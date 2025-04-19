@@ -1,12 +1,9 @@
 from ncatbot.core import BotClient, GroupMessage, PrivateMessage
-from ncatbot.utils.logger import get_log
 from config import load_config
 from chat import group_messages,user_messages
 import jmcomic,requests,random,configparser,json,yaml,re,os,asyncio
 from jmcomic import *
 from typing import Dict, List
-
-_log = get_log()
 
 if_tts = False #判断是否开启TTS
 
@@ -170,12 +167,6 @@ async def handle_search(msg, is_group=True):
     else:
         await bot.api.upload_private_file(msg.user_id, cache_dir + f"{name}.txt", f"{content}.txt")
 
-    '''
-    # 直接搜索禁漫车号
-    page = client.search_site(search_query='427413')
-    album: JmAlbumDetail = page.single_album
-    print(album.tags)
-    '''
 
 @register_command("/tag",help_text = "/tag -> 搜索漫画标签")
 async def handle_search(msg, is_group=True):
@@ -218,7 +209,7 @@ async def handle_get_fav(msg, is_group=True):
 
     username = match.group(1)
     password = match.group(2)
-
+    # 注意，这里的密码是明文显示的，所以需要确保安全性，群聊中最好不要使用
     # 使用提取的用户名和密码进行后续操作
     if is_group:
         await msg.reply(text="正在获取收藏夹喵~")
@@ -310,6 +301,7 @@ async def download_and_send_comic(comic_id, msg, is_group):
         else:
             await bot.api.post_private_msg(msg.user_id, text=error_msg)
 
+# ====下面的收藏夹不是官方的收藏夹，是本地储存的====
 @register_command("/add_fav", help_text="/add_fav <漫画ID> -> 添加收藏")
 async def handle_add_favorite(msg, is_group=True):
     comic_id = msg.raw_message[len("/add_fav"):].strip()
@@ -546,7 +538,7 @@ async def handle_generic_file(msg, is_group: bool, section: str, file_type: str,
         else:
             await bot.api.post_private_msg(msg.user_id, text=error_msg)
 
-# 修改现有命令
+# 统一调用
 @register_command("/random_image","/ri",help_text = "/random_image 或者 /ri -> 随机图片")
 async def handle_random_image(msg, is_group=True):
     await handle_generic_file(msg, is_group, 'ri', 'image')
