@@ -1,5 +1,5 @@
 <div align="center">
-<h1 style = "text-align:center;">🚀可以下载本子下载和聊天的猫娘机器人</h1> 
+<h1 style = "text-align:center;">🚀可以下载本子和聊天的猫娘机器人</h1> 
 
 ![cover](https://img.picui.cn/free/2025/04/19/6803c76d2bbf9.png)
 
