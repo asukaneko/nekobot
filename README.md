@@ -7,6 +7,7 @@
 
 
 </div>
+
 [![Contributors][contributors-shield]][contributors-url]
 [![Forks][forks-shield]][forks-url]
 [![Stargazers][stars-shield]][stars-url]
@@ -132,3 +133,15 @@ __commands.py 中 设置了 ___命令注册装饰器___ ，可以自行添加命
 + 快速添加命令
 + 配置要求低，轻量，占用内存小
 
+[your-project-path]:asukaneko/NapCat-jmcomic_download-bot
+[contributors-shield]: https://img.shields.io/github/contributors/asukaneko/NapCat-jmcomic_download-bot.svg?style=flat-square
+[contributors-url]: https://github.com/asukaneko/NapCat-jmcomic_download-bot/graphs/contributors
+[forks-shield]: https://img.shields.io/github/forks/asukaneko/NapCat-jmcomic_download-bot.svg?style=flat-square
+[forks-url]: https://github.com/asukaneko/NapCat-jmcomic_download-bot/network/members
+[stars-shield]: https://img.shields.io/github/stars/asukaneko/NapCat-jmcomic_download-bot.svg?style=flat-square
+[stars-url]: https://github.com/asukaneko/NapCat-jmcomic_download-bot/stargazers
+[issues-shield]: https://img.shields.io/github/issues/asukaneko/NapCat-jmcomic_download-bot.svg?style=flat-square
+[issues-url]: https://img.shields.io/github/issues/asukaneko/NapCat-jmcomic_download-bot.svg
+[license-shield]: https://img.shields.io/github/license/asukaneko/NapCat-jmcomic_download-bot.svg?style=flat-square
+[license-url]: https://github.com/asukaneko/NapCat-jmcomic_download-bot/blob/master/LICENSE.txt
+[linkedin-shield]: https://img.shields.io/badge/-LinkedIn-black.svg?style=flat-square&logo=linkedin&colorB=555
