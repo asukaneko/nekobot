@@ -89,7 +89,7 @@ pip install -r requirements.txt
 ```
 config.ini：修改账号、大模型api、图片保存等
 option.yml: 修改漫画下载目录、下载方式等
-urls.ini: 修改图片获取api地址, 如不修改则使用默认地址
+urls.ini:(可不修改) 修改图片获取api地址, 如不修改则使用默认地址
 ```
 ### 运行
 ```
