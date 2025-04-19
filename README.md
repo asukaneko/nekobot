@@ -19,6 +19,7 @@
 >环境为 <u>___windows___</u>  
 >建议使用 __小号__ 登录  
 >基于jmcomic和ncatbot开发
+>有任何问题欢迎提issue，或发送给我的邮箱ycssbc@126.com
 
  + **相关文档** 
 
