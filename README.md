@@ -14,7 +14,15 @@
 [![Issues][issues-shield]][issues-url]
 [![MIT License][license-shield]][license-url]
 ---
-![](https://img.shields.io/badge/Version-1.1.0-blue?&logo=react)
+### ✨Updates 更新![](https://img.shields.io/badge/LatestVersion-1.1.0-blue?&logo=react)
++ v1.1.0 原有基础上增加了收藏夹功能
+    - 新增命令：
+        - 收藏：`/add_fav`
+        - 收藏夹：`/list_fav`
+        - 取消收藏：`/del_fav`
+
+---
+
 ### 📌Before You Start / 开始之前![](https://img.shields.io/badge/GitHub-Before_start-blue?logo=github)
 >Environment: <u>___windows___</u>  
 >环境为 <u>___windows___</u>  
