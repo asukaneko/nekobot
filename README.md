@@ -14,9 +14,8 @@
 [![Issues][issues-shield]][issues-url]
 [![MIT License][license-shield]][license-url]
 ---
-
-### Before You Start
-### 开始之前
+![](https://img.shields.io/badge/Version-1.1.0-blue?&logo=react)
+### Before You Start / 开始之前![](https://img.shields.io/badge/GitHub-Before_start-blue?logo=github)
 >Environment: <u>___windows___</u>  
 >环境为 <u>___windows___</u>  
 >Recommended to use a __secondary account__ for login  
@@ -26,7 +25,7 @@
 >For any issues, please submit to GitHub or email ycssbc@126.com  
 >有任何问题欢迎提issue，或发送给我的邮箱ycssbc@126.com  
 
- + **Related Documents / 相关文档**
+ **Related Documents / 相关文档**
 
 | jmcomic | [![](https://img.shields.io/badge/jmcomic-on_Github-blue)](https://github.com/hect0x7/JMComic-Crawler-Python) | [![](https://img.shields.io/badge/jmcomic-Readthedocs.io-orange)](https://jmcomic.readthedocs.io/zh-cn/latest/) |
 |:-:|:-:|:-:|
@@ -76,18 +75,18 @@
     └─......
 ```
 
-### Download Source Code / 下载源码
+### Download Source Code / 下载源码 ![](https://img.shields.io/badge/GitHub-Download_Source_Code-blue?logo=github)
 ```
 git clone https://github.com/asukaneko/NapCat-jmcomic_download-bot.git
 ```
 
-### Install Dependencies / 安装依赖
+### Install Dependencies / 安装依赖![](https://img.shields.io/badge/GitHub-Install_Dependencies-blue?logo=github)
 ```
 cd NapCat-jmcomic_download-bot
 pip install -r requirements.txt
 ```
 
-### Configuration / 更改配置
+### Configuration / 更改配置![](https://img.shields.io/badge/GitHub-Configuration-blue?logo=github)
 ```
 config.ini: Modify account, AI API, image saving settings
 config.ini：修改账号、大模型api、图片保存等
@@ -99,14 +98,14 @@ urls.ini: (Optional) Modify image API URLs, default URLs will be used if not mod
 urls.ini:(可不修改) 修改图片获取api地址, 如不修改则使用默认地址
 ```
 
-### Run / 运行
+### Run / 运行 ![](https://img.shields.io/badge/GitHub-Run-red?logo=github)
 ```
 python bot.py
 ```
 The console will prompt to download napcat, then scan QR code to login  
 命令行会提示下载napcat，然后扫码登录即可
 
-### Commands / 命令相关
+### Commands / 命令相关 ![](https://img.shields.io/badge/GitHub-Commands-yellow?logo=github)
 >__commands.py contains ___command registration decorators___, you can add custom commands__  
 
 >__commands.py 中 设置了 ___命令注册装饰器___ ，可以自行添加命令__  
@@ -142,7 +141,7 @@ Command List:
 /help 或 /h 查看帮助___  
 ...
 
-### Tips / 提示
+### Tips / 提示 ![](https://img.shields.io/badge/GitHub-Tips-green?logo=github)
 + After login, you can find webui login URL in napcat\logs folder
 + 登录以后可在napcat\logs文件夹下找到webui的登录地址
 + ___If napcat is not properly configured, open: http://localhost:6099, default token is 'napcat', then login and create a websocket server in network configuration with default port 3001___
@@ -158,7 +157,7 @@ Command List:
 + Modify prompts in neko.txt to create different characters
 + 可以更改neko.txt中的提示词，实现不同的角色
 
-### More Features / 更多
+### More Features / 更多 ![](https://img.shields.io/badge/GitHub-More_Features-blue?logo=github)
 + Supports image recognition, get API from https://platform.moonshot.cn/console/account (15CNY free credit), add to config.ini (second API)
 + 支持图片识别，需去https://platform.moonshot.cn/console/account 获取api，免费赠送15元。填入config.ini中（第二个api）
 + Supports multi-group chat and custom user prompts
@@ -173,14 +172,14 @@ Command List:
 + 配置要求低，轻量，占用内存小
 
 [your-project-path]:asukaneko/NapCat-jmcomic_download-bot
-[contributors-shield]: https://img.shields.io/github/contributors/asukaneko/NapCat-jmcomic_download-bot.svg?style=flat-square
+[contributors-shield]: https://img.shields.io/github/contributors/asukaneko/NapCat-jmcomic_download-bot.svg?style=flat
 [contributors-url]: https://github.com/asukaneko/NapCat-jmcomic_download-bot/graphs/contributors
-[forks-shield]: https://img.shields.io/github/forks/asukaneko/NapCat-jmcomic_download-bot.svg?style=flat-square
+[forks-shield]: https://img.shields.io/github/forks/asukaneko/NapCat-jmcomic_download-bot.svg?style=flat
 [forks-url]: https://github.com/asukaneko/NapCat-jmcomic_download-bot/network/members
-[stars-shield]: https://img.shields.io/github/stars/asukaneko/NapCat-jmcomic_download-bot.svg?style=flat-square
+[stars-shield]: https://img.shields.io/github/stars/asukaneko/NapCat-jmcomic_download-bot.svg?style=flat
 [stars-url]: https://github.com/asukaneko/NapCat-jmcomic_download-bot/stargazers
-[issues-shield]: https://img.shields.io/github/issues/asukaneko/NapCat-jmcomic_download-bot.svg?style=flat-square
+[issues-shield]: https://img.shields.io/github/issues/asukaneko/NapCat-jmcomic_download-bot.svg?style=flat
 [issues-url]: https://img.shields.io/github/issues/asukaneko/NapCat-jmcomic_download-bot.svg
-[license-shield]: https://img.shields.io/github/license/asukaneko/NapCat-jmcomic_download-bot.svg?style=flat-square
+[license-shield]: https://img.shields.io/github/license/asukaneko/NapCat-jmcomic_download-bot.svg?style=flat
 [license-url]: https://github.com/asukaneko/NapCat-jmcomic_download-bot/blob/master/LICENSE
-[linkedin-shield]: https://img.shields.io/badge/-LinkedIn-black.svg?style=flat-square&logo=linkedin&colorB=555
+[linkedin-shield]: https://img.shields.io/badge/-LinkedIn-black.svg?style=flat&logo=linkedin&colorB=555
