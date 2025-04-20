@@ -122,7 +122,8 @@ The console will prompt to download napcat, then scan QR code to login
 >__commands.py 中 设置了 ___命令注册装饰器___ ，可以自行添加命令__  
 ---
 Command List:
->___/jm xxxxxx Download comics  
+```text
+/jm xxxxxx Download comics  
 /jm xxxxxx 下载漫画  
 /search xxx Search comics  
 /search xxx 搜索漫画  
@@ -149,8 +150,9 @@ Command List:
 /st tag Send random NSFW image, tags support AND/OR (& |)  
 /st 标签名 发送随机涩图,标签支持与或(& |)  
 /help or /h View help  
-/help 或 /h 查看帮助___  
+/help 或 /h 查看帮助 
 ...
+```
 
 ### 💡Tips / 提示 ![](https://img.shields.io/badge/GitHub-Tips-green?logo=github)
 + After login, you can find webui login URL in napcat\logs folder
