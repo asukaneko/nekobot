@@ -1,5 +1,5 @@
 <div align="center">
-<h1 style = "text-align:center;">🚀可以下载本子下载和聊天的猫娘机器人</h1> 
+<h1 style = "text-align:center;">🚀可以下载本子和聊天的猫娘机器人</h1> 
 
 ![cover](https://img.picui.cn/free/2025/04/19/6803c76d2bbf9.png)
 
@@ -89,7 +89,7 @@ pip install -r requirements.txt
 ```
 config.ini：修改账号、大模型api、图片保存等
 option.yml: 修改漫画下载目录、下载方式等
-urls.ini: 修改图片获取api地址, 如不修改则使用默认地址
+urls.ini:(可不修改) 修改图片获取api地址, 如不修改则使用默认地址
 ```
 ### 运行
 ```
