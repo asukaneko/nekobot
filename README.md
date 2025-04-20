@@ -17,17 +17,16 @@
 
 ### Before You Start
 ### 开始之前
->Environment: <u>___windows___</u>
->环境为 <u>___windows___</u>
->Recommended to use a __secondary account__ for login
->建议使用 __小号__ 登录
->Developed based on jmcomic and ncatbot
->基于jmcomic和ncatbot开发
->For any issues, please submit to GitHub or email ycssbc@126.com
->有任何问题欢迎提issue，或发送给我的邮箱ycssbc@126.com
+>Environment: <u>___windows___</u>  
+>环境为 <u>___windows___</u>  
+>Recommended to use a __secondary account__ for login  
+>建议使用 __小号__ 登录  
+>Developed based on jmcomic and ncatbot  
+>基于jmcomic和ncatbot开发  
+>For any issues, please submit to GitHub or email ycssbc@126.com  
+>有任何问题欢迎提issue，或发送给我的邮箱ycssbc@126.com  
 
- + **Related Documents**
- + **相关文档**
+ + **Related Documents / 相关文档**
 
 | jmcomic | [![](https://img.shields.io/badge/jmcomic-on_Github-blue)](https://github.com/hect0x7/JMComic-Crawler-Python) | [![](https://img.shields.io/badge/jmcomic-Readthedocs.io-orange)](https://jmcomic.readthedocs.io/zh-cn/latest/) |
 |:-:|:-:|:-:|
@@ -104,42 +103,43 @@ urls.ini:(可不修改) 修改图片获取api地址, 如不修改则使用默认
 ```
 python bot.py
 ```
-The console will prompt to download napcat, then scan QR code to login
+The console will prompt to download napcat, then scan QR code to login  
 命令行会提示下载napcat，然后扫码登录即可
 
 ### Commands / 命令相关
->__commands.py contains ___command registration decorators___, you can add custom commands__
->__commands.py 中 设置了 ___命令注册装饰器___ ，可以自行添加命令__
+>__commands.py contains ___command registration decorators___, you can add custom commands__  
+
+>__commands.py 中 设置了 ___命令注册装饰器___ ，可以自行添加命令__  
 ---
 Command List:
->___/jm xxxxxx Download comics
-/jm xxxxxx 下载漫画
-/search xxx Search comics
-/search xxx 搜索漫画
-/get_fav Get favorites
-/get_fav 获取收藏夹
-/jmrank Get rankings
-/jmrank 获取排行榜
-/add_fav xxx Add to favorites
-/add_fav xxx 添加收藏夹
-/set_prompt or /sp Set prompt
-/set_prompt 或 /sp 设置提示词
-/del_prompt or /dp Delete prompt
-/del_prompt 或 /dp 删除提示词
-/get_prompt or /gp Get prompt
-/get_prompt 或 /gp 获取提示词
-/agree   Accept friend request
-/agree   同意好友请求
-/restart   Restart Bot
-/restart   重启Bot
-/random_image or /ri Send random image
-/random_image 或 /ri 发送随机图片
-/random_emoticons or /re Send random emoticons
-/random_emoticons 或 /re 发送随机表情包
-/st tag Send random NSFW image, tags support AND/OR (& |)
-/st 标签名 发送随机涩图,标签支持与或(& |)
-/help or /h View help
-/help 或 /h 查看帮助___
+>___/jm xxxxxx Download comics  
+/jm xxxxxx 下载漫画  
+/search xxx Search comics  
+/search xxx 搜索漫画  
+/get_fav Get favorites  
+/get_fav 获取收藏夹  
+/jmrank Get rankings  
+/jmrank 获取排行榜  
+/add_fav xxx Add to favorites  
+/add_fav xxx 添加收藏夹  
+/set_prompt or /sp Set prompt  
+/set_prompt 或 /sp 设置提示词  
+/del_prompt or /dp Delete prompt  
+/del_prompt 或 /dp 删除提示词  
+/get_prompt or /gp Get prompt  
+/get_prompt 或 /gp 获取提示词  
+/agree   Accept friend request  
+/agree   同意好友请求  
+/restart   Restart Bot  
+/restart   重启Bot  
+/random_image or /ri Send random image  
+/random_image 或 /ri 发送随机图片  
+/random_emoticons or /re Send random emoticons  
+/random_emoticons 或 /re 发送随机表情包  
+/st tag Send random NSFW image, tags support AND/OR (& |)  
+/st 标签名 发送随机涩图,标签支持与或(& |)  
+/help or /h View help  
+/help 或 /h 查看帮助___  
 ...
 
 ### Tips / 提示
