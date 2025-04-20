@@ -498,6 +498,14 @@ async def async_send_file(send_method, target_id, file_type, url):
 # 修改通用处理函数
 async def handle_generic_file(msg, is_group: bool, section: str, file_type: str, custom_url: str = None):
     """通用文件处理函数（修复版）"""
+    """
+        支持的file_type:
+        image: 图片
+        record: 语音
+        video: 视频
+        file: 文件
+        markdown: Markdown
+    """
     # 立即回复用户
     initial_text = "正在获取喵~"
     if initial_text:

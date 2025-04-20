@@ -120,7 +120,6 @@ The console will prompt to download napcat, then scan QR code to login
 >__commands.py contains ___command registration decorators___, you can add custom commands__  
 
 >__commands.py 中 设置了 ___命令注册装饰器___ ，可以自行添加命令__  
----
 Command List:
 ```text
 /jm xxxxxx Download comics  
