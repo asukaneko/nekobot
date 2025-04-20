@@ -11,8 +11,10 @@
 [![Contributors][contributors-shield]][contributors-url]
 [![Forks][forks-shield]][forks-url]
 [![Stargazers][stars-shield]][stars-url]
+[![](https://visitor-badge.laobi.icu/badge?page_id=asukaneko.NapCat-jmcomic_download-bot)](https://github.com/asukaneko/NapCat-jmcomic_download-bot)
 [![Issues][issues-shield]][issues-url]
 [![MIT License][license-shield]][license-url]
+
 ---
 ### ✨Updates 更新![](https://img.shields.io/badge/LatestVersion-1.1.0-blue?&logo=react)
 + [2025/4/19] v1.1.0 原有基础上增加了收藏夹功能
@@ -23,7 +25,8 @@
 
 ---
 
-### 📌Before You Start / 开始之前![](https://img.shields.io/badge/GitHub-Before_start-blue?logo=github)
+### 📌Before You Start / 开始之前![](https://img.shields.io/badge/GitHub-Before_start-blue?logo=)  
+[![](https://img.shields.io/badge/python-version>=3.7-red?logo=python)]()
 >Environment: <u>___windows___</u>  
 >环境为 <u>___windows___</u>  
 >Recommended to use a __secondary account__ for login  
