@@ -15,7 +15,7 @@
 [![MIT License][license-shield]][license-url]
 ---
 ### ✨Updates 更新![](https://img.shields.io/badge/LatestVersion-1.1.0-blue?&logo=react)
-+ v1.1.0 原有基础上增加了收藏夹功能
++ [2025/4/19] v1.1.0 原有基础上增加了收藏夹功能
     - 新增命令：
         - 收藏：`/add_fav`
         - 收藏夹：`/list_fav`
