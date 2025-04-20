@@ -25,7 +25,7 @@
 
 ---
 
-### 📌Before You Start / 开始之前![](https://img.shields.io/badge/GitHub-Before_start-blue?logo=)  
+### 📌Before You Start / 开始之前![](https://img.shields.io/badge/GitHub-Before_start-blue?logo=github)  
 [![](https://img.shields.io/badge/python-version>=3.7-red?logo=python)]()
 >Environment: <u>___windows___</u>  
 >环境为 <u>___windows___</u>  
@@ -86,7 +86,7 @@
     └─......
 ```
 
-### ⬇️Download Source Code / 下载源码 ![](https://img.shields.io/badge/GitHub-Download_Source_Code-blue?logo=github)
+### ⬇️Download Source Code / 下载源码 [![](https://img.shields.io/badge/GitHub-Download_Source_Code-blue?logo=github)](https://github.com/asukaneko/NapCat-jmcomic_download-bot.git)
 ```
 git clone https://github.com/asukaneko/NapCat-jmcomic_download-bot.git
 ```
