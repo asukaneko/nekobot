@@ -1,3 +1,4 @@
+from operator import is_
 from ncatbot.core import BotClient, GroupMessage, PrivateMessage
 from config import load_config
 from chat import group_messages,user_messages
@@ -7,7 +8,7 @@ from typing import Dict, List
 
 if_tts = False #判断是否开启TTS
 
-bot_id = load_config() # 加载配置,返回机器人qq号
+bot_id,admin_id = load_config() # 加载配置,返回机器人qq号
 
 bot = BotClient()
 
@@ -17,7 +18,26 @@ group_imgs = {} # 用于存储图片信息
 user_favorites: Dict[str, List[str]] = {}  # 用户收藏夹 {user_id: [comic_ids]}
 group_favorites: Dict[str, Dict[str, List[str]]] = {}  # 群组收藏夹 {group_id: {user_id: [comic_ids]}}
 
+admin = [str(admin_id)]  # 确保admin_id是字符串形式
+
 #通用函数如下----------
+def write_admin():
+    try:
+        with open("admin.txt", "w", encoding="utf-8") as f:
+            f.write("\n".join(admin) + "\n")  # 每行一个管理员ID
+    except Exception as e:
+        print(f"写入管理员文件失败: {e}")
+
+def load_admin():
+    try:
+        with open("admin.txt", "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith("#") and line != str(admin_id):
+                    admin.append(line)
+    except FileNotFoundError:
+        write_admin()
+
 def register_command(*command,help_text = None): # 注册命令
     def decorator(func):
         command_handlers[command] = func
@@ -71,6 +91,7 @@ def save_favorites():
 #----------------
 
 load_favorites()
+load_admin()
 
 @register_command("测试")
 async def handle_test(msg, is_group=True):
@@ -590,8 +611,58 @@ async def handle_del_message(msg, is_group=True):
         del user_messages[str(msg.user_id)]
         await bot.api.post_private_msg(msg.user_id, text="主人要离我而去了吗？呜呜呜……好吧，那我们以后再见喵~")
 
+@register_command("/set_admin","/sa",help_text = "/set_admin <qq号> 或者 /sa <qq号> -> 设置管理员(root)")
+async def handle_set_admin(msg, is_group=True):
+    if is_group:
+        await msg.reply(text="只能私聊设置喵~")
+        return
+    if str(msg.user_id) != str(admin_id):
+        await bot.api.post_private_msg(msg.user_id, text="你没有权限设置管理员喵~")
+        return
 
-@register_command("/set_ids",help_text = "/set_ids 昵称 个性签名 性别 -> 设置账号信息")
+    if msg.raw_message.startswith("/set_admin"):
+        id = msg.raw_message[len("/set_admin"):].strip()
+    else: 
+        id = msg.raw_message[len("/sa"):].strip()
+
+    if id in admin:
+        await bot.api.post_private_msg(msg.user_id, text="已经是管理员了喵~")
+        return
+
+    admin.append(id)
+    write_admin()
+    await bot.api.post_private_msg(msg.user_id, text="设置成功喵~，现在"+id+"是管理员喵~")
+
+@register_command("/del_admin","/da",help_text = "/del_admin <qq号> 或者 /da <qq号> -> 删除管理员(root)")
+async def handle_del_admin(msg, is_group=True):
+    if is_group:
+        await msg.reply(text="只能私聊设置喵~")
+        return
+    if str(msg.user_id)!= str(admin_id):
+        await bot.api.post_private_msg(msg.user_id, text="你没有权限删除管理员喵~")
+        return
+
+    if msg.raw_message.startswith("/del_admin"):
+        id = msg.raw_message[len("/del_admin"):].strip()
+    else:
+        id = msg.raw_message[len("/da"):].strip()
+
+    if id in admin:
+        admin.remove(id)
+        write_admin()
+        await bot.api.post_private_msg(msg.user_id, text="删除成功喵~，现在"+id+"不是管理员喵~")
+    else:
+        await bot.api.post_private_msg(msg.user_id, text="没有这个管理员喵~")
+
+@register_command("/get_admin","/ga",help_text = "/get_admin 或者 /ga -> 获取管理员")
+async def handle_get_admin(msg, is_group=True):
+    if is_group:
+        await msg.reply(text="管理员列表："+str(admin))
+    else:
+        await bot.api.post_private_msg(msg.user_id, text="管理员列表："+str(admin))
+
+
+@register_command("/set_ids",help_text = "/set_ids 昵称 个性签名 性别 -> 设置账号信息(管理员)")
 async def handle_set(msg, is_group=True):
     """
             nickname: 昵称
@@ -599,6 +670,12 @@ async def handle_set(msg, is_group=True):
             sex: 性别
             :return: 设置账号信息
     """
+    if is_group:
+        await msg.reply(text="只能私聊设置喵~")
+        return
+    if str(msg.user_id) not in admin:
+        await bot.api.post_private_msg(msg.user_id, text="你没有权限设置账号信息喵~")
+        return
     msgs = msg.raw_message[len("/set_ids"):].split(" ")
     if len(msgs) < 3:
         text = "格式错误喵~ 请输入 /set 昵称 个性签名 性别"
@@ -624,8 +701,14 @@ async def handle_set(msg, is_group=True):
         else:
             await bot.api.post_private_msg(msg.user_id, text=text)
 
-@register_command("/set_online_status",help_text = "/set_online_status 在线状态 -> 设置在线状态")
+@register_command("/set_online_status",help_text = "/set_online_status 在线状态 -> 设置在线状态(管理员)")
 async def handle_set_online_status(msg, is_group=True):
+    if is_group:
+        await msg.reply(text="只能私聊设置喵~")
+        return
+    if str(msg.user_id) not in admin:
+        await bot.api.post_private_msg(msg.user_id, text="你没有权限设置在线状态喵~")
+        return
     msgs = msg.raw_message[len("/set_online_status"):].split(" ")[0]
     await bot.api.set_online_status(msgs)
     text = "设置成功喵~"
@@ -634,16 +717,27 @@ async def handle_set_online_status(msg, is_group=True):
     else:
         await bot.api.post_private_msg(msg.user_id, text=text)
 
-@register_command("/get_friends",help_text = "/get_friends -> 获取好友列表")
+@register_command("/get_friends",help_text = "/get_friends -> 获取好友列表（管理员）")
 async def handle_get_friends(msg, is_group=True):
+    if is_group:
+        await msg.reply(text="只能私聊获取喵~")
+        return
+    if str(msg.user_id) not in admin:
+        await bot.api.post_private_msg(msg.user_id, text="你没有权限获取好友列表喵~")
     friends = await bot.api.get_friend_list(False)
     if is_group:
         await msg.reply(text=friends)
     else:
         await bot.api.post_private_msg(msg.user_id, text=friends)
 
-@register_command("/set_qq_avatar",help_text = "/set_qq_avatar 地址 -> 更改头像")
+@register_command("/set_qq_avatar",help_text = "/set_qq_avatar 地址 -> 更改头像（管理员）")
 async def handle_set_qq_avatar(msg, is_group=True):
+    if is_group:
+        await msg.reply(text="只能私聊设置喵~")
+        return
+    if str(msg.user_id) not in admin:
+        await bot.api.post_private_msg(msg.user_id, text="你没有权限设置头像喵~")
+        return
     msgs = msg.raw_message[len("/set_qq_avatar"):]
     await bot.api.set_qq_avatar(msgs)
     text = "设置成功喵~"

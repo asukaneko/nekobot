@@ -16,7 +16,16 @@
 [![MIT License][license-shield]][license-url]
 
 ---
-### ✨Updates 更新![](https://img.shields.io/badge/LatestVersion-1.1.0-blue?&logo=react)
+### ✨Updates 更新![](https://img.shields.io/badge/LatestVersion-1.2.0-blue?&logo=react)
++ [2025/4/21] v1.2.0 新增权限功能
+    - 新增命令：
+        - 设置权限：`/sa <qq号>`
+        - 权限列表：`/ga`
+        - 取消权限：`/da <qq号>`
+    - 将原有部分命令调整为仅管理员可用
+    - 超级管理员(root)为config.ini中root的值
+
+
 + [2025/4/19] v1.1.0 原有基础上增加了收藏夹功能
     - 新增命令：
         - 收藏：`/add_fav`

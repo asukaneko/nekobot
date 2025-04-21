@@ -15,4 +15,4 @@ def load_config():
     config.set_ws_uri(ws_uri)
     config.set_token(token)
 
-    return bot_uin
+    return bot_uin,root
