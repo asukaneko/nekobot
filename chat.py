@@ -68,6 +68,16 @@ def load_prompt(user_id=None, group_id=None):
             return ""
 
 def chat(content="", user_id=None, group_id=None, group_user_id=None,image=False,url=None):
+    """
+    与Ai进行对话。
+    :param content: 用户输入的内容。
+    :param user_id: 用户ID。
+    :param group_id: 群组ID。
+    :param group_user_id: 群组用户ID。
+    :param image: 是否是图片。
+    :param url: 图片URL。
+    :return: 机器人的回复。
+    """
     now_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
     if user_id:

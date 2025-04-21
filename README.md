@@ -17,11 +17,12 @@
 
 ---
 ### ✨Updates 更新![](https://img.shields.io/badge/LatestVersion-1.2.0-blue?&logo=react)
-+ [2025/4/21] v1.2.0 新增权限功能
++ [2025/4/21] v1.2.0 新增权限功能和定时提醒功能
     - 新增命令：
         - 设置权限：`/sa <qq号>`
         - 权限列表：`/ga`
         - 取消权限：`/da <qq号>`
+        - 定时提醒：`/remind <时间(hour)> <消息>`
     - 将原有部分命令调整为仅管理员可用
     - 超级管理员(root)为config.ini中root的值
 

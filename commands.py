@@ -2,7 +2,7 @@ from math import e
 from operator import is_
 from ncatbot.core import BotClient, GroupMessage, PrivateMessage
 from config import load_config
-from chat import group_messages,user_messages
+from chat import group_messages,user_messages,tts
 import jmcomic,requests,random,configparser,json,yaml,re,os,asyncio
 from jmcomic import *
 from typing import Dict, List
@@ -97,6 +97,14 @@ async def schedule_task(delay_hours: float, task_func, *args, **kwargs):
     await asyncio.sleep(delay_hours * 3600)  # 转换为秒
     await task_func(*args, **kwargs)
 
+async def chatter(msg):
+    content = chat(content="现在请你根据上下文，主动和用户聊天",user_id=msg.user_id)
+    if if_tts:
+        rtf = tts(content)
+        await bot.api.post_private_msg(msg.user_id, rtf=rtf)
+        await bot.api.post_private_msg(msg.user_id, text=content)
+    else:
+        await bot.api.post_private_msg(msg.user_id, text=content)
 #----------------
 
 load_favorites()

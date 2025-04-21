@@ -73,6 +73,7 @@ async def on_group_message(msg: GroupMessage):
         else:
             await msg.reply(text=content)
 
+running = True #用于定时聊天的开关
 
 @bot.private_event()
 async def on_private_message(msg: PrivateMessage):
@@ -83,6 +84,25 @@ async def on_private_message(msg: PrivateMessage):
         if msg.raw_message.startswith(command):
             await handler(msg, is_group=False)
             return
+    """
+    if msg.raw_message.startswith("/开始定时聊天"):
+        global running
+        running = True
+        async def chat_loop():
+            while running:
+                try:
+                    next_time = random.random() * 10  # 1-2小时
+                    await schedule_task(next_time, chatter, msg)
+                    await asyncio.sleep(next_time)
+                except Exception as e:
+                    _log.error(f"定时聊天出错: {e}")
+                    await asyncio.sleep(10)  # 出错后等待10秒
+        asyncio.create_task(chat_loop())
+        await bot.api.post_private_msg(msg.user_id, text="已开始定时聊天喵~")
+    elif msg.raw_message.startswith("/结束定时聊天"):
+        running = False
+        await bot.api.post_private_msg(msg.user_id, text="已停止定时聊天喵~")
+    """
     try:
         if msg.message[0].get("type") == "image": #处理图片
             url = msg.message[0].get("data").get("url")
