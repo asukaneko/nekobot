@@ -1,3 +1,4 @@
+from math import e
 from operator import is_
 from ncatbot.core import BotClient, GroupMessage, PrivateMessage
 from config import load_config
@@ -87,6 +88,14 @@ def save_favorites():
     # 保存群组收藏
     with open(os.path.join(cache_dir, "group_favorites.json"), 'w', encoding='utf-8') as f:
         json.dump(group_favorites, f, ensure_ascii=False, indent=2)
+
+async def schedule_task(delay_hours: float, task_func, *args, **kwargs):
+    """延时执行任务
+    :param delay_hours: 延迟的小时数
+    :param task_func: 要执行的函数
+    """
+    await asyncio.sleep(delay_hours * 3600)  # 转换为秒
+    await task_func(*args, **kwargs)
 
 #----------------
 
@@ -572,7 +581,7 @@ async def handle_generic_file(msg, is_group: bool, section: str, file_type: str,
 async def handle_random_image(msg, is_group=True):
     await handle_generic_file(msg, is_group, 'ri', 'image')
 
-@register_command("/random_emoticons","/re",help_text = "/random_emoticons 或者 /re -> 随机表情包")
+@register_command("/random_emoticons","/ret",help_text = "/random_emoticons 或者 /ret -> 随机表情包")
 async def handle_random_emoticons(msg, is_group=True):
     await handle_generic_file(msg, is_group, 're', 'image')
 
@@ -610,6 +619,27 @@ async def handle_del_message(msg, is_group=True):
     else:
         del user_messages[str(msg.user_id)]
         await bot.api.post_private_msg(msg.user_id, text="主人要离我而去了吗？呜呜呜……好吧，那我们以后再见喵~")
+
+
+@register_command("/remind",help_text="/remind 时间(小时) 内容 -> 定时提醒")
+async def handle_remind(msg, is_group=True):
+    match = re.match(r'^/remind\s+(\d+\.?\d*)\s+(.+)$', msg.raw_message) #正则支持小数
+    if match:
+        hours = float(match.group(1))
+        content = match.group(2)
+    else:
+        if is_group:
+            await msg.reply(text="格式错误喵~ 请输入 /remind 时间(小时) 内容")
+            return
+        else:
+            await bot.api.post_private_msg(msg.user_id, text="格式错误喵~ 请输入 /remind 时间(小时) 内容")
+            return
+    if is_group:
+        await msg.reply(text=f"已设置提醒喵~{hours}小时后会提醒你：{content}")
+        asyncio.create_task(schedule_task(hours, msg.reply,content))
+    else:
+        await bot.api.post_private_msg(msg.user_id, text=f"已设置提醒喵~{hours}小时后会提醒你：{content}")
+        asyncio.create_task(schedule_task(hours, bot.api.post_private_msg,msg.user_id,content))
 
 @register_command("/set_admin","/sa",help_text = "/set_admin <qq号> 或者 /sa <qq号> -> 设置管理员(root)")
 async def handle_set_admin(msg, is_group=True):
