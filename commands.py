@@ -1,6 +1,6 @@
 from ncatbot.core import BotClient, GroupMessage, PrivateMessage
 from config import load_config
-from chat import group_messages,user_messages,tts
+from chat import group_messages, user_messages, tts, chat
 import jmcomic,requests,random,configparser,json,yaml,re,os,asyncio
 from jmcomic import *
 from typing import Dict, List
