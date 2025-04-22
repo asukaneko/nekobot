@@ -12,9 +12,14 @@ async def on_group_message(msg: GroupMessage):
     global if_tts
     if_tts = commands.if_tts
     _log.info(msg)
-    for command, handler in command_handlers.items(): #优先处理命令
-        if re.match(f'^{re.escape(command)}(?:\s|$)', msg.raw_message): #使用正则表达式精确匹配命令
-            await handler(msg, is_group=True)
+    for command, handler in command_handlers.items():
+        if isinstance(command, tuple):  # 处理命令别名情况
+            for cmd in command:
+                if re.match(f'^{re.escape(cmd)}(?:\s|$)', msg.raw_message):
+                    await handler(msg, is_group=False)
+                    return
+        elif re.match(f'^{re.escape(command)}(?:\s|$)', msg.raw_message): # 处理单个命令情况
+            await handler(msg, is_group=False)
             return
 
     if msg.raw_message.startswith("/chat"):
@@ -81,7 +86,12 @@ async def on_private_message(msg: PrivateMessage):
     if_tts = commands.if_tts
     _log.info(msg)
     for command, handler in command_handlers.items():
-        if re.match(f'^{re.escape(command)}(?:\s|$)', msg.raw_message): #使用正则表达式精确匹配命令
+        if isinstance(command, tuple):  # 处理命令别名情况
+            for cmd in command:
+                if re.match(f'^{re.escape(cmd)}(?:\s|$)', msg.raw_message):
+                    await handler(msg, is_group=False)
+                    return
+        elif re.match(f'^{re.escape(command)}(?:\s|$)', msg.raw_message): # 处理单个命令情况
             await handler(msg, is_group=False)
             return
     """

@@ -17,7 +17,9 @@
 
 ---
 ### ✨Updates 更新![](https://img.shields.io/badge/LatestVersion-1.2.1-blue?&logo=react)
-+ [2025/4/22] v1.2.1 优化/help命令，采用分级菜单展示，同时规范了help_text格式
++ [2025/4/22] v1.2.1 
+    - 优化/help命令，采用分级菜单展示，同时规范了help_text格式
+    - 优化命令匹配方式，更改为正则匹配，更加精准
 
 + [2025/4/21] v1.2.0 新增权限功能和定时提醒功能
     - 新增命令：
