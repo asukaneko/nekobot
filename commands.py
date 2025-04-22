@@ -1,5 +1,3 @@
-from math import e
-from operator import is_
 from ncatbot.core import BotClient, GroupMessage, PrivateMessage
 from config import load_config
 from chat import group_messages,user_messages,tts
@@ -127,7 +125,7 @@ async def chatter(msg):
         await bot.api.post_private_msg(msg.user_id, text=content)
     else:
         await bot.api.post_private_msg(msg.user_id, text=content)
-#----------------
+#---------------------------------------------------------------------------
 
 load_favorites()
 load_admin()
