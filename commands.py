@@ -144,7 +144,7 @@ async def handle_tts(msg, is_group=True):
         await bot.api.post_private_msg(msg.user_id, text=text)
 
 #漫画类命令----------------
-@register_command("/jmrank",help_text = "/jmrank 月排行/周排行 -> ")
+@register_command("/jmrank",help_text = "/jmrank <月排行/周排行> -> 获取排行榜")
 async def handle_jmrank(msg, is_group=True):
     if is_group:
         await msg.reply(text="正在获取排行喵~")
@@ -190,7 +190,7 @@ async def handle_jmrank(msg, is_group=True):
     else:
         await bot.api.upload_private_file(msg.user_id, cache_dir + f"{select}_{name}.txt", f"{select}_{name}.txt")
 
-@register_command("/search",help_text = "/search -> 搜索漫画")
+@register_command("/search",help_text = "/search <内容> -> 搜索漫画")
 async def handle_search(msg, is_group=True):
     if is_group:
         await msg.reply(text="正在搜索喵~")
@@ -219,7 +219,7 @@ async def handle_search(msg, is_group=True):
         await bot.api.upload_private_file(msg.user_id, cache_dir + f"{name}.txt", f"{content}.txt")
 
 
-@register_command("/tag",help_text = "/tag -> 搜索漫画标签")
+@register_command("/tag",help_text = "/tag <标签> -> 搜索漫画标签")
 async def handle_search(msg, is_group=True):
     if is_group:
         await msg.reply(text="正在搜索喵~")
@@ -247,7 +247,7 @@ async def handle_search(msg, is_group=True):
     else:
         await bot.api.upload_private_file(msg.user_id, cache_dir + f"{name}.txt", f"{content}.txt")
 
-@register_command("/get_fav",help_text = "/get_fav 用户名 密码 -> 获取收藏夹")
+@register_command("/get_fav",help_text = "/get_fav <用户名> <密码> -> 获取收藏夹")
 async def handle_get_fav(msg, is_group=True):
     match = re.match(r'^/get_fav\s+(\S+)\s+(\S+)$', msg.raw_message)
     if not match:
@@ -299,7 +299,7 @@ async def handle_get_fav(msg, is_group=True):
         await bot.api.upload_private_file(msg.user_id, cache_dir + f"{name}.txt", f"{username}.txt")
 
 
-@register_command("/jm",help_text = "/jm 漫画ID -> 下载漫画")
+@register_command("/jm",help_text = "/jm <漫画ID> -> 下载漫画")
 async def handle_jmcomic(msg, is_group=True):
     match = re.match(r'^/jm\s+(\d+)$', msg.raw_message)
     if match:
@@ -440,7 +440,7 @@ async def handle_del_favorite(msg, is_group=True):
 
 #------------------------
 
-@register_command("/set_prompt","/sp",help_text = "/set_prompt 或者 /sp 提示词 -> 设定提示词")
+@register_command("/set_prompt","/sp",help_text = "/set_prompt 或者 /sp <提示词> -> 设定提示词")
 async def handle_set_prompt(msg, is_group=True):
     prompt_content = ""
     if msg.raw_message.startswith("/set_prompt"):
@@ -606,7 +606,7 @@ async def handle_random_image(msg, is_group=True):
 async def handle_random_emoticons(msg, is_group=True):
     await handle_generic_file(msg, is_group, 're', 'image')
 
-@register_command("/st",help_text = "/st 标签名 -> 发送随机涩图,标签支持与或(& |)")
+@register_command("/st",help_text = "/st <标签名> -> 发送随机涩图,标签支持与或(& |)")
 async def handle_st(msg, is_group=True):
     tags = msg.raw_message[len("/st"):].strip()
     res = requests.get(f"https://api.lolicon.app/setu/v2?tag={tags}").json().get("data")[0].get("urls").get("original")
@@ -641,7 +641,7 @@ async def handle_del_message(msg, is_group=True):
         del user_messages[str(msg.user_id)]
         await bot.api.post_private_msg(msg.user_id, text="主人要离我而去了吗？呜呜呜……好吧，那我们以后再见喵~")
 
-@register_command("/remind",help_text="/remind 时间(小时) 内容 -> 定时提醒")
+@register_command("/remind",help_text="/remind <时间(小时)> <内容> -> 定时提醒")
 async def handle_remind(msg, is_group=True):
     match = re.match(r'^/remind\s+(\d+\.?\d*)\s+(.+)$', msg.raw_message) #正则支持小数
     if match:
@@ -661,7 +661,7 @@ async def handle_remind(msg, is_group=True):
         await bot.api.post_private_msg(msg.user_id, text=f"已设置提醒喵~{hours}小时后会提醒你：{content}")
         asyncio.create_task(schedule_task(hours, bot.api.post_private_msg,msg.user_id,content))
 
-@register_command("/premind", help_text="/premind YYYY-MM-DD HH:MM 内容 -> 精确时间提醒")
+@register_command("/premind", help_text="/premind <YYYY-MM-DD> <HH:MM> <内容> -> 精确时间提醒")
 async def handle_precise_remind(msg, is_group=True):
     try:
         # 解析日期时间
@@ -780,7 +780,7 @@ async def handle_set(msg, is_group=True):
         else:
             await bot.api.post_private_msg(msg.user_id, text=text)
 
-@register_command("/set_online_status",help_text = "/set_online_status 在线状态 -> 设置在线状态(管理员)")
+@register_command("/set_online_status",help_text = "/set_online_status <在线状态> -> 设置在线状态(管理员)")
 async def handle_set_online_status(msg, is_group=True):
     if is_group:
         await msg.reply(text="只能私聊设置喵~")
@@ -809,7 +809,7 @@ async def handle_get_friends(msg, is_group=True):
     else:
         await bot.api.post_private_msg(msg.user_id, text=friends)
 
-@register_command("/set_qq_avatar",help_text = "/set_qq_avatar 地址 -> 更改头像（管理员）")
+@register_command("/set_qq_avatar",help_text = "/set_qq_avatar <地址> -> 更改头像（管理员）")
 async def handle_set_qq_avatar(msg, is_group=True):
     if is_group:
         await msg.reply(text="只能私聊设置喵~")
@@ -825,7 +825,7 @@ async def handle_set_qq_avatar(msg, is_group=True):
     else:
         await bot.api.post_private_msg(msg.user_id, text=text)
 
-@register_command("/send_like",help_text = "/send_like 目标QQ号 次数 -> 发送点赞")
+@register_command("/send_like",help_text = "/send_like <目标QQ号> <次数> -> 发送点赞")
 async def handle_send_like(msg, is_group=True):
     msgs = msg.raw_message[len("/send_like"):].split(" ")
     if len(msgs) < 2:
@@ -846,23 +846,45 @@ async def handle_send_like(msg, is_group=True):
 #将help命令放在最后
 @register_command("/help","/h",help_text = "/help 或者 /h -> 查看帮助")
 async def handle_help(msg, is_group=True):
-    help_text = "欢迎使用喵~~\n"
-    # 收集所有命令的帮助信息
-    for cmd, handler in command_handlers.items():
-        if hasattr(handler, 'help_text'):
-            help_text += handler.help_text + "\n"
+    # 定义命令分类
+    command_categories = {
+        "1": {"name": "漫画相关", "commands": ["/jm", "/jmrank", "/search","/tag"]},
+        "2": {"name": "收藏管理", "commands": ["/get_fav", "/add_fav", "/del_fav","/list_fav"]},
+        "3": {"name": "聊天设置", "commands": ["/set_prompt", "/del_prompt", "/get_prompt","/del_message"]},
+        "4": {"name": "娱乐功能", "commands": ["/random_image", "/random_emoticons", "/st","/random_video","/random_dice","/random_rps"]},
+        "5": {"name": "系统处理", "commands": ["/restart", "/tts", "/agree","/redmind","/premind","/set_admin","/del_admin","/get_admin","/set_ids","/set_online_status","/get_friends","/set_qq_avatar","/send_like"]}
+    }
+
+    # 第一阶段：显示分类菜单
+    if not msg.raw_message.strip().endswith("help") and not msg.raw_message.strip().endswith("h"):
+        # 用户选择了分类
+        selected_category = msg.raw_message.split()[-1]
+        if selected_category in command_categories:
+            # 显示该分类下的详细命令
+            help_text = f"{command_categories[selected_category]['name']}命令喵~\n"
+            for cmd in command_categories[selected_category]['commands']:
+                # 精确匹配命令别名
+                for command_aliases, handler_func in command_handlers.items():
+                    if cmd in command_aliases:
+                        handler = handler_func
+                        break
+                if hasattr(handler, 'help_text'):
+                    help_text += handler.help_text + "\n"
+            
+            if is_group:
+                await msg.reply(text=help_text)
+            else:
+                await bot.api.post_private_msg(msg.user_id, text=help_text)
+            return
+
+    # 显示主帮助菜单
+    help_text = "欢迎使用喵~ 请选择分类查看详细命令喵~\n"
+    for num, category in command_categories.items():
+        help_text += f"{num}. {category['name']}\n"
+    
+    help_text += "\n输入 /help 加分类编号查看详细命令，例如: /help 1"
+    
     if is_group:
         await msg.reply(text=help_text)
     else:
         await bot.api.post_private_msg(msg.user_id, text=help_text)
-
-    system_help = ("[内置命令]\n"
-                   "/cfg <plugin_name>.<cfg_name> <value> 更改插件配置\n"
-                   "/plg 查看已安装插件\n"
-                   "/sm <user_id> 设置管理员\n"
-                   "/acs [-g] [ban]/[grant] <number> <path> 管理权限\n"
-                   )
-    if is_group:
-        await msg.reply(text=system_help)
-    else:
-        await bot.api.post_private_msg(msg.user_id, text=system_help)

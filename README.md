@@ -16,7 +16,9 @@
 [![MIT License][license-shield]][license-url]
 
 ---
-### ✨Updates 更新![](https://img.shields.io/badge/LatestVersion-1.2.0-blue?&logo=react)
+### ✨Updates 更新![](https://img.shields.io/badge/LatestVersion-1.2.1-blue?&logo=react)
++ [2025/4/22] v1.2.1 优化/help命令，采用分级菜单展示，同时规范了help_text格式
+
 + [2025/4/21] v1.2.0 新增权限功能和定时提醒功能
     - 新增命令：
         - 设置权限：`/sa <qq号>`
