@@ -6,6 +6,7 @@ from chat import group_messages,user_messages,tts
 import jmcomic,requests,random,configparser,json,yaml,re,os,asyncio
 from jmcomic import *
 from typing import Dict, List
+from datetime import datetime, timedelta
 
 if_tts = False #判断是否开启TTS
 
@@ -95,6 +96,18 @@ async def schedule_task(delay_hours: float, task_func, *args, **kwargs):
     :param task_func: 要执行的函数
     """
     await asyncio.sleep(delay_hours * 3600)  # 转换为秒
+    await task_func(*args, **kwargs)
+
+async def schedule_task_by_date(target_time: datetime, task_func, *args, **kwargs):
+    """精确时间执行任务
+    :param target_time: 目标日期时间(datetime对象)
+    :param task_func: 要执行的函数
+    """
+    now = datetime.now()
+    if target_time < now:
+        raise ValueError("目标时间不能是过去时间喵~")
+    delay_seconds = (target_time - now).total_seconds()
+    await asyncio.sleep(delay_seconds)
     await task_func(*args, **kwargs)
 
 async def chatter(msg):
@@ -628,7 +641,6 @@ async def handle_del_message(msg, is_group=True):
         del user_messages[str(msg.user_id)]
         await bot.api.post_private_msg(msg.user_id, text="主人要离我而去了吗？呜呜呜……好吧，那我们以后再见喵~")
 
-
 @register_command("/remind",help_text="/remind 时间(小时) 内容 -> 定时提醒")
 async def handle_remind(msg, is_group=True):
     match = re.match(r'^/remind\s+(\d+\.?\d*)\s+(.+)$', msg.raw_message) #正则支持小数
@@ -648,6 +660,35 @@ async def handle_remind(msg, is_group=True):
     else:
         await bot.api.post_private_msg(msg.user_id, text=f"已设置提醒喵~{hours}小时后会提醒你：{content}")
         asyncio.create_task(schedule_task(hours, bot.api.post_private_msg,msg.user_id,content))
+
+@register_command("/premind", help_text="/premind YYYY-MM-DD HH:MM 内容 -> 精确时间提醒")
+async def handle_precise_remind(msg, is_group=True):
+    try:
+        # 解析日期时间
+        parts = msg.raw_message.split(maxsplit=3)
+        if len(parts) < 3:
+            raise ValueError
+        
+        date_str = parts[1]
+        time_str = parts[2]
+        content = parts[3] if len(parts) > 3 else "提醒时间到了喵~"
+        
+        target_time = datetime.strptime(f"{date_str} {time_str}", "%Y-%m-%d %H:%M")
+        
+        reply = f"已设置精确提醒喵~将在 {target_time} 提醒: {content}"
+        if is_group:
+            await msg.reply(text=reply)
+            asyncio.create_task(schedule_task_by_date(target_time, msg.reply, content))
+        else:
+            await bot.api.post_private_msg(msg.user_id, text=reply)
+            asyncio.create_task(schedule_task_by_date(target_time, bot.api.post_private_msg, msg.user_id, content))
+            
+    except ValueError as e:
+        error_msg = "格式错误喵~ 使用: /precise_remind YYYY-MM-DD HH:MM 提醒内容"
+        if is_group:
+            await msg.reply(text=error_msg)
+        else:
+            await bot.api.post_private_msg(msg.user_id, text=error_msg)
 
 @register_command("/set_admin","/sa",help_text = "/set_admin <qq号> 或者 /sa <qq号> -> 设置管理员(root)")
 async def handle_set_admin(msg, is_group=True):

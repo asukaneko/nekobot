@@ -23,6 +23,7 @@
         - 权限列表：`/ga`
         - 取消权限：`/da <qq号>`
         - 定时提醒：`/remind <时间(hour)> <消息>`
+        - 日期定时体现：`/premind YYYY-MM-DD HH:MM 内容`
     - 将原有部分命令调整为仅管理员可用
     - 超级管理员(root)为config.ini中root的值
 
