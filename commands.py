@@ -602,7 +602,7 @@ async def handle_generic_file(msg, is_group: bool, section: str, file_type: str,
 async def handle_random_image(msg, is_group=True):
     await handle_generic_file(msg, is_group, 'ri', 'image')
 
-@register_command("/random_emoticons","/ret",help_text = "/random_emoticons 或者 /ret -> 随机表情包")
+@register_command("/random_emoticons","/re",help_text = "/random_emoticons 或者 /re -> 随机表情包")
 async def handle_random_emoticons(msg, is_group=True):
     await handle_generic_file(msg, is_group, 're', 'image')
 

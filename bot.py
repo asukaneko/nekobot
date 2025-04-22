@@ -13,7 +13,7 @@ async def on_group_message(msg: GroupMessage):
     if_tts = commands.if_tts
     _log.info(msg)
     for command, handler in command_handlers.items(): #优先处理命令
-        if msg.raw_message.startswith(command): #注意这里是startswith，也就是说命令尽量不要有重叠部分
+        if re.match(f'^{re.escape(command)}(?:\s|$)', msg.raw_message): #使用正则表达式精确匹配命令
             await handler(msg, is_group=True)
             return
 
@@ -81,7 +81,7 @@ async def on_private_message(msg: PrivateMessage):
     if_tts = commands.if_tts
     _log.info(msg)
     for command, handler in command_handlers.items():
-        if msg.raw_message.startswith(command):
+        if re.match(f'^{re.escape(command)}(?:\s|$)', msg.raw_message): #使用正则表达式精确匹配命令
             await handler(msg, is_group=False)
             return
     """
