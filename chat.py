@@ -49,6 +49,12 @@ def remove_brackets_content(text) -> str:
     return text.strip()
 
 def load_prompt(user_id=None, group_id=None):
+    """
+    加载用户或群组的提示词。
+    :param user_id: 用户ID。
+    :param group_id: 群组ID。
+    :return: 提示词字符串。
+    """
     prompt_file = None
     if user_id:
         user_id = str(user_id)
@@ -197,6 +203,12 @@ def tts(content) -> MessageChain:
     return message
 
 def upload_voice(file_path,name,text):
+    """
+    上传音频文件到硅基流动。
+    :param file_path: 音频文件路径。
+    :param name: 音频名称。
+    :param text: 音频的文字内容。
+    """
     url = "https://api.siliconflow.cn/v1/uploads/audio/voice"
     headers = {
         "Authorization": f"Bearer {api_key}"

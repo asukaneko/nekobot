@@ -41,6 +41,11 @@ def load_admin():
         write_admin()
 
 def register_command(*command,help_text = None): # 注册命令
+    """
+    装饰器，用于注册命令。
+    :param command: 命令名称，支持多个。
+    :param help_text: 命令的帮助文本。
+    """
     def decorator(func):
         command_handlers[command] = func
         if help_text is not None:
@@ -111,6 +116,10 @@ async def schedule_task_by_date(target_time: datetime, task_func, *args, **kwarg
     await task_func(*args, **kwargs)
 
 async def chatter(msg):
+    """
+    定时聊天函数。
+    :param msg: 消息对象。
+    """
     content = chat(content="现在请你根据上下文，主动和用户聊天",user_id=msg.user_id)
     if if_tts:
         rtf = tts(content)
