@@ -741,7 +741,7 @@ async def handle_get_admin(msg, is_group=True):
         await bot.api.post_private_msg(msg.user_id, text="管理员列表："+str(admin))
 
 
-@register_command("/set_ids",help_text = "/set_ids 昵称 个性签名 性别 -> 设置账号信息(管理员)")
+@register_command("/set_ids",help_text = "/set_ids <昵称> <个性签名> <性别> -> 设置账号信息(管理员)")
 async def handle_set(msg, is_group=True):
     """
             nickname: 昵称
