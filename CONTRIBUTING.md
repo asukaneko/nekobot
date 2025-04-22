@@ -1,3 +1,4 @@
+![cover](https://img.picui.cn/free/2025/04/19/6803c76d2bbf9.png)
 # 项目贡献指南
 
 欢迎参与 AsukaNeko 项目！以下是贡献代码的指南。
@@ -29,7 +30,7 @@
 - 函数和类要有 docstring
 
 ### 提交信息
-- 使用英文撰写提交信息
+- 使用英文或中文撰写提交信息
 - 采用 [约定式提交](https://www.conventionalcommits.org/) 格式
 - 示例: `feat: add new command handler`
 
