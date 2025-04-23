@@ -4,7 +4,7 @@ from chat import group_messages, user_messages, tts, chat
 import jmcomic,requests,random,configparser,json,yaml,re,os,asyncio
 from jmcomic import *
 from typing import Dict, List
-from datetime import datetime, timedelta
+from datetime import datetime
 
 if_tts = False #判断是否开启TTS
 
