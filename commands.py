@@ -208,9 +208,32 @@ async def handle_search(msg, is_group=True):
     cache_dir += "search/"
     os.makedirs(cache_dir,exist_ok = True)
 
-    content = msg.raw_message[len("/search"):].strip()
-    name = content + str(time.time()).replace(".", "")
     client = JmOption.default().new_jm_client()
+
+    content = msg.raw_message[len("/search"):].strip()
+    
+    if not content or content == " ":
+        if is_group:
+            await msg.reply(text="搜索内容不能为空喵~")
+        else:
+            await bot.api.post_private_msg(msg.user_id, text="搜索内容不能为空喵~")
+        return
+        
+    if re.match(r'^\d+$', content):  # 检查是否为纯数字
+        id = content
+        # 直接搜索禁漫车号
+        page = client.search_site(search_query=id)
+        album: JmAlbumDetail = page.single_album
+        with open(cache_dir + f"{id}.txt", "w", encoding="utf-8") as f:
+            f.write(f"标题：{album.title}\n标签：{album.tags}\n页数：{album.page_count}\n浏览次数：{album.views}\n评论数：{album.comment_count}")
+        if is_group:
+            await bot.api.post_group_file(msg.group_id, file=cache_dir + f"{id}.txt")
+        else:
+            await bot.api.upload_private_file(msg.user_id, cache_dir + f"{id}.txt", f"{id}.txt")
+        return
+
+    name = content + str(time.time()).replace(".", "")
+    
     with open(cache_dir + f"{name}.txt", "w", encoding="utf-8") as f:
         f.write(f"搜索结果：{content}\n")
     tot = 0
