@@ -14,3 +14,4 @@ __pycache__/chat.cpython-312.pyc
 /.idea/jsonSchemas.xml
 __pycache__/config.cpython-312.pyc
 .gitignore
+find.json

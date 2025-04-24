@@ -49,7 +49,10 @@ async def on_group_message(msg: GroupMessage):
     if msg.message[0].get("type") == "reply" and msg.message[1].get("type") == "at" and msg.message[1].get("data").get("qq") == bot_id:
         #如果是回复机器人的消息
         get_id = msg.message[0].get("data").get("id") #判断是不是图片
-        dirs = group_imgs[str(msg.group_id)]
+        try:
+            dirs = group_imgs[str(msg.group_id)]
+        except KeyError:
+            dirs = []
         for ldir in dirs:
             if ldir.get(get_id):
                 url = ldir.get(get_id)
@@ -67,7 +70,7 @@ async def on_group_message(msg: GroupMessage):
                     await msg.reply(text=content)
                 return
         try:
-            ori_content = msg.message[2].get("data").get("text")
+            ori_content = msg.message[2].get("data").get("text")   #这里使用的是回复的消息，看不了被回复的消息
         except IndexError:
             ori_content = "有人回复了你"
         content = chat(ori_content, group_id=msg.group_id,group_user_id=msg.sender.nickname)
