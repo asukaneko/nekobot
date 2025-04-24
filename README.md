@@ -16,7 +16,7 @@
 [![MIT License][license-shield]][license-url]
 
 ---
-### ✨Updates 更新![](https://img.shields.io/badge/LatestVersion-1.2.1-blue?&logo=react)
+### ✨Updates 更新![](https://img.shields.io/badge/LatestVersion-1.2.2-blue?&logo=react)
 + [2025/4/24] v1.2.2 新命令
     - 新增命令：
         - 搜索音乐并发送：`/music <歌曲名/id>`

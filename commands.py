@@ -640,7 +640,7 @@ async def handle_random_emoticons(msg, is_group=True):
 async def handle_st(msg, is_group=True):
     tags = msg.raw_message[len("/st"):].strip()
     res = requests.get(f"https://api.lolicon.app/setu/v2?tag={tags}").json().get("data")[0].get("urls").get("original")
-    await handle_generic_file(msg, is_group,"","",custom_url=res)  # 特殊处理API调用
+    await handle_generic_file(msg, is_group,"","image",custom_url=res)  # 特殊处理API调用
 
 @register_command("/random_video","/rv",help_text = "/random_video 或者 /rv -> 随机二次元视频")
 async def handle_random_video(msg, is_group=True):
@@ -679,11 +679,9 @@ async def handle_music(msg, is_group=True):
         Music(type="163",id=music_id)
     )
     if is_group:
-        await msg.reply(rtf=messagechain)
+        await bot.api.post_group_msg(msg.group_id, rtf=messagechain)
     else:
         await bot.api.post_private_msg(msg.user_id, rtf=messagechain)
-
-
 
 @register_command("/random_dice","/rd",help_text = "/random_dice 或者 /rd -> 发送随机骰子")
 async def handle_random_dice(msg, is_group=True):
