@@ -16,7 +16,7 @@ async def on_group_message(msg: GroupMessage):
         if isinstance(command, tuple):  # 处理命令别名情况
             for cmd in command:
                 if re.match(f'^{re.escape(cmd)}(?:\s|$)', msg.raw_message):
-                    await handler(msg, is_group=False)
+                    await handler(msg, is_group=True)
                     return
         elif re.match(f'^{re.escape(command)}(?:\s|$)', msg.raw_message): # 处理单个命令情况
             await handler(msg, is_group=False)
