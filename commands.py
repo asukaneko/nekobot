@@ -1,4 +1,4 @@
-from ncatbot.core import BotClient, GroupMessage, PrivateMessage
+from ncatbot.core import BotClient, GroupMessage, PrivateMessage,MessageChain,Music
 from config import load_config
 from chat import group_messages, user_messages, tts, chat
 import jmcomic,requests,random,configparser,json,yaml,re,os,asyncio
@@ -648,6 +648,38 @@ async def handle_random_video(msg, is_group=True):
 
 #---------------------------------------------
 
+@register_command("/music","/m",help_text = "/music <音乐名/id> -> 发送音乐")
+async def handle_music(msg, is_group=True):
+    music_name = msg.raw_message[len("/music"):].strip()
+    if not music_name:
+        await msg.reply(text="请输入音乐名喵~")
+        return
+
+    if re.match(r'^\d+$', music_name):  # 检查是否为纯数字
+        messagechain = MessageChain(
+            Music(type="163",id=music_name)
+        )
+        if is_group:
+            await msg.reply(rtf=messagechain)
+        else:
+            await bot.api.post_private_msg(msg.user_id, rtf=messagechain)
+        return
+
+    url = f"https://music.163.com/api/search/get/web?csrf_token=hlpretag=&hlposttag=&s={music_name}&type=1&offset=0&total=true&limit=1"
+    response = requests.get(url)
+    print(response.text)
+    dict = json.loads(response.text)
+    music_id = dict.get("result").get("songs")[0].get("id")
+    messagechain = MessageChain(
+        Music(type="163",id=music_id)
+    )
+    if is_group:
+        await msg.reply(rtf=messagechain)
+    else:
+        await bot.api.post_private_msg(msg.user_id, rtf=messagechain)
+
+
+
 @register_command("/random_dice","/rd",help_text = "/random_dice 或者 /rd -> 发送随机骰子")
 async def handle_random_dice(msg, is_group=True):
     if is_group:
@@ -881,7 +913,7 @@ async def handle_help(msg, is_group=True):
         "1": {"name": "漫画相关", "commands": ["/jm", "/jmrank", "/search","/tag"]},
         "2": {"name": "收藏管理", "commands": ["/get_fav", "/add_fav", "/del_fav","/list_fav"]},
         "3": {"name": "聊天设置", "commands": ["/set_prompt", "/del_prompt", "/get_prompt","/del_message"]},
-        "4": {"name": "娱乐功能", "commands": ["/random_image", "/random_emoticons", "/st","/random_video","/random_dice","/random_rps"]},
+        "4": {"name": "娱乐功能", "commands": ["/random_image", "/random_emoticons", "/st","/random_video","/random_dice","/random_rps","/music"]},
         "5": {"name": "系统处理", "commands": ["/restart", "/tts", "/agree","/redmind","/premind","/set_admin","/del_admin","/get_admin","/set_ids","/set_online_status","/get_friends","/set_qq_avatar","/send_like"]}
     }
 
