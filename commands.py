@@ -664,12 +664,17 @@ async def handle_music(msg, is_group=True):
         else:
             await bot.api.post_private_msg(msg.user_id, rtf=messagechain)
         return
-
-    url = f"https://music.163.com/api/search/get/web?csrf_token=hlpretag=&hlposttag=&s={music_name}&type=1&offset=0&total=true&limit=1"
-    response = requests.get(url)
-    print(response.text)
-    dict = json.loads(response.text)
-    music_id = dict.get("result").get("songs")[0].get("id")
+    music_id = None
+    url = 'https://music.163.com/api/search/get'
+    params = {
+        's': music_name,
+        'type': 1,  # 1表示歌曲
+        'limit': 1  # 获取第一条结果
+    }
+    response = requests.get(url, params=params)
+    data = response.json()
+    if data['code'] == 200 and data['result']['songs']:
+        music_id = data['result']['songs'][0]['id']
     messagechain = MessageChain(
         Music(type="163",id=music_id)
     )
