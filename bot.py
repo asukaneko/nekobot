@@ -114,9 +114,11 @@ async def on_private_message(msg: PrivateMessage):
             content = chat(user_id=msg.user_id,image=True,url=url)
             if if_tts:
                 rtf = tts(content)
+                await bot.api.set_input_status(event_type=0,user_id=msg.user_id)
                 await bot.api.post_private_msg(msg.user_id, rtf=rtf)
                 await bot.api.post_private_msg(msg.user_id, text=content)
             else:
+                await bot.api.set_input_status(event_type=1,user_id=msg.user_id)
                 await bot.api.post_private_msg(msg.user_id, text=content)
             return
     except IndexError:
@@ -136,9 +138,11 @@ async def on_private_message(msg: PrivateMessage):
 
             if if_tts:
                 rtf = tts(content)
+                await bot.api.set_input_status(event_type=0,user_id=msg.user_id)
                 await bot.api.post_private_msg(msg.user_id, rtf=rtf)
                 await bot.api.post_private_msg(msg.user_id, text=content)
             else:
+                await bot.api.set_input_status(event_type=1,user_id=msg.user_id)
                 await bot.api.post_private_msg(msg.user_id, text=content)
             return
 
@@ -150,9 +154,11 @@ async def on_private_message(msg: PrivateMessage):
         content = chat(reply_text+ori_content, user_id=msg.user_id)
         if if_tts:
             rtf = tts(content)
+            await bot.api.set_input_status(event_type=0,user_id=msg.user_id)
             await bot.api.post_private_msg(msg.user_id, rtf=rtf)
             await bot.api.post_private_msg(msg.user_id, text=content)
         else:
+            await bot.api.set_input_status(event_type=1,user_id=msg.user_id)
             await bot.api.post_private_msg(msg.user_id, text=content)
         return
     
@@ -160,9 +166,11 @@ async def on_private_message(msg: PrivateMessage):
         content = chat(msg.raw_message, user_id=msg.user_id)
         if if_tts:
             rtf = tts(content)
+            await bot.api.set_input_status(event_type=0,user_id=msg.user_id)
             await bot.api.post_private_msg(msg.user_id, rtf=rtf)
             await bot.api.post_private_msg(msg.user_id, text=content)
         else:
+            await bot.api.set_input_status(event_type=1,user_id=msg.user_id)
             await bot.api.post_private_msg(msg.user_id, text=content)
 
 if __name__ == "__main__":
