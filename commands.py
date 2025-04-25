@@ -13,7 +13,6 @@ bot_id,admin_id = load_config() # 加载配置,返回机器人qq号
 bot = BotClient()
 
 command_handlers = {}
-group_imgs = {} # 用于存储图片信息
 
 user_favorites: Dict[str, List[str]] = {}  # 用户收藏夹 {user_id: [comic_ids]}
 group_favorites: Dict[str, Dict[str, List[str]]] = {}  # 群组收藏夹 {group_id: {user_id: [comic_ids]}}

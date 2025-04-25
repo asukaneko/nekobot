@@ -26,12 +26,6 @@ async def on_group_message(msg: GroupMessage):
         content = chat(msg.raw_message, group_id=msg.group_id,group_user_id=msg.sender.nickname)
         await msg.reply(text=content)
 
-    if msg.message[0].get("type") == "image": #提取保存所有图片的信息
-        url = msg.message[0].get("data").get("url")
-        if str(msg.group_id) not in group_imgs:  # 添加检查并初始化
-            group_imgs[str(msg.group_id)] = []
-        group_imgs[str(msg.group_id)].append({str(msg.message_id):url})
-
     if msg.message[0].get("type") == "at" and msg.message[0].get("data").get("qq") == bot_id:
     #如果是at机器人
         try:
@@ -48,39 +42,30 @@ async def on_group_message(msg: GroupMessage):
 
     if msg.message[0].get("type") == "reply" and msg.message[1].get("type") == "at" and msg.message[1].get("data").get("qq") == bot_id:
         #如果是回复机器人的消息
-        get_id = msg.message[0].get("data").get("id") #判断是不是图片
-        try:
-            dirs = group_imgs[str(msg.group_id)]
-        except KeyError:
-            dirs = []
-        for ldir in dirs:
-            if ldir.get(get_id):
-                url = ldir.get(get_id)
-                ori_content = ""
-                try:
-                    ori_content = msg.message[2].get("data").get("text")
-                except IndexError:
-                    pass
-                content = chat(ori_content,group_id=msg.group_id,group_user_id=msg.sender.nickname,image=True,url=url)
-                if if_tts:
-                    rtf = tts(content)
-                    await bot.api.post_group_msg(msg.group_id, rtf=rtf)
-                    await msg.reply(text=content)
-                else:
-                    await msg.reply(text=content)
-                return
-        
-        reply_id = msg.message[0].get("data").get("id")
-        msg_obj = await bot.api.get_msg(message_id=reply_id)
-        reply_text = "被回复的消息："+ msg_obj.get("data").get("raw_message") +", "
-        
+
         ori_content = "内容："
         try:
             ori_content += msg.message[2].get("data").get("text")  
         except IndexError:
             ori_content += "有人回复了你"
+
+        reply_id = msg.message[0].get("data").get("id")
+        msg_obj = await bot.api.get_msg(message_id=reply_id)
+        print(msg_obj)
+        if msg_obj.get("data").get("message")[0].get("type") == "image": #处理图片
+            url = msg_obj.get("data").get("message")[0].get("data").get("url")
+            content = chat(content=ori_content,group_id=msg.group_id,group_user_id=msg.sender.nickname,image=True,url=url)
+            if if_tts:
+                rtf = tts(content)
+                await bot.api.post_group_msg(msg.group_id, rtf=rtf)
+                await msg.reply(text=content)
+            else:
+                await msg.reply(text=content)
+            return
+
+        reply_text = "被回复的消息："+ msg_obj.get("data").get("raw_message") +", "
         
-        content = chat(read_text+ori_content, group_id=msg.group_id,group_user_id=msg.sender.nickname)
+        content = chat(reply_text+ori_content, group_id=msg.group_id,group_user_id=msg.sender.nickname)
         if if_tts:
             rtf = tts(content)
             await bot.api.post_group_msg(msg.group_id, rtf=rtf)
@@ -88,7 +73,7 @@ async def on_group_message(msg: GroupMessage):
         else:
             await msg.reply(text=content)
 
-running = True #用于定时聊天的开关
+# running = True #用于定时聊天的开关
 
 @bot.private_event()
 async def on_private_message(msg: PrivateMessage):
@@ -141,6 +126,22 @@ async def on_private_message(msg: PrivateMessage):
         reply_id = msg.message[0].get("data").get("id")
         msg_obj = await bot.api.get_msg(message_id=reply_id)
         print(msg_obj)
+
+        if msg_obj.get("data").get("message")[0].get("type") == "image": #处理图片
+            url = msg_obj.get("data").get("message")[0].get("data").get("url")
+            try:  #预防回复图片时没有内容的情况
+                content = chat(content=msg.message[1].get("data").get("text"),user_id=msg.user_id,image=True,url=url)
+            except IndexError:
+                content = chat(user_id=msg.user_id,image=True,url=url)
+
+            if if_tts:
+                rtf = tts(content)
+                await bot.api.post_private_msg(msg.user_id, rtf=rtf)
+                await bot.api.post_private_msg(msg.user_id, text=content)
+            else:
+                await bot.api.post_private_msg(msg.user_id, text=content)
+            return
+
         reply_text = "被回复的消息："+ msg_obj.get("data").get("raw_message") +", "
         try:
             ori_content = msg.message[1].get("data").get("text")
