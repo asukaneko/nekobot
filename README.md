@@ -11,16 +11,18 @@
 [![Contributors][contributors-shield]][contributors-url]
 [![Forks][forks-shield]][forks-url]
 [![Stargazers][stars-shield]][stars-url]
-[![](https://visitor-badge.laobi.icu/badge?page_id=asukaneko.NapCat-jmcomic_download-bot)](https://github.com/asukaneko/NapCat-jmcomic_download-bot)
+![](https://visitor-badge.laobi.icu/badge?page_id=asukaneko.NapCat-jmcomic_download-bot)
 [![Issues][issues-shield]][issues-url]
 [![MIT License][license-shield]][license-url]
 
 ---
 ### ✨Updates 更新![](https://img.shields.io/badge/LatestVersion-1.2.2-blue?&logo=react)
-+ [2025/4/24] v1.2.2 新命令
++ [2025/4/24] v1.2.2 更新
     - 新增命令：
         - 搜索音乐并发送：`/music <歌曲名/id>`
         - 暂只支持网易云音乐
+    - 聊天可支持回复过往的内容
+
 + [2025/4/22] v1.2.1 优化
     - 优化/help命令，采用分级菜单展示，同时规范了help_text格式
     - 优化命令匹配方式，更改为正则匹配，更加精准
