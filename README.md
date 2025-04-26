@@ -16,7 +16,13 @@
 [![MIT License][license-shield]][license-url]
 
 ---
-### ✨Updates 更新![](https://img.shields.io/badge/LatestVersion-1.2.2-blue?&logo=react)
+### ✨Updates 更新![](https://img.shields.io/badge/LatestVersion-1.2.3-blue?&logo=react)
++ [2025/4/27] v1.2.3 新增命令   
+    - 新增群聊管理分支
+    - 新增命令：
+        - 设置群管理员：`/set_group_admin <qq号>`
+        - 取消群管理员：`/del_group_admin <qq号>`
+
 + [2025/4/24 - 2025/4/25] v1.2.2 更新
     - 新增命令：
         - 搜索音乐并发送：`/music <歌曲名/id>`

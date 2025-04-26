@@ -907,6 +907,30 @@ async def handle_send_like(msg, is_group=True):
     else:
         await bot.api.post_private_msg(msg.user_id, text=text)
 
+@register_command("/set_group_admin",help_text = "/set_group_admin <目标QQ号> -> 设置群管理员(admin)")
+async def handle_set_group_admin(msg, is_group=True):
+    if not is_group:
+        await bot.api.post_private_msg(msg.user_id, text="只能在群聊中设置群管理员喵~")
+        return
+    if str(msg.user_id) not in admin:
+        await msg.reply(text="你没有权限设置群管理员喵~")
+        return
+    msgs = msg.raw_message[len("/set_group_admin"):].split(" ")[0]
+    await bot.api.set_group_admin(msg.group_id, msgs,True)
+    await msg.reply(text="设置成功喵~")
+
+@register_command("/del_group_admin",help_text = "/del_group_admin <目标QQ号> -> 取消群管理员(admin)")
+async def handle_del_group_admin(msg, is_group=True):
+    if not is_group:
+        await bot.api.post_private_msg(msg.user_id, text="只能在群聊中取消群管理员喵~")
+        return
+    if str(msg.user_id) not in admin:
+        await msg.reply(text="你没有权限设置群管理员喵~")
+        return
+    msgs = msg.raw_message[len("/del_group_admin"):].split(" ")[0]
+    await bot.api.set_group_admin(msg.group_id, msgs,False)
+    await msg.reply(text="取消成功喵~")
+
 #将help命令放在最后
 @register_command("/help","/h",help_text = "/help 或者 /h -> 查看帮助")
 async def handle_help(msg, is_group=True):
@@ -916,7 +940,8 @@ async def handle_help(msg, is_group=True):
         "2": {"name": "收藏管理", "commands": ["/get_fav", "/add_fav", "/del_fav","/list_fav"]},
         "3": {"name": "聊天设置", "commands": ["/set_prompt", "/del_prompt", "/get_prompt","/del_message"]},
         "4": {"name": "娱乐功能", "commands": ["/random_image", "/random_emoticons", "/st","/random_video","/random_dice","/random_rps","/music"]},
-        "5": {"name": "系统处理", "commands": ["/restart", "/tts", "/agree","/redmind","/premind","/set_admin","/del_admin","/get_admin","/set_ids","/set_online_status","/get_friends","/set_qq_avatar","/send_like"]}
+        "5": {"name": "系统处理", "commands": ["/restart", "/tts", "/agree","/redmind","/premind","/set_admin","/del_admin","/get_admin","/set_ids","/set_online_status","/get_friends","/set_qq_avatar","/send_like"]},
+        "6": {"name": "群聊管理", "commands": ["/set_group_admin", "/del_group_admin"]}
     }
 
     # 第一阶段：显示分类菜单
