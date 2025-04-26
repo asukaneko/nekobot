@@ -19,7 +19,10 @@ group_favorites: Dict[str, Dict[str, List[str]]] = {}  # 群组收藏夹 {group_
 
 admin = [str(admin_id)]  # 确保admin_id是字符串形式
 
-#通用函数如下----------
+# ------------------
+#    通用函数如下
+# ------------------
+
 def write_admin():
     try:
         with open("admin.txt", "w", encoding="utf-8") as f:
@@ -725,7 +728,7 @@ async def handle_remind(msg, is_group=True):
         await bot.api.post_private_msg(msg.user_id, text=f"已设置提醒喵~{hours}小时后会提醒你：{content}")
         asyncio.create_task(schedule_task(hours, bot.api.post_private_msg,msg.user_id,content))
 
-@register_command("/premind", help_text="/premind <YYYY-MM-DD> <HH:MM> <内容> -> 精确时间提醒")
+@register_command("/premind", help_text="/premind <MM-DD> <HH:MM> <内容> -> 精确时间提醒")
 async def handle_precise_remind(msg, is_group=True):
     try:
         # 解析日期时间
@@ -737,7 +740,7 @@ async def handle_precise_remind(msg, is_group=True):
         time_str = parts[2]
         content = parts[3] if len(parts) > 3 else "提醒时间到了喵~"
         
-        target_time = datetime.strptime(f"{date_str} {time_str}", "%Y-%m-%d %H:%M")
+        target_time = datetime.strptime(f"{date_str} {time_str}", "%m-%d %H:%M")
         
         reply = f"已设置精确提醒喵~将在 {target_time} 提醒: {content}"
         if is_group:
@@ -748,7 +751,7 @@ async def handle_precise_remind(msg, is_group=True):
             asyncio.create_task(schedule_task_by_date(target_time, bot.api.post_private_msg, msg.user_id, content))
             
     except ValueError as e:
-        error_msg = "格式错误喵~ 使用: /precise_remind YYYY-MM-DD HH:MM 提醒内容"
+        error_msg = "格式错误喵~ 使用: /precise_remind MM-DD HH:MM 提醒内容"
         if is_group:
             await msg.reply(text=error_msg)
         else:
