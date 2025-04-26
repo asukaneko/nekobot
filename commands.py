@@ -6,6 +6,10 @@ from jmcomic import *
 from typing import Dict, List
 from datetime import datetime
 
+#----------------------
+# region 全局变量设置
+#----------------------
+
 if_tts = False #判断是否开启TTS
 
 bot_id,admin_id = load_config() # 加载配置,返回机器人qq号
@@ -20,7 +24,7 @@ group_favorites: Dict[str, Dict[str, List[str]]] = {}  # 群组收藏夹 {group_
 admin = [str(admin_id)]  # 确保admin_id是字符串形式
 
 # ------------------
-#    通用函数如下
+# region 通用函数
 # ------------------
 
 def write_admin():
@@ -131,6 +135,10 @@ async def chatter(msg):
 
 load_favorites()
 load_admin()
+
+#----------------------
+#     region 命令
+#----------------------
 
 @register_command("测试")
 async def handle_test(msg, is_group=True):
@@ -891,9 +899,11 @@ async def handle_set_qq_avatar(msg, is_group=True):
     if is_group:
         await msg.reply(text="只能私聊设置喵~")
         return
+
     if str(msg.user_id) not in admin:
         await bot.api.post_private_msg(msg.user_id, text="你没有权限设置头像喵~")
         return
+
     msgs = msg.raw_message[len("/set_qq_avatar"):]
     await bot.api.set_qq_avatar(msgs)
     text = "设置成功喵~"
@@ -905,12 +915,14 @@ async def handle_set_qq_avatar(msg, is_group=True):
 @register_command("/send_like",help_text = "/send_like <目标QQ号> <次数> -> 发送点赞")
 async def handle_send_like(msg, is_group=True):
     msgs = msg.raw_message[len("/send_like"):].split(" ")
+
     if len(msgs) < 2:
         text = "格式错误喵~ 请输入 /send_like 目标QQ号 次数"
         if is_group:
             await msg.reply(text=text)
         else:
             await bot.api.post_private_msg(msg.user_id, text=text)
+
     target_qq = msgs[0]
     times = msgs[1]
     await bot.api.send_like(target_qq, times)
@@ -925,21 +937,26 @@ async def handle_set_group_admin(msg, is_group=True):
     if not is_group:
         await bot.api.post_private_msg(msg.user_id, text="只能在群聊中设置群管理员喵~")
         return
+
     if str(msg.user_id) not in admin:
         await msg.reply(text="你没有权限设置群管理员喵~")
         return
+
     msgs = msg.raw_message[len("/set_group_admin"):].split(" ")[0]
     await bot.api.set_group_admin(msg.group_id, msgs,True)
     await msg.reply(text="设置成功喵~")
 
 @register_command("/del_group_admin",help_text = "/del_group_admin <目标QQ号> -> 取消群管理员(admin)")
 async def handle_del_group_admin(msg, is_group=True):
+
     if not is_group:
         await bot.api.post_private_msg(msg.user_id, text="只能在群聊中取消群管理员喵~")
         return
+
     if str(msg.user_id) not in admin:
         await msg.reply(text="你没有权限设置群管理员喵~")
         return
+
     msgs = msg.raw_message[len("/del_group_admin"):].split(" ")[0]
     await bot.api.set_group_admin(msg.group_id, msgs,False)
     await msg.reply(text="取消成功喵~")
