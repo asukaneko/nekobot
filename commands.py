@@ -733,15 +733,25 @@ async def handle_precise_remind(msg, is_group=True):
     try:
         # 解析日期时间
         parts = msg.raw_message.split(maxsplit=3)
+
         if len(parts) < 3:
             raise ValueError
         
-        date_str = parts[1]
+        now = datetime.now()
+        year = str(now.year)
+
+        date_str = f"{year}-" + parts[1]
         time_str = parts[2]
         content = parts[3] if len(parts) > 3 else "提醒时间到了喵~"
         
-        target_time = datetime.strptime(f"{date_str} {time_str}", "%m-%d %H:%M")
-        
+        target_time = datetime.strptime(f"{date_str} {time_str}", "%Y-%m-%d %H:%M")
+        if target_time < now:
+            if is_group:
+                await msg.reply(text="时间已经过去喵~")
+            else:
+                await bot.api.post_private_msg(msg.user_id, text="时间已经过去喵~")
+            return
+
         reply = f"已设置精确提醒喵~将在 {target_time} 提醒: {content}"
         if is_group:
             await msg.reply(text=reply)
@@ -943,7 +953,7 @@ async def handle_help(msg, is_group=True):
         "2": {"name": "收藏管理", "commands": ["/get_fav", "/add_fav", "/del_fav","/list_fav"]},
         "3": {"name": "聊天设置", "commands": ["/set_prompt", "/del_prompt", "/get_prompt","/del_message"]},
         "4": {"name": "娱乐功能", "commands": ["/random_image", "/random_emoticons", "/st","/random_video","/random_dice","/random_rps","/music"]},
-        "5": {"name": "系统处理", "commands": ["/restart", "/tts", "/agree","/redmind","/premind","/set_admin","/del_admin","/get_admin","/set_ids","/set_online_status","/get_friends","/set_qq_avatar","/send_like"]},
+        "5": {"name": "系统处理", "commands": ["/restart", "/tts", "/agree","/remind","/premind","/set_admin","/del_admin","/get_admin","/set_ids","/set_online_status","/get_friends","/set_qq_avatar","/send_like"]},
         "6": {"name": "群聊管理", "commands": ["/set_group_admin", "/del_group_admin"]}
     }
 
