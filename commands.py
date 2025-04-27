@@ -547,7 +547,7 @@ async def handle_add_black_list(msg, is_group=True):
                 reply = f"漫画 {comic_id} 已在本群黑名单中喵~"
             else:
                 blak_list_comic["groups"][group_id].append(comic_id)
-                await write_blak_list()
+                write_blak_list()
                 reply = f"已在本群黑名单中添加漫画 {comic_id} 喵~"
         else:
             user_id = str(msg.user_id)
@@ -557,7 +557,7 @@ async def handle_add_black_list(msg, is_group=True):
                 reply = f"漫画 {comic_id} 已在你的黑名单中喵~"
             else:
                 blak_list_comic["users"][user_id].append(comic_id)
-                await write_blak_list()
+                write_blak_list()
                 reply = f"已在你的黑名单中添加漫画 {comic_id} 喵~"
     if is_group:
         await msg.reply(text=reply)
@@ -588,7 +588,7 @@ async def handle_add_global_black_list(msg, is_group=True):
             reply = f"漫画 {comic_id} 已在全局黑名单中喵~"
         else:
             blak_list_comic["global"].append(comic_id)
-            await write_blak_list()
+            write_blak_list()
             reply = f"已在全局黑名单中添加漫画 {comic_id} 喵~"
     if is_group:
         await msg.reply(text=reply)
@@ -617,7 +617,7 @@ async def handle_del_global_black_list(msg, is_group=True):
     else:
         if comic_id in blak_list_comic["global"]:
             blak_list_comic["global"].remove(comic_id)
-            await write_blak_list()
+            write_blak_list()
             reply = f"已从全局黑名单中删除漫画 {comic_id} 喵~"
         else:
             reply = f"漫画 {comic_id} 不在全局黑名单中喵~"
@@ -641,7 +641,7 @@ async def handle_del_black_list(msg, is_group=True):
             group_id = str(msg.group_id)
             if group_id in blak_list_comic["groups"] and comic_id in blak_list_comic["groups"][group_id]:
                 blak_list_comic["groups"][group_id].remove(comic_id)
-                await write_blak_list()
+                write_blak_list()
                 reply = f"已从本群黑名单中删除漫画 {comic_id} 喵~"
             else:
                 reply = f"漫画 {comic_id} 不在本群黑名单中喵~"
