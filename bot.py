@@ -123,19 +123,36 @@ async def on_private_message(msg: PrivateMessage):
             return
     except IndexError:
         pass
+    
+    try:
+        if msg.message[0].get("type") == "reply": #处理回复
+            reply_id = msg.message[0].get("data").get("id")
+            msg_obj = await bot.api.get_msg(message_id=reply_id)
+            print(msg_obj)
 
-    if msg.message[0].get("type") == "reply": #处理回复
-        reply_id = msg.message[0].get("data").get("id")
-        msg_obj = await bot.api.get_msg(message_id=reply_id)
-        print(msg_obj)
+            if msg_obj.get("data").get("message")[0].get("type") == "image": #处理图片
+                url = msg_obj.get("data").get("message")[0].get("data").get("url")
+                try:  #预防回复图片时没有内容的情况
+                    content = chat(content=msg.message[1].get("data").get("text"),user_id=msg.user_id,image=True,url=url)
+                except IndexError:
+                    content = chat(user_id=msg.user_id,image=True,url=url)
 
-        if msg_obj.get("data").get("message")[0].get("type") == "image": #处理图片
-            url = msg_obj.get("data").get("message")[0].get("data").get("url")
-            try:  #预防回复图片时没有内容的情况
-                content = chat(content=msg.message[1].get("data").get("text"),user_id=msg.user_id,image=True,url=url)
+                if if_tts:
+                    rtf = tts(content)
+                    await bot.api.set_input_status(event_type=0,user_id=msg.user_id)
+                    await bot.api.post_private_msg(msg.user_id, rtf=rtf)
+                    await bot.api.post_private_msg(msg.user_id, text=content)
+                else:
+                    await bot.api.set_input_status(event_type=1,user_id=msg.user_id)
+                    await bot.api.post_private_msg(msg.user_id, text=content)
+                return
+
+            reply_text = "被回复的消息："+ msg_obj.get("data").get("raw_message") +", "
+            try:
+                ori_content = msg.message[1].get("data").get("text")
             except IndexError:
-                content = chat(user_id=msg.user_id,image=True,url=url)
-
+                ori_content = "回复了你"
+            content = chat(reply_text+ori_content, user_id=msg.user_id)
             if if_tts:
                 rtf = tts(content)
                 await bot.api.set_input_status(event_type=0,user_id=msg.user_id)
@@ -145,22 +162,8 @@ async def on_private_message(msg: PrivateMessage):
                 await bot.api.set_input_status(event_type=1,user_id=msg.user_id)
                 await bot.api.post_private_msg(msg.user_id, text=content)
             return
-
-        reply_text = "被回复的消息："+ msg_obj.get("data").get("raw_message") +", "
-        try:
-            ori_content = msg.message[1].get("data").get("text")
-        except IndexError:
-            ori_content = "回复了你"
-        content = chat(reply_text+ori_content, user_id=msg.user_id)
-        if if_tts:
-            rtf = tts(content)
-            await bot.api.set_input_status(event_type=0,user_id=msg.user_id)
-            await bot.api.post_private_msg(msg.user_id, rtf=rtf)
-            await bot.api.post_private_msg(msg.user_id, text=content)
-        else:
-            await bot.api.set_input_status(event_type=1,user_id=msg.user_id)
-            await bot.api.post_private_msg(msg.user_id, text=content)
-        return
+    except IndexError:
+        pass
     
     if msg.raw_message and not msg.raw_message.startswith("/"): # 检查消息是否为空,避免接受文件后的空消息被回复
         content = chat(msg.raw_message, user_id=msg.user_id)

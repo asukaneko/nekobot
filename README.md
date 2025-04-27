@@ -22,6 +22,10 @@
     - 新增命令：
         - 设置群管理员：`/set_group_admin <qq号>`
         - 取消群管理员：`/del_group_admin <qq号>`
+        - 将漫画添加到黑名单: `/add_black_list <漫画id>`
+        - 将漫画从黑名单移除: `/del_black_list <漫画id>`
+        - 查看当前群聊或用户的黑名单: `/get_black_list`
+
 
 + [2025/4/24 - 2025/4/25] v1.2.2 更新
     - 新增命令：
