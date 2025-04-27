@@ -134,7 +134,7 @@ async def chatter(msg):
     else:
         await bot.api.post_private_msg(msg.user_id, text=content)
 
-async def write_blak_list():
+def write_blak_list():
     """
     写入黑名单
     """
@@ -146,7 +146,7 @@ async def write_blak_list():
     except Exception as e:
         print(f"写入黑名单文件失败: {e}")
 
-async def load_blak_list():
+def load_blak_list():
     """
     加载黑名单
     """
@@ -157,7 +157,7 @@ async def load_blak_list():
             blak_list_comic.update(json.load(f))
 
     except FileNotFoundError:
-        await write_blak_list()
+        write_blak_list()
 #---------------------------------------------------------------------------
 
 load_favorites()
