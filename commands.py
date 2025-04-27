@@ -662,13 +662,13 @@ async def handle_del_black_list(msg, is_group=True):
 async def handle_list_black_list(msg, is_group=True):
     if is_group:
         group_id = str(msg.group_id)
-        if black_list_comic["global"] or blak_list_comic["groups"].get(group_id, []):
+        if blak_list_comic["global"] or blak_list_comic["groups"].get(group_id, []):
             reply = "本群的黑名单中的漫画ID:\n全局：" + "\n".join( blak_list_comic["global"]) + "\n本群：" + "\n".join( blak_list_comic["groups"].get(group_id, []))
         else:
             reply = "本群黑名单是空的喵~"
     else:
         user_id = str(msg.user_id)
-        if black_list_comic["global"] or blak_list_comic["users"].get(user_id, []):
+        if blak_list_comic["global"] or blak_list_comic["users"].get(user_id, []):
             reply = "你的黑名单中的漫画ID:\n全局：" + "\n".join(blak_list_comic["global"]) + "\n个人：" + "\n".join(blak_list_comic["users"].get(user_id, []))
         else:
             reply = "你的黑名单是空的喵~"
