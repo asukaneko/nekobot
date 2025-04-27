@@ -23,7 +23,7 @@ group_favorites: Dict[str, Dict[str, List[str]]] = {}  # 群组收藏夹 {group_
 
 admin = [str(admin_id)]  # 确保admin_id是字符串形式
 
-blak_list_comic = {"global": [], "groups": {}, "users": {}} # str,黑名单
+black_list_comic = {"global": [], "groups": {}, "users": {}} # str,黑名单
 
 # ------------------
 # region 通用函数
@@ -142,7 +142,7 @@ def write_blak_list():
     os.makedirs(cache_dir, exist_ok=True)
     try:
         with open(os.path.join(cache_dir,"blak_list.json"), "w", encoding="utf-8") as f:
-            json.dump(blak_list_comic, f, ensure_ascii=False, indent=2)
+            json.dump(black_list_comic, f, ensure_ascii=False, indent=2)
     except Exception as e:
         print(f"写入黑名单文件失败: {e}")
 
@@ -154,7 +154,7 @@ def load_blak_list():
     os.makedirs(cache_dir, exist_ok=True)
     try:
         with open(os.path.join(cache_dir,"blak_list.json"), "r", encoding="utf-8") as f:
-            blak_list_comic.update(json.load(f))
+            black_list_comic.update(json.load(f))
 
     except FileNotFoundError:
         write_blak_list()
@@ -374,7 +374,7 @@ async def handle_jmcomic(msg, is_group=True):
         comic_id = match.group(1)
 
         # 检查是否在全局、群组或用户黑名单中
-        if comic_id in blak_list_comic["global"]:
+        if comic_id in black_list_comic["global"]:
             error_msg = "该漫画已被加入黑名单喵~"
             if is_group:
                 await msg.reply(text=error_msg)
@@ -383,13 +383,13 @@ async def handle_jmcomic(msg, is_group=True):
             return
         if is_group:
             group_id = str(msg.group_id)
-            if group_id in blak_list_comic["groups"] and comic_id in blak_list_comic["groups"][group_id]:
+            if group_id in black_list_comic["groups"] and comic_id in black_list_comic["groups"][group_id]:
                 error_msg = "该漫画已被加入本群黑名单喵~"
                 await msg.reply(text=error_msg)
                 return
         else:
             user_id = str(msg.user_id)
-            if user_id in blak_list_comic["users"] and comic_id in blak_list_comic["users"][user_id]:
+            if user_id in black_list_comic["users"] and comic_id in black_list_comic["users"][user_id]:
                 error_msg = "该漫画已被加入你的黑名单喵~"
                 await bot.api.post_private_msg(msg.user_id, text=error_msg)
                 return
@@ -541,22 +541,22 @@ async def handle_add_black_list(msg, is_group=True):
     else:
         if is_group:
             group_id = str(msg.group_id)
-            if group_id not in blak_list_comic["groups"]:
-                blak_list_comic["groups"][group_id] = []
-            if comic_id in blak_list_comic["groups"][group_id]:
+            if group_id not in black_list_comic["groups"]:
+                black_list_comic["groups"][group_id] = []
+            if comic_id in black_list_comic["groups"][group_id]:
                 reply = f"漫画 {comic_id} 已在本群黑名单中喵~"
             else:
-                blak_list_comic["groups"][group_id].append(comic_id)
+                black_list_comic["groups"][group_id].append(comic_id)
                 write_blak_list()
                 reply = f"已在本群黑名单中添加漫画 {comic_id} 喵~"
         else:
             user_id = str(msg.user_id)
-            if user_id not in blak_list_comic["users"]:
-                blak_list_comic["users"][user_id] = []
-            if comic_id in blak_list_comic["users"][user_id]:
+            if user_id not in black_list_comic["users"]:
+                black_list_comic["users"][user_id] = []
+            if comic_id in black_list_comic["users"][user_id]:
                 reply = f"漫画 {comic_id} 已在你的黑名单中喵~"
             else:
-                blak_list_comic["users"][user_id].append(comic_id)
+                black_list_comic["users"][user_id].append(comic_id)
                 write_blak_list()
                 reply = f"已在你的黑名单中添加漫画 {comic_id} 喵~"
     if is_group:
@@ -584,10 +584,10 @@ async def handle_add_global_black_list(msg, is_group=True):
     if not comic_id.isdigit():
         reply = "请输入有效的漫画ID喵~"
     else:
-        if comic_id in blak_list_comic["global"]:
+        if comic_id in black_list_comic["global"]:
             reply = f"漫画 {comic_id} 已在全局黑名单中喵~"
         else:
-            blak_list_comic["global"].append(comic_id)
+            black_list_comic["global"].append(comic_id)
             write_blak_list()
             reply = f"已在全局黑名单中添加漫画 {comic_id} 喵~"
     if is_group:
@@ -615,8 +615,8 @@ async def handle_del_global_black_list(msg, is_group=True):
     if not comic_id.isdigit():
         reply = "请输入有效的漫画ID喵~"
     else:
-        if comic_id in blak_list_comic["global"]:
-            blak_list_comic["global"].remove(comic_id)
+        if comic_id in black_list_comic["global"]:
+            black_list_comic["global"].remove(comic_id)
             write_blak_list()
             reply = f"已从全局黑名单中删除漫画 {comic_id} 喵~"
         else:
@@ -639,16 +639,16 @@ async def handle_del_black_list(msg, is_group=True):
     else:
         if is_group:
             group_id = str(msg.group_id)
-            if group_id in blak_list_comic["groups"] and comic_id in blak_list_comic["groups"][group_id]:
-                blak_list_comic["groups"][group_id].remove(comic_id)
+            if group_id in black_list_comic["groups"] and comic_id in black_list_comic["groups"][group_id]:
+                black_list_comic["groups"][group_id].remove(comic_id)
                 write_blak_list()
                 reply = f"已从本群黑名单中删除漫画 {comic_id} 喵~"
             else:
                 reply = f"漫画 {comic_id} 不在本群黑名单中喵~"
         else:
             user_id = str(msg.user_id)
-            if user_id in blak_list_comic["users"] and comic_id in blak_list_comic["users"][user_id]:
-                blak_list_comic["users"][user_id].remove(comic_id)
+            if user_id in black_list_comic["users"] and comic_id in black_list_comic["users"][user_id]:
+                black_list_comic["users"][user_id].remove(comic_id)
                 await write_blak_list()
                 reply = f"已从你的黑名单中删除漫画 {comic_id} 喵~"
             else:
@@ -662,14 +662,14 @@ async def handle_del_black_list(msg, is_group=True):
 async def handle_list_black_list(msg, is_group=True):
     if is_group:
         group_id = str(msg.group_id)
-        if blak_list_comic["global"] or blak_list_comic["groups"].get(group_id, []):
-            reply = "本群的黑名单中的漫画ID:\n全局：" + "\n".join( blak_list_comic["global"]) + "\n本群：" + "\n".join( blak_list_comic["groups"].get(group_id, []))
+        if black_list_comic["global"] or black_list_comic["groups"].get(group_id, []):
+            reply = "本群的黑名单中的漫画ID:\n全局：" + "\n".join( black_list_comic["global"]) + "\n本群：" + "\n".join( black_list_comic["groups"].get(group_id, []))
         else:
             reply = "本群黑名单是空的喵~"
     else:
         user_id = str(msg.user_id)
-        if blak_list_comic["global"] or blak_list_comic["users"].get(user_id, []):
-            reply = "你的黑名单中的漫画ID:\n全局：" + "\n".join(blak_list_comic["global"]) + "\n个人：" + "\n".join(blak_list_comic["users"].get(user_id, []))
+        if black_list_comic["global"] or black_list_comic["users"].get(user_id, []):
+            reply = "你的黑名单中的漫画ID:\n全局：" + "\n".join(black_list_comic["global"]) + "\n个人：" + "\n".join(black_list_comic["users"].get(user_id, []))
         else:
             reply = "你的黑名单是空的喵~"
     if is_group:
