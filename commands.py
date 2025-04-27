@@ -567,7 +567,7 @@ async def handle_add_black_list(msg, is_group=True):
 @register_command("/add_global_black_list","/agbl",help_text = "/add_global_black_list 或 /agbl <漫画ID> -> 添加全局黑名单(admin)")
 async def handle_add_global_black_list(msg, is_group=True):
 
-    if msg.user_id not in admin:
+    if str(msg.user_id) not in admin:
         reply = "你没有权限喵~"
         if is_group:
             await msg.reply(text=reply)
@@ -598,7 +598,7 @@ async def handle_add_global_black_list(msg, is_group=True):
 @register_command("/del_global_black_list","/dgbl",help_text = "/del_global_black_list 或 /dgbl <漫画ID> -> 删除全局黑名单(admin)")
 async def handle_del_global_black_list(msg, is_group=True):
 
-    if msg.user_id not in admin:
+    if str(msg.user_id) not in admin:
         reply = "你没有权限喵~"
         if is_group:
             await msg.reply(text=reply)
