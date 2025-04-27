@@ -564,6 +564,50 @@ async def handle_add_black_list(msg, is_group=True):
     else:
         await bot.api.post_private_msg(msg.user_id, text=reply)
 
+@register_command("/add_global_black_list","/agbl",help_text = "/add_global_black_list 或 /agbl <漫画ID> -> 添加全局黑名单")
+async def handle_add_global_black_list(msg, is_group=True):
+    comic_id = ""
+    if msg.raw_message.startswith("/add_global_black_list"):
+        comic_id = msg.raw_message[len("/add_global_black_list"):].strip()
+    elif msg.raw_message.startswith("/agbl"):
+        comic_id = msg.raw_message[len("/agbl"):].strip()
+
+    if not comic_id.isdigit():
+        reply = "请输入有效的漫画ID喵~"
+    else:
+        if comic_id in blak_list_comic["global"]:
+            reply = f"漫画 {comic_id} 已在全局黑名单中喵~"
+        else:
+            blak_list_comic["global"].append(comic_id)
+            await write_blak_list()
+            reply = f"已在全局黑名单中添加漫画 {comic_id} 喵~"
+    if is_group:
+        await msg.reply(text=reply)
+    else:
+        await bot.api.post_private_msg(msg.user_id, text=reply)
+
+@register_command("/del_global_black_list","/dgbl",help_text = "/del_global_black_list 或 /dgbl <漫画ID> -> 删除全局黑名单")
+async def handle_del_global_black_list(msg, is_group=True):
+    comic_id = ""
+    if msg.raw_message.startswith("/del_global_black_list"):
+        comic_id = msg.raw_message[len("/del_global_black_list"):].strip()
+    elif msg.raw_message.startswith("/dgbl"):
+        comic_id = msg.raw_message[len("/dgbl"):].strip()
+
+    if not comic_id.isdigit():
+        reply = "请输入有效的漫画ID喵~"
+    else:
+        if comic_id in blak_list_comic["global"]:
+            blak_list_comic["global"].remove(comic_id)
+            await write_blak_list()
+            reply = f"已从全局黑名单中删除漫画 {comic_id} 喵~"
+        else:
+            reply = f"漫画 {comic_id} 不在全局黑名单中喵~"
+    if is_group:
+        await msg.reply(text=reply)
+    else:
+        await bot.api.post_private_msg(msg.user_id, text=reply)
+
 @register_command("/del_black_list","/dbl",help_text = "/del_black_list 或 /dbl <漫画ID> -> 删除黑名单")
 async def handle_del_black_list(msg, is_group=True):
     comic_id = ""
@@ -691,7 +735,7 @@ async def handle_get_prompt(msg, is_group=True):
             await bot.api.post_private_msg(msg.user_id, text="没有找到提示词喵~")
 
 
-@register_command("/agree","/agree -> 同意好友请求") # 同意好友请求
+@register_command("/agree",help_text="/agree -> 同意好友请求") # 同意好友请求
 async def handle_agree(msg, is_group=True):
     if not is_group:
         await bot.api.set_friend_add_request(flag=msg.user_id, approve=True,remark=msg.user_id)
@@ -701,7 +745,7 @@ async def handle_agree(msg, is_group=True):
         await msg.reply(text="已同意好友请求喵~")
 
 
-@register_command("/restart","/restart -> 重启机器人")
+@register_command("/restart",help_text="/restart -> 重启机器人")
 async def handle_restart(msg, is_group=True):
     reply_text = "正在重启喵~"
     if is_group:
@@ -1105,7 +1149,7 @@ async def handle_del_group_admin(msg, is_group=True):
 async def handle_help(msg, is_group=True):
     # 定义命令分类
     command_categories = {
-        "1": {"name": "漫画相关", "commands": ["/jm", "/jmrank", "/search","/tag"]},
+        "1": {"name": "漫画相关", "commands": ["/jm", "/jmrank", "/search","/tag","/add_black_list","/del_black_list","/list_black_list","/add_global_black_list","/del_global_black_list"]},
         "2": {"name": "收藏管理", "commands": ["/get_fav", "/add_fav", "/del_fav","/list_fav"]},
         "3": {"name": "聊天设置", "commands": ["/set_prompt", "/del_prompt", "/get_prompt","/del_message"]},
         "4": {"name": "娱乐功能", "commands": ["/random_image", "/random_emoticons", "/st","/random_video","/random_dice","/random_rps","/music"]},
