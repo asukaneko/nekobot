@@ -24,6 +24,8 @@
         - 取消群管理员：`/del_group_admin <qq号>`
         - 将漫画添加到黑名单: `/add_black_list <漫画id>`
         - 将漫画从黑名单移除: `/del_black_list <漫画id>`
+        - 将漫画添加到全局黑名单: `/add_global_black_list <漫画id>`
+        - 将漫画从全局黑名单移除: `/del_global_black_list <漫画id>`
         - 查看当前群聊或用户的黑名单: `/list_black_list`
 
 
