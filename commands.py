@@ -218,6 +218,10 @@ async def handle_jmrank(msg, is_group=True):
     os.makedirs(cache_dir,exist_ok = True)
 
     name = time.time()
+
+    with open(cache_dir + f"{select}_{name}.txt", "w", encoding="utf-8") as f:
+        f.write(f"排行榜：{select}\n")
+
     tot = 0
     for page in cl.categories_filter_gen(page=1,  # 起始页码
                                          # 下面是分类参数
