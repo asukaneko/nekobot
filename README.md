@@ -28,7 +28,7 @@
         - 将漫画从全局黑名单移除: `/del_global_black_list <漫画id>`
         - 查看当前群聊或用户的黑名单: `/list_black_list`
 
-+ 详细查看[CHANGLOG.md](https://github.com/asukaneko/NapCat-jmcomic_download-bot/blob/master/CHANGLOG.md)
++ 详细查看[CHANGLOG.md](https://github.com/asukaneko/NapCat-jmcomic_download-bot/blob/master/CHANGELOG.md)
 ---
 
 ### 📌Before You Start / 开始之前![](https://img.shields.io/badge/GitHub-Before_start-blue?logo=github)  
