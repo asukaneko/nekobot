@@ -28,35 +28,7 @@
         - 将漫画从全局黑名单移除: `/del_global_black_list <漫画id>`
         - 查看当前群聊或用户的黑名单: `/list_black_list`
 
-
-+ [2025/4/24 - 2025/4/25] v1.2.2 更新
-    - 新增命令：
-        - 搜索音乐并发送：`/music <歌曲名/id>`
-        - 暂只支持网易云音乐
-    - 聊天可支持回复过往的内容
-    - 优化回复逻辑，对图片有更好的处理
-
-+ [2025/4/22] v1.2.1 优化
-    - 优化/help命令，采用分级菜单展示，同时规范了help_text格式
-    - 优化命令匹配方式，更改为正则匹配，更加精准
-
-+ [2025/4/21] v1.2.0 新增权限功能和定时提醒功能
-    - 新增命令：
-        - 设置权限：`/sa <qq号>`
-        - 权限列表：`/ga`
-        - 取消权限：`/da <qq号>`
-        - 定时提醒：`/remind <时间(hour)> <消息>`
-        - 日期定时体现：`/premind YYYY-MM-DD HH:MM 内容`
-    - 将原有部分命令调整为仅管理员可用
-    - 超级管理员(root)为config.ini中root的值
-
-
-+ [2025/4/19] v1.1.0 原有基础上增加了收藏夹功能
-    - 新增命令：
-        - 收藏：`/add_fav`
-        - 收藏夹：`/list_fav`
-        - 取消收藏：`/del_fav`
-
++ 详细查看[CHANGLOG.md](https://github.com/asukaneko/NapCat-jmcomic_download-bot/blob/master/CHANGLOG.md)
 ---
 
 ### 📌Before You Start / 开始之前![](https://img.shields.io/badge/GitHub-Before_start-blue?logo=github)  
