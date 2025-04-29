@@ -25,6 +25,8 @@ admin = [str(admin_id)]  # 确保admin_id是字符串形式
 
 black_list_comic = {"global": [], "groups": {}, "users": {}} # str,黑名单
 
+running = {}  #用于定时聊天的开关
+tasks = {}  # 用于存储定时任务
 # ------------------
 # region 通用函数
 # ------------------
@@ -121,18 +123,37 @@ async def schedule_task_by_date(target_time: datetime, task_func, *args, **kwarg
     await asyncio.sleep(delay_seconds)
     await task_func(*args, **kwargs)
 
-async def chatter(msg):
+async def chatter(id):
     """
     定时聊天函数。
     :param msg: 消息对象。
     """
-    content = chat(content="现在请你根据上下文，主动和用户聊天",user_id=msg.user_id)
+    content = chat(content="现在请你根据上下文，主动和用户聊天",user_id=id)
     if if_tts:
         rtf = tts(content)
-        await bot.api.post_private_msg(msg.user_id, rtf=rtf)
-        await bot.api.post_private_msg(msg.user_id, text=content)
+        await bot.api.post_private_msg(id, rtf=rtf)
+        await bot.api.post_private_msg(id, text=content)
     else:
-        await bot.api.post_private_msg(msg.user_id, text=content)
+        await bot.api.post_private_msg(id, text=content)
+
+async def chat_loop(id:str):
+    """
+        单人定时聊天任务
+        :param id: QQ号(msg.user_id)
+        :return: None
+    """
+    global running
+    running[id]["state"] = True
+    while running[id]["active"]:
+        time = datetime.now()
+        if time.hour < 8 or time.hour > 0:
+            time.sleep(60 * 10)  # 转换为秒
+            continue
+        await asyncio.sleep(60 * 60 * running[id]["interval"])  # 转换为秒
+        try:
+            await chatter(id)   
+        except Exception as e:
+            print(f"Error in chat_loop for {id}: {e}")
 
 def write_blak_list():
     """
@@ -158,11 +179,43 @@ def load_blak_list():
 
     except FileNotFoundError:
         write_blak_list()
+
+def write_running():
+    """
+    写入定时聊天开关
+    """
+    cache_dir = load_address()[:-4] + "running/"
+    os.makedirs(cache_dir, exist_ok=True)
+    try:
+        with open(os.path.join(cache_dir,"running.json"), "w", encoding="utf-8") as f:
+            json.dump(running, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        print(f"写入定时聊天开关文件失败: {e}")
+
+def load_running():
+    """
+    加载定时聊天开关
+    """
+    cache_dir = load_address()[:-4] + "running/"
+    os.makedirs(cache_dir, exist_ok=True)
+    try:
+        with open(os.path.join(cache_dir,"running.json"), "r", encoding="utf-8") as f:
+            running.update(json.load(f))
+    except FileNotFoundError:
+        write_running()
+
+def update_running(id):
+    if id in tasks:
+        tasks[id].cancel()  # 取消之前的任务
+        tasks[id] = asyncio.create_task(chat_loop(id))  # 创建新的任务
+        
+
 #---------------------------------------------------------------------------
 
 load_favorites()
 load_admin()
 load_blak_list()
+load_running()
 
 #----------------------
 #     region 命令
@@ -898,6 +951,17 @@ async def handle_music(msg, is_group=True):
     else:
         await bot.api.post_private_msg(msg.user_id, rtf=messagechain)
 
+@register_command("/random_music","/rm",help_text = "/random_music 或者 /rm -> 发送随机音乐")
+async def handle_random_music(msg, is_group=True):
+    id = requests.get("https://api.mtbbs.top/Music/song/?id=2645495145").json()["data"]["id"]
+    messagechain = MessageChain(
+        Music(type="163",id=id)
+    )
+    if is_group:
+        await bot.api.post_group_msg(msg.group_id, rtf=messagechain)
+    else:
+        await bot.api.post_private_msg(msg.user_id, rtf=messagechain)
+
 @register_command("/random_dice","/rd",help_text = "/random_dice 或者 /rd -> 发送随机骰子")
 async def handle_random_dice(msg, is_group=True):
     if is_group:
@@ -1166,6 +1230,55 @@ async def handle_del_group_admin(msg, is_group=True):
     await bot.api.set_group_admin(msg.group_id, msgs,False)
     await msg.reply(text="取消成功喵~")
 
+@register_command("/主动聊天",help_text = "/主动聊天 <间隔时间(小时)> <是否开启(1/0)> -> 开启主动聊天")
+async def handle_active_chat(msg, is_group=True):
+    if is_group:
+        await msg.reply(text="只能私聊设置喵~")
+        return
+
+    params = msg.raw_message[len("/主动聊天"):].split(" ")
+    if len(params) < 2:
+        await bot.api.post_private_msg(msg.user_id, text="格式错误喵~ 请输入 /主动聊天 间隔时间(小时) 是否开启(1/0)")
+        return
+
+    interval = float(params[0])
+    active = bool(int(params[1]))
+    id = str(msg.user_id)
+
+    if active:
+        if id in running:
+            running[id]["interval"] = interval
+            running[id]["active"] = True
+        else:
+            running[id] = {"interval": interval, "active": True,"state":False}
+    else:
+        if id in running:
+            running[id]["interval"] = interval
+            running[id]["active"] = False
+        else:
+            running[id] = {"interval": interval, "active": False,"state":False}
+    
+    ori = await bot.api.get_recent_contact(100)
+    count = len(ori["data"])
+   
+    for i in range(count):
+        id = str(ori["data"][i]["lastestMsg"]["user_id"])
+        if id != msg.user_id:
+            continue
+        if active:
+            if running[id]["state"]:
+                if id in tasks:
+                    del tasks[id]
+            chat = asyncio.create_task(chat_loop(id))
+            tasks[id]=chat
+        else:
+            if id in tasks:
+                tasks[id].cancel()
+                del tasks[id]
+            running[id]["state"] = False
+
+    bot.api.post_private_msg(msg.user_id, text="设置成功喵~，现在"+str(interval)+"小时后会主动聊天喵~")
+ 
 #将help命令放在最后
 @register_command("/help","/h",help_text = "/help 或者 /h -> 查看帮助")
 async def handle_help(msg, is_group=True):
@@ -1174,7 +1287,7 @@ async def handle_help(msg, is_group=True):
         "1": {"name": "漫画相关", "commands": ["/jm", "/jmrank", "/search","/tag","/add_black_list","/del_black_list","/list_black_list","/add_global_black_list","/del_global_black_list"]},
         "2": {"name": "收藏管理", "commands": ["/get_fav", "/add_fav", "/del_fav","/list_fav"]},
         "3": {"name": "聊天设置", "commands": ["/set_prompt", "/del_prompt", "/get_prompt","/del_message"]},
-        "4": {"name": "娱乐功能", "commands": ["/random_image", "/random_emoticons", "/st","/random_video","/random_dice","/random_rps","/music"]},
+        "4": {"name": "娱乐功能", "commands": ["/random_image", "/random_emoticons", "/st","/random_video","/random_dice","/random_rps","/music","/random_music"]},
         "5": {"name": "系统处理", "commands": ["/restart", "/tts", "/agree","/remind","/premind","/set_admin","/del_admin","/get_admin","/set_ids","/set_online_status","/get_friends","/set_qq_avatar","/send_like"]},
         "6": {"name": "群聊管理", "commands": ["/set_group_admin", "/del_group_admin"]}
     }
