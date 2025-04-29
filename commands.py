@@ -219,9 +219,6 @@ async def handle_jmrank(msg, is_group=True):
 
     name = time.time()
 
-    with open(cache_dir + f"{select}_{name}.txt", "w", encoding="utf-8") as f:
-        f.write(f"排行榜：{select}\n")
-
     tot = 0
     for page in cl.categories_filter_gen(page=1,  # 起始页码
                                          # 下面是分类参数
@@ -233,6 +230,13 @@ async def handle_jmrank(msg, is_group=True):
             tot += 1
             with open(cache_dir + f"{select}_{name}.txt", "a", encoding="utf-8") as f:
                 f.write(f"{tot}: {aid}  {atitle}\n\n")
+
+    if not os.path.exists(cache_dir + f"{select}_{name}.txt"):
+        if is_group:
+            await msg.reply(text="获取排行失败喵~")
+        else:
+            await bot.api.post_private_msg(msg.user_id, text="获取排行失败喵~")
+        return
 
     if is_group:
         await bot.api.post_group_file(msg.group_id, file=cache_dir + f"{select}_{name}.txt")
@@ -342,8 +346,6 @@ async def handle_get_fav(msg, is_group=True):
     cache_dir = load_address()[:-4]
     cache_dir += "fav/"
     os.makedirs(cache_dir, exist_ok=True)
-
-    print(username,password)
 
     name = username + str(time.time()).replace(".", "")
 
