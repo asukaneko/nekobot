@@ -1338,7 +1338,7 @@ async def handle_help(msg, is_group=True):
     
     help_text += "\n输入 /help 加分类编号查看详细命令，例如: /help 1"
 
-    help_text += "\n 一共有"+str(len(command_handlers))+"个命令"
+    help_text += "\n\n 一共有"+str(len(command_handlers))+"个命令"
     
     if is_group:
         await msg.reply(text=help_text)
