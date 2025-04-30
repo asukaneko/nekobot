@@ -93,6 +93,8 @@ async def on_private_message(msg: PrivateMessage):
     if running[str(msg.user_id)]["status"]:
         running[str(msg.user_id)]["last_time"] = time.time()
 
+    write_running()
+
     try:
         if msg.message[0].get("type") == "image": #处理图片
             url = msg.message[0].get("data").get("url")
