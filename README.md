@@ -16,17 +16,9 @@
 [![MIT License][license-shield]][license-url]
 
 ---
-### ✨Updates 更新![](https://img.shields.io/badge/LatestVersion-1.2.3-blue?&logo=react)
-+ [2025/4/27] v1.2.3 新增命令   
-    - 新增群聊管理分支
-    - 新增命令：
-        - 设置群管理员：`/set_group_admin <qq号>`
-        - 取消群管理员：`/del_group_admin <qq号>`
-        - 将漫画添加到黑名单: `/add_black_list <漫画id>`
-        - 将漫画从黑名单移除: `/del_black_list <漫画id>`
-        - 将漫画添加到全局黑名单: `/add_global_black_list <漫画id>`
-        - 将漫画从全局黑名单移除: `/del_global_black_list <漫画id>`
-        - 查看当前群聊或用户的黑名单: `/list_black_list`
+### ✨Updates 更新![](https://img.shields.io/badge/LatestVersion-1.3.0-blue?&logo=react)
+- 新增命令：
+  - 主动聊天：`/主动聊天 <间隔时间(小时)> <是否开启(1/0)>`
 
 + 详细查看[CHANGLOG.md](https://github.com/asukaneko/NapCat-jmcomic_download-bot/blob/master/CHANGELOG.md)
 ---
