@@ -90,7 +90,7 @@ async def on_private_message(msg: PrivateMessage):
             await handler(msg, is_group=False)
             return
     
-    if running[str(msg.user_id)]["status"]:
+    if running[str(msg.user_id)]["state"]:
         running[str(msg.user_id)]["last_time"] = time.time()
 
     write_running()
