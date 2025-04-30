@@ -144,6 +144,7 @@ async def chat_loop(id:str):
     """
     global running
     running[id]["state"] = True
+    write_running()
     while running[id]["active"]:
         date_time = datetime.now()
         time = time.time()
@@ -1244,8 +1245,8 @@ async def handle_active_chat(msg, is_group=True):
         await bot.api.post_private_msg(msg.user_id, text="格式错误喵~ 请输入 /主动聊天 间隔时间(小时) 是否开启(1/0)")
         return
 
-    interval = float(params[0])
-    active = bool(int(params[1]))
+    interval = float(params[1])
+    active = bool(int(params[2]))
     id = str(msg.user_id)
 
     if active:
@@ -1260,21 +1261,27 @@ async def handle_active_chat(msg, is_group=True):
             running[id]["active"] = False
         else:
             running[id] = {"interval": interval, "active": False,"state":False}
-    
+
     ori = await bot.api.get_recent_contact(100)
     count = len(ori["data"])
    
     for i in range(count):
-        id = str(ori["data"][i]["lastestMsg"]["user_id"])
-        if id != msg.user_id:
+        try:
+            id = str(ori["data"][i]['lastestMsg']["user_id"])
+        except KeyError:
             continue
-        time = ori["data"][i]["lastestMsg"]["time"]
+
+        if id != str(msg.user_id):
+            continue
+        
+        time = ori["data"][i]['lastestMsg']["time"]
         running[id]["last_time"] = time
         if active:
             if running[id]["state"]:
                 if id in tasks:
                     tasks[id].cancel()
                     del tasks[id]
+                    await bot.api.post_private_msg(msg.user_id, text="主动聊天已重置")
             chat = asyncio.create_task(chat_loop(id))
             tasks[id]=chat
         else:
@@ -1283,7 +1290,11 @@ async def handle_active_chat(msg, is_group=True):
                 del tasks[id]
             running[id]["state"] = False
 
-    bot.api.post_private_msg(msg.user_id, text="设置成功喵~，现在"+str(interval)+"小时后会主动聊天喵~")
+    write_running()
+    if active:
+        await bot.api.post_private_msg(msg.user_id, text="设置成功喵~，现在"+str(interval)+"小时后会主动聊天喵~")
+    else:
+        await bot.api.post_private_msg(msg.user_id, text="设置成功喵~，已关闭主动聊天喵~")
  
 #将help命令放在最后
 @register_command("/help","/h",help_text = "/help 或者 /h -> 查看帮助")
@@ -1292,7 +1303,7 @@ async def handle_help(msg, is_group=True):
     command_categories = {
         "1": {"name": "漫画相关", "commands": ["/jm", "/jmrank", "/search","/tag","/add_black_list","/del_black_list","/list_black_list","/add_global_black_list","/del_global_black_list"]},
         "2": {"name": "收藏管理", "commands": ["/get_fav", "/add_fav", "/del_fav","/list_fav"]},
-        "3": {"name": "聊天设置", "commands": ["/set_prompt", "/del_prompt", "/get_prompt","/del_message"]},
+        "3": {"name": "聊天设置", "commands": ["/set_prompt", "/del_prompt", "/get_prompt","/del_message","/主动聊天"]},
         "4": {"name": "娱乐功能", "commands": ["/random_image", "/random_emoticons", "/st","/random_video","/random_dice","/random_rps","/music","/random_music"]},
         "5": {"name": "系统处理", "commands": ["/restart", "/tts", "/agree","/remind","/premind","/set_admin","/del_admin","/get_admin","/set_ids","/set_online_status","/get_friends","/set_qq_avatar","/send_like"]},
         "6": {"name": "群聊管理", "commands": ["/set_group_admin", "/del_group_admin"]}
