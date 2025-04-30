@@ -132,7 +132,7 @@ async def chatter(id):
     if if_tts:
         rtf = tts(content)
         await bot.api.post_private_msg(id, rtf=rtf)
-        await bot.api.post_private_msg(id, text=content)
+        await bot.api.post_private_msg(id, text=content)    
     else:
         await bot.api.post_private_msg(id, text=content)
 
@@ -145,15 +145,18 @@ async def chat_loop(id:str):
     global running
     running[id]["state"] = True
     while running[id]["active"]:
-        time = datetime.now()
-        if time.hour < 8 or time.hour > 0:
+        date_time = datetime.now()
+        time = time.time()
+        last_time = running[id]["last_time"]
+        if date_time.hour < 8 or date_time.hour > 0:
             time.sleep(60 * 10)  # 转换为秒
             continue
-        await asyncio.sleep(60 * 60 * running[id]["interval"])  # 转换为秒
-        try:
-            await chatter(id)   
-        except Exception as e:
-            print(f"Error in chat_loop for {id}: {e}")
+        if time - last_time < 60 * 60 * running[id]["interval"]:
+            time.sleep(60 * 10)  # 转换为秒
+            continue
+        #await asyncio.sleep(60 * 60 * running[id]["interval"])  # 转换为秒
+        await chatter(id)   
+        await asyncio.sleep(60 * 10)  # 转换为秒
 
 def write_blak_list():
     """
@@ -1265,9 +1268,12 @@ async def handle_active_chat(msg, is_group=True):
         id = str(ori["data"][i]["lastestMsg"]["user_id"])
         if id != msg.user_id:
             continue
+        time = ori["data"][i]["lastestMsg"]["time"]
+        running[id]["last_time"] = time
         if active:
             if running[id]["state"]:
                 if id in tasks:
+                    tasks[id].cancel()
                     del tasks[id]
             chat = asyncio.create_task(chat_loop(id))
             tasks[id]=chat
