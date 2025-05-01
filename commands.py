@@ -457,6 +457,13 @@ async def handle_jmcomic(msg, is_group=True):
                 await bot.api.post_private_msg(msg.user_id, text=error_msg)
                 return
 
+        if os.path.exists(load_address() + f"{comic_id}.pdf"):
+            if is_group:
+                await bot.api.post_group_file(msg.group_id, file=load_address() + f"{comic_id}.pdf")
+            else:
+                await bot.api.upload_private_file(msg.user_id, load_address() + f"{comic_id}.pdf", f"{comic_id}.pdf")
+            return
+
         # 立即回复用户，不等待下载完成
         reply_text = f"已开始下载漫画ID：{comic_id}，下载完成后会自动通知喵~"
         if is_group:
@@ -504,6 +511,12 @@ async def download_and_send_comic(comic_id, msg, is_group):
             await msg.reply(text=error_msg)
         else:
             await bot.api.post_private_msg(msg.user_id, text=error_msg)
+        if os.path.exists(file_path):
+            if is_group:
+                await bot.api.post_group_file(msg.group_id, file=file_path)
+            else:
+                await bot.api.upload_private_file(msg.user_id, file_path, f"{comic_id}.pdf")
+        
 
 # ====下面的收藏夹不是官方的收藏夹，是本地储存的====
 @register_command("/add_fav", help_text="/add_fav <漫画ID> -> 添加收藏")
