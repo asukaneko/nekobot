@@ -16,9 +16,8 @@
 [![MIT License][license-shield]][license-url]
 
 ---
-### ✨Updates 更新![](https://img.shields.io/badge/LatestVersion-1.3.0-blue?&logo=react)
-- 新增命令：
-  - 主动聊天：`/主动聊天 <间隔时间(小时)> <是否开启(1/0)>`
+### ✨Updates 更新![](https://img.shields.io/badge/LatestVersion-1.3.1-blue?&logo=react)
+- 优化/jm命令的输出，保证在部分图片未完成下载时也能上传文件
 
 + 详细查看[CHANGLOG.md](https://github.com/asukaneko/NapCat-jmcomic_download-bot/blob/master/CHANGELOG.md)
 ---
