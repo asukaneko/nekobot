@@ -459,8 +459,10 @@ async def handle_jmcomic(msg, is_group=True):
 
         if os.path.exists(load_address() + f"{comic_id}.pdf"):
             if is_group:
+                await msg.reply(text="该漫画已存在喵~,正在发送喵~")
                 await bot.api.post_group_file(msg.group_id, file=load_address() + f"{comic_id}.pdf")
             else:
+                await bot.api.post_private_msg(msg.user_id,text="该漫画已存在喵~,正在发送喵~")
                 await bot.api.upload_private_file(msg.user_id, load_address() + f"{comic_id}.pdf", f"{comic_id}.pdf")
             return
 
@@ -513,8 +515,10 @@ async def download_and_send_comic(comic_id, msg, is_group):
             await bot.api.post_private_msg(msg.user_id, text=error_msg)
         if os.path.exists(file_path):
             if is_group:
+                await msg.reply(text="部分下载失败了喵~，正在发送剩余的文件喵~")
                 await bot.api.post_group_file(msg.group_id, file=file_path)
             else:
+                await bot.api.post_private_msg(msg.user_id,text="部分下载失败了喵~，正在发送剩余的文件喵~")
                 await bot.api.upload_private_file(msg.user_id, file_path, f"{comic_id}.pdf")
         
 
