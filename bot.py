@@ -73,8 +73,6 @@ async def on_group_message(msg: GroupMessage):
         else:
             await msg.reply(text=content)
 
-# running = True #用于定时聊天的开关
-
 @bot.private_event()
 async def on_private_message(msg: PrivateMessage):
     global if_tts
