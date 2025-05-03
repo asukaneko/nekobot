@@ -419,7 +419,6 @@ async def handle_get_fav(msg, is_group=True):
 
     # 遍历全部收藏的所有页
     for page in cl.favorite_folder_gen():  # 如果你只想获取特定收藏夹，需要添加folder_id参数
-        # 遍历每页结果
         for aid, atitle in page.iter_id_title():
             with open(cache_dir + f"{name}.txt", "a", encoding="utf-8") as f:
                 f.write(f"{aid}  {atitle}\n\n")
