@@ -862,8 +862,12 @@ async def async_send_file(send_method, target_id, file_type, url):
         # 异步发送文件
         await send_method(target_id, **{file_type: final_url})
     except Exception as e:
-        pass
-
+        error_msg = f"发送失败喵~: {str(e)}"
+        if is_group:
+            await msg.reply(text=error_msg)
+        else:
+            await bot.api.post_private_msg(msg.user_id, text=error_msg)
+            
 # 修改通用处理函数
 async def handle_generic_file(msg, is_group: bool, section: str, file_type: str, custom_url: str = None):
     """通用文件处理函数（修复版）"""
