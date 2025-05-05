@@ -16,14 +16,20 @@
 [![MIT License][license-shield]][license-url]
 
 ---
-### ✨Updates 更新![](https://img.shields.io/badge/LatestVersion-1.3.1-blue?&logo=react)
+### ✨Updates 更新  
+![](https://img.shields.io/badge/LatestVersion-1.3.1-blue?&logo=react)
+
 - 优化/jm命令的输出，保证在部分图片未完成下载时也能上传文件
 
 + 详细查看[CHANGLOG.md](https://github.com/asukaneko/NapCat-jmcomic_download-bot/blob/master/CHANGELOG.md)
 ---
 
-### 📌Before You Start / 开始之前![](https://img.shields.io/badge/GitHub-Before_start-blue?logo=github)  
+### 📌Before You Start / 开始之前  
 [![](https://img.shields.io/badge/python-version>=3.7-red?logo=python)]()
+>**⚠️Important Notice / 重要提示**
+> Because of the reason of Ncatbot, some commands may have some problems
+>部分命令由于Ncatbot的原因，可能会出现问题
+
 >Environment: <u>___windows___</u>  
 >环境为 <u>___windows___</u>  
 >Recommended to use a __secondary account__ for login  
@@ -83,18 +89,18 @@
     └─......
 ```
 
-### ⬇️Download Source Code / 下载源码 [![](https://img.shields.io/badge/GitHub-Download_Source_Code-blue?logo=github)](https://github.com/asukaneko/NapCat-jmcomic_download-bot.git)
+### ⬇️Download Source Code / 下载源码 
 ```
 git clone https://github.com/asukaneko/NapCat-jmcomic_download-bot.git
 ```
 
-### 📦Install Dependencies / 安装依赖![](https://img.shields.io/badge/GitHub-Install_Dependencies-blue?logo=github)
+### 📦Install Dependencies / 安装依赖  
 ```
 cd NapCat-jmcomic_download-bot
 pip install -r requirements.txt
 ```
 
-### ⚙️Configuration / 更改配置![](https://img.shields.io/badge/GitHub-Configuration-blue?logo=github)
+### ⚙️Configuration / 更改配置
 ```
 config.ini: Modify account, AI API, image saving settings
 config.ini：修改账号、大模型api、图片保存等
@@ -106,14 +112,14 @@ urls.ini: (Optional) Modify image API URLs, default URLs will be used if not mod
 urls.ini:(可不修改) 修改图片获取api地址, 如不修改则使用默认地址
 ```
 
-### ▶️Run / 运行 ![](https://img.shields.io/badge/GitHub-Run-red?logo=github)
+### ▶️Run / 运行 
 ```
 python bot.py
 ```
 The console will prompt to download napcat, then scan QR code to login  
 命令行会提示下载napcat，然后扫码登录即可
 
-### 📜Commands / 命令相关 ![](https://img.shields.io/badge/GitHub-Commands-yellow?logo=github)
+### 📜Commands / 命令相关 
 >__commands.py contains ___command registration decorators___, you can add custom commands__  
 
 >__commands.py 中 设置了 ___命令注册装饰器___ ，可以自行添加命令__  
@@ -150,7 +156,7 @@ Command List:
 ...
 ```
 
-### 💡Tips / 提示 ![](https://img.shields.io/badge/GitHub-Tips-green?logo=github)
+### 💡Tips / 提示 
 + After login, you can find webui login URL in napcat\logs folder
 + 登录以后可在napcat\logs文件夹下找到webui的登录地址
 + ___If napcat is not properly configured, open: http://localhost:6099, default token is 'napcat', then login and create a websocket server in network configuration with default port 3001___
@@ -166,7 +172,7 @@ Command List:
 + Modify prompts in neko.txt to create different characters
 + 可以更改neko.txt中的提示词，实现不同的角色
 
-### 🌟More Features / 更多 ![](https://img.shields.io/badge/GitHub-More_Features-blue?logo=github)
+### 🌟More Features / 更多 
 + Supports image recognition, get API from https://platform.moonshot.cn/console/account (15CNY free credit), add to config.ini (second API)
 + 支持图片识别，需去https://platform.moonshot.cn/console/account 获取api，免费赠送15元。填入config.ini中（第二个api）
 + Supports multi-group chat and custom user prompts
