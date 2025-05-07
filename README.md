@@ -16,7 +16,7 @@
 [![MIT License][license-shield]][license-url]
 
 ---
-### ✨Updates 更新  
+## ✨Updates 更新  
 ![](https://img.shields.io/badge/LatestVersion-1.3.2-blue?&logo=react)
 
 - 优化目录处理方式，增强结构稳定性
@@ -24,7 +24,7 @@
 + 详细查看[CHANGLOG.md](https://github.com/asukaneko/NapCat-jmcomic_download-bot/blob/master/CHANGELOG.md)
 ---
 
-### 📌Before You Start / 开始之前  
+## 📌Before You Start / 开始之前  
 [![](https://img.shields.io/badge/python-version>=3.7-red?logo=python)]()
 >**⚠️Important Notice / 重要提示**  
 > Because of the reason of Ncatbot, some commands may have some problems  
@@ -89,6 +89,7 @@
     └─......
 ```
 
+## =============== ↓ Quick Start / 快速开始 ↓ ===============
 ### ⬇️Download Source Code / 下载源码 
 ```
 git clone https://github.com/asukaneko/NapCat-jmcomic_download-bot.git
@@ -156,7 +157,7 @@ Command List:
 ...
 ```
 
-### 💡Tips / 提示 
+## 💡Tips / 提示 
 + After login, you can find webui login URL in napcat\logs folder
 + 登录以后可在napcat\logs文件夹下找到webui的登录地址
 + ___If napcat is not properly configured, open: http://localhost:6099, default token is 'napcat', then login and create a websocket server in network configuration with default port 3001___
@@ -172,7 +173,7 @@ Command List:
 + Modify prompts in neko.txt to create different characters
 + 可以更改neko.txt中的提示词，实现不同的角色
 
-### 🌟More Features / 更多 
+## 🌟More Features / 更多 
 + Supports image recognition, get API from https://platform.moonshot.cn/console/account (15CNY free credit), add to config.ini (second API)
 + 支持图片识别，需去https://platform.moonshot.cn/console/account 获取api，免费赠送15元。填入config.ini中（第二个api）
 + Supports multi-group chat and custom user prompts
