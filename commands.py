@@ -71,11 +71,11 @@ def load_address(): # 加载配置文件，返回图片保存地址
             pdf_dir = "./cache/pdf/"
         if not pdf_dir.endswith(os.path.sep):
             pdf_dir += os.path.sep
-        return pdf_dir
+        return os.path.dirname(pdf_dir)  # 返回pdf目录的父目录
 
 def load_favorites():
     """加载收藏夹数据"""
-    cache_dir = load_address()[:-4] + "list/"
+    cache_dir = os.path.join(load_address(),"list")
     os.makedirs(cache_dir, exist_ok=True)
     
     # 加载用户收藏
@@ -92,7 +92,7 @@ def load_favorites():
 
 def save_favorites():
     """保存收藏夹数据"""
-    cache_dir = load_address()[:-4] + "list/"
+    cache_dir = os.path.join(load_address(),"list/")
     os.makedirs(cache_dir, exist_ok=True)
     
     # 保存用户收藏
@@ -163,7 +163,7 @@ def write_blak_list():
     """
     写入黑名单
     """
-    cache_dir = load_address()[:-4] + "black_list/"
+    cache_dir = os.path.join(load_address(),"black_list/")
     os.makedirs(cache_dir, exist_ok=True)
     try:
         with open(os.path.join(cache_dir,"blak_list.json"), "w", encoding="utf-8") as f:
@@ -175,7 +175,7 @@ def load_blak_list():
     """
     加载黑名单
     """
-    cache_dir = load_address()[:-4] + "black_list/"
+    cache_dir = os.path.join(load_address(),"black_list/")
     os.makedirs(cache_dir, exist_ok=True)
     try:
         with open(os.path.join(cache_dir,"blak_list.json"), "r", encoding="utf-8") as f:
@@ -188,7 +188,7 @@ def write_running():
     """
     写入定时聊天开关
     """
-    cache_dir = load_address()[:-4] + "running/"
+    cache_dir = os.path.join(load_address(),"running/")
     os.makedirs(cache_dir, exist_ok=True)
     try:
         with open(os.path.join(cache_dir,"running.json"), "w", encoding="utf-8") as f:
@@ -200,7 +200,7 @@ def load_running():
     """
     加载定时聊天开关
     """
-    cache_dir = load_address()[:-4] + "running/"
+    cache_dir = os.path.join(load_address(),"running/")
     os.makedirs(cache_dir, exist_ok=True)
     try:
         with open(os.path.join(cache_dir,"running.json"), "r", encoding="utf-8") as f:
@@ -270,8 +270,8 @@ async def handle_jmrank(msg, is_group=True):
     elif select == "周排行":
         page: JmCategoryPage = cl.week_ranking(1)
 
-    cache_dir = load_address()[:-4]
-    cache_dir += "rank/"
+    cache_dir = os.path.join(load_address(),"rank")
+   
     os.makedirs(cache_dir,exist_ok = True)
 
     name = time.time()
@@ -307,8 +307,8 @@ async def handle_search(msg, is_group=True):
     else:
         await bot.api.post_private_msg(msg.user_id, text="正在搜索喵~")
 
-    cache_dir = load_address()[:-4]
-    cache_dir += "search/"
+    cache_dir = os.path.join(load_address(),"search")
+
     os.makedirs(cache_dir,exist_ok = True)
 
     client = JmOption.default().new_jm_client()
@@ -359,8 +359,8 @@ async def handle_search(msg, is_group=True):
     else:
         await bot.api.post_private_msg(msg.user_id, text="正在搜索喵~")
 
-    cache_dir = load_address()[:-4]
-    cache_dir += "search/"
+    cache_dir = os.path.join(load_address(),"search")
+
     os.makedirs(cache_dir,exist_ok = True)
 
     content = msg.raw_message[len("/tag"):].strip()
@@ -400,8 +400,8 @@ async def handle_get_fav(msg, is_group=True):
     else:
         await bot.api.post_private_msg(msg.user_id, text="正在获取收藏夹喵~")
 
-    cache_dir = load_address()[:-4]
-    cache_dir += "fav/"
+    cache_dir = os.path.join(load_address(),"fav")
+
     os.makedirs(cache_dir, exist_ok=True)
 
     name = username + str(time.time()).replace(".", "")
@@ -456,7 +456,7 @@ async def handle_jmcomic(msg, is_group=True):
                 await bot.api.post_private_msg(msg.user_id, text=error_msg)
                 return
 
-        if os.path.exists(load_address() + f"{comic_id}.pdf"):
+        if os.path.exists(os.path.join(load_address(),f"{comic_id}.pdf")):
             if is_group:
                 await msg.reply(text="该漫画已存在喵~,正在发送喵~")
                 await bot.api.post_group_file(msg.group_id, file=load_address() + f"{comic_id}.pdf")
