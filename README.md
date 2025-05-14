@@ -27,8 +27,8 @@
 ## 📌Before You Start / 开始之前  
 [![](https://img.shields.io/badge/python-version>=3.7-red?logo=python)]()
 >**⚠️Important Notice / 重要提示**  
-> Because of the reason of Ncatbot, some commands may have some problems,please upgrade napcat and ncatbot 
->部分命令由于Ncatbot的原因，可能会出现问题，请更新ncatbot和napcat到最新版本  
+> if you encounter any error, please check if you have installed the latest version of napcat and ncatbot
+> 若出现未知错误，请检查是否已安装最新版本的napcat和ncatbot
 
 >Environment: <u>___windows___</u>  
 >环境为 <u>___windows___</u>  
