@@ -17,9 +17,9 @@
 
 ---
 ## ✨Updates 更新  
-![](https://img.shields.io/badge/LatestVersion-1.3.2-blue?&logo=react)
+![](https://img.shields.io/badge/LatestVersion-1.3.3-blue?&logo=react)
 
-- 优化目录处理方式，增强结构稳定性
+- 处理若干bug
 
 + 详细查看[CHANGLOG.md](https://github.com/asukaneko/NapCat-jmcomic_download-bot/blob/master/CHANGELOG.md)
 ---
