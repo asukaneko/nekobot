@@ -69,8 +69,7 @@ def load_address(): # 加载配置文件，返回图片保存地址
             pdf_dir = after_photo_list[0].get("kwargs", {}).get("pdf_dir", "./cache/pdf/")
         else:
             pdf_dir = "./cache/pdf/"
-        if not pdf_dir.endswith(os.path.sep):
-            pdf_dir += os.path.sep
+        pdf_dir = os.path.normpath(pdf_dir)
         return os.path.dirname(pdf_dir)  # 返回pdf目录的父目录
 
 def load_favorites():
