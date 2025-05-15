@@ -285,10 +285,10 @@ async def handle_jmrank(msg, is_group=True):
                                          ):
         for aid, atitle in page:
             tot += 1
-            with open(cache_dir + f"{select}_{name}.txt", "a", encoding="utf-8") as f:
+            with open(os.path.join(cache_dir , f"{select}_{name}.txt"), "a", encoding="utf-8") as f:
                 f.write(f"{tot}: {aid}  {atitle}\n\n")
 
-    if not os.path.exists(cache_dir + f"{select}_{name}.txt"):
+    if not os.path.exists(os.path.join(cache_dir , f"{select}_{name}.txt")):
         if is_group:
             await msg.reply(text="获取排行失败喵~")
         else:
@@ -296,9 +296,9 @@ async def handle_jmrank(msg, is_group=True):
         return
 
     if is_group:
-        await bot.api.post_group_file(msg.group_id, file=cache_dir + f"{select}_{name}.txt")
+        await bot.api.post_group_file(msg.group_id, file=os.path.join(cache_dir , f"{select}_{name}.txt"))
     else:
-        await bot.api.upload_private_file(msg.user_id, cache_dir + f"{select}_{name}.txt", f"{select}_{name}.txt")
+        await bot.api.upload_private_file(msg.user_id, os.path.join(cache_dir , f"{select}_{name}.txt"), f"{select}_{name}.txt")
 
 @register_command("/search",help_text = "/search <内容> -> 搜索漫画")
 async def handle_search(msg, is_group=True):
@@ -327,29 +327,29 @@ async def handle_search(msg, is_group=True):
         # 直接搜索禁漫车号
         page = client.search_site(search_query=id)
         album: JmAlbumDetail = page.single_album
-        with open(cache_dir + f"{id}.txt", "w", encoding="utf-8") as f:
+        with open(os.path.join(cache_dir , f"{id}.txt"), "w", encoding="utf-8") as f:
             f.write(f"标题：{album.title}\n标签：{album.tags}\n页数：{album.page_count}\n浏览次数：{album.views}\n评论数：{album.comment_count}")
         if is_group:
-            await bot.api.post_group_file(msg.group_id, file=cache_dir + f"{id}.txt")
+            await bot.api.post_group_file(msg.group_id, file=os.path.join(cache_dir , f"{id}.txt"))
         else:
-            await bot.api.upload_private_file(msg.user_id, cache_dir + f"{id}.txt", f"{id}.txt")
+            await bot.api.upload_private_file(msg.user_id, os.path.join(cache_dir , f"{id}.txt"), f"{id}.txt")
         return
 
     name = content + str(time.time()).replace(".", "")
     
-    with open(cache_dir + f"{name}.txt", "w", encoding="utf-8") as f:
+    with open(os.path.join(cache_dir , f"{id}.txt"), "w", encoding="utf-8") as f:
         f.write(f"搜索结果：{content}\n")
     tot = 0
     for i in range(5):# 搜索5页，可以自己修改
         page: JmSearchPage = client.search_site(search_query=content, page=i+1,order_by=JmMagicConstants.ORDER_BY_VIEW)
         for album_id, title in page:
             tot += 1
-            with open(cache_dir + f"{name}.txt", "a", encoding="utf-8") as f:
+            with open(os.path.join(cache_dir , f"{id}.txt"), "a", encoding="utf-8") as f:
                 f.write(f"{tot}: {album_id}  {title}\n\n")
     if is_group:
-        await bot.api.post_group_file(msg.group_id, file=cache_dir + f"{name}.txt")
+        await bot.api.post_group_file(msg.group_id, file=os.path.join(cache_dir , f"{id}.txt"))
     else:
-        await bot.api.upload_private_file(msg.user_id, cache_dir + f"{name}.txt", f"{content}.txt")
+        await bot.api.upload_private_file(msg.user_id, os.path.join(cache_dir , f"{id}.txt"), f"{content}.txt")
 
 
 @register_command("/tag",help_text = "/tag <标签> -> 搜索漫画标签")
@@ -366,19 +366,19 @@ async def handle_search(msg, is_group=True):
     content = msg.raw_message[len("/tag"):].strip()
     name = content + str(time.time()).replace(".", "")
     client = JmOption.default().new_jm_client()
-    with open(cache_dir + f"{name}.txt", "w", encoding="utf-8") as f:
+    with open(os.path.join(cache_dir , f"{name}.txt"), "w", encoding="utf-8") as f:
         f.write(f"搜索标签结果：{content}\n")
     tot = 0
     for i in range(5):# 搜索5页，可以自己修改
         page: JmSearchPage = client.search_tag(search_query=content, page=i+1,order_by=JmMagicConstants.ORDER_BY_VIEW)
         for album_id, title in page:
             tot += 1
-            with open(cache_dir + f"{name}.txt", "a", encoding="utf-8") as f:
+            with open(os.path.join(cache_dir , f"{name}.txt"), "a", encoding="utf-8") as f:
                 f.write(f"{tot}: {album_id}  {title}\n\n")
     if is_group:
-        await bot.api.post_group_file(msg.group_id, file=cache_dir + f"{name}.txt")
+        await bot.api.post_group_file(msg.group_id, file=os.path.join(cache_dir , f"{name}.txt"))
     else:
-        await bot.api.upload_private_file(msg.user_id, cache_dir + f"{name}.txt", f"{content}.txt")
+        await bot.api.upload_private_file(msg.user_id, os.path.join(cache_dir , f"{name}.txt"), f"{content}.txt")
 
 @register_command("/get_fav",help_text = "/get_fav <用户名> <密码> -> 获取收藏夹")
 async def handle_get_fav(msg, is_group=True):
