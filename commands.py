@@ -5,6 +5,7 @@ import jmcomic,requests,random,configparser,json,yaml,re,os,asyncio
 from jmcomic import *
 from typing import Dict, List
 from datetime import datetime
+from difflib import get_close_matches  # 用于模糊匹配
 
 #----------------------
 # region 全局变量设置
@@ -27,6 +28,9 @@ black_list_comic = {"global": [], "groups": {}, "users": {}} # str,黑名单
 
 running = {}  #用于定时聊天的开关
 tasks = {}  # 用于存储定时任务
+
+books = {}
+
 # ------------------
 # region 通用函数
 # ------------------
@@ -212,6 +216,12 @@ def update_running(id):
         tasks[id].cancel()  # 取消之前的任务
         tasks[id] = asyncio.create_task(chat_loop(id))  # 创建新的任务
         
+def load_novel_data():
+    """
+    加载小说数据
+    """
+    with open("novel_details2.json", "r", encoding="utf-8") as f:
+        books.update(json.load(f))
 
 #---------------------------------------------------------------------------
 
@@ -219,6 +229,7 @@ load_favorites()
 load_admin()
 load_blak_list()
 load_running()
+load_novel_data()
 
 #----------------------
 #     region 命令
@@ -996,6 +1007,31 @@ async def handle_df(msg, is_group=True):
         else:
             await bot.api.post_private_msg(msg.user_id, text="请输入合法的链接喵~")
 
+@register_command("/dln",help_text = "/dln <名称> -> 下载轻小说")
+async def handle_dln(msg, is_group=True):
+    name = msg.raw_message[len("/dln"):].strip()
+    if not name:
+        if is_group:
+            await msg.reply(text="请输入小说名喵~")
+        else:
+            await bot.api.post_private_msg(msg.user_id, text="请输入小说名喵~")
+        return
+    matches = get_close_matches(name, books.keys(), n=1, cutoff=0.6)
+    if matches:
+        closest_match = matches[0]
+        if is_group:
+            await msg.reply(text=f"最接近的匹配是 {closest_match}")
+        else:
+            await bot.api.post_private_msg(msg.user_id, text=f"最接近的匹配是 {closest_match}")
+        url = books[closest_match].get("download_url")
+        await handle_generic_file(msg, is_group, '', 'file', custom_url=url)
+    else:
+        if is_group:
+            await msg.reply(text="没有找到匹配的小说喵~")
+        else:
+            await bot.api.post_private_msg(msg.user_id, text="没有找到匹配的小说喵~")
+
+    
 #---------------------------------------------
 
 @register_command("/music","/m",help_text = "/music <音乐名/id> -> 发送音乐")
