@@ -75,6 +75,7 @@ def load_address(): # 加载配置文件，返回图片保存地址
 def load_favorites():
     """加载收藏夹数据"""
     cache_dir = os.path.join(load_address(),"list")
+    print(cache_dir)
     os.makedirs(cache_dir, exist_ok=True)
     
     # 加载用户收藏
@@ -455,13 +456,13 @@ async def handle_jmcomic(msg, is_group=True):
                 await bot.api.post_private_msg(msg.user_id, text=error_msg)
                 return
 
-        if os.path.exists(os.path.join(load_address(),f"{comic_id}.pdf")):
+        if os.path.exists(os.path.join(load_address(),f"pdf/{comic_id}.pdf")):
             if is_group:
                 await msg.reply(text="该漫画已存在喵~,正在发送喵~")
-                await bot.api.post_group_file(msg.group_id, file=os.path.join(load_address(),f"{comic_id}.pdf"))
+                await bot.api.post_group_file(msg.group_id, file=os.path.join(load_address(),f"pdf/{comic_id}.pdf"))
             else:
                 await bot.api.post_private_msg(msg.user_id,text="该漫画已存在喵~,正在发送喵~")
-                await bot.api.upload_private_file(msg.user_id, os.path.join(load_address(),f"{comic_id}.pdf"), f"{comic_id}.pdf")
+                await bot.api.upload_private_file(msg.user_id, os.path.join(load_address(),f"pdf/{comic_id}.pdf"), f"{comic_id}.pdf")
             return
 
         # 立即回复用户，不等待下载完成
@@ -491,7 +492,7 @@ async def download_and_send_comic(comic_id, msg, is_group):
         )
 
         pdf_dir = load_address()
-        file_path = os.path.join(pdf_dir, f"{comic_id}.pdf")
+        file_path = os.path.join(pdf_dir, f"pdf/{comic_id}.pdf")
 
         # 检查文件是否真正生成
         if not os.path.exists(file_path):
