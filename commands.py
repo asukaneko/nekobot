@@ -379,7 +379,7 @@ async def handle_search(msg, is_group=True):
     else:
         await bot.api.upload_private_file(msg.user_id, os.path.join(cache_dir , f"{name}.txt"), f"{content}.txt")
 
-@register_command("/get_fav",help_text = "/get_fav <用户名> <密码> -> 获取收藏夹")
+@register_command("/get_fav",help_text = "/get_fav <用户名> <密码> -> 获取收藏夹(群聊请私聊)")
 async def handle_get_fav(msg, is_group=True):
     match = re.match(r'^/get_fav\s+(\S+)\s+(\S+)$', msg.raw_message)
     if not match:
@@ -392,8 +392,7 @@ async def handle_get_fav(msg, is_group=True):
 
     username = match.group(1)
     password = match.group(2)
-    # 注意，这里的密码是明文显示的，所以需要确保安全性，群聊中最好不要使用
-    # 使用提取的用户名和密码进行后续操作
+
     if is_group:
         await msg.reply(text="正在获取收藏夹喵~")
     else:
