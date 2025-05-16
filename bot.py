@@ -18,7 +18,7 @@ async def on_group_message(msg: GroupMessage):
                 if re.match(rf'^{re.escape(cmd)}(?:\s|$)', msg.raw_message):
                     await handler(msg, is_group=True)
                     return
-        elif re.match(f'^{re.escape(command)}(?:\s|$)', msg.raw_message): # 处理单个命令情况
+        elif re.match(fr'^{re.escape(command)}(?:\s|$)', msg.raw_message): # 处理单个命令情况
             await handler(msg, is_group=False)
             return
 
@@ -84,7 +84,7 @@ async def on_private_message(msg: PrivateMessage):
                 if re.match(rf'^{re.escape(cmd)}(?:\s|$)', msg.raw_message):
                     await handler(msg, is_group=False)
                     return
-        elif re.match(f'^{re.escape(command)}(?:\s|$)', msg.raw_message): # 处理单个命令情况
+        elif re.match(fr'^{re.escape(command)}(?:\s|$)', msg.raw_message): # 处理单个命令情况
             await handler(msg, is_group=False)
             return
     
