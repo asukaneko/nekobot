@@ -4,7 +4,7 @@
 
 ![cover](https://img.picui.cn/free/2025/04/19/6803c76d2bbf9.png)
 
-> _a bot for downloading comics and chatting with ai_
+> _a catgirl QQ bot for downloading comics and chatting with ai_
 
 </div>
 
