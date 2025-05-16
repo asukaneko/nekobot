@@ -320,7 +320,7 @@ async def handle_search(msg, is_group=True):
         else:
             await bot.api.post_private_msg(msg.user_id, text="搜索内容不能为空喵~")
         return
-        
+    
     if re.match(r'^\d+$', content):  # 检查是否为纯数字
         id = content
         # 直接搜索禁漫车号
@@ -336,19 +336,19 @@ async def handle_search(msg, is_group=True):
 
     name = content + str(time.time()).replace(".", "")
     
-    with open(os.path.join(cache_dir , f"{id}.txt"), "w", encoding="utf-8") as f:
+    with open(os.path.join(cache_dir , f"{name}.txt"), "w", encoding="utf-8") as f:
         f.write(f"搜索结果：{content}\n")
     tot = 0
     for i in range(5):# 搜索5页，可以自己修改
         page: JmSearchPage = client.search_site(search_query=content, page=i+1,order_by=JmMagicConstants.ORDER_BY_VIEW)
         for album_id, title in page:
             tot += 1
-            with open(os.path.join(cache_dir , f"{id}.txt"), "a", encoding="utf-8") as f:
+            with open(os.path.join(cache_dir , f"{content}.txt"), "a", encoding="utf-8") as f:
                 f.write(f"{tot}: {album_id}  {title}\n\n")
     if is_group:
-        await bot.api.post_group_file(msg.group_id, file=os.path.join(cache_dir , f"{id}.txt"))
+        await bot.api.post_group_file(msg.group_id, file=os.path.join(cache_dir , f"{name}.txt"))
     else:
-        await bot.api.upload_private_file(msg.user_id, os.path.join(cache_dir , f"{id}.txt"), f"{content}.txt")
+        await bot.api.upload_private_file(msg.user_id, os.path.join(cache_dir , f"{name}.txt"), f"{content}.txt")
 
 
 @register_command("/tag",help_text = "/tag <标签> -> 搜索漫画标签")
