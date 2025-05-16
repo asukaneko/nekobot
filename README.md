@@ -19,7 +19,9 @@
 ## ✨Updates 更新  
 ![](https://img.shields.io/badge/LatestVersion-1.3.3-blue?&logo=react)
 
-- 处理若干bug
+- 新增命令：
+  - 下载图片：`/di <link> -> 下载图片`
+  - 下载视频：`/dv <link> -> 下载视频`
 
 + 详细查看[CHANGLOG.md](https://github.com/asukaneko/NapCat-jmcomic_download-bot/blob/master/CHANGELOG.md)
 ---
