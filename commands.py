@@ -896,11 +896,11 @@ async def handle_generic_file(msg, is_group: bool, section: str, file_type: str,
     """
     # 立即回复用户
     initial_text = "正在获取喵~"
-    if initial_text:
-        if is_group:
-            await msg.reply(text=initial_text)
-        else:
-            await bot.api.post_private_msg(msg.user_id, text=initial_text)
+    
+    if is_group:
+        await msg.reply(text=initial_text)
+    else:
+        await bot.api.post_private_msg(msg.user_id, text=initial_text)
 
     try:
         # 修复配置读取逻辑
@@ -1021,8 +1021,11 @@ async def handle_dln(msg, is_group=True):
         closest_match = matches[0]
         if is_group:
             await msg.reply(text=f"最接近的匹配是 {closest_match}")
+            await msg.reply(text="受网络的影响，下载时间可能较长")
         else:
             await bot.api.post_private_msg(msg.user_id, text=f"最接近的匹配是 {closest_match}")
+            await bot.api.post_private_msg(msg.user_id, text="受网络的影响，下载时间可能较长")
+
         url = books[closest_match].get("download_url")
         await handle_generic_file(msg, is_group, '', 'file', custom_url=url)
     else:
