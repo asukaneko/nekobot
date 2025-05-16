@@ -953,7 +953,9 @@ async def handle_d(msg, is_group=True):
             await bot.api.post_private_msg(msg.user_id, text="请输入链接喵~")
         return
 
-    if not re.match(r'^https?://', link):  # 检查是否为合法链接
+    if re.match(r'^https?://', link):  # 检查是否为合法链接
+        await handle_generic_file(msg, is_group, '', 'video', custom_url=link)  
+    else:
         if is_group:
             await msg.reply(text="请输入合法的链接喵~")
         else:
@@ -969,7 +971,9 @@ async def handle_di(msg, is_group=True):
             await bot.api.post_private_msg(msg.user_id, text="请输入链接喵~")
         return
 
-    if not re.match(r'^https?://', link):  # 检查是否为合法链接
+    if re.match(r'^https?://', link):  # 检查是否为合法链接
+        await handle_generic_file(msg, is_group, '', 'image', custom_url=link)
+    else:
         if is_group:
             await msg.reply(text="请输入合法的链接喵~")
         else:
