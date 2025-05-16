@@ -75,7 +75,6 @@ def load_address(): # 加载配置文件，返回图片保存地址
 def load_favorites():
     """加载收藏夹数据"""
     cache_dir = os.path.join(load_address(),"list")
-    print(cache_dir)
     os.makedirs(cache_dir, exist_ok=True)
     
     # 加载用户收藏
@@ -870,7 +869,13 @@ async def async_send_file(send_method, target_id, file_type, url):
             
 # 修改通用处理函数
 async def handle_generic_file(msg, is_group: bool, section: str, file_type: str, custom_url: str = None):
-    """通用文件处理函数（修复版）"""
+    """通用文件处理函数（修复版）
+       :param msg: 消息对象
+       :param is_group: 是否为群组消息
+       :param section: 配置文件中的section名称
+       :param file_type: 文件类型(image、record、video、file、markdown)
+       :param custom_url: 自定义URL(可选)
+    """
     """
         支持的file_type:
         image: 图片
@@ -938,6 +943,37 @@ async def handle_st(msg, is_group=True):
 async def handle_random_video(msg, is_group=True):
     await handle_generic_file(msg, is_group, 'rv', 'video')
 
+@register_command("/dv",help_text="/dv <link> -> 下载视频")
+async def handle_d(msg, is_group=True):
+    link = msg.raw_message[len("/d"):].strip()
+    if not link:
+        if is_group:
+            await msg.reply(text="请输入链接喵~")
+        else:
+            await bot.api.post_private_msg(msg.user_id, text="请输入链接喵~")
+        return
+
+    if not re.match(r'^https?://', link):  # 检查是否为合法链接
+        if is_group:
+            await msg.reply(text="请输入合法的链接喵~")
+        else:
+            await bot.api.post_private_msg(msg.user_id, text="请输入合法的链接喵~")
+
+@register_command("/di",help_text="/di <link> -> 下载图片")
+async def handle_di(msg, is_group=True):
+    link = msg.raw_message[len("/di"):].strip()
+    if not link:
+        if is_group:
+            await msg.reply(text="请输入链接喵~")
+        else:
+            await bot.api.post_private_msg(msg.user_id, text="请输入链接喵~")
+        return
+
+    if not re.match(r'^https?://', link):  # 检查是否为合法链接
+        if is_group:
+            await msg.reply(text="请输入合法的链接喵~")
+        else:
+            await bot.api.post_private_msg(msg.user_id, text="请输入合法的链接喵~")
 #---------------------------------------------
 
 @register_command("/music","/m",help_text = "/music <音乐名/id> -> 发送音乐")
@@ -1324,7 +1360,7 @@ async def handle_help(msg, is_group=True):
         "1": {"name": "漫画相关", "commands": ["/jm", "/jmrank", "/search","/tag","/add_black_list","/del_black_list","/list_black_list","/add_global_black_list","/del_global_black_list"]},
         "2": {"name": "收藏管理", "commands": ["/get_fav", "/add_fav", "/del_fav","/list_fav"]},
         "3": {"name": "聊天设置", "commands": ["/set_prompt", "/del_prompt", "/get_prompt","/del_message","/主动聊天"]},
-        "4": {"name": "娱乐功能", "commands": ["/random_image", "/random_emoticons", "/st","/random_video","/random_dice","/random_rps","/music","/random_music"]},
+        "4": {"name": "娱乐功能", "commands": ["/random_image", "/random_emoticons", "/st","/random_video","/random_dice","/random_rps","/music","/random_music","/dv","/di"]},
         "5": {"name": "系统处理", "commands": ["/restart", "/tts", "/agree","/remind","/premind","/set_admin","/del_admin","/get_admin","/set_ids","/set_online_status","/get_friends","/set_qq_avatar","/send_like"]},
         "6": {"name": "群聊管理", "commands": ["/set_group_admin", "/del_group_admin"]}
     }
