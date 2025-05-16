@@ -978,6 +978,25 @@ async def handle_di(msg, is_group=True):
             await msg.reply(text="请输入合法的链接喵~")
         else:
             await bot.api.post_private_msg(msg.user_id, text="请输入合法的链接喵~")
+
+@register_command("/df",help_text="/df <link> -> 下载文件")
+async def handle_df(msg, is_group=True):
+    link = msg.raw_message[len("/df"):].strip()
+    if not link:
+        if is_group:
+            await msg.reply(text="请输入链接喵~")
+        else:
+            await bot.api.post_private_msg(msg.user_id, text="请输入链接喵~")
+        return
+
+    if re.match(r'^https?://', link):  # 检查是否为合法链接
+        await handle_generic_file(msg, is_group, '', 'file', custom_url=link)
+    else:
+        if is_group:
+            await msg.reply(text="请输入合法的链接喵~")
+        else:
+            await bot.api.post_private_msg(msg.user_id, text="请输入合法的链接喵~")
+
 #---------------------------------------------
 
 @register_command("/music","/m",help_text = "/music <音乐名/id> -> 发送音乐")
@@ -1361,12 +1380,11 @@ async def handle_active_chat(msg, is_group=True):
 async def handle_help(msg, is_group=True):
     # 定义命令分类
     command_categories = {
-        "1": {"name": "漫画相关", "commands": ["/jm", "/jmrank", "/search","/tag","/add_black_list","/del_black_list","/list_black_list","/add_global_black_list","/del_global_black_list"]},
-        "2": {"name": "收藏管理", "commands": ["/get_fav", "/add_fav", "/del_fav","/list_fav"]},
-        "3": {"name": "聊天设置", "commands": ["/set_prompt", "/del_prompt", "/get_prompt","/del_message","/主动聊天"]},
-        "4": {"name": "娱乐功能", "commands": ["/random_image", "/random_emoticons", "/st","/random_video","/random_dice","/random_rps","/music","/random_music","/dv","/di"]},
-        "5": {"name": "系统处理", "commands": ["/restart", "/tts", "/agree","/remind","/premind","/set_admin","/del_admin","/get_admin","/set_ids","/set_online_status","/get_friends","/set_qq_avatar","/send_like"]},
-        "6": {"name": "群聊管理", "commands": ["/set_group_admin", "/del_group_admin"]}
+        "1": {"name": "漫画相关", "commands": ["/jm", "/jmrank", "/search","/tag","/add_black_list","/del_black_list","/list_black_list","/add_global_black_list","/del_global_black_list","/get_fav", "/add_fav", "/del_fav","/list_fav"]},
+        "2": {"name": "聊天设置", "commands": ["/set_prompt", "/del_prompt", "/get_prompt","/del_message","/主动聊天"]},
+        "3": {"name": "娱乐功能", "commands": ["/random_image", "/random_emoticons", "/st","/random_video","/random_dice","/random_rps","/music","/random_music","/dv","/di","/df"]},
+        "4": {"name": "系统处理", "commands": ["/restart", "/tts", "/agree","/remind","/premind","/set_admin","/del_admin","/get_admin","/set_ids","/set_online_status","/get_friends","/set_qq_avatar","/send_like"]},
+        "5": {"name": "群聊管理", "commands": ["/set_group_admin", "/del_group_admin"]}
     }
 
     # 第一阶段：显示分类菜单
