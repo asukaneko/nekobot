@@ -1015,129 +1015,6 @@ async def handle_df(msg, is_group=True):
         else:
             await bot.api.post_private_msg(msg.user_id, text="请输入合法的链接喵~")
 
-@register_command("/findbook","/fb",help_text="/findbook 或者 /fb <书名> -> 搜索并选择下载轻小说")
-async def handle_find_book(msg, is_group=True):
-    search_term = ""
-    if msg.raw_message.startswith("/findbook"):
-        search_term = msg.raw_message[len("/findbook"):].strip()
-    elif msg.raw_message.startswith("/fb"):
-        search_term = msg.raw_message[len("/fb"):].strip()
-    if not search_term:
-        reply = "请输入要搜索的书名喵~"
-        if is_group:
-            await msg.reply(text=reply)
-        else:
-            await bot.api.post_private_msg(msg.user_id, text=reply)
-        return
-
-    # 模糊匹配书籍
-    matches = []
-    for title, book_info in books.items():
-        # 同时匹配原始书名和去除括号后的书名
-        clean_title = re.sub(r'\(.*?\)', '', title).strip()
-        if (search_term.lower() in title.lower() or search_term.lower() in clean_title.lower()):
-            matches.append((title, book_info.get("download_url")))
-        
-    if not matches:
-        matches2 = get_close_matches(search_term, books.keys(), n=5, cutoff=0.4)
-        for title in matches2:
-            matches.append((title, books[title].get("download_url")))
-
-    if not matches:
-        reply = f"没有找到包含'{search_term}'的书籍喵~"
-        if is_group:
-            await msg.reply(text=reply)
-        else:
-            await bot.api.post_private_msg(msg.user_id, text=reply)
-        return
-    
-    # 生成选择列表
-    choices = "\n".join([f"{i+1}. {title}" for i, (title, _) in enumerate(matches)])
-    reply = f"找到以下匹配的书籍喵~:\n{choices}\n\n请回复'/select 编号'选择要下载的书籍喵~\n回复'/info 编号'获取书籍信息喵~"
-    
-    # 存储匹配结果临时数据
-    temp_selections[msg.user_id] = matches
-    
-    if is_group:
-        await msg.reply(text=reply)
-    else:
-        await bot.api.post_private_msg(msg.user_id, text=reply)
-
-# 添加临时存储字典
-temp_selections = {}
-
-# 添加选择处理函数
-@register_command("/select", help_text="/select <编号> -> 选择要下载的轻小说")
-async def handle_select_book(msg, is_group=True):
-    if msg.user_id not in temp_selections:
-        reply = "没有找到您的搜索记录喵~请先使用/findbook搜索喵~"
-        if is_group:
-            await msg.reply(text=reply)
-        else:
-            await bot.api.post_private_msg(msg.user_id, text=reply)
-        return
-    
-    try:
-        selection = int(msg.raw_message[len("/select"):].strip()) - 1
-        matches = temp_selections[msg.user_id]
-        if 0 <= selection < len(matches):
-            title, url = matches[selection]
-            reply = f"已开始下载《{title}》喵~"
-            if is_group:
-                await msg.reply(text=reply)
-            else:
-                await bot.api.post_private_msg(msg.user_id, text=reply)
-            await handle_generic_file(msg, is_group, '', 'file', custom_url=url,file_name=title+".txt")
-        else:
-            reply = "编号无效喵~请选择列表中的编号喵~"
-            if is_group:
-                await msg.reply(text=reply)
-            else:
-                await bot.api.post_private_msg(msg.user_id, text=reply)
-    except ValueError:
-        reply = "请输入有效的编号喵~"
-        if is_group:
-            await msg.reply(text=reply)
-        else:
-            await bot.api.post_private_msg(msg.user_id, text=reply)
-    
-    del temp_selections[msg.user_id]  # 清理临时数据
-
-@register_command("/info",help_text="/info <书名> -> 获取轻小说信息")
-async def handle_info(msg, is_group=True):
-    if msg.user_id not in temp_selections:
-        reply = "没有找到您的搜索记录喵~请先使用/findbook搜索喵~"
-        if is_group:
-            await msg.reply(text=reply)
-        else:
-            await bot.api.post_private_msg(msg.user_id, text=reply)
-        return 
-    try:
-        selection = int(msg.raw_message[len("/info"):].strip()) - 1
-        matches = temp_selections[msg.user_id]
-        if 0 <= selection < len(matches):
-            title, url = matches[selection]
-            info = books[title]
-            reply = f"《{title}》的信息如下喵~\n作者: {info['author']}\n分类: {info['category']}\n字数: {info['word_count']}\n状态: {info['is_serialize']}\n更新日期: {info['last_date']}\n下载链接: {url}"
-            if is_group:
-                await msg.reply(text=reply)
-            else:
-                await bot.api.post_private_msg(msg.user_id, text=reply)
-        else:
-            reply = "编号无效喵~请选择列表中的编号喵~"
-            if is_group:
-                await msg.reply(text=reply)
-            else:
-                await bot.api.post_private_msg(msg.user_id, text=reply)
-    except ValueError:
-        reply = "请输入有效的编号喵~"
-        if is_group:
-            await msg.reply(text=reply)
-        else:
-            await bot.api.post_private_msg(msg.user_id, text=reply)
-
-
-
 #---------------------------------------------
 
 @register_command("/music","/m",help_text = "/music <音乐名/id> -> 发送音乐")
@@ -1515,7 +1392,141 @@ async def handle_active_chat(msg, is_group=True):
         await bot.api.post_private_msg(msg.user_id, text="设置成功喵~，现在"+str(interval)+"小时后会主动聊天喵~")
     else:
         await bot.api.post_private_msg(msg.user_id, text="设置成功喵~，已关闭主动聊天喵~")
- 
+
+# 添加临时存储字典
+temp_selections = {}
+
+@register_command("/findbook","/fb",help_text="/findbook 或者 /fb <书名> -> 搜索并选择下载轻小说")
+async def handle_find_book(msg, is_group=True):
+    search_term = ""
+    if msg.raw_message.startswith("/findbook"):
+        search_term = msg.raw_message[len("/findbook"):].strip()
+    elif msg.raw_message.startswith("/fb"):
+        search_term = msg.raw_message[len("/fb"):].strip()
+    if not search_term:
+        reply = "请输入要搜索的书名喵~"
+        if is_group:
+            await msg.reply(text=reply)
+        else:
+            await bot.api.post_private_msg(msg.user_id, text=reply)
+        return
+
+    # 模糊匹配书籍
+    matches = []
+    for title, book_info in books.items():
+        # 同时匹配原始书名和去除括号后的书名
+        clean_title = re.sub(r'\(.*?\)', '', title).strip()
+        if (search_term.lower() in title.lower() or search_term.lower() in clean_title.lower()):
+            matches.append((title, book_info.get("download_url")))
+        
+    if not matches:
+        matches2 = get_close_matches(search_term, books.keys(), n=5, cutoff=0.4)
+        for title in matches2:
+            matches.append((title, books[title].get("download_url")))
+
+    if not matches:
+        reply = f"没有找到包含'{search_term}'的书籍喵~"
+        if is_group:
+            await msg.reply(text=reply)
+        else:
+            await bot.api.post_private_msg(msg.user_id, text=reply)
+        return
+    
+    # 生成选择列表
+    choices = "\n".join([f"{i+1}. {title}" for i, (title, _) in enumerate(matches)])
+    reply = f"找到以下匹配的书籍喵~:\n{choices}\n\n请回复'/select 编号'选择要下载的书籍喵~\n回复'/info 编号'获取书籍信息喵~"
+    
+    # 存储匹配结果临时数据
+    temp_selections[msg.user_id] = matches
+    
+    if is_group:
+        await msg.reply(text=reply)
+    else:
+        await bot.api.post_private_msg(msg.user_id, text=reply)
+
+# 添加选择处理函数
+@register_command("/select", help_text="/select <编号> -> 选择要下载的轻小说")
+async def handle_select_book(msg, is_group=True):
+    if msg.user_id not in temp_selections:
+        reply = "没有找到您的搜索记录喵~请先使用/findbook搜索喵~"
+        if is_group:
+            await msg.reply(text=reply)
+        else:
+            await bot.api.post_private_msg(msg.user_id, text=reply)
+        return
+    
+    try:
+        selection = int(msg.raw_message[len("/select"):].strip()) - 1
+        matches = temp_selections[msg.user_id]
+        if 0 <= selection < len(matches):
+            title, url = matches[selection]
+            reply = f"已开始下载《{title}》喵~"
+            if is_group:
+                await msg.reply(text=reply)
+            else:
+                await bot.api.post_private_msg(msg.user_id, text=reply)
+            await handle_generic_file(msg, is_group, '', 'file', custom_url=url,file_name=title+".txt")
+        else:
+            reply = "编号无效喵~请选择列表中的编号喵~"
+            if is_group:
+                await msg.reply(text=reply)
+            else:
+                await bot.api.post_private_msg(msg.user_id, text=reply)
+    except ValueError:
+        reply = "请输入有效的编号喵~"
+        if is_group:
+            await msg.reply(text=reply)
+        else:
+            await bot.api.post_private_msg(msg.user_id, text=reply)
+    
+    del temp_selections[msg.user_id]  # 清理临时数据
+
+@register_command("/info",help_text="/info <书名> -> 获取轻小说信息")
+async def handle_info(msg, is_group=True):
+    if msg.user_id not in temp_selections:
+        reply = "没有找到您的搜索记录喵~请先使用/findbook搜索喵~"
+        if is_group:
+            await msg.reply(text=reply)
+        else:
+            await bot.api.post_private_msg(msg.user_id, text=reply)
+        return 
+    try:
+        selection = int(msg.raw_message[len("/info"):].strip()) - 1
+        matches = temp_selections[msg.user_id]
+        if 0 <= selection < len(matches):
+            title, url = matches[selection]
+            info = books[title]
+            reply = f"《{title}》的信息如下喵~\n作者: {info['author']}\n分类: {info['category']}\n字数: {info['word_count']}\n状态: {info['is_serialize']}\n更新日期: {info['last_date']}\n下载链接: {url}"
+            if is_group:
+                await msg.reply(text=reply)
+            else:
+                await bot.api.post_private_msg(msg.user_id, text=reply)
+        else:
+            reply = "编号无效喵~请选择列表中的编号喵~"
+            if is_group:
+                await msg.reply(text=reply)
+            else:
+                await bot.api.post_private_msg(msg.user_id, text=reply)
+    except ValueError:
+        reply = "请输入有效的编号喵~"
+        if is_group:
+            await msg.reply(text=reply)
+        else:
+            await bot.api.post_private_msg(msg.user_id, text=reply)
+
+@register_command("/random_novel","/rn",help_text = "/random_novel 或者 /rn -> 发送随机小说")
+async def handle_random_novel(msg, is_group=True):
+    novel = random.choice(list(books.keys()))
+    url = books[novel]["download_url"]
+    reply = f"抽选到了《{novel}》喵~"
+    if is_group:
+        await msg.reply(text=reply)
+        await handle_generic_file(msg, is_group, '', 'file', custom_url=url,file_name=novel+".txt")
+    else:
+        await bot.api.post_private_msg(msg.user_id, text=reply)
+        await handle_generic_file(msg, is_group, '', 'file', custom_url=url,file_name=novel+".txt")
+
+
 #将help命令放在最后
 @register_command("/help","/h",help_text = "/help 或者 /h -> 查看帮助")
 async def handle_help(msg, is_group=True):
@@ -1523,13 +1534,14 @@ async def handle_help(msg, is_group=True):
     command_categories = {
         "1": {"name": "漫画相关", "commands": ["/jm", "/jmrank", "/search","/tag","/add_black_list","/del_black_list","/list_black_list","/add_global_black_list","/del_global_black_list","/get_fav", "/add_fav", "/del_fav","/list_fav"]},
         "2": {"name": "聊天设置", "commands": ["/set_prompt", "/del_prompt", "/get_prompt","/del_message","/主动聊天"]},
-        "3": {"name": "娱乐功能", "commands": ["/random_image", "/random_emoticons", "/st","/random_video","/random_dice","/random_rps","/music","/random_music","/dv","/di","/df","/findbook","/select","/info"]},
+        "3": {"name": "娱乐功能", "commands": ["/random_image", "/random_emoticons", "/st","/random_video","/random_dice","/random_rps","/music","/random_music","/dv","/di","/df"]},
         "4": {"name": "系统处理", "commands": ["/restart", "/tts", "/agree","/remind","/premind","/set_admin","/del_admin","/get_admin","/set_ids","/set_online_status","/get_friends","/set_qq_avatar","/send_like"]},
-        "5": {"name": "群聊管理", "commands": ["/set_group_admin", "/del_group_admin"]}
+        "5": {"name": "群聊管理", "commands": ["/set_group_admin", "/del_group_admin"]},
+        "6": {"name": "轻小说命令", "commands": ["/findbook", "/select", "/info","/random_novel"]}
     }
     
     # 添加全部功能分类
-    command_categories["6"] = {
+    command_categories["7"] = {
         "name": "全部功能", 
         "commands": [cmd for category in command_categories.values() for cmd in category["commands"]] + ["/help"]
     }
