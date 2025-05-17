@@ -223,7 +223,9 @@ def load_novel_data():
     with open("novel_details2.json", "r", encoding="utf-8") as f:
         books.update(json.load(f))
 
-#---------------------------------------------------------------------------
+#-------------------------
+#     region 加载参数
+#-------------------------
 
 load_favorites()
 load_admin()

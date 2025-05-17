@@ -111,10 +111,10 @@ def chat(content="", user_id=None, group_id=None, group_user_id=None,image=False
         file_name = ""
         if response.status_code == 200:
             # 保存图片到本地
-            dirs = cache_address+"saved_images"
+            dirs = os.path.join(cache_address,"saved_images")
             os.makedirs(dirs, exist_ok=True)
             name = int(time.time())
-            file_name = dirs + f"/{name}.jpg"
+            file_name = os.path.join(dirs , f"/{name}.jpg")
             if not os.path.exists(file_name):
                 with open(file_name, "wb") as file:
                     file.write(response.content)
@@ -177,11 +177,11 @@ def chat(content="", user_id=None, group_id=None, group_user_id=None,image=False
     return assistant_response
 
 def tts(content) -> MessageChain:
-    file_path = cache_address+ "tts/"
+    file_path = os.path.join(cache_address , "tts/")
     os.makedirs(file_path, exist_ok=True)
     name = int(time.time())
 
-    speech_file_path = file_path + f"{name}.mp3"
+    speech_file_path = os.path.join(file_path , f"{name}.mp3")
 
     client = OpenAI(
         api_key=api_key,
