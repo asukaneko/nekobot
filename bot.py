@@ -91,10 +91,9 @@ async def on_private_message(msg: PrivateMessage):
     try:
         if running[str(msg.user_id)]["state"]:
             running[str(msg.user_id)]["last_time"] = time.time()
+        write_running()
     except KeyError:
         pass
-
-    write_running()
 
     try:
         if msg.message[0].get("type") == "image": #处理图片
@@ -102,11 +101,11 @@ async def on_private_message(msg: PrivateMessage):
             content = chat(user_id=msg.user_id,image=True,url=url)
             if if_tts:
                 rtf = tts(content)
-                await bot.api.set_input_status(event_type=0,user_id=msg.user_id)
+                await bot.api.set_input_status(event_type=0,user_id=bot_id)
                 await bot.api.post_private_msg(msg.user_id, rtf=rtf)
                 await bot.api.post_private_msg(msg.user_id, text=content)
             else:
-                await bot.api.set_input_status(event_type=1,user_id=msg.user_id)
+                await bot.api.set_input_status(event_type=1,user_id=bot_id)
                 await bot.api.post_private_msg(msg.user_id, text=content)
             return
     except IndexError:
