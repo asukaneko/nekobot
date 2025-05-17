@@ -150,17 +150,20 @@ async def chat_loop(id:str):
     write_running()
     while running[id]["active"]:
         date_time = datetime.now()
-        time = time.time()
+        current_time = time.time()
         last_time = running[id]["last_time"]
-        if date_time.hour < 8 or date_time.hour > 0:
-            time.sleep(60 * 10)  # 转换为秒
+        # 只在8点到24点之间运行
+        if date_time.hour < 8 or date_time.hour >= 24:
+            await asyncio.sleep(60 * 10)  # 转换为秒
             continue
-        if time - last_time < 60 * 60 * running[id]["interval"]:
-            time.sleep(60 * 10)  # 转换为秒
+        # 检查是否达到间隔时间
+        if current_time - last_time < 60 * 60 * running[id]["interval"]:
+            await asyncio.sleep(60 * 10)  # 转换为秒
             continue
-        #await asyncio.sleep(60 * 60 * running[id]["interval"])  # 转换为秒
-        await chatter(id)   
-        await asyncio.sleep(60 * 10)  # 转换为秒
+        await chatter(id)
+        running[id]["last_time"] = current_time
+        write_running()
+        await asyncio.sleep(60 * 60 * running[id]["interval"])  # 等待完整间隔时间
 
 def write_blak_list():
     """
@@ -863,7 +866,7 @@ async def handle_restart(msg, is_group=True):
 
 #------以下为调用api发送文件的命令，采用异步方式发送文件------
 # 新增后台任务函数
-async def async_send_file(send_method, target_id, file_type, url):
+async def async_send_file(is_group,send_method, target_id, file_type, url,file_name):
     try:
         # 处理可能的重定向
         loop = asyncio.get_event_loop()
@@ -871,7 +874,10 @@ async def async_send_file(send_method, target_id, file_type, url):
         final_url = response.url
 
         # 异步发送文件
-        await send_method(target_id, **{file_type: final_url})
+        if is_group:
+            await send_method(target_id, **{file_type: final_url})
+        else:
+            await send_method(target_id, **{file_type: final_url},name = file_name)
     except Exception as e:
         error_msg = f"发送失败喵~: {str(e)}"
         if is_group:
@@ -880,7 +886,7 @@ async def async_send_file(send_method, target_id, file_type, url):
             await bot.api.post_private_msg(msg.user_id, text=error_msg)
             
 # 修改通用处理函数
-async def handle_generic_file(msg, is_group: bool, section: str, file_type: str, custom_url: str = None):
+async def handle_generic_file(msg, is_group: bool, section: str, file_type: str, custom_url: str = None, file_name:str = None):
     """通用文件处理函数（修复版）
        :param msg: 消息对象
        :param is_group: 是否为群组消息
@@ -923,10 +929,10 @@ async def handle_generic_file(msg, is_group: bool, section: str, file_type: str,
             selected_url = custom_url
 
         # 创建后台任务
-        send_method = bot.api.post_group_file if is_group else bot.api.post_private_file
+        send_method = bot.api.post_group_file if is_group else bot.api.upload_private_file
         target_id = msg.group_id if is_group else msg.user_id
         asyncio.create_task(
-            async_send_file(send_method, target_id, file_type, selected_url)
+            async_send_file(is_group,send_method, target_id, file_type, selected_url,file_name)
         )
 
     except Exception as e:
@@ -1081,7 +1087,7 @@ async def handle_select_book(msg, is_group=True):
                 await msg.reply(text=reply)
             else:
                 await bot.api.post_private_msg(msg.user_id, text=reply)
-            await handle_generic_file(msg, is_group, '', 'file', custom_url=url)
+            await handle_generic_file(msg, is_group, '', 'file', custom_url=url,file_name=title)
         else:
             reply = "编号无效喵~请选择列表中的编号喵~"
             if is_group:
