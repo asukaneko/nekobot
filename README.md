@@ -17,13 +17,11 @@
 
 ---
 ## ✨Updates 更新  
-![](https://img.shields.io/badge/LatestVersion-1.3.3-blue?&logo=react)
+![](https://img.shields.io/badge/LatestVersion-1.4.0-blue?&logo=react)
 
 - 新增命令：
-  - 下载图片：`/di <link> -> 下载图片`
-  - 下载视频：`/dv <link> -> 下载视频`
-  - 下载文件：`/df <link> -> 下载文件`
-  - 下载轻小说：`/dln <名称> -> 下载轻小说`
+  - 查询轻小说：`/fb <书名> -> 查询轻小说`
+  - 选择并下载轻小说：`/select <编号> -> 选择并下载轻小说`
 
 + 详细查看[CHANGLOG.md](https://github.com/asukaneko/NapCat-jmcomic_download-bot/blob/master/CHANGELOG.md)
 ---
