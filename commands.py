@@ -1053,7 +1053,7 @@ async def handle_find_book(msg, is_group=True):
     
     # 生成选择列表
     choices = "\n".join([f"{i+1}. {title}" for i, (title, _) in enumerate(matches)])
-    reply = f"找到以下匹配的书籍喵~:\n{choices}\n\n请回复'/select 编号'选择要下载的书籍喵~"
+    reply = f"找到以下匹配的书籍喵~:\n{choices}\n\n请回复'/select 编号'选择要下载的书籍喵~\n回复'/info 编号'获取书籍信息喵~"
     
     # 存储匹配结果临时数据
     temp_selections[msg.user_id] = matches
@@ -1102,7 +1102,43 @@ async def handle_select_book(msg, is_group=True):
             await bot.api.post_private_msg(msg.user_id, text=reply)
     
     del temp_selections[msg.user_id]  # 清理临时数据
-    
+
+@register_command("/info",help_text="/info <书名> -> 获取轻小说信息")
+async def handle_info(msg, is_group=True):
+    if msg.user_id not in temp_selections:
+        reply = "没有找到您的搜索记录喵~请先使用/findbook搜索喵~"
+        if is_group:
+            await msg.reply(text=reply)
+        else:
+            await bot.api.post_private_msg(msg.user_id, text=reply)
+        return 
+    try:
+        selection = int(msg.raw_message[len("/info"):].strip()) - 1
+        matches = temp_selections[msg.user_id]
+        if 0 <= selection < len(matches):
+            title, url = matches[selection]
+            info = books[title]
+            reply = f"《{title}》的信息如下喵~\n作者: {info['author']}\n分类: {info['category']}\n字数: {info['word_count']}\n状态: {info['is_serialize']}\n更新日期: {info['last_date']}\n下载链接: {url}"
+            if is_group:
+                await msg.reply(text=reply)
+            else:
+                await bot.api.post_private_msg(msg.user_id, text=reply)
+        else:
+            reply = "编号无效喵~请选择列表中的编号喵~"
+            if is_group:
+                await msg.reply(text=reply)
+            else:
+                await bot.api.post_private_msg(msg.user_id, text=reply)
+    except ValueError:
+        reply = "请输入有效的编号喵~"
+        if is_group:
+            await msg.reply(text=reply)
+        else:
+            await bot.api.post_private_msg(msg.user_id, text=reply)
+
+    del temp_selections[msg.user_id]  # 清理临时数据
+
+
 #---------------------------------------------
 
 @register_command("/music","/m",help_text = "/music <音乐名/id> -> 发送音乐")
@@ -1488,7 +1524,7 @@ async def handle_help(msg, is_group=True):
     command_categories = {
         "1": {"name": "漫画相关", "commands": ["/jm", "/jmrank", "/search","/tag","/add_black_list","/del_black_list","/list_black_list","/add_global_black_list","/del_global_black_list","/get_fav", "/add_fav", "/del_fav","/list_fav"]},
         "2": {"name": "聊天设置", "commands": ["/set_prompt", "/del_prompt", "/get_prompt","/del_message","/主动聊天"]},
-        "3": {"name": "娱乐功能", "commands": ["/random_image", "/random_emoticons", "/st","/random_video","/random_dice","/random_rps","/music","/random_music","/dv","/di","/df","/findbook","/select"]},
+        "3": {"name": "娱乐功能", "commands": ["/random_image", "/random_emoticons", "/st","/random_video","/random_dice","/random_rps","/music","/random_music","/dv","/di","/df","/findbook","/select","/info"]},
         "4": {"name": "系统处理", "commands": ["/restart", "/tts", "/agree","/remind","/premind","/set_admin","/del_admin","/get_admin","/set_ids","/set_online_status","/get_friends","/set_qq_avatar","/send_like"]},
         "5": {"name": "群聊管理", "commands": ["/set_group_admin", "/del_group_admin"]}
     }
