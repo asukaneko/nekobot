@@ -1016,23 +1016,42 @@ async def handle_dln(msg, is_group=True):
         else:
             await bot.api.post_private_msg(msg.user_id, text="请输入小说名喵~")
         return
-    matches = get_close_matches(name, books.keys(), n=1, cutoff=0.6)
-    if matches:
-        closest_match = matches[0]
-        if is_group:
-            await msg.reply(text=f"最接近的匹配是 {closest_match}")
-            await msg.reply(text="受网络的影响，下载时间可能较长")
-        else:
-            await bot.api.post_private_msg(msg.user_id, text=f"最接近的匹配是 {closest_match}")
-            await bot.api.post_private_msg(msg.user_id, text="受网络的影响，下载时间可能较长")
-
-        url = books[closest_match].get("download_url")
+    
+    if name in books.keys():  # 精确匹配保留
+        url = books[name].get("download_url")
         await handle_generic_file(msg, is_group, '', 'file', custom_url=url)
-    else:
-        if is_group:
-            await msg.reply(text="没有找到匹配的小说喵~")
+    else:  # 添加模糊匹配
+        # 预处理：同时考虑原始书名和去除括号后的书名
+        all_keys = []
+        for key in books.keys():
+            all_keys.append(key)  # 原始书名
+            clean_key = re.sub(r'\(.*?\)', '', key).strip()
+            if clean_key and clean_key != key:
+                all_keys.append(clean_key)  # 去除括号后的书名
+        
+        # 进行模糊匹配（同时匹配原始和清理后的书名）
+        matches = get_close_matches(name, all_keys, n=2, cutoff=0.5)
+        
+        if matches:
+            # 优先选择匹配度高的结果
+            best_match = matches[0]
+            # 如果是清理后的书名，找到对应的原始书名
+            if best_match not in books.keys():
+                for key in books.keys():
+                    if re.sub(r'\(.*?\)', '', key).strip() == best_match:
+                        best_match = key
+                        break
+            if is_group:
+                await msg.reply(text=f"最接近的匹配是 {best_match}")
+            else:
+                await bot.api.post_private_msg(msg.user_id, text=f"最接近的匹配是 {best_match}")
+            url = books[best_match].get("download_url")
+            await handle_generic_file(msg, is_group, '', 'file', custom_url=url)
         else:
-            await bot.api.post_private_msg(msg.user_id, text="没有找到匹配的小说喵~")
+            if is_group:
+                await msg.reply(text="没有找到匹配的小说喵~")
+            else:
+                await bot.api.post_private_msg(msg.user_id, text="没有找到匹配的小说喵~")
 
     
 #---------------------------------------------
@@ -1420,7 +1439,7 @@ async def handle_help(msg, is_group=True):
     command_categories = {
         "1": {"name": "漫画相关", "commands": ["/jm", "/jmrank", "/search","/tag","/add_black_list","/del_black_list","/list_black_list","/add_global_black_list","/del_global_black_list","/get_fav", "/add_fav", "/del_fav","/list_fav"]},
         "2": {"name": "聊天设置", "commands": ["/set_prompt", "/del_prompt", "/get_prompt","/del_message","/主动聊天"]},
-        "3": {"name": "娱乐功能", "commands": ["/random_image", "/random_emoticons", "/st","/random_video","/random_dice","/random_rps","/music","/random_music","/dv","/di","/df"]},
+        "3": {"name": "娱乐功能", "commands": ["/random_image", "/random_emoticons", "/st","/random_video","/random_dice","/random_rps","/music","/random_music","/dv","/di","/df","/dln"]},
         "4": {"name": "系统处理", "commands": ["/restart", "/tts", "/agree","/remind","/premind","/set_admin","/del_admin","/get_admin","/set_ids","/set_online_status","/get_friends","/set_qq_avatar","/send_like"]},
         "5": {"name": "群聊管理", "commands": ["/set_group_admin", "/del_group_admin"]}
     }
