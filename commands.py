@@ -1425,7 +1425,7 @@ async def handle_find_book(msg, is_group=True):
             matches.append((title, books[title].get("download_url")))
 
     if not matches:
-        reply = f"没有找到包含'{search_term}'的书籍喵~"
+        reply = f"没有找到包含'{search_term}'的轻小说喵~"
         if is_group:
             await msg.reply(text=reply)
         else:
@@ -1434,7 +1434,7 @@ async def handle_find_book(msg, is_group=True):
     
     # 生成选择列表
     choices = "\n".join([f"{i+1}. {title}" for i, (title, _) in enumerate(matches)])
-    reply = f"找到以下匹配的书籍喵~:\n{choices}\n\n请回复'/select 编号'选择要下载的书籍喵~\n回复'/info 编号'获取书籍信息喵~"
+    reply = f"找到以下匹配的轻小说喵~:\n{choices}\n\n请回复'/select 编号'选择要下载的轻小说喵~\n回复'/info 编号'获取轻小说信息喵~"
     
     # 存储匹配结果临时数据
     temp_selections[msg.user_id] = matches
@@ -1448,7 +1448,7 @@ async def handle_find_book(msg, is_group=True):
 @register_command("/select", help_text="/select <编号> -> 选择要下载的轻小说")
 async def handle_select_book(msg, is_group=True):
     if msg.user_id not in temp_selections:
-        reply = "没有找到您的搜索记录喵~请先使用/findbook搜索喵~"
+        reply = "没有找到主人的搜索记录喵~请先使用/findbook搜索喵~"
         if is_group:
             await msg.reply(text=reply)
         else:
