@@ -1482,9 +1482,13 @@ async def handle_help(msg, is_group=True):
         "2": {"name": "聊天设置", "commands": ["/set_prompt", "/del_prompt", "/get_prompt","/del_message","/主动聊天"]},
         "3": {"name": "娱乐功能", "commands": ["/random_image", "/random_emoticons", "/st","/random_video","/random_dice","/random_rps","/music","/random_music","/dv","/di","/df","/findbook","/select"]},
         "4": {"name": "系统处理", "commands": ["/restart", "/tts", "/agree","/remind","/premind","/set_admin","/del_admin","/get_admin","/set_ids","/set_online_status","/get_friends","/set_qq_avatar","/send_like"]},
-        "5": {"name": "群聊管理", "commands": ["/set_group_admin", "/del_group_admin"]},
-        "6": {"name": "全部功能", "commands": [cmd for category in command_categories.values() for cmd in category["commands"] if category != "6"] + ["/help"]}
-
+        "5": {"name": "群聊管理", "commands": ["/set_group_admin", "/del_group_admin"]}
+    }
+    
+    # 添加全部功能分类
+    command_categories["6"] = {
+        "name": "全部功能", 
+        "commands": [cmd for category in command_categories.values() for cmd in category["commands"]] + ["/help"]
     }
 
     # 第一阶段：显示分类菜单
