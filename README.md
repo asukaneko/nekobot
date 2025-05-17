@@ -22,6 +22,7 @@
 - 新增命令：
   - 查询轻小说：`/fb <书名> -> 查询轻小说`
   - 选择并下载轻小说：`/select <编号> -> 选择并下载轻小说`
+  - 查看轻小说信息：`/info <编号> -> 查看轻小说信息`
 
 + 详细查看[CHANGLOG.md](https://github.com/asukaneko/NapCat-jmcomic_download-bot/blob/master/CHANGELOG.md)
 ---

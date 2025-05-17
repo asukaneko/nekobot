@@ -1136,7 +1136,6 @@ async def handle_info(msg, is_group=True):
         else:
             await bot.api.post_private_msg(msg.user_id, text=reply)
 
-    del temp_selections[msg.user_id]  # 清理临时数据
 
 
 #---------------------------------------------
