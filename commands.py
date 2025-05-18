@@ -883,7 +883,7 @@ async def async_send_file(is_group,send_method, target_id, file_type, url,file_n
         if is_group:
             await msg.reply(text=error_msg)
         else:
-            await bot.api.post_private_msg(msg.user_id, text=error_msg)
+            await bot.api.post_private_msg(target_id, text=error_msg)
             
 # 修改通用处理函数
 async def handle_generic_file(msg, is_group: bool, section: str, file_type: str, custom_url: str = None, file_name:str = None):
