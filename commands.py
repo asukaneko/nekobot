@@ -1496,7 +1496,7 @@ async def handle_info(msg, is_group=True):
         if 0 <= selection < len(matches):
             title, url = matches[selection]
             info = books[title]
-            reply = f"《{title}》的信息如下喵~\n作者: {info['author']}\n分类: {info['category']}\n字数: {info['word_count']}\n状态: {info['is_serialize']}\n更新日期: {info['last_date']}\n下载链接: {url}"
+            reply = f"《{title}》的信息如下喵~\n作者: {info['author']}\n分类: {info['category']}\n字数: {info['word_count']}\n状态: {info['is_serialize']}\n更新日期: {info['last_date']}\n下载链接: {url}\n详细页面：{info['page']}"
             if is_group:
                 await msg.reply(text=reply)
             else:
