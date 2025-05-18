@@ -1444,6 +1444,44 @@ async def handle_find_book(msg, is_group=True):
     else:
         await bot.api.post_private_msg(msg.user_id, text=reply)
 
+@register_command("/fa",help_text="/fa <作者> -> 搜索作者")
+async def handle_find_author(msg, is_group=True):
+    search_term = msg.raw_message[len("/fa"):].strip()
+    if not search_term:
+        reply = "请输入要搜索的作者喵~"
+        if is_group:
+            await msg.reply(text=reply)
+        else:
+            await bot.api.post_private_msg(msg.user_id, text=reply)
+        return
+
+    # 模糊匹配作者
+    matches = []
+    for title, book_info in books.items():
+        author = book_info.get("author")
+        if search_term.lower() in author.lower():
+            matches.append((author, title, book_info.get("download_url")))
+
+    if not matches:
+        reply = f"没有找到包含'{search_term}'的作者喵~"
+        if is_group:
+            await msg.reply(text=reply)
+        else:
+            await bot.api.post_private_msg(msg.user_id, text=reply)
+        return
+
+    # 生成选择列表
+    choices = "\n".join([f"{i+1}. {title}" for i, (title, _) in enumerate(matches)])
+    reply = f"找到以下匹配的作者的轻小说喵~:\n{choices}\n\n请回复'/select 编号'选择要下载的轻小说喵~\n回复'/info 编号'获取轻小说信息喵~"
+    # 存储匹配结果临时数据
+    temp_selections[msg.user_id] = matches
+
+    if is_group:
+        await msg.reply(text=reply)
+    else:
+        await bot.api.post_private_msg(msg.user_id, text=reply)
+
+
 # 添加选择处理函数
 @register_command("/select", help_text="/select <编号> -> 选择要下载的轻小说")
 async def handle_select_book(msg, is_group=True):
