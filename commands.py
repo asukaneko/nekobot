@@ -1417,12 +1417,14 @@ async def handle_find_book(msg, is_group=True):
         # 同时匹配原始书名和去除括号后的书名
         clean_title = re.sub(r'\(.*?\)', '', title).strip()
         if (search_term.lower() in title.lower() or search_term.lower() in clean_title.lower()):
-            matches.append((title, book_info.get("download_url")))
+            author = book_info.get("author")
+            matches.append((author,title, book_info.get("download_url")))
         
     if not matches:
         matches2 = get_close_matches(search_term, books.keys(), n=5, cutoff=0.4)
         for title in matches2:
-            matches.append((title, books[title].get("download_url")))
+            author = books[title].get("author")
+            matches.append((author,title, books[title].get("download_url")))
 
     if not matches:
         reply = f"没有找到包含'{search_term}'的轻小说喵~"
@@ -1433,7 +1435,7 @@ async def handle_find_book(msg, is_group=True):
         return
     
     # 生成选择列表
-    choices = "\n".join([f"{i+1}. {title}" for i, (title, _) in enumerate(matches)])
+    choices = "\n".join([f"{i+1}. {title} -- {author}" for i, (author,title, _) in enumerate(matches)])
     reply = f"找到以下匹配的轻小说喵~:\n{choices}\n\n请回复'/select 编号'选择要下载的轻小说喵~\n回复'/info 编号'获取轻小说信息喵~"
     
     # 存储匹配结果临时数据
@@ -1471,7 +1473,7 @@ async def handle_find_author(msg, is_group=True):
         return
 
     # 生成选择列表
-    choices = "\n".join([f"{i+1}. {title}" for i, (title, _) in enumerate(matches)])
+    choices = "\n".join([f"{i+1}. {title} -- {author}" for i, (author,title, _) in enumerate(matches)])
     reply = f"找到以下匹配的作者的轻小说喵~:\n{choices}\n\n请回复'/select 编号'选择要下载的轻小说喵~\n回复'/info 编号'获取轻小说信息喵~"
     # 存储匹配结果临时数据
     temp_selections[msg.user_id] = matches
