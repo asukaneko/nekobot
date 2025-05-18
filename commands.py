@@ -1577,7 +1577,7 @@ async def handle_help(msg, is_group=True):
         "3": {"name": "娱乐功能", "commands": ["/random_image", "/random_emoticons", "/st","/random_video","/random_dice","/random_rps","/music","/random_music","/dv","/di","/df"]},
         "4": {"name": "系统处理", "commands": ["/restart", "/tts", "/agree","/remind","/premind","/set_admin","/del_admin","/get_admin","/set_ids","/set_online_status","/get_friends","/set_qq_avatar","/send_like"]},
         "5": {"name": "群聊管理", "commands": ["/set_group_admin", "/del_group_admin"]},
-        "6": {"name": "轻小说命令", "commands": ["/findbook", "/select", "/info","/random_novel"]}
+        "6": {"name": "轻小说命令", "commands": ["/findbook","/fa" , "/select", "/info","/random_novel"]}
     }
     
     # 添加全部功能分类
