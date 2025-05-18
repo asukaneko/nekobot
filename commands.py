@@ -1499,8 +1499,8 @@ async def handle_select_book(msg, is_group=True):
         selection = int(msg.raw_message[len("/select"):].strip()) - 1
         matches = temp_selections[msg.user_id]
         if 0 <= selection < len(matches):
-            title, url = matches[selection]
-            reply = f"已开始下载《{title}》喵~"
+            author,title, url = matches[selection]
+            reply = f"已开始下载《{title}》-- {author}喵~"
             if is_group:
                 await msg.reply(text=reply)
             else:
@@ -1534,9 +1534,9 @@ async def handle_info(msg, is_group=True):
         selection = int(msg.raw_message[len("/info"):].strip()) - 1
         matches = temp_selections[msg.user_id]
         if 0 <= selection < len(matches):
-            title, url = matches[selection]
+            author,title, url = matches[selection]
             info = books[title]
-            reply = f"《{title}》的信息如下喵~\n作者: {info['author']}\n分类: {info['category']}\n字数: {info['word_count']}\n状态: {info['is_serialize']}\n更新日期: {info['last_date']}\n下载链接: {url}\n详细页面：{info['page']}"
+            reply = f"《{title}》的信息如下喵~\n作者: {author}\n分类: {info['category']}\n字数: {info['word_count']}\n状态: {info['is_serialize']}\n更新日期: {info['last_date']}\n下载链接: {url}\n详细页面：{info['page']}"
             if is_group:
                 await msg.reply(text=reply)
             else:
