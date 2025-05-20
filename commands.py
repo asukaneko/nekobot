@@ -934,10 +934,10 @@ async def handle_generic_file(msg, is_group: bool, section: str, file_type: str,
         send_method = bot.api.post_group_file if is_group else bot.api.post_private_file
         target_id = msg.group_id if is_group else msg.user_id
         if custom_send_method:
-            async_send_file(is_group,custom_send_method, target_id, file_type, selected_url,file_name)
+            await async_send_file(is_group,custom_send_method, target_id, file_type, selected_url,file_name)
         else:
             asyncio.create_task(
-                async_send_file(is_group,send_method, target_id, file_type, selected_url,file_name)
+                await async_send_file(is_group,send_method, target_id, file_type, selected_url,file_name)
             )
 
     except Exception as e:
