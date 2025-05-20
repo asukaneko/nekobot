@@ -886,13 +886,15 @@ async def async_send_file(is_group,send_method, target_id, file_type, url,file_n
             await bot.api.post_private_msg(target_id, text=error_msg)
             
 # 修改通用处理函数
-async def handle_generic_file(msg, is_group: bool, section: str, file_type: str, custom_url: str = None, file_name:str = None):
+async def handle_generic_file(msg, is_group: bool, section: str, file_type: str, custom_url: str = None, file_name:str = None,custom_send_method=None):
     """通用文件处理函数（修复版）
        :param msg: 消息对象
        :param is_group: 是否为群组消息
-       :param section: 配置文件中的section名称
+       :param section: 配置文件中的section名称(可选)
        :param file_type: 文件类型(image、record、video、file、markdown)
        :param custom_url: 自定义URL(可选)
+       :param file_name: 文件名(可选)
+       :param custom_send_method: 发送方法(可选)
     """
     """
         支持的file_type:
@@ -929,11 +931,14 @@ async def handle_generic_file(msg, is_group: bool, section: str, file_type: str,
             selected_url = custom_url
 
         # 创建后台任务
-        send_method = bot.api.post_group_file if is_group else bot.api.upload_private_file
+        send_method = bot.api.post_group_file if is_group else bot.api.post_private_file
         target_id = msg.group_id if is_group else msg.user_id
-        asyncio.create_task(
-            async_send_file(is_group,send_method, target_id, file_type, selected_url,file_name)
-        )
+        if custom_send_method:
+            async_send_file(is_group,custom_send_method, target_id, file_type, selected_url,file_name)
+        else:
+            asyncio.create_task(
+                async_send_file(is_group,send_method, target_id, file_type, selected_url,file_name)
+            )
 
     except Exception as e:
         error_msg = f"配置错误喵~: {str(e)}" if '配置' in str(e) else f"获取失败喵~: {str(e)}"
@@ -1505,7 +1510,7 @@ async def handle_select_book(msg, is_group=True):
                 await msg.reply(text=reply)
             else:
                 await bot.api.post_private_msg(msg.user_id, text=reply)
-            await handle_generic_file(msg, is_group, '', 'file', custom_url=url,file_name=title+".txt")
+            await handle_generic_file(msg, is_group, '', 'file', custom_url=url,file_name=title+".txt",custom_send_method=bot.api.upload_private_file)
         else:
             reply = "编号无效喵~请选择列表中的编号喵~"
             if is_group:
@@ -1564,7 +1569,7 @@ async def handle_random_novel(msg, is_group=True):
         await handle_generic_file(msg, is_group, '', 'file', custom_url=url,file_name=novel+".txt")
     else:
         await bot.api.post_private_msg(msg.user_id, text=reply)
-        await handle_generic_file(msg, is_group, '', 'file', custom_url=url,file_name=novel+".txt")
+        await handle_generic_file(msg, is_group, '', 'file', custom_url=url,file_name=novel+".txt",custom_send_method=bot.api.upload_private_file)
 
 
 #将help命令放在最后
