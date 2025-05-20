@@ -877,7 +877,7 @@ async def async_send_file(is_group,send_method, target_id, file_type, url,file_n
         if is_group:
             await send_method(target_id, **{file_type: final_url})
         else:
-            await send_method(target_id, **{file_type: final_url},name = file_name)
+            await send_method(target_id, final_url,name = file_name)
     except Exception as e:
         error_msg = f"发送失败喵~: {str(e)}"
         if is_group:
@@ -931,7 +931,7 @@ async def handle_generic_file(msg, is_group: bool, section: str, file_type: str,
             selected_url = custom_url
 
         # 创建后台任务
-        send_method = bot.api.post_group_file if is_group else bot.api.post_private_file
+        send_method = bot.api.post_group_file if is_group else bot.api.upload_private_file
         target_id = msg.group_id if is_group else msg.user_id
         if custom_send_method:
             await async_send_file(is_group,custom_send_method, target_id, file_type, selected_url,file_name)
