@@ -1601,7 +1601,7 @@ async def handle_mc(msg, is_group=True):
         import mcstatus
         server = mcstatus.JavaServer.lookup(server)
         status = server.status()
-        reply = f"服务器状态如下喵~\n版本: {status.version.name}\n在线人数: {status.players.online}\n最大人数: {status.players.max}\n延迟: {status.latency}ms"
+        reply = f"服务器状态如下喵~\n服务器描述：{status.description}\n版本: {status.version.name}\n在线人数: {status.players.online}\n最大人数: {status.players.max}\n延迟: {int(status.latency)}ms"
         if is_group:
             await msg.reply(text=reply)
         else:
