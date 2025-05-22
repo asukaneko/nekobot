@@ -1571,6 +1571,110 @@ async def handle_random_novel(msg, is_group=True):
         await bot.api.post_private_msg(msg.user_id, text=reply)
         await handle_generic_file(msg, is_group, '', 'file', custom_url=url,file_name=novel+".txt",custom_send_method=bot.api.upload_private_file)
 
+mc = {}
+@register_command("/mc",help_text = "/mc <服务器地址> -> 发送mc服务器状态")
+async def handle_mc(msg, is_group=True):
+    if os.path.exists("mc.txt"):
+        with open("mc.txt", "r") as f:
+            for line in f:
+                parts = line.strip().split(":")
+                if len(parts) >= 2:
+                    id = parts[0]
+                    server = ":".join(parts[1:])
+                    mc[id] = server
+    else:
+        with open("mc.txt", "w") as f:
+            pass
+    server = msg.raw_message[len("/mc"):].strip()
+    if not server:
+        if str(msg.user_id) in mc:
+            server = mc[str(msg.user_id)]
+        else:
+            reply = "请输入服务器地址或使用/mc_bind进行绑定喵~"
+            if is_group:
+                await msg.reply(text=reply)
+            else:
+                await bot.api.post_private_msg(msg.user_id, text=reply)
+            return
+    
+    try:
+        import mcstatus
+        server = mcstatus.JavaServer.lookup(server)
+        status = server.status()
+        reply = f"服务器状态如下喵~\n版本: {status.version.name}\n在线人数: {status.players.online}\n最大人数: {status.players.max}\n延迟: {status.latency}ms"
+        if is_group:
+            await msg.reply(text=reply)
+        else:
+            await bot.api.post_private_msg(msg.user_id, text=reply)
+    except ImportError:
+        reply = "未安装mcstatus库喵~请使用pip install mcstatus进行安装喵~"
+        if is_group:
+            await msg.reply(text=reply)
+        else:
+            await bot.api.post_private_msg(msg.user_id, text=reply)
+    except Exception as e:
+        reply = "获取服务器状态失败喵~"
+        if is_group:
+            await msg.reply(text=reply)
+        else:
+            await bot.api.post_private_msg(msg.user_id, text=reply)
+
+@register_command("/mc_bind",help_text = "/mc_bind <服务器地址> -> 绑定mc服务器")
+async def handle_mc_bind(msg, is_group=True):
+    server = msg.raw_message[len("/mc_bind"):].strip()
+    if not server:
+        reply = "请输入服务器地址喵~"
+        if is_group:
+            await msg.reply(text=reply)
+        else:
+            await bot.api.post_private_msg(msg.user_id, text=reply)
+        return
+    mc[str(msg.user_id)] = server
+    with open("mc.txt", "a") as f:
+        f.write(f"{msg.user_id}:{server}\n")
+    reply = "绑定成功喵~"
+    if is_group:
+        await msg.reply(text=reply)
+    else:
+        await bot.api.post_private_msg(msg.user_id, text=reply)
+
+@register_command("/mc_unbind",help_text = "/mc_unbind -> 解绑mc服务器")
+async def handle_mc_unbind(msg, is_group=True):
+    if str(msg.user_id) in mc:
+        del mc[str(msg.user_id)]
+        with open("mc.txt", "r") as f:
+            lines = f.readlines()
+        with open("mc.txt", "w") as f:
+            for line in lines:
+                if line.split(":")[0] != str(msg.user_id):
+                    f.write(line)
+        reply = "解绑成功喵~"
+        if is_group:
+            await msg.reply(text=reply)
+        else:
+            await bot.api.post_private_msg(msg.user_id, text=reply)
+    else:
+        reply = "你没有绑定过mc服务器喵~"
+        if is_group:
+            await msg.reply(text=reply)
+        else:
+            await bot.api.post_private_msg(msg.user_id, text=reply)
+
+@register_command("/mc_show",help_text = "/mc_show -> 查看绑定的mc服务器")
+async def handle_mc_show(msg, is_group=True):
+    if str(msg.user_id) in mc:
+        reply = f"你绑定的mc服务器是：{mc[str(msg.user_id)]}"
+        if is_group:
+            await msg.reply(text=reply)
+        else:
+            await bot.api.post_private_msg(msg.user_id, text=reply)
+    else:
+        reply = "你没有绑定过mc服务器喵~"
+        if is_group:
+            await msg.reply(text=reply)
+        else:
+            await bot.api.post_private_msg(msg.user_id, text=reply)
+
 
 #将help命令放在最后
 @register_command("/help","/h",help_text = "/help 或者 /h -> 查看帮助")
@@ -1579,7 +1683,7 @@ async def handle_help(msg, is_group=True):
     command_categories = {
         "1": {"name": "漫画相关", "commands": ["/jm", "/jmrank", "/search","/tag","/add_black_list","/del_black_list","/list_black_list","/add_global_black_list","/del_global_black_list","/get_fav", "/add_fav", "/del_fav","/list_fav"]},
         "2": {"name": "聊天设置", "commands": ["/set_prompt", "/del_prompt", "/get_prompt","/del_message","/主动聊天"]},
-        "3": {"name": "娱乐功能", "commands": ["/random_image", "/random_emoticons", "/st","/random_video","/random_dice","/random_rps","/music","/random_music","/dv","/di","/df"]},
+        "3": {"name": "娱乐功能", "commands": ["/random_image", "/random_emoticons", "/st","/random_video","/random_dice","/random_rps","/music","/random_music","/dv","/di","/df","/mc","/mc_bind","/mc_unbind","/mc_show"]},
         "4": {"name": "系统处理", "commands": ["/restart", "/tts", "/agree","/remind","/premind","/set_admin","/del_admin","/get_admin","/set_ids","/set_online_status","/get_friends","/set_qq_avatar","/send_like"]},
         "5": {"name": "群聊管理", "commands": ["/set_group_admin", "/del_group_admin"]},
         "6": {"name": "轻小说命令", "commands": ["/findbook","/fa" , "/select", "/info","/random_novel"]}

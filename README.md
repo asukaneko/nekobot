@@ -17,13 +17,13 @@
 
 ---
 ## ✨Updates 更新  
-![](https://img.shields.io/badge/LatestVersion-1.4.0-blue?&logo=react)
+![](https://img.shields.io/badge/LatestVersion-1.4.1-blue?&logo=react)
 
 - 新增命令：
-  - 查询轻小说：`/fb <书名> -> 查询轻小说`
-  - 查询作者：`/fa <作者> -> 查询作者`
-  - 选择并下载轻小说：`/select <编号> -> 选择并下载轻小说`
-  - 查看轻小说信息：`/info <编号> -> 查看轻小说信息`
+  - 查询mc服务器：`/mc <服务器地址> -> 查询mc服务器`
+  - 绑定mc服务器：`/mc_bind <服务器地址> -> 绑定mc服务器`
+  - 解绑mc服务器：`/mc_unbind <服务器地址> -> 解绑mc服务器`
+  - 查看绑定的mc服务器：`/mc_show -> 查看绑定的mc服务器`
 
 + 详细查看[CHANGLOG.md](https://github.com/asukaneko/NapCat-jmcomic_download-bot/blob/master/CHANGELOG.md)
 ---
