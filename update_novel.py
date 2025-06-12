@@ -122,7 +122,8 @@ class NovelDownloader:
                     "last_date": last_update,
                     "word_count": length,
                     "download_url": f"https://dl.wenku8.com/down.php?type=txt&node=1&id={url}",
-                    "is_serialize": status
+                    "is_serialize": status,
+                    "page": f"https://www.wenku8.net/book/{url}.htm"
                 }
 
                 if name in data:
