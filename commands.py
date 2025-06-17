@@ -529,6 +529,7 @@ async def download_and_send_comic(comic_id, msg, is_group):
             await bot.api.post_private_msg(msg.user_id, text=success_text)
 
     except Exception as e:
+        file_path = os.path.join(pdf_dir, f"pdf/{comic_id}.pdf")
         error_msg = f"下载失败喵~: {str(e)}"
         if is_group:
             await msg.reply(text=error_msg)
