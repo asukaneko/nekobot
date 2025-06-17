@@ -261,6 +261,7 @@ async def handle_tts(msg, is_group=True):
         await bot.api.post_private_msg(msg.user_id, text=text)
 
 #漫画类命令----------------
+comic_cache = []
 @register_command("/jmrank",help_text = "/jmrank <月排行/周排行> -> 获取排行榜")
 async def handle_jmrank(msg, is_group=True):
     if is_group:
@@ -292,6 +293,9 @@ async def handle_jmrank(msg, is_group=True):
     name = time.time()
 
     tot = 0
+
+    comic_cache.clear()
+
     for page in cl.categories_filter_gen(page=1,  # 起始页码
                                          # 下面是分类参数
                                          time=JmMagicConstants.TIME_WEEK,
@@ -302,6 +306,7 @@ async def handle_jmrank(msg, is_group=True):
             tot += 1
             with open(os.path.join(cache_dir , f"{select}_{name}.txt"), "a", encoding="utf-8") as f:
                 f.write(f"{tot}: {aid}  {atitle}\n\n")
+            comic_cache.append(aid)
 
     if not os.path.exists(os.path.join(cache_dir , f"{select}_{name}.txt")):
         if is_group:
@@ -478,6 +483,9 @@ async def handle_jmcomic(msg, is_group=True):
                 await bot.api.post_private_msg(msg.user_id,text="该漫画已存在喵~,正在发送喵~")
                 await bot.api.upload_private_file(msg.user_id, os.path.join(load_address(),f"pdf/{comic_id}.pdf"), f"{comic_id}.pdf")
             return
+
+        if int(comic_id) < 100:
+            comic_id = comic_cache[int(comic_id)-1]
 
         # 立即回复用户，不等待下载完成
         reply_text = f"已开始下载漫画ID：{comic_id}，下载完成后会自动通知喵~"
