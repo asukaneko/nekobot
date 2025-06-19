@@ -485,7 +485,15 @@ async def handle_jmcomic(msg, is_group=True):
             return
 
         if int(comic_id) < 100 and len(comic_cache) > 0 :
-            comic_id = comic_cache[int(comic_id)-1]
+            try:
+                comic_id = comic_cache[int(comic_id)-1]
+            except IndexError:
+                error_msg = "超出范围了喵~"
+                if is_group:
+                    await msg.reply(text=error_msg)
+                else:
+                    await bot.api.post_private_msg(msg.user_id, text=error_msg)
+                return
 
         # 立即回复用户，不等待下载完成
         reply_text = f"已开始下载漫画ID：{comic_id}，下载完成后会自动通知喵~"
