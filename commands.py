@@ -484,7 +484,7 @@ async def handle_jmcomic(msg, is_group=True):
                 await bot.api.upload_private_file(msg.user_id, os.path.join(load_address(),f"pdf/{comic_id}.pdf"), f"{comic_id}.pdf")
             return
 
-        if int(comic_id) < 100:
+        if int(comic_id) < 100 and len(comic_cache) > 0 :
             comic_id = comic_cache[int(comic_id)-1]
 
         # 立即回复用户，不等待下载完成
@@ -542,7 +542,15 @@ async def download_and_send_comic(comic_id, msg, is_group):
             else:
                 await bot.api.post_private_msg(msg.user_id,text="部分下载失败了喵~，正在发送剩余的文件喵~")
                 await bot.api.upload_private_file(msg.user_id, file_path, f"{comic_id}.pdf")
-        
+
+@register_command("/jm_clear",help_text = "/jm_clear -> 清除缓存")
+async def handle_jm_clear(msg, is_group=True):
+    comic_cache.clear()
+    if is_group:
+        await msg.reply(text="缓存已清除喵~")
+    else:
+        await bot.api.post_private_msg(msg.user_id, text="缓存已清除喵~")
+
 
 # ====下面的收藏夹不是官方的收藏夹，是本地储存的====
 @register_command("/add_fav", help_text="/add_fav <漫画ID> -> 添加收藏")
@@ -1690,7 +1698,7 @@ async def handle_mc_show(msg, is_group=True):
 async def handle_help(msg, is_group=True):
     # 定义命令分类
     command_categories = {
-        "1": {"name": "漫画相关", "commands": ["/jm", "/jmrank", "/search","/tag","/add_black_list","/del_black_list","/list_black_list","/add_global_black_list","/del_global_black_list","/get_fav", "/add_fav", "/del_fav","/list_fav"]},
+        "1": {"name": "漫画相关", "commands": ["/jm", "/jmrank","/jm_clear", "/search","/tag","/add_black_list","/del_black_list","/list_black_list","/add_global_black_list","/del_global_black_list","/get_fav", "/add_fav", "/del_fav","/list_fav"]},
         "2": {"name": "聊天设置", "commands": ["/set_prompt", "/del_prompt", "/get_prompt","/del_message","/主动聊天"]},
         "3": {"name": "娱乐功能", "commands": ["/random_image", "/random_emoticons", "/st","/random_video","/random_dice","/random_rps","/music","/random_music","/dv","/di","/df","/mc","/mc_bind","/mc_unbind","/mc_show"]},
         "4": {"name": "系统处理", "commands": ["/restart", "/tts", "/agree","/remind","/premind","/set_admin","/del_admin","/get_admin","/set_ids","/set_online_status","/get_friends","/set_qq_avatar","/send_like"]},
