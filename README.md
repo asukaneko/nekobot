@@ -82,12 +82,12 @@ docker：https://asukablog.iepose.cn/archives/5f583afd-c9b1-420f-bc4b-41f4dfc039
 ## =============== ↓ Quick Start  ↓ ===============
 ### ⬇️Download Source Code  
 ```
-git clone https://github.com/asukaneko/NapCat-jmcomic_download-bot.git
+git clone https://github.com/asukaneko/Ncatbot-comic-QQbot.git
 ```
 
 ### 📦Install Dependencies   
 ```
-cd NapCat-jmcomic_download-bot
+cd Ncatbot-comic-QQbot
 pip install -r requirements.txt
 ```
 

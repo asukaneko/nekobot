@@ -86,12 +86,12 @@ docker部署指南：https://asukanas.iepose.cn/archives/5f583afd-c9b1-420f-bc4b
 ## =============== ↓ 快速开始 ↓ ===============
 ### ⬇️下载源码 
 ```
-git clone https://github.com/asukaneko/NapCat-jmcomic_download-bot.git
+git clone https://github.com/asukaneko/Ncatbot-comic-QQbot.git
 ```
 
 ### 📦安装依赖  
 ```
-cd NapCat-jmcomic_download-bot
+cd Ncatbot-comic-QQbot
 pip install -r requirements.txt
 ```
 
