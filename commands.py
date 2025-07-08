@@ -453,7 +453,6 @@ async def handle_jmcomic(msg, is_group=True):
     match = re.match(r'^/jm\s+(\d+)$', msg.raw_message)
     if match:
         comic_id = match.group(1)
-
         # 检查是否在全局、群组或用户黑名单中
         if comic_id in black_list_comic["global"]:
             error_msg = "该漫画已被加入黑名单喵~"
@@ -484,7 +483,7 @@ async def handle_jmcomic(msg, is_group=True):
                 await bot.api.upload_private_file(msg.user_id, os.path.join(load_address(),f"pdf/{comic_id}.pdf"), f"{comic_id}.pdf")
             return
 
-        if int(comic_id) < 100 and len(comic_cache) > 0 :
+        if int(comic_id) <= len(comic_cache) and len(comic_cache) > 0 :
             try:
                 comic_id = comic_cache[int(comic_id)-1]
             except IndexError:
