@@ -17,13 +17,16 @@ async def on_group_message(msg: GroupMessage):
             for cmd in command:
                 if re.match(rf'^{re.escape(cmd)}(?:\s|$)', msg.raw_message):
                     await handler(msg, is_group=True)
+                    _log.info(f"调用{cmd}命令")
                     return
         elif re.match(fr'^{re.escape(command)}(?:\s|$)', msg.raw_message): # 处理单个命令情况
             await handler(msg, is_group=False)
+            _log.info(f"调用{command}命令")
             return
 
     if msg.raw_message.startswith("/chat"):
         content = chat(msg.raw_message, group_id=msg.group_id,group_user_id=msg.sender.nickname)
+        _log.info("调用chat命令")
         await msg.reply(text=content)
 
     if msg.message[0].get("type") == "at" and msg.message[0].get("data").get("qq") == bot_id:
@@ -82,9 +85,11 @@ async def on_private_message(msg: PrivateMessage):
         if isinstance(command, tuple):  # 处理命令别名情况
             for cmd in command:
                 if re.match(rf'^{re.escape(cmd)}(?:\s|$)', msg.raw_message):
+                    _log.info(f"调用{cmd}命令")
                     await handler(msg, is_group=False)
                     return
         elif re.match(fr'^{re.escape(command)}(?:\s|$)', msg.raw_message): # 处理单个命令情况
+            _log.info(f"调用{command}命令")
             await handler(msg, is_group=False)
             return
     
@@ -115,8 +120,7 @@ async def on_private_message(msg: PrivateMessage):
         if msg.message[0].get("type") == "reply": #处理回复
             reply_id = msg.message[0].get("data").get("id")
             msg_obj = await bot.api.get_msg(message_id=reply_id)
-            print(msg_obj)
-
+            #print(msg_obj)
             if msg_obj.get("data").get("message")[0].get("type") == "image": #处理图片
                 url = msg_obj.get("data").get("message")[0].get("data").get("url")
                 try:  #预防回复图片时没有内容的情况
