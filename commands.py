@@ -508,7 +508,7 @@ async def handle_jmcomic(msg, is_group=True):
         if not is_group:
             await bot.api.post_private_msg(msg.user_id, text=error_msg)
 
-# 新增后台任务函数
+#后台任务函数
 async def download_and_send_comic(comic_id, msg, is_group):
     try:
         # 在线程池中执行阻塞操作

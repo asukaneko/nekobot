@@ -98,7 +98,7 @@ async def on_private_message(msg: PrivateMessage):
             running[str(msg.user_id)]["last_time"] = time.time()
         write_running()
     except KeyError:
-        pass
+        _log.info(f"用户{msg.user_id}不在运行状态")
 
     try:
         if msg.message[0].get("type") == "image": #处理图片
