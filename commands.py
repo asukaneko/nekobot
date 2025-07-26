@@ -1532,9 +1532,10 @@ async def handle_select_book(msg, is_group=True):
             reply = f"已开始下载《{title}》-- {author}喵~"
             if is_group:
                 await msg.reply(text=reply)
+                await handle_generic_file(msg, is_group, '', 'file', custom_url=url,file_name=title+".txt",custom_send_method=bot.api.upload_private_file)
             else:
                 await bot.api.post_private_msg(msg.user_id, text=reply)
-            await handle_generic_file(msg, is_group, '', 'file', custom_url=url,file_name=title+".txt",custom_send_method=bot.api.upload_private_file)
+                await bot.api.upload_private_file(msg.user_id,file=url,name=title+".txt")
         else:
             reply = "编号无效喵~请选择列表中的编号喵~"
             if is_group:
