@@ -168,4 +168,4 @@ async def on_private_message(msg: PrivateMessage):
             await bot.api.post_private_msg(msg.user_id, text=content)
 
 if __name__ == "__main__":
-    bot.run(reload=False)
+    bot.run(enable_webui_interaction=False)

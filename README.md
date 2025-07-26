@@ -40,44 +40,6 @@ docker：https://asukablog.iepose.cn/archives/5f583afd-c9b1-420f-bc4b-41f4dfc039
 | ncatbot | [![](https://img.shields.io/badge/ncatbot-on_Github-blue)](https://github.com/liyihao1110/ncatbot) | [![](https://img.shields.io/badge/Python_Sdk-Ncatbot-8A2BE2)](https://docs.ncatbot.xyz/) |
 |:-:|:-:|:-:|
 
-### 📂Directory Structure
-```
-.
-│  bot.py
-│  chat.py
-│  config.ini
-│  config.py
-│  commands.py
-│  LICENSE
-│  neko.txt
-│  number.txt
-│  option.yml
-│  README.md
-│  requirements.txt
-│  urls.ini
-│  
-├─logs
-│      
-├─napcat
-│  ├─...... 
-│  └─......
-├─plugins
-│
-├─prompts
-│  ├─group
-│  └─user
-├─saved_images
-│      
-├─saved_message
-│
-└─cache
-    ├─comic
-    ├─saved_images
-    ├─list
-    ├─fav
-    ├─pdf
-    └─......
-```
 
 ## =============== ↓ Quick Start  ↓ ===============
 ### ⬇️Download Source Code  
@@ -156,3 +118,42 @@ Command List:
 [license-shield]: https://img.shields.io/github/license/asukaneko/NapCat-jmcomic_download-bot.svg?style=flat
 [license-url]: https://github.com/asukaneko/NapCat-jmcomic_download-bot/blob/master/LICENSE
 [linkedin-shield]: https://img.shields.io/badge/-LinkedIn-black.svg?style=flat&logo=linkedin&colorB=555
+
+### 📂Directory Structure
+```
+.
+│  bot.py
+│  chat.py
+│  config.ini
+│  config.py
+│  commands.py
+│  LICENSE
+│  neko.txt
+│  number.txt
+│  option.yml
+│  README.md
+│  requirements.txt
+│  urls.ini
+│  
+├─logs
+│      
+├─napcat
+│  ├─...... 
+│  └─......
+├─plugins
+│
+├─prompts
+│  ├─group
+│  └─user
+├─saved_images
+│      
+├─saved_message
+│
+└─cache
+    ├─comic
+    ├─saved_images
+    ├─list
+    ├─fav
+    ├─pdf
+    └─......
+```
