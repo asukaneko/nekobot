@@ -24,17 +24,18 @@
 ## 📌开始之前  
 [![](https://img.shields.io/badge/python-version>=3.7-red?logo=python)]()
 >**⚠️重要提示**  
-> 若出现未知错误，请检查是否已安装最新版本的napcat和ncatbot
+> 若出现未知错误，请检查是否已安装最新版本的napcat和ncatbot  
+>
+> 若在命令行阶段无法安装napcat，请去[napcat下载页](https://github.com/NapNeko/NapCatQQ/releases/download/v4.8.95/NapCat.Shell.zip)下载最新版的NapCat.Shell.zip，解压到根目录，并把文件夹重命名为napcat
 
 >环境为 <u>___windows___</u>  
 >建议使用 __小号__ 登录  
 >基于jmcomic和ncatbot开发  
 >有任何问题欢迎提issue，或发送给我的邮箱ycssbc@126.com  
 
-docker部署指南：https://asukanas.iepose.cn/archives/5f583afd-c9b1-420f-bc4b-41f4dfc039d3
-
  **📝相关文档**
 
+docker部署指南：https://asukanas.iepose.cn/archives/5f583afd-c9b1-420f-bc4b-41f4dfc039d3
 | jmcomic | [![](https://img.shields.io/badge/jmcomic-on_Github-blue)](https://github.com/hect0x7/JMComic-Crawler-Python) | [![](https://img.shields.io/badge/jmcomic-Readthedocs.io-orange)](https://jmcomic.readthedocs.io/zh-cn/latest/) |
 |:-:|:-:|:-:|
 
@@ -44,44 +45,6 @@ docker部署指南：https://asukanas.iepose.cn/archives/5f583afd-c9b1-420f-bc4b
 | ncatbot | [![](https://img.shields.io/badge/ncatbot-on_Github-blue)](https://github.com/liyihao1110/ncatbot) | [![](https://img.shields.io/badge/Python_Sdk-Ncatbot-8A2BE2)](https://docs.ncatbot.xyz/) |
 |:-:|:-:|:-:|
 
-### 📂Directory Structure
-```
-.
-│  bot.py
-│  chat.py
-│  config.ini
-│  config.py
-│  commands.py
-│  LICENSE
-│  neko.txt
-│  number.txt
-│  option.yml
-│  README.md
-│  requirements.txt
-│  urls.ini
-│  
-├─logs
-│      
-├─napcat
-│  ├─...... 
-│  └─......
-├─plugins
-│
-├─prompts
-│  ├─group
-│  └─user
-├─saved_images
-│      
-├─saved_message
-│
-└─cache
-    ├─comic
-    ├─saved_images
-    ├─list
-    ├─fav
-    ├─pdf
-    └─......
-```
 
 ## =============== ↓ 快速开始 ↓ ===============
 ### ⬇️下载源码 
@@ -147,6 +110,45 @@ Command List:
 + 支持保存对话记录
 + 快速添加命令
 + 配置要求低，轻量，占用内存小
+
+### 📂Directory Structure
+```
+.
+│  bot.py
+│  chat.py
+│  config.ini
+│  config.py
+│  commands.py
+│  LICENSE
+│  neko.txt
+│  number.txt
+│  option.yml
+│  README.md
+│  requirements.txt
+│  urls.ini
+│  
+├─logs
+│      
+├─napcat
+│  ├─...... 
+│  └─......
+├─plugins
+│
+├─prompts
+│  ├─group
+│  └─user
+├─saved_images
+│      
+├─saved_message
+│
+└─cache
+    ├─comic
+    ├─saved_images
+    ├─list
+    ├─fav
+    ├─pdf
+    └─......
+```
 
 [your-project-path]:asukaneko/NapCat-jmcomic_download-bot
 [contributors-shield]: https://img.shields.io/github/contributors/asukaneko/NapCat-jmcomic_download-bot.svg?style=flat

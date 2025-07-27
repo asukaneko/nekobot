@@ -19,18 +19,21 @@
 
 ## 📌Before You Start  
 [![](https://img.shields.io/badge/python-version>=3.7-red?logo=python)]()
->**⚠️Important Notice **  
-> if you encounter any error, please check if you have installed the latest version of napcat and ncatbot
+> **⚠️Important Notice**  
+> if you encounter any error, please check if you have installed the latest version of napcat and ncatbot  
+>
+> If you are unable to install NapCat, please go to the [NapCat Download Page](https://github.com/NapNeko/NapCatQQ/releases/download/v4.8.95/NapCat.Shell.zip) to download the latest version of NapCat.Shell.zip, extract it to the root directory, and rename it to "napcat."
+
 
 >Environment: <u>___windows___</u>   
 >Recommended to use a __secondary account__ for login  
 >Developed based on jmcomic and ncatbot   
 >For any issues, please submit to GitHub or email ycssbc@126.com  
 
-docker：https://asukablog.iepose.cn/archives/5f583afd-c9b1-420f-bc4b-41f4dfc039d3
 
  **📝Related Documents**
 
+docker：https://asukablog.iepose.cn/archives/5f583afd-c9b1-420f-bc4b-41f4dfc039d3  
 | jmcomic | [![](https://img.shields.io/badge/jmcomic-on_Github-blue)](https://github.com/hect0x7/JMComic-Crawler-Python) | [![](https://img.shields.io/badge/jmcomic-Readthedocs.io-orange)](https://jmcomic.readthedocs.io/zh-cn/latest/) |
 |:-:|:-:|:-:|
 
