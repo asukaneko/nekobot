@@ -114,7 +114,7 @@ def chat(content="", user_id=None, group_id=None, group_user_id=None,image=False
             dirs = os.path.join(cache_address,"saved_images")
             os.makedirs(dirs, exist_ok=True)
             name = int(time.time())
-            file_name = os.path.join(dirs , f"/{name}.jpg")
+            file_name = os.path.join(dirs , f"{name}.jpg")
             if not os.path.exists(file_name):
                 with open(file_name, "wb") as file:
                     file.write(response.content)
