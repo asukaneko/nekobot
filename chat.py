@@ -123,7 +123,7 @@ def chat(content="", user_id=None, group_id=None, group_user_id=None,image=False
     else:
         pre_text = ""
 
-    if content.startswith("搜索"):
+    if content.startswith("搜索") | ("搜索" in content):
         search_status = 1
     else:
         search_status = 0
