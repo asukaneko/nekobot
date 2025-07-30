@@ -26,12 +26,16 @@ api_key = config_parser.get('ApiKey', 'api_key')
 base_url = config_parser.get('ApiKey', 'base_url')
 model = config_parser.get('ApiKey', 'model')
 MAX_HISTORY_LENGTH = config_parser.getint('chat', 'MAX_HISTORY_LENGTH')
-#用于图片识别
+#用于图片识别：
 MOONSHOT_API_KEY = config_parser.get('pic', 'MOONSHOT_API_KEY')
 MOONSHOT_MODEL = config_parser.get('pic', 'MOONSHOT_MODEL')
 cache_address = config_parser.get('cache','cache_address')
 
 voice = config_parser.get('voice','voice')
+
+#用于在线搜索：
+search_api_key = config_parser.get('search','api_key')
+search_api_url = config_parser.get('search','api_url')
 
 def remove_brackets_content(text) -> str:
     """
@@ -73,6 +77,19 @@ def load_prompt(user_id=None, group_id=None):
         except FileNotFoundError:
             return ""
 
+def online_search(content) -> str:
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {search_api_key}"
+    }
+    data = {
+        "query": content,
+        "query_rewrite": True,
+        "top_k":3
+    }
+    response = requests.post(search_api_url, headers=headers, json=data)
+    return str(response.json()["result"]["search_result"])
+
 def chat(content="", user_id=None, group_id=None, group_user_id=None,image=False,url=None):
     """
     与Ai进行对话。
@@ -105,6 +122,16 @@ def chat(content="", user_id=None, group_id=None, group_user_id=None,image=False
         pre_text = f"用户{group_user_id}说："
     else:
         pre_text = ""
+
+    if content.startswith("搜索"):
+        search_status = 1
+    else:
+        search_status = 0
+
+    if search_status == 1:
+        search_res = online_search(content)
+    else:
+        search_res = ""
 
     if image:
         response = requests.get(url)
@@ -147,11 +174,17 @@ def chat(content="", user_id=None, group_id=None, group_user_id=None,image=False
             ]
         )
         messages.append({"role": "system", "content":f"当前时间：{now_time}"})
-        messages.append({"role": "user", "content":f"{pre_text}"+"这是一张图片的描述："+response.choices[0].message.content+" "+content})
+        if search_status == 1:
+            messages.append({"role": "user", "content":f"{pre_text}"+"用户发送了一张图片，这是图片的描述："+response.choices[0].message.content+" "+"这是联网搜索的结果："+search_res+"这是用户说的话："+content})
+        else:
+            messages.append({"role": "user", "content":f"{pre_text}"+"用户发送了一张图片，这是图片的描述："+response.choices[0].message.content+" "+"这是用户说的话："+content})
 
     else:
         messages.append({"role": "system", "content":f"当前时间：{now_time}"})
-        messages.append({"role": "user", "content":f"{pre_text}"+ content})
+        if search_status == 1:
+            messages.append({"role": "user", "content":f"{pre_text}"+ "这是联网搜索的结果："+search_res+"这是用户说的话："+content})
+        else:
+            messages.append({"role": "user", "content":f"{pre_text}"+ "这是用户说的话："+content})
 
     #保留最大历史记录
     if len(messages) > MAX_HISTORY_LENGTH:

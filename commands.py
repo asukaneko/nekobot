@@ -1707,7 +1707,7 @@ async def handle_help(msg, is_group=True):
     # 定义命令分类
     command_categories = {
         "1": {"name": "漫画相关", "commands": ["/jm", "/jmrank","/jm_clear", "/search","/tag","/add_black_list","/del_black_list","/list_black_list","/add_global_black_list","/del_global_black_list","/get_fav", "/add_fav", "/del_fav","/list_fav"]},
-        "2": {"name": "聊天设置", "commands": ["/set_prompt", "/del_prompt", "/get_prompt","/del_message","/主动聊天"]},
+        "2": {"name": "聊天设置", "commands": ["/set_prompt", "/del_prompt", "/get_prompt","/del_message","/主动聊天","/开启搜索","/关闭搜索"]},
         "3": {"name": "娱乐功能", "commands": ["/random_image", "/random_emoticons", "/st","/random_video","/random_dice","/random_rps","/music","/random_music","/dv","/di","/df","/mc","/mc_bind","/mc_unbind","/mc_show"]},
         "4": {"name": "系统处理", "commands": ["/restart", "/tts", "/agree","/remind","/premind","/set_admin","/del_admin","/get_admin","/set_ids","/set_online_status","/get_friends","/set_qq_avatar","/send_like"]},
         "5": {"name": "群聊管理", "commands": ["/set_group_admin", "/del_group_admin"]},

@@ -12,7 +12,7 @@
 ---
 [中文版 | Chinese](https://github.com/asukaneko/NapCat-jmcomic_download-bot/blob/master/Chinese.md)
 ## ✨Updates  
-![](https://img.shields.io/badge/LatestVersion-1.4.3-blue?&logo=react)
+![](https://img.shields.io/badge/LatestVersion-1.5.0-blue?&logo=react)
 
 + [CHANGLOG.md](https://github.com/asukaneko/NapCat-jmcomic_download-bot/blob/master/CHANGELOG.md)
 ---
@@ -103,6 +103,7 @@ Command List:
 
 ## 🌟More Features
 + Supports image recognition, get API from https://platform.moonshot.cn/console/account (15CNY free credit), add to config.ini (second API)
++ Supports web search. Go to https://opensearch.console.aliyun.com/cn-shanghai/rag/api-key  to obtain the API and domain address, which can be used for free.
 + Supports multi-group chat and custom user prompts
 + Group chat supports user awareness, chat supports time awareness
 + Supports conversation history saving
