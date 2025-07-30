@@ -66,7 +66,7 @@ async def on_group_message(msg: GroupMessage):
                 await msg.reply(text=content)
             return
 
-        reply_text = "被回复的消息："+ msg_obj.get("data").get("raw_message") +", "
+        reply_text = "这是被回复的消息："+ msg_obj.get("data").get("raw_message") +"。 "
         
         content = chat(reply_text+ori_content, group_id=msg.group_id,group_user_id=msg.sender.nickname)
         if if_tts:
@@ -138,7 +138,7 @@ async def on_private_message(msg: PrivateMessage):
                     await bot.api.post_private_msg(msg.user_id, text=content)
                 return
 
-            reply_text = "被回复的消息："+ msg_obj.get("data").get("raw_message") +", "
+            reply_text = "这是被回复的消息："+ msg_obj.get("data").get("raw_message") +"。"
             try:
                 ori_content = msg.message[1].get("data").get("text")
             except IndexError:
