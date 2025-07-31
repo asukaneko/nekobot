@@ -28,7 +28,7 @@ async def on_group_message(msg: GroupMessage):
         content = chat(msg.raw_message, group_id=msg.group_id,group_user_id=msg.sender.nickname)
         _log.info("调用chat命令")
         await msg.reply(text=content)
-
+    
     if msg.message[0].get("type") == "at" and msg.message[0].get("data").get("qq") == bot_id:
     #如果是at机器人
         try:
@@ -46,7 +46,7 @@ async def on_group_message(msg: GroupMessage):
     if msg.message[0].get("type") == "reply" and msg.message[1].get("type") == "at" and msg.message[1].get("data").get("qq") == bot_id:
         #如果是回复机器人的消息
 
-        ori_content = "内容："
+        ori_content = ""
         try:
             ori_content += msg.message[2].get("data").get("text")  
         except IndexError:
@@ -64,6 +64,20 @@ async def on_group_message(msg: GroupMessage):
                 await msg.reply(text=content)
             else:
                 await msg.reply(text=content)
+            return
+
+        if msg_obj.get("data").get("message")[0].get("type") == "json":
+            json_data = msg_obj.get("data").get("message")[0].get("data").get("data")
+            title = json.loads(json_data).get("meta", {}).get("detail_1", {}).get("title", "")
+            desc = json.loads(json_data).get("meta", {}).get("detail_1", {}).get("desc", "")
+            url = json.loads(json_data).get("meta", {}).get("detail_1", {}).get("url", "")
+            preview = json.loads(json_data).get("meta", {}).get("detail_1", {}).get("preview", "")
+            content = f"发送了一个QQ小程序分享:\n标题: {title}\n描述: {desc}。{ori_content}"
+            res = chat(group_id=msg.group_id,group_user_id=msg.sender.nickname,content=content,image=True,url=preview)
+            if if_tts:
+                rtf = tts(res)
+                await bot.api.post_group_msg(msg.group_id, rtf=rtf)
+            await msg.reply(text=res)
             return
 
         reply_text = "这是被回复的消息："+ msg_obj.get("data").get("raw_message") +"。 "
@@ -98,7 +112,28 @@ async def on_private_message(msg: PrivateMessage):
             running[str(msg.user_id)]["last_time"] = time.time()
         write_running()
     except KeyError:
-        _log.info(f"用户{msg.user_id}不在运行状态")
+        pass
+    
+    # 处理QQ小程序消息
+    if msg.message[0].get("type") == "json":
+        try:
+            json_data = msg.message[0].get("data").get("data")
+            title = json.loads(json_data).get("meta", {}).get("detail_1", {}).get("title", "")
+            desc = json.loads(json_data).get("meta", {}).get("detail_1", {}).get("desc", "")
+            url = json.loads(json_data).get("meta", {}).get("detail_1", {}).get("url", "")
+            preview = json.loads(json_data).get("meta", {}).get("detail_1", {}).get("preview", "")
+            
+            content = f"发送了一个QQ小程序分享:\n标题: {title}\n描述: {desc}"
+            res = chat(user_id=msg.user_id,content=content,image=True,url=preview)
+            if if_tts:
+                rtf = tts(res)
+                await bot.api.post_private_msg(msg.user_id, rtf=rtf)
+                await bot.api.post_private_msg(msg.user_id, text=res)
+            else:
+                await bot.api.post_private_msg(msg.user_id, text=res)
+            return
+        except Exception as e:
+            _log.error(f"处理QQ小程序消息出错: {e}")
 
     try:
         if msg.message[0].get("type") == "image": #处理图片
@@ -120,7 +155,8 @@ async def on_private_message(msg: PrivateMessage):
         if msg.message[0].get("type") == "reply": #处理回复
             reply_id = msg.message[0].get("data").get("id")
             msg_obj = await bot.api.get_msg(message_id=reply_id)
-            #print(msg_obj)
+            print(msg_obj)
+
             if msg_obj.get("data").get("message")[0].get("type") == "image": #处理图片
                 url = msg_obj.get("data").get("message")[0].get("data").get("url")
                 try:  #预防回复图片时没有内容的情况
@@ -138,7 +174,7 @@ async def on_private_message(msg: PrivateMessage):
                     await bot.api.post_private_msg(msg.user_id, text=content)
                 return
 
-            reply_text = "这是被回复的消息："+ msg_obj.get("data").get("raw_message") +"。"
+            reply_text = "这是被回复的消息："+ msg_obj.get("data").get("raw_message") +"。 "
             try:
                 ori_content = msg.message[1].get("data").get("text")
             except IndexError:
