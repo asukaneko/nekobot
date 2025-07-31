@@ -115,6 +115,13 @@ async def on_private_message(msg: PrivateMessage):
     except KeyError:
         pass
     
+    try:
+        if msg.message == []:
+            return
+        msg.message[0]
+    except Exception as e:
+        pass
+
     # 处理QQ小程序消息
     if msg.message[0].get("type") == "json":
         try:
