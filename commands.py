@@ -1713,7 +1713,7 @@ async def handle_help(msg, is_group=True):
         "1": {"name": "漫画相关", "commands": ["/jm", "/jmrank","/jm_clear", "/search","/tag","/add_black_list","/del_black_list","/list_black_list","/add_global_black_list","/del_global_black_list","/get_fav", "/add_fav", "/del_fav","/list_fav"]},
         "2": {"name": "聊天设置", "commands": ["/set_prompt", "/del_prompt", "/get_prompt","/del_message","/主动聊天","/开启搜索","/关闭搜索"]},
         "3": {"name": "娱乐功能", "commands": ["/random_image", "/random_emoticons", "/st","/random_video","/random_dice","/random_rps","/music","/random_music","/dv","/di","/df","/mc","/mc_bind","/mc_unbind","/mc_show"]},
-        "4": {"name": "系统处理", "commands": ["/restart", "/tts", "/agree","/remind","/premind","/set_admin","/del_admin","/get_admin","/set_ids","/set_online_status","/get_friends","/set_qq_avatar","/send_like"]},
+        "4": {"name": "系统处理", "commands": ["/restart", "/tts", "/agree","/remind","/premind","/set_admin","/del_admin","/get_admin","/set_ids","/set_online_status","/get_friends","/set_qq_avatar","/send_like","/bot"]},
         "5": {"name": "群聊管理", "commands": ["/set_group_admin", "/del_group_admin"]},
         "6": {"name": "轻小说命令", "commands": ["/findbook","/fa" , "/select", "/info","/random_novel"]}
     }
@@ -1759,3 +1759,42 @@ async def handle_help(msg, is_group=True):
         await msg.reply(text=help_text)
     else:
         await bot.api.post_private_msg(msg.user_id, text=help_text)
+
+def parse_command_string(cmd_str):
+    # 提取函数名和参数部分，支持带点的函数名
+    func_match = re.match(r'^/([\w.]+)\((.*)\)$', cmd_str)
+    if not func_match:
+        return None
+    
+    func_name = func_match.group(1)
+    params_str = func_match.group(2)
+    
+    # 解析参数
+    params = {}
+    for param in re.finditer(r'([\w.]+)\s*=\s*"([^"]*)"', params_str):
+        key = param.group(1)
+        value = param.group(2)
+        params[key] = value
+    
+    return {
+        'func': func_name,
+        'params': params
+    }
+
+@register_command("/bot",help_text="用户自定义api(admin)，使用方法：/bot.api.函数名(参数1=值1,参数2=值2)，详情可见https://docs.ncatbot.xyz/guide/p8aun9nh/")
+async def handle_api(msg,is_group):
+    dict = parse_command_string(msg.raw_message)
+    command = dict["func"]
+    params = dict["params"]
+    if command == "":
+        return
+    if str(msg.user_id) not in admin:
+        text = "没有权限喵~"
+        if is_group:
+            await msg.reply(text=text)
+        else:
+            await bot.api.post_private_msg(msg.user_id, text=text)
+        return
+    # 将命令字符串转换为bot.api中的方法
+    func = getattr(bot.api, command.split('.')[-1])
+    await func(**params)
