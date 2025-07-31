@@ -1796,5 +1796,12 @@ async def handle_api(msg,is_group):
             await bot.api.post_private_msg(msg.user_id, text=text)
         return
     # 将命令字符串转换为bot.api中的方法
-    func = getattr(bot.api, command.split('.')[-1])
-    await func(**params)
+    try:
+        func = getattr(bot.api, command.split('.')[-1])
+        await func(**params)
+    except Exception as e:
+        text = f"执行命令时出错喵~：{e}"
+        if is_group:
+            await msg.reply(text=text)
+        else:
+            await bot.api.post_private_msg(msg.user_id, text=text)
