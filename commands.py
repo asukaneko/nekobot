@@ -1781,7 +1781,7 @@ def parse_command_string(cmd_str):
         'params': params
     }
 
-@register_command("/bot",help_text="用户自定义api(admin)，使用方法：/bot.api.函数名(参数1=值1,参数2=值2)，详情可见https://docs.ncatbot.xyz/guide/p8aun9nh/")
+@register_command("/bot",help_text="/bot.api.函数名(参数1=值1,参数2=值2) -> 用户自定义api(admin)，详情可见https://docs.ncatbot.xyz/guide/p8aun9nh/")
 async def handle_api(msg,is_group):
     dict = parse_command_string(msg.raw_message)
     command = dict["func"]
