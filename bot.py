@@ -70,8 +70,9 @@ async def on_group_message(msg: GroupMessage):
             json_data = msg_obj.get("data").get("message")[0].get("data").get("data")
             title = json.loads(json_data).get("meta", {}).get("detail_1", {}).get("title", "")
             desc = json.loads(json_data).get("meta", {}).get("detail_1", {}).get("desc", "")
-            url = json.loads(json_data).get("meta", {}).get("detail_1", {}).get("url", "")
             preview = json.loads(json_data).get("meta", {}).get("detail_1", {}).get("preview", "")
+            if not preview.startswith("http"):
+                preview = "https://"+preview
             content = f"发送了一个QQ小程序分享:\n标题: {title}\n描述: {desc}。{ori_content}"
             res = chat(group_id=msg.group_id,group_user_id=msg.sender.nickname,content=content,image=True,url=preview)
             if if_tts:
@@ -120,9 +121,9 @@ async def on_private_message(msg: PrivateMessage):
             json_data = msg.message[0].get("data").get("data")
             title = json.loads(json_data).get("meta", {}).get("detail_1", {}).get("title", "")
             desc = json.loads(json_data).get("meta", {}).get("detail_1", {}).get("desc", "")
-            url = json.loads(json_data).get("meta", {}).get("detail_1", {}).get("url", "")
             preview = json.loads(json_data).get("meta", {}).get("detail_1", {}).get("preview", "")
-            
+            if not preview.startswith("http"):
+                preview = "https://"+preview
             content = f"发送了一个QQ小程序分享:\n标题: {title}\n描述: {desc}"
             res = chat(user_id=msg.user_id,content=content,image=True,url=preview)
             if if_tts:
