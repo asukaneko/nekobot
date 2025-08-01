@@ -14,5 +14,6 @@ def load_config():
     config.set_root(root)
     config.set_ws_uri(ws_uri)
     config.set_token(token)
-
+    #config.set_webui_uri("ws://xxxxxx") #自定义webui地址，用于docker或者远程连接
+    # 注意，如果使用远程连接，那么本地下载的文件应该要能被napcat服务器访问，否则出现无法找到文件的出错误
     return bot_uin,root
