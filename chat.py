@@ -173,14 +173,14 @@ def chat(content="", user_id=None, group_id=None, group_user_id=None,image=False
                 }
             ]
         )
-        messages.append({"role": "system", "content":f"当前时间：{now_time}"})
+        messages.append({"role": "user", "content":f"当前时间：{now_time}"})
         if search_status == 1:
             messages.append({"role": "user", "content":f"{pre_text}"+"用户发送了一张图片，这是图片的描述："+response.choices[0].message.content+" "+"这是联网搜索的结果："+search_res+"这是用户说的话："+content})
         else:
             messages.append({"role": "user", "content":f"{pre_text}"+"用户发送了一张图片，这是图片的描述："+response.choices[0].message.content+" "+"这是用户说的话："+content})
 
     else:
-        messages.append({"role": "system", "content":f"当前时间：{now_time}"})
+        messages.append({"role": "user", "content":f"当前时间：{now_time}"})
         if search_status == 1:
             messages.append({"role": "user", "content":f"{pre_text}"+ "这是联网搜索的结果："+search_res+"这是用户说的话："+content})
         else:
