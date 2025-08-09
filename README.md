@@ -20,7 +20,7 @@
 ## 📌Before You Start  
 [![](https://img.shields.io/badge/python-version>=3.7-red?logo=python)]()
 > **⚠️Notice**  
-> if you encounter any error, please check if you have installed the latest version of napcat and ncatbot  
+> If you encounter any error, please check if you have installed the latest version of napcat and ncatbot  
 >
 > If you are unable to install NapCat, please go to the [NapCat Download Page](https://github.com/NapNeko/NapCatQQ/releases/download/v4.8.95/NapCat.Shell.zip) to download the latest version of NapCat.Shell.zip, extract it to the root directory, and rename it to "napcat."
 
