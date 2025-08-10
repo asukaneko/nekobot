@@ -233,12 +233,15 @@ def fetch_cover_url(id:str) -> str:
     :param album_id: 本子ID
     :return: 第一张图片的URL
     """
+    """
     client = JmOption.default().new_jm_client()
     album = client.get_album_detail(id)
     first_photo = album[0]
     photo_detail = client.get_photo_detail(first_photo.photo_id, False)
     first_image = next(iter(photo_detail))
     return first_image.img_url
+    """
+    return f"https://cdn-msp3.jmapinodeudzn.net/media/photos/{id}/00001.webp"
 
 #-------------------------
 #     region 加载参数
@@ -312,7 +315,6 @@ async def handle_jmrank(msg, is_group=True):
 
     for page in cl.categories_filter_gen(page=1,  # 起始页码
                                          # 下面是分类参数
-                                         time=JmMagicConstants.TIME_WEEK,
                                          category=JmMagicConstants.CATEGORY_ALL,
                                          order_by=JmMagicConstants.ORDER_BY_VIEW,
                                          ):
@@ -320,9 +322,9 @@ async def handle_jmrank(msg, is_group=True):
             tot += 1
             cover_url = fetch_cover_url(aid)
             with open(os.path.join(cache_dir , f"{select}_{name}.md"), "a", encoding="utf-8") as f:
-                f.write(f"{tot}: {aid} {atitle}  \n ![{atitle}]({cover_url})    \n\n")
+                f.write(f"{tot}: {aid} {atitle}  \n ![]({cover_url})    \n\n")
             comic_cache.append(aid)
-            if tot >=30:
+            if tot >=100:
                 break
 
     if not os.path.exists(os.path.join(cache_dir , f"{select}_{name}.md")):
@@ -364,18 +366,18 @@ async def handle_search(msg, is_group=True):
         # 直接搜索禁漫车号
         page = client.search_site(search_query=id)
         album: JmAlbumDetail = page.single_album
-        with open(os.path.join(cache_dir , f"{id}.txt"), "w", encoding="utf-8") as f:
-            f.write(f"标题：{album.title}\n标签：{album.tags}\n页数：{album.page_count}\n浏览次数：{album.views}\n评论数：{album.comment_count}")
+        with open(os.path.join(cache_dir , f"{id}.md"), "w", encoding="utf-8") as f:
+            f.write(f"标题：{album.title}  \n标签：{album.tags}  \n页数：{album.page_count}  \n浏览次数：{album.views}  \n评论数：{album.comment_count}  \n ![](https://cdn-msp3.jmapinodeudzn.net/media/photos/{id}/00001.webp)")
         if is_group:
-            await bot.api.post_group_file(msg.group_id, file=os.path.join(cache_dir , f"{id}.txt"))
+            await bot.api.post_group_file(msg.group_id, file=os.path.join(cache_dir , f"{id}.md"))
         else:
-            await bot.api.upload_private_file(msg.user_id, os.path.join(cache_dir , f"{id}.txt"), f"{id}.txt")
+            await bot.api.upload_private_file(msg.user_id, os.path.join(cache_dir , f"{id}.md"), f"{id}.md")
         return
 
     name = content + str(time.time()).replace(".", "")
     
-    with open(os.path.join(cache_dir , f"{name}.txt"), "w", encoding="utf-8") as f:
-        f.write(f"搜索结果：{content}\n")
+    with open(os.path.join(cache_dir , f"{name}.md"), "w", encoding="utf-8") as f:
+        f.write(f"搜索结果：{content}  \n")
     tot = 0
     for i in range(5):# 搜索5页，可以自己修改
         page: JmSearchPage = client.search_site(search_query=content, page=i+1,order_by=JmMagicConstants.ORDER_BY_VIEW)
@@ -383,8 +385,7 @@ async def handle_search(msg, is_group=True):
             tot += 1
             url = fetch_cover_url(album_id)
             with open(os.path.join(cache_dir , f"{name}.md"), "a", encoding="utf-8") as f:
-                f.write(f"{tot}: {album_id}  {title}  \n![{title}]({url})     \n\n")
-
+                f.write(f"{tot}: {album_id}  {title}  \n![]({url})     \n\n")
     if is_group:
         await bot.api.post_group_file(msg.group_id, file=os.path.join(cache_dir , f"{name}.md"))
     else:
@@ -405,8 +406,8 @@ async def handle_search(msg, is_group=True):
     content = msg.raw_message[len("/tag"):].strip()
     name = content + str(time.time()).replace(".", "")
     client = JmOption.default().new_jm_client()
-    with open(os.path.join(cache_dir , f"{name}.txt"), "w", encoding="utf-8") as f:
-        f.write(f"搜索标签结果：{content}\n")
+    with open(os.path.join(cache_dir , f"{name}.md"), "w", encoding="utf-8") as f:
+        f.write(f"搜索标签结果：{content}  \n")
     tot = 0
     for i in range(5):# 搜索5页，可以自己修改
         page: JmSearchPage = client.search_tag(search_query=content, page=i+1,order_by=JmMagicConstants.ORDER_BY_VIEW)
@@ -414,7 +415,7 @@ async def handle_search(msg, is_group=True):
             tot += 1
             url = fetch_cover_url(album_id)
             with open(os.path.join(cache_dir , f"{name}.md"), "a", encoding="utf-8") as f:
-                f.write(f"{tot}: {album_id}  {title}  \n![{title}]({url})    \n\n")
+                f.write(f"{tot}: {album_id}  {title}  \n![]({url})    \n\n")
     if is_group:
         await bot.api.post_group_file(msg.group_id, file=os.path.join(cache_dir , f"{name}.md"))
     else:
