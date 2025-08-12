@@ -1,5 +1,3 @@
-from pydoc import cli
-from tkinter import E
 from ncatbot.core import BotClient, GroupMessage, PrivateMessage,MessageChain,Music
 from config import load_config
 from chat import group_messages, user_messages, tts, chat
@@ -1620,7 +1618,8 @@ async def handle_info(msg, is_group=True):
 async def handle_random_novel(msg, is_group=True):
     novel = random.choice(list(books.keys()))
     url = books[novel]["download_url"]
-    reply = f"抽选到了《{novel}》喵~"
+    reply = f"抽选到了《{novel}》喵~\n"
+    reply += f"简介如下喵~\n作者：{books[novel]['author']}\n字数：{books[novel]['word_count']}\n状态：{books[novel]['is_serialize']}\n最新更新：{books[novel]['last_date']}\n简介：{books[novel]['introduction']}"
     if is_group:
         await msg.reply(text=reply)
         await handle_generic_file(msg, is_group, '', 'file', custom_url=url,file_name=novel+".txt")
