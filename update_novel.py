@@ -34,8 +34,8 @@ class NovelDownloader:
         email_field = wait.until(EC.presence_of_element_located((By.NAME, 'username')))
         password_field = wait.until(EC.presence_of_element_located((By.NAME, 'password')))
 
-        email_field.send_keys(xxxxxxxx) # 替换为你的用户名
-        password_field.send_keys(xxxxxxxx) # 替换为你的密码
+        email_field.send_keys("xxxxxxxxxx") # 替换为你的用户名
+        password_field.send_keys("xxxxxxxxx") # 替换为你的密码
 
         # 点击登录按钮
         login_button = self.driver.find_element(By.NAME, 'submit')
@@ -90,7 +90,8 @@ class NovelDownloader:
                     'author': '未知',
                     'status': '未知',
                     'last_update': '未知',
-                    'length': '未知'
+                    'length': '未知',
+                    'introduction':'未知'
                 }
 
                 # 提取文库分类
@@ -108,19 +109,22 @@ class NovelDownloader:
 
                 # 提取最后更新日期
                 last_update_elem = soup.select_one('td:-soup-contains("最后更新：")')
-                last_update = last_update_elem.text.replace('最后更新：', '').strip() if last_update_elem else \
-                default_values['last_update']
+                last_update = last_update_elem.text.replace('最后更新：', '').strip() if last_update_elem else default_values['last_update']
 
                 # 提取全文长度
                 length_elem = soup.select_one('td:-soup-contains("全文长度：")')
                 length = length_elem.text.replace('全文长度：', '').strip() if length_elem else default_values['length']
                 
+                # 提取简介
+                introduction = soup.find('span', string='内容简介：').find_next('span').get_text(strip=True) if soup.find('span', string='内容简介：') else default_values['introduction']
+
                 new = {
                     "res": url,
                     "author": author,
                     "category": category,
                     "last_date": last_update,
                     "word_count": length,
+                    "introduction":introduction,
                     "download_url": f"https://dl.wenku8.com/down.php?type=txt&node=1&id={url}",
                     "is_serialize": status,
                     "page": f"https://www.wenku8.net/book/{url}.htm"
@@ -128,9 +132,8 @@ class NovelDownloader:
 
                 if name in data:
                     res = data[name]
-                    if res != new:
-                        data[name] = new
-                    continue
+                    if res == new:
+                        continue
 
                 data[name] = new
                 print(f"已获取 {name} 的信息")

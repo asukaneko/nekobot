@@ -1,4 +1,5 @@
 from pydoc import cli
+from tkinter import E
 from ncatbot.core import BotClient, GroupMessage, PrivateMessage,MessageChain,Music
 from config import load_config
 from chat import group_messages, user_messages, tts, chat
@@ -1593,7 +1594,11 @@ async def handle_info(msg, is_group=True):
         if 0 <= selection < len(matches):
             author,title, url = matches[selection]
             info = books[title]
-            reply = f"《{title}》的信息如下喵~\n作者: {author}\n分类: {info['category']}\n字数: {info['word_count']}\n状态: {info['is_serialize']}\n更新日期: {info['last_date']}\n下载链接: {url}\n详细页面：{info['page']}"
+            try:
+                introduction = info['introduction']
+            except Exception:
+                introduction = "暂无"
+            reply = f"《{title}》的信息如下喵~\n作者: {author}\n分类: {info['category']}\n字数: {info['word_count']}\n状态: {info['is_serialize']}\n简介：{introduction}\n更新日期: {info['last_date']}\n下载链接: {url}\n详细页面：{info['page']}"
             if is_group:
                 await msg.reply(text=reply)
             else:
