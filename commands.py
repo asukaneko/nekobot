@@ -309,6 +309,7 @@ async def handle_jmrank(msg, is_group=True):
     name = time.time()
 
     tot = 0
+    fg=0
 
     comic_cache.clear()
 
@@ -323,8 +324,12 @@ async def handle_jmrank(msg, is_group=True):
             with open(os.path.join(cache_dir , f"{select}_{name}.md"), "a", encoding="utf-8") as f:
                 f.write(f"{tot}: {aid} {atitle}  \n ![]({cover_url})    \n\n")
             comic_cache.append(aid)
-            if tot >=100:
+            if tot >=30:
+                fg=1
                 break
+        if fg:
+            break
+
 
     if not os.path.exists(os.path.join(cache_dir , f"{select}_{name}.md")):
         if is_group:
