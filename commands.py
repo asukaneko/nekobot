@@ -1736,6 +1736,62 @@ async def handle_mc_show(msg, is_group=True):
         else:
             await bot.api.post_private_msg(msg.user_id, text=reply)
 
+@register_command("/generate_photo","/gf",help_text = "/generate_photo 或 /gf <图片描述> <大小> -> 生成图片")
+async def handle_gf(msg,is_group=True):
+    import requests
+    if msg.raw_message.startswith("/generate_photo"):
+        try:
+            prompt = msg.raw_message[len("/generate_photo"):].split(" ")[1].strip()
+            size = msg.raw_message[len("/generate_photo"):].split(" ")[2].strip()
+        except Exception:
+            reply = "请输入图片描述和大小喵~"
+            if is_group:
+                await msg.reply(text=reply)
+            else:
+                await bot.api.post_private_msg(msg.user_id, text=reply)
+            return
+    else:
+        try:
+            prompt = msg.raw_message[len("/gf"):].split(" ")[1].strip()
+            size = msg.raw_message[len("/gf"):].split(" ")[2].strip()
+        except Exception:
+            reply = "请输入图片描述和大小喵~"
+            if is_group:
+                await msg.reply(text=reply)
+            else:
+                await bot.api.post_private_msg(msg.user_id, text=reply)
+            return
+    if is_group:
+        await msg.reply(text="正在绘制喵……")
+    else:
+        await bot.api.post_private_msg(msg.user_id,text="正在绘制喵……")
+    config_parser = configparser.ConfigParser()
+    config_parser.read('config.ini')
+    api_key = config_parser.get('ApiKey', 'api_key')
+
+    url = "https://api.siliconflow.cn/v1/images/generations"
+
+    payload = {
+        "model": "Kwai-Kolors/Kolors",
+        "prompt": prompt,
+        "image_size": size,
+        "batch_size": 1,
+        "num_inference_steps": 20,
+        "guidance_scale": 7.5
+    }
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json"
+    }
+    response = requests.post(url, json=payload, headers=headers)
+    url = response.json().get("images")[0].get("url")
+    if is_group:
+        await msg.reply(text="绘制完成喵~")
+        await bot.api.post_group_file(msg.group_id,image=url)
+    else:
+        await bot.api.post_private_msg(msg.user_id,text="绘制完成喵~")
+        await bot.api.post_private_file(msg.user_id,image=url)
+
 
 #将help命令放在最后
 @register_command("/help","/h",help_text = "/help 或者 /h -> 查看帮助")
@@ -1744,7 +1800,7 @@ async def handle_help(msg, is_group=True):
     command_categories = {
         "1": {"name": "漫画相关", "commands": ["/jm", "/jmrank","/jm_clear", "/search","/tag","/add_black_list","/del_black_list","/list_black_list","/add_global_black_list","/del_global_black_list","/get_fav", "/add_fav", "/del_fav","/list_fav"]},
         "2": {"name": "聊天设置", "commands": ["/set_prompt", "/del_prompt", "/get_prompt","/del_message","/主动聊天"]},
-        "3": {"name": "娱乐功能", "commands": ["/random_image", "/random_emoticons", "/st","/random_video","/random_dice","/random_rps","/music","/random_music","/dv","/di","/df","/mc","/mc_bind","/mc_unbind","/mc_show"]},
+        "3": {"name": "娱乐功能", "commands": ["/random_image", "/random_emoticons", "/st","/random_video","/random_dice","/random_rps","/music","/random_music","/dv","/di","/df","/mc","/mc_bind","/mc_unbind","/mc_show","/gf"]},
         "4": {"name": "系统处理", "commands": ["/restart", "/tts", "/agree","/remind","/premind","/set_admin","/del_admin","/get_admin","/set_ids","/set_online_status","/get_friends","/set_qq_avatar","/send_like","/bot"]},
         "5": {"name": "群聊管理", "commands": ["/set_group_admin", "/del_group_admin"]},
         "6": {"name": "轻小说命令", "commands": ["/findbook","/fa" , "/select", "/info","/random_novel"]}
