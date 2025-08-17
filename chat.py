@@ -225,7 +225,7 @@ def tts(content) -> MessageChain:
             model="fnlp/MOSS-TTSD-v0.5",
             voice=voice, #自定义音色
             # 用户输入信息
-            input="你能用可爱的语气说吗？<|endofprompt|>"+remove_brackets_content(content),
+            input=remove_brackets_content(content),
             response_format="mp3"
     ) as response:
         response.stream_to_file(speech_file_path)
