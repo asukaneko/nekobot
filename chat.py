@@ -37,6 +37,8 @@ voice = config_parser.get('voice','voice')
 search_api_key = config_parser.get('search','api_key')
 search_api_url = config_parser.get('search','api_url')
 
+video_api = config_parser.get('video','api_key')
+
 def remove_brackets_content(text) -> str:
     """
     删除字符串中所有括号及其内容，包括：
@@ -90,7 +92,7 @@ def online_search(content) -> str:
     response = requests.post(search_api_url, headers=headers, json=data)
     return str(response.json()["result"]["search_result"])
 
-def chat(content="", user_id=None, group_id=None, group_user_id=None,image=False,url=None):
+def chat(content="", user_id=None, group_id=None, group_user_id=None,image=False,url=None,video=None):
     """
     与Ai进行对话。
     :param content: 用户输入的内容。
@@ -99,6 +101,7 @@ def chat(content="", user_id=None, group_id=None, group_user_id=None,image=False
     :param group_user_id: 群组用户ID。
     :param image: 是否是图片。
     :param url: 图片URL。
+    :param video: 视频url。
     :return: 机器人的回复。
     """
     now_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -178,6 +181,37 @@ def chat(content="", user_id=None, group_id=None, group_user_id=None,image=False
             messages.append({"role": "user", "content":f"{pre_text}"+"用户发送了一张图片，这是图片的描述："+response.choices[0].message.content+" "+"这是联网搜索的结果："+search_res+"这是用户说的话："+content})
         else:
             messages.append({"role": "user", "content":f"{pre_text}"+"用户发送了一张图片，这是图片的描述："+response.choices[0].message.content+" "+"这是用户说的话："+content})
+
+    elif video:
+        url = "https://open.bigmodel.cn/api/paas/v4/chat/completions"
+
+        payload = {
+            "model": "glm-4v-plus",
+            "messages": [
+            {
+            "role": "user",
+            "content": [
+                {
+                    "type": "video_url",
+                    "video_url": {
+                        "url": video
+                    }
+                },
+                {
+                    "type": "text", 
+                    "text": "请分析这个视频的内容"
+                }
+            ]
+            }
+            ]
+        }
+        headers = {
+            "Authorization": f"Bearer {video_api}",
+            "Content-Type": "application/json"
+        }
+        response = requests.post(url, json=payload, headers=headers)
+        messages.append({"role": "user", "content":f"(当前时间：{now_time})"})
+        messages.append({"role": "user", "content":f"{pre_text}"+ "这是视频的描述："+response.json()["choices"][0]["message"]["content"]+"这是用户说的话："+content})
 
     else:
         messages.append({"role": "user", "content":f"(当前时间：{now_time})"})

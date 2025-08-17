@@ -65,6 +65,17 @@ async def on_group_message(msg: GroupMessage):
             else:
                 await msg.reply(text=content)
             return
+        
+        if msg_obj.get("data").get("message")[0].get("type") == "video": #处理视频
+            url = msg_obj.get("data").get("message")[0].get("data").get("url")
+            content = chat(content=ori_content,group_id=msg.group_id,group_user_id=msg.sender.nickname,video=url)
+            if if_tts:
+                rtf = tts(content)
+                await bot.api.post_group_msg(msg.group_id, rtf=rtf)
+                await msg.reply(text=content)
+            else:
+                await msg.reply(text=content)
+            return
 
         if msg_obj.get("data").get("message")[0].get("type") == "json":
             json_data = msg_obj.get("data").get("message")[0].get("data").get("data")
@@ -142,6 +153,17 @@ async def on_private_message(msg: PrivateMessage):
             return
         except Exception as e:
             _log.error(f"处理QQ小程序消息出错: {e}")
+
+    if msg.message[0].get("type") == "video": #处理视频
+        url = msg.message[0].get("data").get("url")
+        content = chat(user_id=msg.user_id,video=url)
+        if if_tts:
+            rtf = tts(content)
+            await bot.api.post_private_msg(msg.user_id, rtf=rtf)
+            await bot.api.post_private_msg(msg.user_id, text=content)
+        else:
+            await bot.api.post_private_msg(msg.user_id, text=content)
+        return
 
     try:
         if msg.message[0].get("type") == "image": #处理图片

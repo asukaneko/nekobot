@@ -6,7 +6,8 @@
 ### 新增
 - 新增命令：
   - 生成图片：`/generate_photo 或 /gf <图片描述> <大小> -> 生成图片`  
-
+- 新增功能：
+  - 可以识别视频，采用智谱的大模型，去https://bigmodel.cn/usercenter/proj-mgmt/apikeys 获取api_key
 
 ## [1.5.1] - 2025-07-31
 ### 新增
