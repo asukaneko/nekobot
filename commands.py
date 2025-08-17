@@ -324,7 +324,7 @@ async def handle_jmrank(msg, is_group=True):
             with open(os.path.join(cache_dir , f"{select}_{name}.md"), "a", encoding="utf-8") as f:
                 f.write(f"{tot}: {aid} {atitle}  \n ![]({cover_url})    \n\n")
             comic_cache.append(aid)
-            if tot >=30:
+            if tot >=100:
                 fg=1
                 break
         if fg:
@@ -1019,7 +1019,7 @@ async def handle_random_video(msg, is_group=True):
 
 @register_command("/dv",help_text="/dv <link> -> 下载视频")
 async def handle_d(msg, is_group=True):
-    link = msg.raw_message[len("/d"):].strip()
+    link = msg.raw_message[len("/dv"):].strip()
     if not link:
         if is_group:
             await msg.reply(text="请输入链接喵~")

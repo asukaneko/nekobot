@@ -222,7 +222,7 @@ def tts(content) -> MessageChain:
     )
 
     with client.audio.speech.with_streaming_response.create(
-            model="FunAudioLLM/CosyVoice2-0.5B",
+            model="fnlp/MOSS-TTSD-v0.5",
             voice=voice, #自定义音色
             # 用户输入信息
             input="你能用可爱的语气说吗？<|endofprompt|>"+remove_brackets_content(content),
