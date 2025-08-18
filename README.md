@@ -75,20 +75,63 @@ The console will prompt to download napcat, then scan QR code to login
 >__commands.py contains ___command registration decorators___, you can add custom commands__  
 Command List:
 ```text
-/jm xxxxxx Download comics  
-/search xxx Search comics  
-/get_fav Get favorites   
-/jmrank Get rankings  
-/add_fav xxx Add to favorites  
-/set_prompt or /sp Set prompt  
-/del_prompt or /dp Delete prompt  
-/get_prompt or /gp Get prompt   
-/agree   Accept friend request    
-/restart   Restart Bot  
-/random_image or /ri Send random image    
-/random_emoticons or /re Send random emoticons   
-/st tag Send random NSFW image, tags support AND/OR (& |)   
-/help or /h View help  
+/jm <comic_id> -> Download comics
+/jmrank <monthly_rank/weekly_rank> -> Get rankings
+/jm_clear -> Clear cache
+/search <content> -> Search comics
+/tag <tag> -> Search by tag
+/add_black_list or /abl <comic_id> -> Add to blacklist
+/del_black_list or /dbl <comic_id> -> Remove from blacklist
+/list_black_list or /lbl -> View blacklist
+/add_global_black_list or /agbl <comic_id> -> Add to global blacklist (admin)
+/del_global_black_list or /dgbl <comic_id> -> Remove from global blacklist (admin)
+/get_fav <username> <password> -> Get favorites (private chat only for groups)
+/add_fav <comic_id> -> Add to favorites
+/del_fav <comic_id> -> Remove from favorites
+/list_fav -> View favorites list
+/set_prompt or /sp <prompt> -> Set prompt
+/del_prompt or /dp -> Delete prompt
+/get_prompt or /gp -> Get prompt
+/del_message or /dm -> Delete chat history
+/active_chat <interval_hours> <enable(1/0)> -> Enable active chat
+/random_image or /ri -> Random image
+/random_emoticons or /re -> Random emoticons
+/st <tag> -> Send random NSFW image (tags support AND/OR (& |))
+/random_video or /rv -> Random anime video
+/random_dice or /rd -> Random dice
+/random_rps or /rps -> Random rock-paper-scissors
+/music <song_name/id> -> Send music
+/random_music or /rm -> Random music
+/dv <link> -> Download video
+/di <link> -> Download image
+/df <link> -> Download file
+/mc <server_address> -> Check MC server status
+/mc_bind <server_address> -> Bind MC server
+/mc_unbind -> Unbind MC server
+/mc_show -> View bound MC server
+/generate_photo or /gf <description> <size> -> Generate image
+/restart -> Restart bot
+/tts -> Toggle TTS
+/agree -> Accept friend request
+/remind <hours> <content> -> Set reminder
+/premind <MM-DD> <HH:MM> <content> -> Set precise reminder
+/set_admin <qq_number> or /sa <qq_number> -> Set admin (root)
+/del_admin <qq_number> or /da <qq_number> -> Remove admin (root)
+/get_admin or /ga -> Get admin list
+/set_ids <nickname> <signature> <gender> -> Set account info (admin)
+/set_online_status <status> -> Set online status (admin)
+/get_friends -> Get friend list (admin)
+/set_qq_avatar <url> -> Change avatar (admin)
+/send_like <target_qq> <times> -> Send likes
+/bot.api.function_name(param1=value1,param2=value2) -> Custom API (admin), see `https://docs.ncatbot.xyz/guide/p8aun9nh/`
+/set_group_admin <target_qq> -> Set group admin (admin)
+/del_group_admin <target_qq> -> Remove group admin (admin)
+/findbook or /fb <book_title> -> Search and download light novel
+/fa <author> -> Search by author
+/select <number> -> Select novel to download
+/info <book_title> -> Get novel info
+/random_novel or /rn -> Random novel
+/help or /h -> View help
 ...
 ```
 
