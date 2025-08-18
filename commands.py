@@ -1743,7 +1743,6 @@ async def handle_gf(msg,is_group=True):
     try:
         # 使用maxsplit=1确保只分割描述参数
         parts = msg.raw_message[len(prefix):].strip().split(maxsplit=1)
-        print(parts)
         # 如果只提供了描述，则使用默认大小
         if len(parts) == 1:
             prompt = parts[0]
@@ -1752,14 +1751,11 @@ async def handle_gf(msg,is_group=True):
             prompt = parts[0]
             size_parts = parts[1].split(maxsplit=1)
             size = size_parts[0] if size_parts else default_size
-        
     except Exception as e:
         error_msg = f"请输入图片描述喵~ 格式: {prefix} <描述> [大小，默认{default_size}]"
         await (msg.reply(text=error_msg) if is_group 
             else bot.api.post_private_msg(msg.user_id, text=error_msg))
         return
-    print(prompt,size)
-
     if is_group:
         await msg.reply(text="正在绘制喵……")
     else:
