@@ -1738,29 +1738,28 @@ async def handle_mc_show(msg, is_group=True):
 
 @register_command("/generate_photo","/gf",help_text = "/generate_photo 或 /gf <图片描述> <大小> -> 生成图片")
 async def handle_gf(msg,is_group=True):
-    import requests
-    if msg.raw_message.startswith("/generate_photo"):
-        try:
-            prompt = msg.raw_message[len("/generate_photo"):].split(" ")[1].strip()
-            size = msg.raw_message[len("/generate_photo"):].split(" ")[2].strip()
-        except Exception:
-            reply = "请输入图片描述和大小喵~"
-            if is_group:
-                await msg.reply(text=reply)
-            else:
-                await bot.api.post_private_msg(msg.user_id, text=reply)
-            return
-    else:
-        try:
-            prompt = msg.raw_message[len("/gf"):].split(" ")[1].strip()
-            size = msg.raw_message[len("/gf"):].split(" ")[2].strip()
-        except Exception:
-            reply = "请输入图片描述和大小喵~"
-            if is_group:
-                await msg.reply(text=reply)
-            else:
-                await bot.api.post_private_msg(msg.user_id, text=reply)
-            return
+    prefix = "/generate_photo" if msg.raw_message.startswith("/generate_photo") else "/gf"
+    default_size = "1024x1024"  
+    try:
+        # 使用maxsplit=1确保只分割描述参数
+        parts = msg.raw_message[len(prefix):].strip().split(maxsplit=1)
+        print(parts)
+        # 如果只提供了描述，则使用默认大小
+        if len(parts) == 1:
+            prompt = parts[0]
+            size = default_size
+        else:
+            prompt = parts[0]
+            size_parts = parts[1].split(maxsplit=1)
+            size = size_parts[0] if size_parts else default_size
+        
+    except Exception as e:
+        error_msg = f"请输入图片描述喵~ 格式: {prefix} <描述> [大小，默认{default_size}]"
+        await (msg.reply(text=error_msg) if is_group 
+            else bot.api.post_private_msg(msg.user_id, text=error_msg))
+        return
+    print(prompt,size)
+
     if is_group:
         await msg.reply(text="正在绘制喵……")
     else:
@@ -1784,14 +1783,22 @@ async def handle_gf(msg,is_group=True):
         "Content-Type": "application/json"
     }
     response = requests.post(url, json=payload, headers=headers)
-    url = response.json().get("images")[0].get("url")
+    try:
+        url = response.json().get("images")[0].get("url")
+    except Exception as e:
+        reply = f"绘制失败喵~,{e}\n{response.json()}"
+
+        if is_group:
+            await msg.reply(text=reply)
+        else:
+            await bot.api.post_private_msg(msg.user_id, text=reply)
+        return
     if is_group:
         await msg.reply(text="绘制完成喵~")
         await bot.api.post_group_file(msg.group_id,image=url)
     else:
         await bot.api.post_private_msg(msg.user_id,text="绘制完成喵~")
         await bot.api.post_private_file(msg.user_id,image=url)
-
 
 #将help命令放在最后
 @register_command("/help","/h",help_text = "/help 或者 /h -> 查看帮助")
