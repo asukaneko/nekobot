@@ -141,29 +141,49 @@ async def chatter(id):
 
 async def chat_loop(id:str):
     """
-        单人定时聊天任务
-        :param id: QQ号(msg.user_id)
-        :return: None
+    单人定时聊天任务
+    :param id: QQ号(msg.user_id)
     """
     global running
     running[id]["state"] = True
     write_running()
-    while running[id]["active"]:
-        date_time = datetime.now()
-        current_time = time.time()
-        last_time = running[id]["last_time"]
-        # 只在8点到24点之间运行
-        if date_time.hour < 8 or date_time.hour >= 24:
-            await asyncio.sleep(60 * 10)  # 转换为秒
-            continue
-        # 检查是否达到间隔时间
-        if current_time - last_time < 60 * 60 * running[id]["interval"]:
-            await asyncio.sleep(60 * 10)  # 转换为秒
-            continue
-        await chatter(id)
-        running[id]["last_time"] = current_time
-        write_running()
-        await asyncio.sleep(60 * 60 * running[id]["interval"])  # 等待完整间隔时间
+    
+    while True:
+        # 检查是否仍处于激活状态
+        if not running.get(id, {}).get("active", False):
+            running[id]["state"] = False
+            write_running()
+            break
+            
+        try:
+            date_time = datetime.now()
+            current_time = time.time()
+            last_time = running[id].get("last_time", 0)
+            
+            # 只在8点到24点之间运行
+            if date_time.hour < 8 or date_time.hour >= 24:
+                await asyncio.sleep(60 * 10)  # 10分钟检查一次
+                continue
+                
+            # 计算剩余等待时间
+            time_remaining = (60 * 60 * running[id]["interval"]) - (current_time - last_time)
+            
+            # 如果还没到时间，精确等待剩余时间
+            if time_remaining > 0:
+                await asyncio.sleep(min(time_remaining, 60 * 10))  # 最多等待10分钟
+                continue
+                
+            # 发送聊天消息
+            await chatter(id)
+            running[id]["last_time"] = current_time
+            write_running()
+            
+            # 等待完整间隔时间
+            await asyncio.sleep(60 * 60 * running[id]["interval"])
+            
+        except Exception as e:
+            print(f"主动聊天循环出错: {e}")
+            await asyncio.sleep(60)  # 出错后等待1分钟再重试
 
 def write_blak_list():
     """
@@ -1391,67 +1411,82 @@ async def handle_del_group_admin(msg, is_group=True):
     await bot.api.set_group_admin(msg.group_id, msgs,False)
     await msg.reply(text="取消成功喵~")
 
+@register_command("/show_chat","/sc",help_text = "/show_chat 或 /sc -> 发送完整聊天记录")    
+async def handle_show_chat(msg, is_group=True):
+    if is_group:  
+        with open("saved_message/group_messages.json","r",encoding="utf-8") as f:
+            group_messages = json.load(f)
+        try:
+            text = str(group_messages[str(msg.group_id)])
+        except KeyError:
+            text = "该群没有聊天记录喵~"
+        if len(text) > 4000:
+            for i in range(0, len(text), 4000):
+                await msg.reply(text=text[i:i+4000])
+        else:
+            await msg.reply(text=text)
+
+    else:
+        with open("saved_message/user_messages.json","r",encoding="utf-8") as f:
+            user_messages = json.load(f)
+        try:
+            text = str(user_messages[str(msg.user_id)])
+        except KeyError:
+            text = "你没有聊天记录喵~"
+        if len(text) > 4000:
+            for i in range(0, len(text), 4000):
+                await bot.api.post_private_msg(msg.user_id, text=text[i:i+4000])
+        else:
+            await bot.api.post_private_msg(msg.user_id, text=text)
+
 @register_command("/主动聊天",help_text = "/主动聊天 <间隔时间(小时)> <是否开启(1/0)> -> 开启主动聊天")
 async def handle_active_chat(msg, is_group=True):
     if is_group:
         await msg.reply(text="只能私聊设置喵~")
         return
 
-    params = msg.raw_message[len("/主动聊天"):].split(" ")
-    if len(params) < 2:
-        await bot.api.post_private_msg(msg.user_id, text="格式错误喵~ 请输入 /主动聊天 间隔时间(小时) 是否开启(1/0)")
-        return
+    try:
+        params = msg.raw_message[len("/主动聊天"):].strip().split()
+        if len(params) < 2 or params[1] not in ('0', '1'):
+            raise ValueError
+            
+        interval = float(params[0])
+        active = bool(int(params[1]))
+        user_id = str(msg.user_id)
 
-    interval = float(params[1])
-    active = bool(int(params[2]))
-    id = str(msg.user_id)
+        # 统一处理用户状态
+        running[user_id] = {
+            "interval": interval, 
+            "active": active,
+            "state": False
+        }
 
-    if active:
-        if id in running:
-            running[id]["interval"] = interval
-            running[id]["active"] = True
-        else:
-            running[id] = {"interval": interval, "active": True,"state":False}
-    else:
-        if id in running:
-            running[id]["interval"] = interval
-            running[id]["active"] = False
-        else:
-            running[id] = {"interval": interval, "active": False,"state":False}
-
-    ori = await bot.api.get_recent_contact(100)
-    count = len(ori["data"])
-   
-    for i in range(count):
+        # 获取最近联系人
         try:
-            id = str(ori["data"][i]['lastestMsg']["user_id"])
-        except KeyError:
-            continue
+            ori = await bot.api.get_recent_contact(100)
+            for contact in ori.get("data", []):
+                if str(contact['lastestMsg'].get("user_id")) == user_id:
+                    running[user_id]["last_time"] = contact['lastestMsg']["time"]
+                    break
+        except Exception as e:
+            print(f"获取最近联系人失败: {e}")
 
-        if id != str(msg.user_id):
-            continue
-        
-        time = ori["data"][i]['lastestMsg']["time"]
-        running[id]["last_time"] = time
+        # 处理任务状态
         if active:
-            if running[id]["state"]:
-                if id in tasks:
-                    tasks[id].cancel()
-                    del tasks[id]
-                    await bot.api.post_private_msg(msg.user_id, text="主动聊天已重置")
-            chat = asyncio.create_task(chat_loop(id))
-            tasks[id]=chat
-        else:
-            if id in tasks:
-                tasks[id].cancel()
-                del tasks[id]
-            running[id]["state"] = False
+            if user_id in tasks:
+                tasks[user_id].cancel()
+            tasks[user_id] = asyncio.create_task(chat_loop(user_id))
+        elif user_id in tasks:
+            tasks[user_id].cancel()
+            del tasks[user_id]
 
-    write_running()
-    if active:
-        await bot.api.post_private_msg(msg.user_id, text="设置成功喵~，现在"+str(interval)+"小时后会主动聊天喵~")
-    else:
-        await bot.api.post_private_msg(msg.user_id, text="设置成功喵~，已关闭主动聊天喵~")
+        write_running()
+        reply = f"设置成功喵~，{'现在'+str(interval)+'小时后会主动聊天喵~' if active else '已关闭主动聊天喵~'}"
+        await bot.api.post_private_msg(user_id, text=reply)
+        
+    except ValueError:
+        await bot.api.post_private_msg(msg.user_id, 
+            text="格式错误喵~ 请输入 /主动聊天 间隔时间(小时) 是否开启(1/0)")
 
 # 添加临时存储字典
 temp_selections = {}
@@ -1802,7 +1837,7 @@ async def handle_help(msg, is_group=True):
     # 定义命令分类
     command_categories = {
         "1": {"name": "漫画相关", "commands": ["/jm", "/jmrank","/jm_clear", "/search","/tag","/add_black_list","/del_black_list","/list_black_list","/add_global_black_list","/del_global_black_list","/get_fav", "/add_fav", "/del_fav","/list_fav"]},
-        "2": {"name": "聊天设置", "commands": ["/set_prompt", "/del_prompt", "/get_prompt","/del_message","/主动聊天"]},
+        "2": {"name": "聊天设置", "commands": ["/set_prompt", "/del_prompt", "/get_prompt","/del_message","/主动聊天","/sc"]},
         "3": {"name": "娱乐功能", "commands": ["/random_image", "/random_emoticons", "/st","/random_video","/random_dice","/random_rps","/music","/random_music","/dv","/di","/df","/mc","/mc_bind","/mc_unbind","/mc_show","/gf"]},
         "4": {"name": "系统处理", "commands": ["/restart", "/tts", "/agree","/remind","/premind","/set_admin","/del_admin","/get_admin","/set_ids","/set_online_status","/get_friends","/set_qq_avatar","/send_like","/bot"]},
         "5": {"name": "群聊管理", "commands": ["/set_group_admin", "/del_group_admin"]},

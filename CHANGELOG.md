@@ -6,6 +6,8 @@
 ### 新增
 - 新增命令：
   - 生成图片：`/generate_photo 或 /gf <图片描述> <大小> -> 生成图片`  
+  - 发送聊天记录：`/show_chat 或 /sc -> 发送完整聊天记录`
+
 - 新增功能：
   - 可以识别视频，采用智谱的大模型，去https://bigmodel.cn/usercenter/proj-mgmt/apikeys 获取api_key
 
