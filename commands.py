@@ -1736,7 +1736,7 @@ async def handle_mc_show(msg, is_group=True):
         else:
             await bot.api.post_private_msg(msg.user_id, text=reply)
 
-@register_command("/generate_photo","/gf",help_text = "/generate_photo 或 /gf <图片描述> <大小> -> 生成图片")
+@register_command("/generate_photo","/gf",help_text = "/generate_photo 或 /gf <图片描述(不能有空格)> <大小> -> 生成图片")
 async def handle_gf(msg,is_group=True):
     prefix = "/generate_photo" if msg.raw_message.startswith("/generate_photo") else "/gf"
     default_size = "1024x1024"  
