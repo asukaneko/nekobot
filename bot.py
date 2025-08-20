@@ -128,9 +128,7 @@ async def on_group_message(msg: GroupMessage):
         if if_tts:
             rtf = tts(content)
             await bot.api.post_group_msg(msg.group_id, rtf=rtf)
-            await msg.reply(text=content)
-        else:
-            await msg.reply(text=content)
+        await msg.reply(text=content)
 
     if msg.message[0].get("type") == "reply" and msg.message[1].get("type") == "at" and msg.message[1].get("data").get("qq") == bot_id:
         #如果是回复机器人的消息
@@ -148,9 +146,7 @@ async def on_group_message(msg: GroupMessage):
             if if_tts:
                 rtf = tts(content)
                 await bot.api.post_group_msg(msg.group_id, rtf=rtf)
-                await msg.reply(text=content)
-            else:
-                await msg.reply(text=content)
+            await msg.reply(text=content)
             return
         
         if msg_obj.get("data").get("message")[0].get("type") == "video": #处理视频
@@ -159,9 +155,7 @@ async def on_group_message(msg: GroupMessage):
             if if_tts:
                 rtf = tts(content)
                 await bot.api.post_group_msg(msg.group_id, rtf=rtf)
-                await msg.reply(text=content)
-            else:
-                await msg.reply(text=content)
+            await msg.reply(text=content)
             return
 
         if msg_obj.get("data").get("message")[0].get("type") == "json":
@@ -209,9 +203,7 @@ async def on_group_message(msg: GroupMessage):
         if if_tts:
             rtf = tts(content)
             await bot.api.post_group_msg(msg.group_id, rtf=rtf)
-            await msg.reply(text=content)
-        else:
-            await msg.reply(text=content)
+        await msg.reply(text=content)
 
 @bot.private_event()
 async def on_private_message(msg: PrivateMessage):
@@ -263,9 +255,7 @@ async def on_private_message(msg: PrivateMessage):
             if if_tts:
                 rtf = tts(res)
                 await bot.api.post_private_msg(msg.user_id, rtf=rtf)
-                await bot.api.post_private_msg(msg.user_id, text=res)
-            else:
-                await bot.api.post_private_msg(msg.user_id, text=res)
+            await bot.api.post_private_msg(msg.user_id, text=res)
             return
         except Exception as e:
             _log.error(f"处理QQ小程序消息出错: {e}")
@@ -276,10 +266,7 @@ async def on_private_message(msg: PrivateMessage):
         if if_tts:
             rtf = tts(content)
             await bot.api.post_private_msg(msg.user_id, rtf=rtf)
-            await bot.api.post_private_msg(msg.user_id, text=content)
-        else:
-            await bot.api.post_private_msg(msg.user_id, text=content)
-        
+        await bot.api.post_private_msg(msg.user_id, text=content)
         return
 
     try:
@@ -290,10 +277,9 @@ async def on_private_message(msg: PrivateMessage):
                 rtf = tts(content)
                 await bot.api.set_input_status(event_type=0,user_id=bot_id)
                 await bot.api.post_private_msg(msg.user_id, rtf=rtf)
-                await bot.api.post_private_msg(msg.user_id, text=content)
             else:
                 await bot.api.set_input_status(event_type=1,user_id=bot_id)
-                await bot.api.post_private_msg(msg.user_id, text=content)
+            await bot.api.post_private_msg(msg.user_id, text=content)
             return
     except IndexError:
         pass
@@ -315,10 +301,9 @@ async def on_private_message(msg: PrivateMessage):
                     rtf = tts(content)
                     await bot.api.set_input_status(event_type=0,user_id=msg.user_id)
                     await bot.api.post_private_msg(msg.user_id, rtf=rtf)
-                    await bot.api.post_private_msg(msg.user_id, text=content)
                 else:
                     await bot.api.set_input_status(event_type=1,user_id=msg.user_id)
-                    await bot.api.post_private_msg(msg.user_id, text=content)
+                await bot.api.post_private_msg(msg.user_id, text=content)
                 return
 
             reply_text = "这是被回复的消息："+ msg_obj.get("data").get("raw_message") +"。 "
@@ -331,10 +316,9 @@ async def on_private_message(msg: PrivateMessage):
                 rtf = tts(content)
                 await bot.api.set_input_status(event_type=0,user_id=msg.user_id)
                 await bot.api.post_private_msg(msg.user_id, rtf=rtf)
-                await bot.api.post_private_msg(msg.user_id, text=content)
             else:
                 await bot.api.set_input_status(event_type=1,user_id=msg.user_id)
-                await bot.api.post_private_msg(msg.user_id, text=content)
+            await bot.api.post_private_msg(msg.user_id, text=content)
             return
     except IndexError:
         pass
@@ -348,10 +332,9 @@ async def on_private_message(msg: PrivateMessage):
             rtf = tts(content)
             await bot.api.set_input_status(event_type=0,user_id=msg.user_id)
             await bot.api.post_private_msg(msg.user_id, rtf=rtf)
-            await bot.api.post_private_msg(msg.user_id, text=content)
         else:
             await bot.api.set_input_status(event_type=1,user_id=msg.user_id)
-            await bot.api.post_private_msg(msg.user_id, text=content)
+        await bot.api.post_private_msg(msg.user_id, text=content)
         return
     
     if msg.message[0].get("type") == "face": # 处理表情
@@ -367,10 +350,9 @@ async def on_private_message(msg: PrivateMessage):
             rtf = tts(content)
             await bot.api.set_input_status(event_type=0,user_id=msg.user_id)
             await bot.api.post_private_msg(msg.user_id, rtf=rtf)
-            await bot.api.post_private_msg(msg.user_id, text=content)
         else:
             await bot.api.set_input_status(event_type=1,user_id=msg.user_id)
-            await bot.api.post_private_msg(msg.user_id, text=content)
+        await bot.api.post_private_msg(msg.user_id, text=content)
         return
 
     if msg.raw_message and not msg.raw_message.startswith("/"): # 检查消息是否为空,避免接受文件后的空消息被回复
@@ -379,10 +361,9 @@ async def on_private_message(msg: PrivateMessage):
             rtf = tts(content)
             await bot.api.set_input_status(event_type=0,user_id=msg.user_id)
             await bot.api.post_private_msg(msg.user_id, rtf=rtf)
-            await bot.api.post_private_msg(msg.user_id, text=content)
         else:
             await bot.api.set_input_status(event_type=1,user_id=msg.user_id)
-            await bot.api.post_private_msg(msg.user_id, text=content)
+        await bot.api.post_private_msg(msg.user_id, text=content)
 
 if __name__ == "__main__":
     bot.run(enable_webui_interaction=False)
