@@ -7,6 +7,15 @@ _log = get_log()
 
 if_tts = commands.if_tts
 
+emotions = {}
+
+def load_emotions():
+    with open('emotions.json', 'r', encoding='utf-8') as f:
+        global emotions
+        emotions = json.load(f)
+
+load_emotions()
+
 def get_bilibili_real_url(short_url):
     """
     获取哔哩哔哩视频的真实URL。
@@ -63,7 +72,13 @@ def deal_forward(msg_obj) -> str:
         elif msg_type == "forward":
             content += deal_forward(forward_msg['message'][0])    
         elif msg_type == "face":
-            content += "这是一个表情"
+            try:
+                emo = emotions[forward_msg['message'][0].get('data').get('id')]
+            except KeyError:
+                emo = forward_msg['message'][0].get('data').get('raw').get('faceText')
+                if not emo:
+                    emo = ""
+            content += f"发送了一个表情:{emo}"
         else:
             content += "这是一条"+str(msg_type)+"消息"
         content += "\n"
@@ -94,9 +109,21 @@ async def on_group_message(msg: GroupMessage):
     if msg.message[0].get("type") == "at" and msg.message[0].get("data").get("qq") == bot_id:
     #如果是at机器人
         try:
-            ori_content = msg.message[1].get("data").get("text") #避免@的消息为空
+            if msg.message[1].get("type") == "text":
+                ori_content = msg.message[1].get("data").get("text") #避免@的消息为空
+            elif msg.message[1].get("type") == "face":
+                try:
+                    emo = emotions[msg.message[1].get('data').get('id')]
+                except KeyError:
+                    emo = msg.message[1].get('data').get('raw').get('faceText')
+                    if emo:
+                        emo = f"[表情:{emo}]"
+                    else:
+                        emo = ""
+                ori_content = f"发送了一个表情:{emo}"
         except IndexError:
             ori_content = f"用户{msg.user_id}@了你"
+        
         content = chat(ori_content, group_id=msg.group_id,group_user_id=msg.sender.nickname)
         if if_tts:
             rtf = tts(content)
@@ -155,13 +182,29 @@ async def on_group_message(msg: GroupMessage):
         if msg_obj.get("data").get("message")[0].get("type") == "forward":
             msg_forward_obj = await bot.api.get_msg(message_id=reply_id)
             content = deal_forward(msg_forward_obj)
-            res = chat(group_id=msg.group_id,group_user_id=msg.sender.nickname,content=content+ori_content)
+            res = chat(group_id=msg.group_id,group_user_id=msg.sender.nickname,content=ori_content+content)
             if if_tts:
                 rtf = tts(res)
                 await bot.api.post_group_msg(msg.group_id, rtf=rtf)
             await msg.reply(text=res)
             return
         
+        if msg_obj.get("data").get("message")[0].get("type") == "face":
+            try:
+                emo = emotions[msg_obj.get('data').get('message')[0].get('data').get('id')]
+            except KeyError:
+                emo = msg_obj.get('data').get('message')[0].get('data').get('raw').get('faceText')
+                if not emo:
+                    emo = ""
+            content = f"发送了一个表情:{emo}"
+            ori_content = ori_content+content
+            res = chat(group_id=msg.group_id,group_user_id=msg.sender.nickname,content=ori_content)
+            if if_tts:
+                rtf = tts(res)
+                await bot.api.post_group_msg(msg.group_id, rtf=rtf)
+            await msg.reply(text=res)
+            return
+
         content = chat(reply_text+ori_content, group_id=msg.group_id,group_user_id=msg.sender.nickname)
         if if_tts:
             rtf = tts(content)
@@ -311,6 +354,25 @@ async def on_private_message(msg: PrivateMessage):
             await bot.api.post_private_msg(msg.user_id, text=content)
         return
     
+    if msg.message[0].get("type") == "face": # 处理表情
+        try:
+            emo = emotions[msg.message[0].get("data").get("id")]
+        except KeyError:
+            emo = msg.message[0].get("data").get('raw').get('faceText')
+            if not emo:
+                emo = ""
+        res = f"发送了一个表情:{emo}"
+        content = chat(res, user_id=msg.user_id)
+        if if_tts:
+            rtf = tts(content)
+            await bot.api.set_input_status(event_type=0,user_id=msg.user_id)
+            await bot.api.post_private_msg(msg.user_id, rtf=rtf)
+            await bot.api.post_private_msg(msg.user_id, text=content)
+        else:
+            await bot.api.set_input_status(event_type=1,user_id=msg.user_id)
+            await bot.api.post_private_msg(msg.user_id, text=content)
+        return
+
     if msg.raw_message and not msg.raw_message.startswith("/"): # 检查消息是否为空,避免接受文件后的空消息被回复
         content = chat(msg.raw_message, user_id=msg.user_id)
         if if_tts:
