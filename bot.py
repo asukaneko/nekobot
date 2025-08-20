@@ -1,11 +1,73 @@
 from ncatbot.utils.logger import get_log
 import commands
-from chat import chat,tts
+from chat import chat,tts,chat_video,chat_image
 from commands import *
 
 _log = get_log()
 
 if_tts = commands.if_tts
+
+def get_bilibili_real_url(short_url):
+    """
+    获取哔哩哔哩视频的真实URL。
+    :param short_url: 哔哩哔哩视频的短链接。
+    :return: 哔哩哔哩视频的真实URL。
+    """
+    try:
+        response = requests.get(short_url, allow_redirects=False)
+        if response.status_code == 302:
+            return response.headers['Location']
+        return short_url
+    except:
+        return short_url
+
+def deal_forward(msg_obj) -> str:
+    """
+    处理转发消息。
+    :param msg_obj: 转发消息对象。
+    :return: 处理后的转发消息内容。
+    """
+    content = "这是一条转发消息，转发了以下内容：\n"
+    tot = 0
+    fg=1
+    try:
+        tp = msg_obj['type']
+        if tp == "forward":
+            fg=0
+    except KeyError:
+        fg=1
+    for forward_msg in msg_obj['data']['message'][0]['data']['content'] if fg else msg_obj['data']['content']:
+        # 获取消息类型
+        msg_type = forward_msg['message'][0]['type']
+        user = forward_msg['sender']['nickname']
+        tot += 1
+        content += f"第{tot}条，由{user}发送："
+        if msg_type == "text":
+            text = forward_msg['message'][0]['data']['text']
+            content += text
+        elif msg_type == "image":
+            image_url = forward_msg['message'][0]['data']['url']
+            content += "这是图片的描述："+chat_image(image_url)
+        elif msg_type == "video":
+            video_url = forward_msg['message'][0]['data']['url']
+            content += "这是视频的描述："+chat_video(video_url)
+        elif msg_type == "json":
+            json_comtent = "这是一个QQ小程序，小程序的描述如下："
+            json_data = forward_msg['message'][0]['data']['data']
+            title = json.loads(json_data).get("meta", {}).get("detail_1", {}).get("title", "")
+            desc = json.loads(json_data).get("meta", {}).get("detail_1", {}).get("desc", "")
+            preview = json.loads(json_data).get("meta", {}).get("detail_1", {}).get("preview", "")
+            image_describe = chat_image(preview)
+            json_comtent += f"小程序的描述：{desc}\n小程序的标题：{title}\n小程序的预览图描述：{image_describe}\n"
+            content += json_comtent
+        elif msg_type == "forward":
+            content += deal_forward(forward_msg['message'][0])    
+        elif msg_type == "face":
+            content += "这是一个表情"
+        else:
+            content += "这是一条"+str(msg_type)+"消息"
+        content += "\n"
+    return content
 
 @bot.group_event()
 async def on_group_message(msg: GroupMessage):
@@ -45,7 +107,6 @@ async def on_group_message(msg: GroupMessage):
 
     if msg.message[0].get("type") == "reply" and msg.message[1].get("type") == "at" and msg.message[1].get("data").get("qq") == bot_id:
         #如果是回复机器人的消息
-
         ori_content = ""
         try:
             ori_content += msg.message[2].get("data").get("text")  
@@ -54,7 +115,6 @@ async def on_group_message(msg: GroupMessage):
 
         reply_id = msg.message[0].get("data").get("id")
         msg_obj = await bot.api.get_msg(message_id=reply_id)
-        print(msg_obj)
         if msg_obj.get("data").get("message")[0].get("type") == "image": #处理图片
             url = msg_obj.get("data").get("message")[0].get("data").get("url")
             content = chat(content=ori_content,group_id=msg.group_id,group_user_id=msg.sender.nickname,image=True,url=url)
@@ -92,7 +152,15 @@ async def on_group_message(msg: GroupMessage):
             await msg.reply(text=res)
             return
 
-        reply_text = "这是被回复的消息："+ msg_obj.get("data").get("raw_message") +"。 "
+        if msg_obj.get("data").get("message")[0].get("type") == "forward":
+            msg_forward_obj = await bot.api.get_msg(message_id=reply_id)
+            content = deal_forward(msg_forward_obj)
+            res = chat(group_id=msg.group_id,group_user_id=msg.sender.nickname,content=content+ori_content)
+            if if_tts:
+                rtf = tts(res)
+                await bot.api.post_group_msg(msg.group_id, rtf=rtf)
+            await msg.reply(text=res)
+            return
         
         content = chat(reply_text+ori_content, group_id=msg.group_id,group_user_id=msg.sender.nickname)
         if if_tts:
@@ -143,6 +211,11 @@ async def on_private_message(msg: PrivateMessage):
             if not preview.startswith("http"):
                 preview = "https://"+preview
             content = f"发送了一个QQ小程序分享:\n标题: {title}\n描述: {desc}"
+            if "哔哩哔哩" in title:
+                url = json.loads(json_data).get("meta", {}).get("detail_1", {}).get("qqdocurl", "")
+                url = get_bilibili_real_url(url)
+                print(url)
+            
             res = chat(user_id=msg.user_id,content=content,image=True,url=preview)
             if if_tts:
                 rtf = tts(res)
@@ -163,6 +236,7 @@ async def on_private_message(msg: PrivateMessage):
             await bot.api.post_private_msg(msg.user_id, text=content)
         else:
             await bot.api.post_private_msg(msg.user_id, text=content)
+        
         return
 
     try:
@@ -221,6 +295,21 @@ async def on_private_message(msg: PrivateMessage):
             return
     except IndexError:
         pass
+    
+    if msg.message[0].get("type") == "forward": # 处理转发消息
+        msg_obj = await bot.api.get_msg(message_id=msg.message_id)
+        print(msg_obj)
+        res = deal_forward(msg_obj)
+        content = chat(res, user_id=msg.user_id)
+        if if_tts:
+            rtf = tts(content)
+            await bot.api.set_input_status(event_type=0,user_id=msg.user_id)
+            await bot.api.post_private_msg(msg.user_id, rtf=rtf)
+            await bot.api.post_private_msg(msg.user_id, text=content)
+        else:
+            await bot.api.set_input_status(event_type=1,user_id=msg.user_id)
+            await bot.api.post_private_msg(msg.user_id, text=content)
+        return
     
     if msg.raw_message and not msg.raw_message.startswith("/"): # 检查消息是否为空,避免接受文件后的空消息被回复
         content = chat(msg.raw_message, user_id=msg.user_id)

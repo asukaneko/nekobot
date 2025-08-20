@@ -92,6 +92,89 @@ def online_search(content) -> str:
     response = requests.post(search_api_url, headers=headers, json=data)
     return str(response.json()["result"]["search_result"])
 
+def chat_image(url) -> str:
+    """
+    图片识别。
+    :param url: 图片URL。
+    :return: 图片识别结果。
+    """
+    response = requests.get(url)
+    file_name = ""
+    if response.status_code == 200:
+        # 保存图片到本地
+        dirs = os.path.join(cache_address,"saved_images")
+        os.makedirs(dirs, exist_ok=True)
+        name = int(time.time())
+        file_name = os.path.join(dirs , f"{name}.jpg")
+        if not os.path.exists(file_name):
+            with open(file_name, "wb") as file:
+                file.write(response.content)
+
+    with open(file_name, 'rb') as f: #读取图片
+        img_base = base64.b64encode(f.read()).decode('utf-8')
+
+    client = OpenAI(
+        api_key=MOONSHOT_API_KEY,
+        base_url="https://api.moonshot.cn/v1"
+    )
+    response = client.chat.completions.create(
+        model=MOONSHOT_MODEL,
+        messages=[
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "image_url",
+                        "image_url": {
+                            "url": f"data:image/jpeg;base64,{img_base}"
+                        }
+                    },
+                    {
+                        "type": "text",
+                        "text": "请描述这张图片"
+                    }
+                ]
+            }
+        ],
+        max_tokens=1024
+    )
+    return response.choices[0].message.content
+
+def chat_video(vurl) -> str:
+    """
+    视频识别。
+    :param url: 视频URL。
+    :return: 视频识别结果。
+    """
+    url = "https://open.bigmodel.cn/api/paas/v4/chat/completions"
+
+    payload = {
+            "model": "glm-4v-plus",
+            "messages": [
+            {
+            "role": "user",
+            "content": [
+                {
+                    "type": "video_url",
+                    "video_url": {
+                        "url": vurl
+                    }
+                },
+                {
+                    "type": "text", 
+                    "text": "请分析这个视频的内容"
+                }
+            ]
+            }
+            ]
+    }
+    headers = {
+            "Authorization": f"Bearer {video_api}",
+            "Content-Type": "application/json"
+    }
+    response = requests.post(url, json=payload, headers=headers)
+    return response.json()["choices"][0]["message"]["content"]
+
 def chat(content="", user_id=None, group_id=None, group_user_id=None,image=False,url=None,video=None):
     """
     与Ai进行对话。
@@ -128,91 +211,22 @@ def chat(content="", user_id=None, group_id=None, group_user_id=None,image=False
 
     if content.startswith("搜索") | ("搜索" in content):
         search_status = 1
-    else:
-        search_status = 0
-
-    if search_status == 1:
         search_res = online_search(content)
     else:
+        search_status = 0
         search_res = ""
 
     if image:
-        response = requests.get(url)
-        file_name = ""
-        if response.status_code == 200:
-            # 保存图片到本地
-            dirs = os.path.join(cache_address,"saved_images")
-            os.makedirs(dirs, exist_ok=True)
-            name = int(time.time())
-            file_name = os.path.join(dirs , f"{name}.jpg")
-            if not os.path.exists(file_name):
-                with open(file_name, "wb") as file:
-                    file.write(response.content)
-
-        with open(file_name, 'rb') as f: #读取图片
-            img_base = base64.b64encode(f.read()).decode('utf-8')
-
-        client = OpenAI(
-            api_key=MOONSHOT_API_KEY,
-            base_url="https://api.moonshot.cn/v1"
-        )
-        response = client.chat.completions.create(
-            model=MOONSHOT_MODEL,
-            messages=[
-                {
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "image_url",
-                            "image_url": {
-                                "url": f"data:image/jpeg;base64,{img_base}"
-                            }
-                        },
-                        {
-                            "type": "text",
-                            "text": "请描述这个图片"
-                        }
-                    ]
-                }
-            ]
-        )
+        response = chat_image(url)
         messages.append({"role": "user", "content":f"(当前时间：{now_time})"})
         if search_status == 1:
-            messages.append({"role": "user", "content":f"{pre_text}"+"用户发送了一张图片，这是图片的描述："+response.choices[0].message.content+" "+"这是联网搜索的结果："+search_res+"这是用户说的话："+content})
+            messages.append({"role": "user", "content":f"{pre_text}"+"用户发送了一张图片，这是图片的描述："+response+" "+"这是联网搜索的结果："+search_res+"这是用户说的话："+content})
         else:
-            messages.append({"role": "user", "content":f"{pre_text}"+"用户发送了一张图片，这是图片的描述："+response.choices[0].message.content+" "+"这是用户说的话："+content})
-
+            messages.append({"role": "user", "content":f"{pre_text}"+"用户发送了一张图片，这是图片的描述："+response+" "+"这是用户说的话："+content})       
     elif video:
-        url = "https://open.bigmodel.cn/api/paas/v4/chat/completions"
-
-        payload = {
-            "model": "glm-4v-plus",
-            "messages": [
-            {
-            "role": "user",
-            "content": [
-                {
-                    "type": "video_url",
-                    "video_url": {
-                        "url": video
-                    }
-                },
-                {
-                    "type": "text", 
-                    "text": "请分析这个视频的内容"
-                }
-            ]
-            }
-            ]
-        }
-        headers = {
-            "Authorization": f"Bearer {video_api}",
-            "Content-Type": "application/json"
-        }
-        response = requests.post(url, json=payload, headers=headers)
+        response = chat_video(video)
         messages.append({"role": "user", "content":f"(当前时间：{now_time})"})
-        messages.append({"role": "user", "content":f"{pre_text}"+ "这是视频的描述："+response.json()["choices"][0]["message"]["content"]+"这是用户说的话："+content})
-
+        messages.append({"role": "user", "content":f"{pre_text}"+ "这是视频的描述："+response+"这是用户说的话："+content})
     else:
         messages.append({"role": "user", "content":f"(当前时间：{now_time})"})
         if search_status == 1:
