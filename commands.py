@@ -1636,9 +1636,10 @@ async def handle_active_chat(msg, is_group=True):
             if user_id in tasks:
                 tasks[user_id].cancel()
             tasks[user_id] = asyncio.create_task(chat_loop(user_id))
-        elif user_id in tasks:
-            tasks[user_id].cancel()
-            del tasks[user_id]
+        else:
+            if user_id in tasks:
+                tasks[user_id].cancel()
+                del tasks[user_id]
 
         write_running()
         reply = f"设置成功喵~，{'现在'+str(interval)+'小时后会主动聊天喵~' if active else '已关闭主动聊天喵~'}"
