@@ -30,6 +30,27 @@ def get_bilibili_real_url(short_url):
     except:
         return short_url
 
+def get_bilibili_video_url(url):
+    """
+    获取哔哩哔哩视频的URL。
+    :param url: 哔哩哔哩视频的链接。
+    :return: 哔哩哔哩视频的URL。
+    """
+    bvid = url.split("/video/")[1].split("/")[0].split("?")[0]
+    cid_url = f"https://api.bilibili.com/x/web-interface/view?bvid={bvid}"
+    response = requests.get(cid_url,headers={
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36"
+    })
+    data = response.json()
+    cid = data['data']['cid']
+    api_url = f"https://api.bilibili.com/x/player/playurl?bvid={bvid}&cid={cid}"
+    response = requests.get(api_url,headers={
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36"
+    })
+    data2 = response.json()
+    video_url = data2['data']['durl'][0]['url']
+    return video_url
+
 def deal_forward(msg_obj) -> str:
     """
     处理转发消息。
@@ -257,7 +278,14 @@ async def on_private_message(msg: PrivateMessage):
             if "哔哩哔哩" in title:
                 url = json.loads(json_data).get("meta", {}).get("detail_1", {}).get("qqdocurl", "")
                 url = get_bilibili_real_url(url)
+                url = get_bilibili_video_url(url)
                 print(url)
+                try:
+                    video_content = chat_video(url)
+                except Exception as e:
+                    video_content = ""
+                    _log.error(f"处理b站视频出错: {e}")
+                content = content+"\n视频描述: "+video_content
             
             res = chat(user_id=msg.user_id,content=content,image=True,url=preview)
             if if_tts:
