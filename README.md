@@ -12,7 +12,7 @@
 ---
 [中文版 | Chinese](https://github.com/asukaneko/NapCat-jmcomic_download-bot/blob/master/Chinese.md)
 ## ✨Updates  
-![](https://img.shields.io/badge/LatestVersion-1.5.2-blue?&logo=react)
+![](https://img.shields.io/badge/LatestVersion-1.5.3-blue?&logo=react)
 
 + [CHANGLOG.md](https://github.com/asukaneko/NapCat-jmcomic_download-bot/blob/master/CHANGELOG.md)
 ---

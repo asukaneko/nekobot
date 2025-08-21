@@ -27,10 +27,11 @@ admin = [str(admin_id)]  # 确保admin_id是字符串形式
 black_list_comic = {"global": [], "groups": {}, "users": {}} # str,黑名单
 
 running = {}  #用于定时聊天的开关
-tasks = {}  # 用于存储定时任务
+tasks = {}  # 用于存储聊天的定时任务
 
 books = {}
 
+schedule_tasks = {} #用于存储定时任务
 # ------------------
 # region 通用函数
 # ------------------
@@ -125,6 +126,25 @@ async def schedule_task_by_date(target_time: datetime, task_func, *args, **kwarg
     delay_seconds = (target_time - now).total_seconds()
     await asyncio.sleep(delay_seconds)
     await task_func(*args, **kwargs)
+
+async def schedule_job_task(delay_hours: float,loop:bool,name:str, task_func, *args, **kwargs):
+
+    """延时执行任务
+    :param delay_hours: 延迟的小时数
+    :param loop: 是否循环执行
+    :param name: 任务名称
+    :param task_func: 要执行的函数
+    """
+    if loop:
+        while True:
+            await asyncio.sleep(delay_hours * 3600)  # 转换为秒
+            await task_func(*args, **kwargs)
+            print(f"任务 {name} 执行完成")
+    else:
+        await asyncio.sleep(delay_hours * 3600)  # 转换为秒
+        await task_func(*args, **kwargs)
+        print(f"任务 {name} 执行完成")
+        del schedule_tasks[name]
 
 async def chatter(id):
     """
@@ -1247,6 +1267,124 @@ async def handle_precise_remind(msg, is_group=True):
         else:
             await bot.api.post_private_msg(msg.user_id, text=error_msg)
 
+@register_command("/task",help_text="/task </bot.api.xxxx(参数1=值1...)> <时间(小时)> <是否循环(1/0)> -> 设置定时任务(管理员)")
+async def handle_task(msg,is_group=True):
+    if str(msg.user_id) not in admin:
+        text = "你没有权限设置定时任务喵~"
+        if is_group:
+            await msg.reply(text=text)
+        else:
+            await bot.api.post_private_msg(msg.user_id, text=text)
+        return
+    
+    match = re.match(r'^/task\s+(.+)\s+(\d+\.?\d*)\s+(\d)$', msg.raw_message) #正则支持小数
+    if match:
+        command_str = match.group(1)
+        hours = float(match.group(2))
+        loop = int(match.group(3))
+    else:
+        error_msg = "格式错误喵~ 请输入 /task bot.api.xxxx(参数1=值1...) 时间(小时) 是否循环(1/0)"
+        if is_group:
+            await msg.reply(text=error_msg)
+        else:
+            await bot.api.post_private_msg(msg.user_id, text=error_msg) 
+        return
+    if loop not in [0,1]:
+        error_msg = "格式错误喵~ 请输入 /task bot.api.xxxx(参数1=值1...) 时间(小时) 是否循环(1/0)"
+        if is_group:
+            await msg.reply(text=error_msg)
+        else:
+            await bot.api.post_private_msg(msg.user_id, text=error_msg) 
+        return
+    
+    dict = parse_command_string(command_str)
+    command = dict["func"]
+    params = dict["params"]
+    try:
+        func = getattr(bot.api, command.split('.')[-1])
+    except Exception as e:
+        error_msg = f"发生错误喵~ 请检查命令是否正确。{e}"
+        if is_group:
+            await msg.reply(text=error_msg)
+        else:
+            await bot.api.post_private_msg(msg.user_id, text=error_msg) 
+        return
+
+    if loop == 0:
+        task = asyncio.create_task(schedule_job_task(hours,0,f"{command_str}_{hours}_{loop}",func, **params))
+        schedule_tasks[f"{command_str}_{hours}_{loop}"] = task
+        if is_group:
+            await msg.reply(text=f"已设置定时任务喵~{hours}小时后会执行：{command_str}")
+        else:
+            await bot.api.post_private_msg(msg.user_id, text=f"已设置定时任务喵~{hours}小时后会执行：{command_str}")
+        return
+
+    else:
+        task = asyncio.create_task(schedule_job_task(hours,1,f"{command_str}_{hours}_{loop}",func, **params))
+        schedule_tasks[f"{command_str}_{hours}_{loop}"] = task
+        if is_group:
+            await msg.reply(text=f"已设置循环定时任务喵~{hours}小时后会执行：{command_str}")
+        else:
+            await bot.api.post_private_msg(msg.user_id, text=f"已设置循环定时任务喵~{hours}小时后会执行：{command_str}")
+        return
+
+@register_command("/list_tasks","/lt",help_text = "/list_tasks 或者 /lt -> 查看定时任务(管理员)")
+async def handle_list_tasks(msg, is_group=True):
+    if str(msg.user_id) not in admin:
+        text = "你没有权限查看定时任务喵~"
+        if is_group:
+            await msg.reply(text=text)
+        else:
+            await bot.api.post_private_msg(msg.user_id, text=text)
+        return
+    text = "定时任务列表：\n"
+    tot = 0
+    for i in schedule_tasks.keys():
+        tot += 1
+        text += f"{tot}. {i}\n"
+    if is_group:
+        await msg.reply(text=text)
+    else:
+        await bot.api.post_private_msg(msg.user_id, text=text)
+    return
+
+@register_command("/cancel_tasks","/ct",help_text = "/cancel_tasks 或者 /ct <任务名> -> 取消定时任务(管理员)")
+async def handle_cancel_tasks(msg, is_group=True):
+    if str(msg.user_id) not in admin:
+        text = "你没有权限取消定时任务喵~"
+        if is_group:
+            await msg.reply(text=text)
+        else:
+            await bot.api.post_private_msg(msg.user_id, text=text)
+        return
+    pre = "/cancel_tasks" if msg.raw_message.startswith("/cancel_tasks") else "/ct"
+    name = msg.raw_message[len(pre):].strip()
+
+    if name == "":
+        text = "请输入任务名喵~"
+        if is_group:
+            await msg.reply(text=text)
+        else:
+            await bot.api.post_private_msg(msg.user_id, text=text)
+        return
+    
+    if name not in schedule_tasks:
+        text = "没有这个任务喵~"
+        if is_group:
+            await msg.reply(text=text)
+        else:
+            await bot.api.post_private_msg(msg.user_id, text=text)
+        return
+    
+    schedule_tasks[name].cancel()
+    del schedule_tasks[name]
+    text = "取消成功喵~"
+    if is_group:
+        await msg.reply(text=text)
+    else:
+        await bot.api.post_private_msg(msg.user_id, text=text)
+    return
+
 @register_command("/set_admin","/sa",help_text = "/set_admin <qq号> 或者 /sa <qq号> -> 设置管理员(root)")
 async def handle_set_admin(msg, is_group=True):
     if is_group:
@@ -1861,13 +1999,13 @@ async def handle_help(msg, is_group=True):
         "1": {"name": "漫画相关", "commands": ["/jm", "/jmrank","/jm_clear", "/search","/tag","/add_black_list","/del_black_list","/list_black_list","/add_global_black_list","/del_global_black_list","/get_fav", "/add_fav", "/del_fav","/list_fav"]},
         "2": {"name": "聊天设置", "commands": ["/set_prompt", "/del_prompt", "/get_prompt","/del_message","/主动聊天","/sc"]},
         "3": {"name": "娱乐功能", "commands": ["/random_image", "/random_emoticons", "/st","/random_video","/random_dice","/random_rps","/music","/random_music","/dv","/di","/df","/mc","/mc_bind","/mc_unbind","/mc_show","/gf"]},
-        "4": {"name": "系统处理", "commands": ["/restart", "/tts", "/agree","/remind","/premind","/set_admin","/del_admin","/get_admin","/set_ids","/set_online_status","/get_friends","/set_qq_avatar","/send_like","/bot","/shutdown"]},
+        "4": {"name": "系统处理", "commands": ["/restart", "/tts", "/agree","/set_admin","/del_admin","/get_admin","/set_ids","/set_online_status","/get_friends","/set_qq_avatar","/send_like","/bot","/shutdown"]},
         "5": {"name": "群聊管理", "commands": ["/set_group_admin", "/del_group_admin"]},
-        "6": {"name": "轻小说命令", "commands": ["/findbook","/fa" , "/select", "/info","/random_novel"]}
+        "6": {"name": "轻小说", "commands": ["/findbook","/fa" , "/select", "/info","/random_novel"]},
+        "7": {"name": "定时任务", "commands": ["/task","/cancel_task","/list_task","/remind","/premind"]}
     }
-    
     # 添加全部功能分类
-    command_categories["7"] = {
+    command_categories["8"] = {
         "name": "全部功能", 
         "commands": [cmd for category in command_categories.values() for cmd in category["commands"]] + ["/help"]
     }
