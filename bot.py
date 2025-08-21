@@ -79,6 +79,14 @@ def deal_forward(msg_obj) -> str:
                 if not emo:
                     emo = ""
             content += f"发送了一个表情:{emo}"
+        elif msg_type == "reply":
+            try:
+                if forward_msg['message'][1].get("type") == "text":
+                    content += f"回复了一条消息：{forward_msg['message'][1].get('data').get('text')}"
+                else:
+                    content += f"回复了一条消息:{forward_msg['raw_message']}"
+            except IndexError:
+                content += "回复了一条消息"
         else:
             content += "这是一条"+str(msg_type)+"消息"
         content += "\n"
