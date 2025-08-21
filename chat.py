@@ -138,7 +138,11 @@ def chat_image(url) -> str:
         ],
         max_tokens=1024
     )
-    return response.choices[0].message.content
+    if response.choices[0].message.content:
+        return response.choices[0].message.content
+    else:
+        print(f"图片识别失败: {response.status_code} {response.text}")
+        return ""
 
 def chat_video(vurl) -> str:
     """
@@ -149,7 +153,7 @@ def chat_video(vurl) -> str:
     url = "https://open.bigmodel.cn/api/paas/v4/chat/completions"
 
     payload = {
-            "model": "glm-4v-plus",
+            "model": "glm-4.5v",
             "messages": [
             {
             "role": "user",
@@ -173,7 +177,11 @@ def chat_video(vurl) -> str:
             "Content-Type": "application/json"
     }
     response = requests.post(url, json=payload, headers=headers)
-    return response.json()["choices"][0]["message"]["content"]
+    if response.status_code == 200:
+        return response.json()["choices"][0]["message"]["content"]
+    else:
+        print(f"视频识别失败: {response.status_code} {response.text}")
+        return ""
 
 def chat(content="", user_id=None, group_id=None, group_user_id=None,image=False,url=None,video=None):
     """
