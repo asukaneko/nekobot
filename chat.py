@@ -27,8 +27,7 @@ base_url = config_parser.get('ApiKey', 'base_url')
 model = config_parser.get('ApiKey', 'model')
 MAX_HISTORY_LENGTH = config_parser.getint('chat', 'MAX_HISTORY_LENGTH')
 #用于图片识别：
-MOONSHOT_API_KEY = config_parser.get('pic', 'MOONSHOT_API_KEY')
-MOONSHOT_MODEL = config_parser.get('pic', 'MOONSHOT_MODEL')
+pic_model = config_parser.get('pic', 'model')
 cache_address = config_parser.get('cache','cache_address')
 
 voice = config_parser.get('voice','voice')
@@ -92,57 +91,41 @@ def online_search(content) -> str:
     response = requests.post(search_api_url, headers=headers, json=data)
     return str(response.json()["result"]["search_result"])
 
-def chat_image(url) -> str:
+def chat_image(iurl) -> str:
     """
     图片识别。
     :param url: 图片URL。
     :return: 图片识别结果。
     """
-    response = requests.get(url)
-    file_name = ""
-    if response.status_code == 200:
-        # 保存图片到本地
-        dirs = os.path.join(cache_address,"saved_images")
-        os.makedirs(dirs, exist_ok=True)
-        name = int(time.time())
-        file_name = os.path.join(dirs , f"{name}.jpg")
-        if not os.path.exists(file_name):
-            with open(file_name, "wb") as file:
-                file.write(response.content)
+    url = "https://api.siliconflow.cn/v1/chat/completions"
 
-    with open(file_name, 'rb') as f: #读取图片
-        img_base = base64.b64encode(f.read()).decode('utf-8')
-
-    client = OpenAI(
-        api_key=MOONSHOT_API_KEY,
-        base_url="https://api.moonshot.cn/v1"
-    )
-    response = client.chat.completions.create(
-        model=MOONSHOT_MODEL,
-        messages=[
+    payload = {
+            "model":pic_model,
+            "messages": [
             {
-                "role": "user",
-                "content": [
-                    {
-                        "type": "image_url",
-                        "image_url": {
-                            "url": f"data:image/jpeg;base64,{img_base}"
-                        }
-                    },
-                    {
-                        "type": "text",
-                        "text": "请描述这张图片"
+            "role": "user",
+            "content": [
+                {
+                    "type": "image_url",
+                    "image_url": {
+                        "url": iurl
                     }
-                ]
+                },
+                {
+                    "type": "text", 
+                    "text": "请分析这个图片的内容"
+                }
+            ]
             }
-        ],
-        max_tokens=1024
-    )
-    if response.choices[0].message.content:
-        return response.choices[0].message.content
-    else:
-        print(f"图片识别失败: {response.status_code} {response.text}")
-        return ""
+            ]
+    }
+    headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json"
+    }
+    response = requests.post(url, json=payload, headers=headers)
+    print(response.json())
+    return response.json()["choices"][0]["message"]["content"]
 
 def chat_video(vurl) -> str:
     """
