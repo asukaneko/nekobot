@@ -124,7 +124,6 @@ def chat_image(iurl) -> str:
             "Content-Type": "application/json"
     }
     response = requests.post(url, json=payload, headers=headers)
-    print(response.json())
     return response.json()["choices"][0]["message"]["content"]
 
 def chat_video(vurl) -> str:
