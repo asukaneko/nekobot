@@ -145,7 +145,7 @@ Command List:
 + Modify prompts in neko.txt to create different characters
 
 ## 🌟More Features
-+ Supports image recognition, get API from https://platform.moonshot.cn/console/account (15CNY free credit), add to config.ini (second API)
++ Supports image recognition, video recognition
 + Supports web search. Go to https://opensearch.console.aliyun.com/cn-shanghai/rag/api-key  to obtain the API and domain address, which can be used for free.
 + Supports multi-group chat and custom user prompts
 + Group chat supports user awareness, chat supports time awareness

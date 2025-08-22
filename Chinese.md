@@ -147,7 +147,7 @@ Command List:
 + 可以更改neko.txt中的提示词，实现不同的角色
 
 ## 🌟更多 
-+ 支持图片识别，需去https://platform.moonshot.cn/console/account 获取api，免费赠送15元。填入config.ini中（第二个api）
++ 支持图片识别，视频识别
 + 支持联网搜索，去https://opensearch.console.aliyun.com/cn-shanghai/rag/api-key获取api和域名地址，可以免费使用
 + 支持多群聊以及用户自定义提示词
 + 群聊支持用户感知，聊天支持时间感知
