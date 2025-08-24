@@ -161,6 +161,54 @@ def chat_video(vurl) -> str:
     response = requests.post(url, json=payload, headers=headers)
     return response.json()["choices"][0]["message"]["content"]
 
+def chat_webpage(wurl) -> str:
+    """
+    网页识别。
+    :param wurl: 网页URL。
+    :return: 网页识别结果。
+    """
+    max_seq_len = 131071
+
+    if not wurl.startswith("http"):
+        wurl = "https://"+wurl
+    try:
+        res = requests.get(wurl,headers={
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36"
+        })
+    except:
+        return "链接失效"
+    
+    html = res.text
+
+    if len(html) > max_seq_len:
+        html = html[:max_seq_len]
+
+    url = "https://api.siliconflow.cn/v1/chat/completions"
+
+    payload = {
+            "model": model,
+            "messages": [
+            {
+            "role": "user",
+            "content": [
+                {
+                    "type": "text", 
+                    "text": f"请描述这个网页的内容：{html}"
+                }
+            ]
+            }
+            ]
+    }
+    headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json"
+    }
+    response = requests.post(url, json=payload, headers=headers)
+    try:
+        return response.json()["choices"][0]["message"]["content"]
+    except:
+        return "链接失效"
+
 def chat(content="", user_id=None, group_id=None, group_user_id=None,image=False,url=None,video=None):
     """
     与Ai进行对话。
@@ -219,7 +267,17 @@ def chat(content="", user_id=None, group_id=None, group_user_id=None,image=False
             messages.append({"role": "user", "content":f"{pre_text}"+ "这是联网搜索的结果："+search_res+"这是用户说的话："+content})
         else:
             messages.append({"role": "user", "content":f"{pre_text}"+ "这是用户说的话："+content})
-
+    
+    des = ""
+    pattern = r"(?:https?:\/\/)?(?:www\.)?[a-zA-Z0-9-]+(?:\.[a-zA-Z]{2,})+(?:\/[^\s]*)?"
+    matches = re.findall(pattern, content)
+    if matches:
+        tot = 0 
+        for match in matches:
+            tot += 1
+            des += f"第{tot}个链接{match}的描述："+chat_webpage(match) + "\n"
+        messages.append({"role": "user", "content":f"{pre_text}"+des})
+    
     #保留最大历史记录
     if len(messages) > MAX_HISTORY_LENGTH:
         messages = messages[-MAX_HISTORY_LENGTH:] #这里有可能会丢失初始提示词，但ai大概率能根据上下文判断提示词
