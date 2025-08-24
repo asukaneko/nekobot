@@ -1,6 +1,6 @@
 from ncatbot.utils.logger import get_log
 import commands
-from chat import chat,tts,chat_video,chat_image
+from chat import chat,tts,chat_video,chat_image,chat_webpage
 from commands import *
 
 _log = get_log()
@@ -195,6 +195,12 @@ async def on_group_message(msg: GroupMessage):
             if not preview.startswith("http"):
                 preview = "https://"+preview
             content = f"发送了一个QQ小程序分享:\n标题: {title}\n描述: {desc}。{ori_content}"
+            if "哔哩哔哩" in title:
+                url = json.loads(json_data).get("meta", {}).get("detail_1", {}).get("qqdocurl", "")
+                url = get_bilibili_real_url(url)
+                res = chat_webpage(url)
+                content = content+"视频内容:"+res
+            
             res = chat(group_id=msg.group_id,group_user_id=msg.sender.nickname,content=content,image=True,url=preview)
             if if_tts:
                 rtf = tts(res)
@@ -278,10 +284,8 @@ async def on_private_message(msg: PrivateMessage):
             if "哔哩哔哩" in title:
                 url = json.loads(json_data).get("meta", {}).get("detail_1", {}).get("qqdocurl", "")
                 url = get_bilibili_real_url(url)
-                url = get_bilibili_video_url(url)
-                print(url)
                 try:
-                    video_content = chat_video(url)
+                    video_content = chat_webpage(url)
                 except Exception as e:
                     video_content = ""
                     _log.error(f"处理b站视频出错: {e}")

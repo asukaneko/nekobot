@@ -269,7 +269,7 @@ def chat(content="", user_id=None, group_id=None, group_user_id=None,image=False
             messages.append({"role": "user", "content":f"{pre_text}"+ "这是用户说的话："+content})
     
     des = ""
-    pattern = r"(?:https?:\/\/)?(?:www\.)?[a-zA-Z0-9-]+(?:\.[a-zA-Z]{2,})+(?:\/[^\s]*)?"
+    pattern = r"(?:https?:\/\/)?(?:www\.)?[a-zA-Z0-9-]+(?:\.[a-zA-Z]{2,})+(?:\/[^\s?]*)?(?:\?[^\s]*)?"
     matches = re.findall(pattern, content)
     if matches:
         tot = 0 
