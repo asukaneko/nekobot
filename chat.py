@@ -4,6 +4,7 @@
 #  .prompts
 #   |---... 
 
+from ast import mod
 import configparser,requests,os,base64,time,json,datetime,re
 from openai import OpenAI
 from ncatbot.core.element import Record,MessageChain
@@ -88,8 +89,11 @@ def online_search(content) -> str:
         "query_rewrite": True,
         "top_k":3
     }
-    response = requests.post(search_api_url, headers=headers, json=data)
-    return str(response.json()["result"]["search_result"])
+    try:
+        response = requests.post(search_api_url, headers=headers, json=data)
+        return str(response.json()["result"]["search_result"])
+    except:
+        return ""
 
 def chat_image(iurl) -> str:
     """
@@ -124,7 +128,10 @@ def chat_image(iurl) -> str:
             "Content-Type": "application/json"
     }
     response = requests.post(url, json=payload, headers=headers)
-    return response.json()["choices"][0]["message"]["content"]
+    try:
+        return response.json()["choices"][0]["message"]["content"]
+    except:
+        return "链接失效"
 
 def chat_video(vurl) -> str:
     """
@@ -159,7 +166,10 @@ def chat_video(vurl) -> str:
             "Content-Type": "application/json"
     }
     response = requests.post(url, json=payload, headers=headers)
-    return response.json()["choices"][0]["message"]["content"]
+    try:
+        return response.json()["choices"][0]["message"]["content"]
+    except:
+        return "链接失效"
 
 def chat_webpage(wurl) -> str:
     """
@@ -208,6 +218,38 @@ def chat_webpage(wurl) -> str:
         return response.json()["choices"][0]["message"]["content"]
     except:
         return "链接失效"
+
+def chat_json(content) -> str:
+    """
+    处理json字符串。
+    :param content: json字符串。
+    :return: 处理后的字符串。
+    """
+    url = "https://api.siliconflow.cn/v1/chat/completions"
+
+    payload = {
+            "model":model,
+            "messages": [
+            {
+            "role": "user",
+            "content": [
+                {
+                    "type": "text", 
+                    "text": f"请分析这个json字符串的内容；如果有链接，则还需列出最重要的一个链接，忽略其他链接：{content}"
+                }
+            ]
+            }
+            ]
+    }
+    headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json"
+    }
+    response = requests.post(url, json=payload, headers=headers)
+    try:
+        return response.json()["choices"][0]["message"]["content"]
+    except:
+        return ""
 
 def chat(content="", user_id=None, group_id=None, group_user_id=None,image=False,url=None,video=None):
     """

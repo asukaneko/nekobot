@@ -1,6 +1,6 @@
 from ncatbot.utils.logger import get_log
 import commands
-from chat import chat,tts,chat_video,chat_image,chat_webpage
+from chat import chat,tts,chat_video,chat_image,chat_webpage,chat_json
 from commands import *
 
 _log = get_log()
@@ -82,14 +82,17 @@ def deal_forward(msg_obj) -> str:
             video_url = forward_msg['message'][0]['data']['url']
             content += "这是视频的描述："+chat_video(video_url)
         elif msg_type == "json":
-            json_comtent = "这是一个QQ小程序，小程序的描述如下："
-            json_data = forward_msg['message'][0]['data']['data']
-            title = json.loads(json_data).get("meta", {}).get("detail_1", {}).get("title", "")
-            desc = json.loads(json_data).get("meta", {}).get("detail_1", {}).get("desc", "")
-            preview = json.loads(json_data).get("meta", {}).get("detail_1", {}).get("preview", "")
-            image_describe = chat_image(preview)
-            json_comtent += f"小程序的描述：{desc}\n小程序的标题：{title}\n小程序的预览图描述：{image_describe}\n"
-            content += json_comtent
+            try:
+                json_comtent = "这是一个QQ小程序，小程序的描述如下："
+                json_data = forward_msg['message'][0]['data']['data']
+                title = json.loads(json_data).get("meta", {}).get("detail_1", {}).get("title", "")
+                desc = json.loads(json_data).get("meta", {}).get("detail_1", {}).get("desc", "")
+                preview = json.loads(json_data).get("meta", {}).get("detail_1", {}).get("preview", "")
+                image_describe = chat_image(preview)
+                json_comtent += f"小程序的描述：{desc}\n小程序的标题：{title}\n小程序的预览图描述：{image_describe}\n"
+                content += json_comtent
+            except Exception:
+                content += "这是一个QQ小程序，小程序的描述如下："+chat_json(str(forward_msg['message'][0]['data']['data']))
         elif msg_type == "forward":
             content += deal_forward(forward_msg['message'][0])    
         elif msg_type == "face":
@@ -188,10 +191,19 @@ async def on_group_message(msg: GroupMessage):
             return
 
         if msg_obj.get("data").get("message")[0].get("type") == "json":
-            json_data = msg_obj.get("data").get("message")[0].get("data").get("data")
-            title = json.loads(json_data).get("meta", {}).get("detail_1", {}).get("title", "")
-            desc = json.loads(json_data).get("meta", {}).get("detail_1", {}).get("desc", "")
-            preview = json.loads(json_data).get("meta", {}).get("detail_1", {}).get("preview", "")
+            try:
+                json_data = msg_obj.get("data").get("message")[0].get("data").get("data")
+                title = json.loads(json_data).get("meta").get("detail_1").get("title", "")
+                desc = json.loads(json_data).get("meta").get("detail_1").get("desc", "")
+                preview = json.loads(json_data).get("meta").get("detail_1").get("preview", "")
+            except Exception:
+                content = "发送了一个QQ小程序分享:"+chat_json(str(msg_obj.get("data").get("message")[0].get("data").get("data")))
+                res = chat(group_id=msg.group_id,group_user_id=msg.sender.nickname,content=content)
+                if if_tts:
+                    rtf = tts(res)
+                    await bot.api.post_group_msg(msg.group_id, rtf=rtf)
+                await msg.reply(text=res)
+                return
             if not preview.startswith("http"):
                 preview = "https://"+preview
             content = f"发送了一个QQ小程序分享:\n标题: {title}\n描述: {desc}。{ori_content}"
@@ -275,14 +287,14 @@ async def on_private_message(msg: PrivateMessage):
     if msg.message[0].get("type") == "json":
         try:
             json_data = msg.message[0].get("data").get("data")
-            title = json.loads(json_data).get("meta", {}).get("detail_1", {}).get("title", "")
-            desc = json.loads(json_data).get("meta", {}).get("detail_1", {}).get("desc", "")
-            preview = json.loads(json_data).get("meta", {}).get("detail_1", {}).get("preview", "")
+            title = json.loads(json_data).get("meta").get("detail_1").get("title", "")
+            desc = json.loads(json_data).get("meta").get("detail_1").get("desc", "")
+            preview = json.loads(json_data).get("meta").get("detail_1").get("preview", "")
             if not preview.startswith("http"):
                 preview = "https://"+preview
             content = f"发送了一个QQ小程序分享:\n标题: {title}\n描述: {desc}"
             if "哔哩哔哩" in title:
-                url = json.loads(json_data).get("meta", {}).get("detail_1", {}).get("qqdocurl", "")
+                url = json.loads(json_data).get("meta").get("detail_1").get("qqdocurl", "")
                 url = get_bilibili_real_url(url)
                 try:
                     video_content = chat_webpage(url)
@@ -298,7 +310,14 @@ async def on_private_message(msg: PrivateMessage):
             await bot.api.post_private_msg(msg.user_id, text=res)
             return
         except Exception as e:
-            _log.error(f"处理QQ小程序消息出错: {e}")
+            _log.info(f"处理QQ小程序分享出错: {e}，切换为普通文本")
+            content = "发送了一个QQ小程序分享:"+chat_json(str(msg.message[0].get("data").get("data")))
+            res = chat(user_id=msg.user_id,content=content)
+            if if_tts:
+                rtf = tts(res)
+                await bot.api.post_private_msg(msg.user_id, rtf=rtf)
+            await bot.api.post_private_msg(msg.user_id, text=res)
+            return
 
     if msg.message[0].get("type") == "video": #处理视频
         url = msg.message[0].get("data").get("url")
