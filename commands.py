@@ -1937,7 +1937,7 @@ async def handle_gf(msg,is_group=True):
     prefix = "/generate_photo" if msg.raw_message.startswith("/generate_photo") else "/gf"
     default_size = "1024x1024"
     try:
-        args = msg.raw_message[len(prefix):].strip().split(
+        args = msg.raw_message[len(prefix):].strip().split()
         if not args:
             raise ValueError
         if len(args) == 1:
