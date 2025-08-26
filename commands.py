@@ -1,4 +1,4 @@
-from ncatbot.core import BotClient, GroupMessage, PrivateMessage,MessageChain,Music
+from ncatbot.core import BotClient, GroupMessage, PrivateMessage
 from config import load_config
 from chat import group_messages, user_messages, tts, chat
 import jmcomic,requests,random,configparser,json,yaml,re,os,asyncio
@@ -6,7 +6,23 @@ from jmcomic import *
 from typing import Dict, List
 from datetime import datetime
 from difflib import get_close_matches  # 用于模糊匹配
-
+from ncatbot.core import (
+    MessageChain,  
+    Text,         
+    Reply,         
+    At,           
+    AtAll,         
+    Dice,          
+    Face,          
+    Image,         
+    Json,          
+    Music,         
+    CustomMusic,   
+    Record,        
+    Rps,          
+    Video,         
+    File,          
+)
 #----------------------
 # region 全局变量设置
 #----------------------
@@ -1797,11 +1813,15 @@ async def handle_info(msg, is_group=True):
                 introduction = info['introduction']
             except Exception:
                 introduction = "暂无"
-            reply = f"《{title}》的信息如下喵~\n作者: {author}\n分类: {info['category']}\n字数: {info['word_count']}\n状态: {info['is_serialize']}\n简介：{introduction}\n更新日期: {info['last_date']}\n下载链接: {url}\n详细页面：{info['page']}"
+            cover = info['cover_url']
+            reply =  MessageChain(
+                f"《{title}》的信息如下喵~\n作者: {author}\n分类: {info['category']}\n字数: {info['word_count']}\n状态: {info['is_serialize']}\n简介：{introduction}\n更新日期: {info['last_date']}\n下载链接: {url}\n详细页面：{info['page']}",
+                Image(f"{cover}")
+                )
             if is_group:
-                await msg.reply(text=reply)
+                await msg.reply(rtf=reply)
             else:
-                await bot.api.post_private_msg(msg.user_id, text=reply)
+                await bot.api.post_private_msg(msg.user_id, rtf=reply)
         else:
             reply = "编号无效喵~请选择列表中的编号喵~"
             if is_group:
