@@ -371,6 +371,7 @@ async def handle_jmrank(msg, is_group=True):
 
     for page in cl.categories_filter_gen(page=1,  # 起始页码
                                          # 下面是分类参数
+                                         time=JmMagicConstants.TIME_WEEK,
                                          category=JmMagicConstants.CATEGORY_ALL,
                                          order_by=JmMagicConstants.ORDER_BY_VIEW,
                                          ):
@@ -385,7 +386,6 @@ async def handle_jmrank(msg, is_group=True):
                 break
         if fg:
             break
-
 
     if not os.path.exists(os.path.join(cache_dir , f"{select}_{name}.md")):
         if is_group:
