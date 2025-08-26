@@ -1841,11 +1841,16 @@ async def handle_random_novel(msg, is_group=True):
     url = books[novel]["download_url"]
     reply = f"抽选到了《{novel}》喵~\n"
     reply += f"简介如下喵~\n作者：{books[novel]['author']}\n字数：{books[novel]['word_count']}\n状态：{books[novel]['is_serialize']}\n最新更新：{books[novel]['last_date']}\n简介：{books[novel]['introduction']}"
+    cover = books[novel]['cover_url']
+    reply =  MessageChain(
+        reply,
+        Image(f"{cover}")
+        )
     if is_group:
-        await msg.reply(text=reply)
+        await msg.reply(rtf=reply)
         await handle_generic_file(msg, is_group, '', 'file', custom_url=url,file_name=novel+".txt")
     else:
-        await bot.api.post_private_msg(msg.user_id, text=reply)
+        await bot.api.post_private_msg(msg.user_id, rtf=reply)
         await handle_generic_file(msg, is_group, '', 'file', custom_url=url,file_name=novel+".txt",custom_send_method=bot.api.upload_private_file)
 
 mc = {}
