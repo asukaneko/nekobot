@@ -322,7 +322,7 @@ def chat(content="", user_id=None, group_id=None, group_user_id=None,image=False
     
     #保留最大历史记录
     if len(messages) > MAX_HISTORY_LENGTH:
-        messages = messages[-MAX_HISTORY_LENGTH:] #这里有可能会丢失初始提示词，但ai大概率能根据上下文判断提示词
+        messages = messages[0]+messages[-MAX_HISTORY_LENGTH:] #这里有可能会丢失初始提示词，但ai大概率能根据上下文判断提示词
 
     client = OpenAI(api_key=api_key,base_url=base_url)
 
