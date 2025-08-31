@@ -168,13 +168,17 @@ async def on_group_message(msg: GroupMessage):
         try:
             ori_content += msg.message[2].get("data").get("text")  
         except IndexError:
-            ori_content += "有人回复了你"
+            ori_content += "有人回复了你："
 
         reply_id = msg.message[0].get("data").get("id")
         msg_obj = await bot.api.get_msg(message_id=reply_id)
         if msg_obj.get("data").get("message")[0].get("type") == "image": #处理图片
             url = msg_obj.get("data").get("message")[0].get("data").get("url")
-            content = chat(content=ori_content,group_id=msg.group_id,group_user_id=msg.sender.nickname,image=True,url=url)
+            summary = msg_obj.get("data").get("message")[0].get("data").get("summary")
+            if summary == "[动画表情]":
+                content = chat(content=ori_content+"发送了一个动画表情",group_id=msg.group_id,group_user_id=msg.sender.nickname,image=True,url=url)
+            else:
+                content = chat(content=ori_content,group_id=msg.group_id,group_user_id=msg.sender.nickname,image=True,url=url)
             if if_tts:
                 rtf = tts(content)
                 await bot.api.post_group_msg(msg.group_id, rtf=rtf)
@@ -331,7 +335,11 @@ async def on_private_message(msg: PrivateMessage):
     try:
         if msg.message[0].get("type") == "image": #处理图片
             url = msg.message[0].get("data").get("url")
-            content = chat(user_id=msg.user_id,image=True,url=url)
+            summary = msg.message[0].get("data").get("summary")
+            if summary == "[动画表情]":
+                content = chat(user_id=msg.user_id,image=True,url=url,content="发送了一个动画表情")
+            else:
+                content = chat(user_id=msg.user_id,image=True,url=url)
             if if_tts:
                 rtf = tts(content)
                 await bot.api.set_input_status(event_type=0,user_id=bot_id)
