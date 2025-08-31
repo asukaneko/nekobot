@@ -16,7 +16,7 @@
 
 ---
 ## ✨Updates 更新  
-![](https://img.shields.io/badge/LatestVersion-1.5.3-blue?&logo=react)
+![](https://img.shields.io/badge/LatestVersion-1.5.4-blue?&logo=react)
 
 + 详细查看[CHANGLOG.md](https://github.com/asukaneko/NapCat-jmcomic_download-bot/blob/master/CHANGELOG.md)
 ---

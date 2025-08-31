@@ -424,5 +424,40 @@ async def on_private_message(msg: PrivateMessage):
             await bot.api.set_input_status(event_type=1,user_id=msg.user_id)
         await bot.api.post_private_msg(msg.user_id, text=content)
 
+async def handle_command(msg, command_handlers):
+    for command, handler in command_handlers.items():
+        if isinstance(command, tuple):  # 处理命令别名情况
+            for cmd in command:
+                if re.match(rf'^{re.escape(cmd)}(?:\s|\.|$)', msg.raw_message):
+                    _log.info(f"调用{cmd}命令")
+                    await handler(msg, is_group=False)
+                    return
+        elif re.match(fr'^{re.escape(command)}(?:\s|\.|$)', msg.raw_message): # 处理单个命令情况
+            _log.info(f"调用{command}命令")
+            await handler(msg, is_group=False)
+            return
+
 if __name__ == "__main__":
-    bot.run(enable_webui_interaction=False)
+    import threading
+    import asyncio
+    # 启动机器人
+    bot_thread = threading.Thread(target=bot.run, kwargs={'enable_webui_interaction': False})
+    bot_thread.start()
+    loop = asyncio.new_event_loop()
+    _log.info("命令行模式已启动，可以在命令行内输入命令")
+    while True:
+        try:
+            command = input("").strip()
+            if command.lower() == 'exit':
+                _log.info("已退出命令行模式")
+                break
+            message = {
+                "raw_message":command,
+                "user_id":admin_id
+            }
+            msg = GroupMessage(message)
+            loop.run_until_complete(handle_command(msg, command_handlers))
+            time.sleep(1)
+        except KeyboardInterrupt:
+            _log.info("退出命令输入")
+            break
