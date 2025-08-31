@@ -3,8 +3,6 @@
 #   |--- ...
 #  .prompts
 #   |---... 
-
-from ast import mod
 import configparser,requests,os,base64,time,json,datetime,re
 from openai import OpenAI
 from ncatbot.core.element import Record,MessageChain
@@ -320,9 +318,9 @@ def chat(content="", user_id=None, group_id=None, group_user_id=None,image=False
             des += f"第{tot}个链接{match}的描述："+chat_webpage(match) + "\n"
         messages.append({"role": "user", "content":f"{pre_text}"+des})
     
-    #保留最大历史记录
+    # 保留最大历史记录
     if len(messages) > MAX_HISTORY_LENGTH:
-        messages = messages[0]+messages[-MAX_HISTORY_LENGTH:] #这里有可能会丢失初始提示词，但ai大概率能根据上下文判断提示词
+        messages = [messages[0]] + messages[-MAX_HISTORY_LENGTH:]
 
     client = OpenAI(api_key=api_key,base_url=base_url)
 
