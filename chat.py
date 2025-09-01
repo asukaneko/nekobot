@@ -201,7 +201,7 @@ def chat_webpage(wurl) -> str:
             "content": [
                 {
                     "type": "text", 
-                    "text": f"请描述这个网页的内容：{html}"
+                    "text": f"请描述这个网页的内容，仅分析网页的主体内容，忽略网页的其他内容和技术相关的细节；仅返回主体内容的描述：{html}"
                 }
             ]
             }
