@@ -341,34 +341,26 @@ async def handle_jmrank(msg, is_group=True):
     else:
         await bot.api.post_private_msg(msg.user_id, text="正在获取排行喵~")
     select = msg.raw_message[len("/jmrank"):].strip()
-
-    # 创建客户端
     op = JmOption.default()
     cl = op.new_jm_client()
-
     page: JmCategoryPage = cl.categories_filter(
         page=1,
         time=JmMagicConstants.TIME_ALL,
         category=JmMagicConstants.CATEGORY_ALL,
         order_by=JmMagicConstants.ORDER_BY_LATEST,
     )
-
     if select == "月排行":
         page: JmCategoryPage = cl.month_ranking(1)
     elif select == "周排行":
         page: JmCategoryPage = cl.week_ranking(1)
-
     cache_dir = os.path.join(load_address(),"rank")
-   
     os.makedirs(cache_dir,exist_ok = True)
-
     name = time.time()
-
     tot = 0
     fg=0
-
     comic_cache.clear()
-
+    with open(os.path.join(cache_dir , f"{select}_{name}.md"), "w", encoding="utf-8") as f:
+        f.write(f"# {select}：  \n")
     for page in cl.categories_filter_gen(page=1,  # 起始页码
                                          # 下面是分类参数
                                          time=JmMagicConstants.TIME_WEEK,
@@ -386,14 +378,12 @@ async def handle_jmrank(msg, is_group=True):
                 break
         if fg:
             break
-
     if not os.path.exists(os.path.join(cache_dir , f"{select}_{name}.md")):
         if is_group:
-            await msg.reply(text="获取排行失败喵~")
+            await msg.reply(text="获取排行失败喵~，文件不存在")
         else:
-            await bot.api.post_private_msg(msg.user_id, text="获取排行失败喵~")
+            await bot.api.post_private_msg(msg.user_id, text="获取排行失败喵~，文件不存在")
         return
-
     if is_group:
         await bot.api.post_group_file(msg.group_id, file=os.path.join(cache_dir , f"{select}_{name}.md"))
     else:
