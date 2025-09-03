@@ -94,6 +94,7 @@ Command List:
 /get_prompt or /gp -> Get prompt
 /del_message or /dm -> Delete chat history
 /active_chat <interval_hours> <enable(1/0)> -> Enable active chat
+/show_chat or /sc -> Send complete chat history
 /random_image or /ri -> Random image
 /random_emoticons or /re -> Random emoticons
 /st <tag> -> Send random NSFW image (tags support AND/OR (& |))
@@ -109,12 +110,10 @@ Command List:
 /mc_bind <server_address> -> Bind MC server
 /mc_unbind -> Unbind MC server
 /mc_show -> View bound MC server
-/generate_photo or /gf <description> <size> -> Generate image
-/restart -> Restart bot
+/generate_photo or /gf <description(no spaces)> <size> -> Generate image
+/restart -> Restart bot (admin)
 /tts -> Toggle TTS
 /agree -> Accept friend request
-/remind <hours> <content> -> Set reminder
-/premind <MM-DD> <HH:MM> <content> -> Set precise reminder
 /set_admin <qq_number> or /sa <qq_number> -> Set admin (root)
 /del_admin <qq_number> or /da <qq_number> -> Remove admin (root)
 /get_admin or /ga -> Get admin list
@@ -124,6 +123,7 @@ Command List:
 /set_qq_avatar <url> -> Change avatar (admin)
 /send_like <target_qq> <times> -> Send likes
 /bot.api.function_name(param1=value1,param2=value2) -> Custom API (admin), see `https://docs.ncatbot.xyz/guide/p8aun9nh/`
+/shutdown -> Shutdown bot (admin)
 /set_group_admin <target_qq> -> Set group admin (admin)
 /del_group_admin <target_qq> -> Remove group admin (admin)
 /findbook or /fb <book_title> -> Search and download light novel
@@ -131,6 +131,9 @@ Command List:
 /select <number> -> Select novel to download
 /info <book_title> -> Get novel info
 /random_novel or /rn -> Random novel
+/task </bot.api.xxxx(param1=value1...)> <hours> <loop(1/0)> -> Set timed task (admin)
+/remind <hours> <content> -> Set reminder
+/premind <MM-DD> <HH:MM> <content> -> Set precise reminder
 /help or /h -> View help
 ...
 ```

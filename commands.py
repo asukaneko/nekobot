@@ -353,6 +353,8 @@ async def handle_jmrank(msg, is_group=True):
         page: JmCategoryPage = cl.month_ranking(1)
     elif select == "周排行":
         page: JmCategoryPage = cl.week_ranking(1)
+    else:
+        page: JmCategoryPage = cl.week_ranking(1)
     cache_dir = os.path.join(load_address(),"rank")
     os.makedirs(cache_dir,exist_ok = True)
     name = time.time()
@@ -360,7 +362,7 @@ async def handle_jmrank(msg, is_group=True):
     fg=0
     comic_cache.clear()
     with open(os.path.join(cache_dir , f"{select}_{name}.md"), "w", encoding="utf-8") as f:
-        f.write(f"# {select}：  \n")
+        f.write(f"## {select}：  \n")
     for page in cl.categories_filter_gen(page=1,  # 起始页码
                                          # 下面是分类参数
                                          time=JmMagicConstants.TIME_WEEK,
@@ -397,11 +399,8 @@ async def handle_search(msg, is_group=True):
         await bot.api.post_private_msg(msg.user_id, text="正在搜索喵~")
 
     cache_dir = os.path.join(load_address(),"search")
-
     os.makedirs(cache_dir,exist_ok = True)
-
     client = JmOption.default().new_jm_client()
-
     content = msg.raw_message[len("/search"):].strip()
     
     if not content or content == " ":
@@ -450,12 +449,11 @@ async def handle_search(msg, is_group=True):
         await bot.api.post_private_msg(msg.user_id, text="正在搜索喵~")
 
     cache_dir = os.path.join(load_address(),"search")
-
     os.makedirs(cache_dir,exist_ok = True)
-
     content = msg.raw_message[len("/tag"):].strip()
     name = content + str(time.time()).replace(".", "")
     client = JmOption.default().new_jm_client()
+ 
     with open(os.path.join(cache_dir , f"{name}.md"), "w", encoding="utf-8") as f:
         f.write(f"搜索标签结果：{content}  \n")
     tot = 0
@@ -491,9 +489,7 @@ async def handle_get_fav(msg, is_group=True):
         await bot.api.post_private_msg(msg.user_id, text="正在获取收藏夹喵~")
 
     cache_dir = os.path.join(load_address(),"fav")
-
     os.makedirs(cache_dir, exist_ok=True)
-
     name = username + str(time.time()).replace(".", "")
 
     option = JmOption.default()
@@ -513,13 +509,10 @@ async def handle_get_fav(msg, is_group=True):
             url = fetch_cover_url(aid)
             with open(os.path.join(cache_dir , f"{name}.md"), "a", encoding="utf-8") as f:
                 f.write(f"{aid}  {atitle}    \n![{atitle}]({url})    \n\n")
-
-
     if is_group:
         await bot.api.post_group_file(msg.group_id, file=os.path.join(cache_dir , f"{name}.md"))
     else:
         await bot.api.upload_private_file(msg.user_id, os.path.join(cache_dir , f"{name}.md"), f"{username}.md")
-
 
 @register_command("/jm",help_text = "/jm <漫画ID> -> 下载漫画")
 async def handle_jmcomic(msg, is_group=True):
@@ -630,7 +623,6 @@ async def handle_jm_clear(msg, is_group=True):
         await msg.reply(text="缓存已清除喵~")
     else:
         await bot.api.post_private_msg(msg.user_id, text="缓存已清除喵~")
-
 
 # ====下面的收藏夹不是官方的收藏夹，是本地储存的====
 @register_command("/add_fav", help_text="/add_fav <漫画ID> -> 添加收藏")

@@ -96,6 +96,7 @@ Command List:
 /get_prompt 或者 /gp -> 获取提示词
 /del_message 或者 /dm -> 删除对话记录
 /主动聊天 <间隔时间(小时)> <是否开启(1/0)> -> 开启主动聊天
+/show_chat 或 /sc -> 发送完整聊天记录
 /random_image 或者 /ri -> 随机图片
 /random_emoticons 或者 /re -> 随机表情包
 /st <标签名> -> 发送随机涩图,标签支持与或(& |)
@@ -111,12 +112,10 @@ Command List:
 /mc_bind <服务器地址> -> 绑定mc服务器
 /mc_unbind -> 解绑mc服务器
 /mc_show -> 查看绑定的mc服务器
-/generate_photo 或 /gf <图片描述> <大小> -> 生成图片
-/restart -> 重启机器人
+/generate_photo 或 /gf <图片描述(不能有空格)> <大小> -> 生成图片
+/restart -> 重启机器人(管理员)
 /tts -> 开启或关闭TTS
 /agree -> 同意好友请求
-/remind <时间(小时)> <内容> -> 定时提醒
-/premind <MM-DD> <HH:MM> <内容> -> 精确时间提醒
 /set_admin <qq号> 或者 /sa <qq号> -> 设置管理员(root)
 /del_admin <qq号> 或者 /da <qq号> -> 删除管理员(root)
 /get_admin 或者 /ga -> 获取管理员
@@ -126,6 +125,7 @@ Command List:
 /set_qq_avatar <地址> -> 更改头像（管理员）
 /send_like <目标QQ号> <次数> -> 发送点赞
 /bot.api.函数名(参数1=值1,参数2=值2) -> 用户自定义api(admin)，详情可见https://docs.ncatbot.xyz/guide/p8aun9nh/
+/shutdown -> 关闭机器人(管理员)
 /set_group_admin <目标QQ号> -> 设置群管理员(admin)
 /del_group_admin <目标QQ号> -> 取消群管理员(admin)
 /findbook 或者 /fb <书名> -> 搜索并选择下载轻小说
@@ -133,6 +133,11 @@ Command List:
 /select <编号> -> 选择要下载的轻小说
 /info <书名> -> 获取轻小说信息
 /random_novel 或者 /rn -> 发送随机小说
+/task </bot.api.xxxx(参数1=值1...)> <时间(小时)> <是否循环(1/0)> -> 设置定时任务(管理员)
+/task </bot.api.xxxx(参数1=值1...)> <时间(小时)> <是否循环(1/0)> -> 设置定时任务(管理员)
+/task </bot.api.xxxx(参数1=值1...)> <时间(小时)> <是否循环(1/0)> -> 设置定时任务(管理员)
+/remind <时间(小时)> <内容> -> 定时提醒
+/premind <MM-DD> <HH:MM> <内容> -> 精确时间提醒
 /help 或者 /h -> 查看帮助
 ...
 ```
