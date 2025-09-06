@@ -1579,6 +1579,7 @@ async def handle_del_group_admin(msg, is_group=True):
 
 @register_command("/show_chat","/sc",help_text = "/show_chat 或 /sc -> 发送完整聊天记录")    
 async def handle_show_chat(msg, is_group=True):
+    cache_dir = os.path.join(load_address(),"temp.txt")
     if is_group:  
         with open("saved_message/group_messages.json","r",encoding="utf-8") as f:
             group_messages = json.load(f)
@@ -1586,11 +1587,9 @@ async def handle_show_chat(msg, is_group=True):
             text = str(group_messages[str(msg.group_id)])
         except KeyError:
             text = "该群没有聊天记录喵~"
-        if len(text) > 4000:
-            for i in range(0, len(text), 4000):
-                await msg.reply(text=text[i:i+4000])
-        else:
-            await msg.reply(text=text)
+        with open(cache_dir,"w",encoding="utf-8") as f:
+            f.write(text)
+        await bot.api.post_group_file(msg.group_id, file=cache_dir)
 
     else:
         with open("saved_message/user_messages.json","r",encoding="utf-8") as f:
@@ -1599,11 +1598,11 @@ async def handle_show_chat(msg, is_group=True):
             text = str(user_messages[str(msg.user_id)])
         except KeyError:
             text = "你没有聊天记录喵~"
-        if len(text) > 4000:
-            for i in range(0, len(text), 4000):
-                await bot.api.post_private_msg(msg.user_id, text=text[i:i+4000])
-        else:
-            await bot.api.post_private_msg(msg.user_id, text=text)
+        with open(cache_dir,"w",encoding="utf-8") as f:
+            f.write(text)
+        await bot.api.upload_private_file(msg.user_id, file=cache_dir,name="聊天记录.txt")
+
+    os.remove(cache_dir)    
 
 @register_command("/主动聊天",help_text = "/主动聊天 <间隔时间(小时)> <是否开启(1/0)> -> 开启主动聊天")
 async def handle_active_chat(msg, is_group=True):
