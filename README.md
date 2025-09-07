@@ -31,22 +31,6 @@
 >For any issues, please submit to GitHub or email ycssbc@126.com  
 
 
- **📝Related Documents**
-
-docker：https://asukablog.iepose.cn/archives/5f583afd-c9b1-420f-bc4b-41f4dfc039d3  
-
-[![](https://img.shields.io/badge/docs-nekodocs-blue)](https://nekodocs.iepose.cn/)  
-
-| jmcomic | [![](https://img.shields.io/badge/jmcomic-on_Github-blue)](https://github.com/hect0x7/JMComic-Crawler-Python) | [![](https://img.shields.io/badge/jmcomic-Readthedocs.io-orange)](https://jmcomic.readthedocs.io/zh-cn/latest/) |
-|:-:|:-:|:-:|
-
-| napcat |[![](https://img.shields.io/badge/napcat-on_Github-blue)](https://github.com/NapNeko/NapCatQQ) | [![](https://img.shields.io/badge/napcat-Github.IO-orange)](https://napneko.github.io)
-|:-:|:-:|:-:|
-
-| ncatbot | [![](https://img.shields.io/badge/ncatbot-on_Github-blue)](https://github.com/liyihao1110/ncatbot) | [![](https://img.shields.io/badge/Python_Sdk-Ncatbot-8A2BE2)](https://docs.ncatbot.xyz/) |
-|:-:|:-:|:-:|
-
-
 ## =============== ↓ Quick Start  ↓ ===============
 ### ⬇️Download Source Code  
 ```
