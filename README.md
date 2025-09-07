@@ -23,7 +23,7 @@
 > If you encounter any error, please check if you have installed the latest version of napcat and ncatbot  
 >
 > If you are unable to install NapCat, please go to the [NapCat Download Page](https://github.com/NapNeko/NapCatQQ/releases/download/v4.8.95/NapCat.Shell.zip) to download the latest version of NapCat.Shell.zip, extract it to the root directory, and rename it to "napcat."
-
+>**Do not expose the webui directly to the public network. If necessary, please set a strong password.**
 
 >Environment: <u>___windows___</u>   
 >Recommended to use a __secondary account__ for login  

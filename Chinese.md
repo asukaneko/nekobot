@@ -27,6 +27,7 @@
 > 若出现未知错误，请检查是否已安装最新版本的napcat和ncatbot  
 >
 > 若在命令行阶段无法安装napcat，请去[napcat下载页](https://github.com/NapNeko/NapCatQQ/releases/download/v4.8.95/NapCat.Shell.zip)下载最新版的NapCat.Shell.zip，解压到根目录，并把文件夹重命名为napcat
+>**请勿直接将webui开放到公网，如有需求请设置强密码**
 
 >环境为 <u>___windows___</u>  
 >建议使用 __小号__ 登录  
