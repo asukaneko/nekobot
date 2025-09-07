@@ -2007,6 +2007,14 @@ async def handle_gf(msg,is_group=True):
         await bot.api.post_private_msg(msg.user_id,text="绘制完成喵~")
         await bot.api.post_private_file(msg.user_id,image=url)
 
+@register_command("/识别人物",help_text = "/识别人物 -> 识别图片中的二次元人物")
+async def handle_rec(msg, is_group=True):
+    if is_group:
+        await msg.reply(text="请先发送图片，再回复图片，加上@我，/识别人物")
+    else:
+        await bot.api.post_private_msg(msg.user_id,text="请先发送图片，再回复图片，加上/识别人物")
+    return
+
 #将help命令放在最后
 @register_command("/help","/h",help_text = "/help 或者 /h -> 查看帮助")
 async def handle_help(msg, is_group=True):
@@ -2014,7 +2022,7 @@ async def handle_help(msg, is_group=True):
     command_categories = {
         "1": {"name": "漫画相关", "commands": ["/jm", "/jmrank","/jm_clear", "/search","/tag","/add_black_list","/del_black_list","/list_black_list","/add_global_black_list","/del_global_black_list","/get_fav", "/add_fav", "/del_fav","/list_fav"]},
         "2": {"name": "聊天设置", "commands": ["/set_prompt", "/del_prompt", "/get_prompt","/del_message","/主动聊天","/sc"]},
-        "3": {"name": "娱乐功能", "commands": ["/random_image", "/random_emoticons", "/st","/random_video","/random_dice","/random_rps","/music","/random_music","/dv","/di","/df","/mc","/mc_bind","/mc_unbind","/mc_show","/gf"]},
+        "3": {"name": "娱乐功能", "commands": ["/random_image", "/random_emoticons", "/st","/random_video","/random_dice","/random_rps","/music","/random_music","/dv","/di","/df","/mc","/mc_bind","/mc_unbind","/mc_show","/gf","/识别人物"]},
         "4": {"name": "系统处理", "commands": ["/restart", "/tts", "/agree","/set_admin","/del_admin","/get_admin","/set_ids","/set_online_status","/get_friends","/set_qq_avatar","/send_like","/bot","/shutdown"]},
         "5": {"name": "群聊管理", "commands": ["/set_group_admin", "/del_group_admin"]},
         "6": {"name": "轻小说", "commands": ["/findbook","/fa" , "/select", "/info","/random_novel"]},
