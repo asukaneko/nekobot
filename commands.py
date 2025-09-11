@@ -1579,7 +1579,7 @@ async def handle_del_group_admin(msg, is_group=True):
 
 @register_command("/show_chat","/sc",help_text = "/show_chat 或 /sc -> 发送完整聊天记录")    
 async def handle_show_chat(msg, is_group=True):
-    cache_dir = os.path.join(load_address(),"temp.txt")
+    cache_dir = os.path.join(load_address(),"聊天记录.txt")
     if is_group:  
         with open("saved_message/group_messages.json","r",encoding="utf-8") as f:
             group_messages = json.load(f)

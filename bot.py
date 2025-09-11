@@ -166,7 +166,11 @@ async def on_group_message(msg: GroupMessage):
     #如果是at机器人
         try:
             if msg.message[1].get("type") == "text":
-                ori_content = msg.message[1].get("data").get("text") #避免@的消息为空
+                ori_content = ""
+                for i in range(1,len(msg.message)):
+                    if msg.message[i].get("type") == "text":
+                        ori_content += msg.message[i].get("data").get("text")
+    
             elif msg.message[1].get("type") == "face":
                 try:
                     emo = emotions[msg.message[1].get('data').get('id')]
@@ -190,7 +194,9 @@ async def on_group_message(msg: GroupMessage):
         #如果是回复机器人的消息
         ori_content = ""
         try:
-            ori_content += msg.message[2].get("data").get("text")  
+            for i in range(2,len(msg.message)):
+                if msg.message[i].get("type") == "text":
+                    ori_content += msg.message[i].get("data").get("text")
         except IndexError:
             ori_content += "有人回复了你："
 

@@ -306,7 +306,7 @@ def chat(content="", user_id=None, group_id=None, group_user_id=None,image=False
         if search_status == 1:
             messages.append({"role": "user", "content":f"{pre_text}"+ "这是联网搜索的结果："+search_res+"这是用户说的话："+content})
         else:
-            messages.append({"role": "user", "content":f"{pre_text}"+ "这是用户说的话："+content})
+            messages.append({"role": "user", "content":f"{pre_text}"+content})
     
     des = ""
     pattern = r"(?:https?:\/\/)?(?:www\.)?[a-zA-Z0-9-]+(?:\.[a-zA-Z]{2,})+(?:\/[^\s?]*)?(?:\?[^\s]*)?"
