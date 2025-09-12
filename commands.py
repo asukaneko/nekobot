@@ -48,9 +48,26 @@ tasks = {}  # 用于存储聊天的定时任务
 books = {}
 
 schedule_tasks = {} #用于存储定时任务
+
+at_all_group = [] # 用于存储@全体成员的群
+
 # ------------------
 # region 通用函数
 # ------------------
+
+def read_at_all_group():
+    try:
+        with open(os.path.join(load_address(),"at_all_group.txt"), "r", encoding="utf-8") as f:
+            group_ids = f.readlines()
+            for i in range(len(group_ids)):
+                group_ids[i] = group_ids[i].strip()
+            at_all_group.extend(group_ids)
+    except FileNotFoundError:
+        write_at_all_group()
+
+def write_at_all_group():
+    with open(os.path.join(load_address(),"at_all_group.txt"), "w", encoding="utf-8") as f:
+        f.writelines(at_all_group)
 
 def write_admin():
     try:
@@ -2014,6 +2031,21 @@ async def handle_rec(msg, is_group=True):
     else:
         await bot.api.post_private_msg(msg.user_id,text="请先发送图片，再回复图片，加上/识别人物")
     return
+
+@register_command("/at_all",help_text = "/at_all -> 识别@全体成员功能(admin)")
+async def handle_at_all_group(msg, is_group=True):
+    if is_group:
+        if str(msg.user_id) not in admin:
+            await msg.reply(text="只有管理员才能使用该命令喵~")
+            return
+        if str(msg.group_id) in at_all_group:
+            await msg.reply(text="该群已开启识别@全体成员功能喵~")
+            return
+        at_all_group.append(str(msg.group_id))
+        write_at_all_group()
+        await msg.reply(text="开启成功喵~")
+    else:
+        await bot.api.post_private_msg(msg.user_id,text="请在群聊中使用该命令")
 
 #将help命令放在最后
 @register_command("/help","/h",help_text = "/help 或者 /h -> 查看帮助")

@@ -162,8 +162,8 @@ async def on_group_message(msg: GroupMessage):
         _log.info("调用chat命令")
         await msg.reply(text=content)
     
-    if msg.message[0].get("type") == "at" and msg.message[0].get("data").get("qq") == bot_id:
-    #如果是at机器人
+    if (msg.message[0].get("type") == "at" and msg.message[0].get("data").get("qq") == bot_id) or (msg.message[0].get("type") == "at" and msg.message[0].get("data").get("qq") == 'all' and str(msg.group_id) in at_all_group):
+    #如果是at机器人或者at全体成员并且该群开启了识别@全体成员功能
         try:
             if msg.message[1].get("type") == "text":
                 ori_content = ""
