@@ -2039,7 +2039,9 @@ async def handle_at_all_group(msg, is_group=True):
             await msg.reply(text="只有管理员才能使用该命令喵~")
             return
         if str(msg.group_id) in at_all_group:
-            await msg.reply(text="该群已开启识别@全体成员功能喵~")
+            at_all_group.remove(str(msg.group_id))
+            write_at_all_group()
+            await msg.reply(text="关闭成功喵~")
             return
         at_all_group.append(str(msg.group_id))
         write_at_all_group()
