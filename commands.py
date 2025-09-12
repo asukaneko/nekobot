@@ -2055,7 +2055,7 @@ async def handle_help(msg, is_group=True):
         "1": {"name": "漫画相关", "commands": ["/jm", "/jmrank","/jm_clear", "/search","/tag","/add_black_list","/del_black_list","/list_black_list","/add_global_black_list","/del_global_black_list","/get_fav", "/add_fav", "/del_fav","/list_fav"]},
         "2": {"name": "聊天设置", "commands": ["/set_prompt", "/del_prompt", "/get_prompt","/del_message","/主动聊天","/sc"]},
         "3": {"name": "娱乐功能", "commands": ["/random_image", "/random_emoticons", "/st","/random_video","/random_dice","/random_rps","/music","/random_music","/dv","/di","/df","/mc","/mc_bind","/mc_unbind","/mc_show","/gf","/识别人物"]},
-        "4": {"name": "系统处理", "commands": ["/restart", "/tts", "/agree","/set_admin","/del_admin","/get_admin","/set_ids","/set_online_status","/get_friends","/set_qq_avatar","/send_like","/bot","/shutdown"]},
+        "4": {"name": "系统处理", "commands": ["/restart", "/tts", "/agree","/set_admin","/del_admin","/get_admin","/set_ids","/set_online_status","/get_friends","/set_qq_avatar","/send_like","/bot","/shutdown","/at_all"]},
         "5": {"name": "群聊管理", "commands": ["/set_group_admin", "/del_group_admin"]},
         "6": {"name": "轻小说", "commands": ["/findbook","/fa" , "/select", "/info","/random_novel"]},
         "7": {"name": "定时任务", "commands": ["/task","/cancel_task","/list_task","/remind","/premind"]}
