@@ -102,7 +102,7 @@ def register_command(*command,help_text = None): # 注册命令
 def load_address(): # 加载配置文件，返回图片保存地址
     with open("option.yml", "r", encoding="utf-8") as f:
         conf = yaml.safe_load(f)
-        after_photo_list = conf.get("plugins", {}).get("after_photo", [])
+        after_photo_list = conf.get("plugins", {}).get("after_album", [])
         if after_photo_list and isinstance(after_photo_list, list):
             pdf_dir = after_photo_list[0].get("kwargs", {}).get("pdf_dir", "./cache/pdf/")
         else:
