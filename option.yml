@@ -9,11 +9,11 @@ dir_rule:
   base_dir: ./cache/comic/
 
 plugins:
-  after_photo:
-    # 把章节的所有图片合并为一个pdf的插件
+  after_album:
+    # 把所有章节的所有图片合并为一个pdf的插件
     # 使用前需要安装依赖库: [pip install img2pdf]
     - plugin: img2pdf
       kwargs:
         pdf_dir: ./cache/pdf/ # pdf存放文件夹
-        filename_rule: Pid
+        filename_rule: Aid
         delete_original_file: true # 是否删除原图
