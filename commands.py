@@ -67,7 +67,8 @@ def read_at_all_group():
 
 def write_at_all_group():
     with open(os.path.join(load_address(),"at_all_group.txt"), "w", encoding="utf-8") as f:
-        f.writelines(at_all_group)
+        for group_id in at_all_group:
+            f.write(group_id + "\n")
 
 def write_admin():
     try:
