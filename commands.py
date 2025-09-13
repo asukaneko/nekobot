@@ -886,7 +886,8 @@ async def handle_set_prompt(msg, is_group=True):
     elif msg.raw_message.startswith("/sp"):
         prompt_content = msg.raw_message[len("/sp"):].strip()
     id_str = str(msg.group_id if is_group else msg.user_id)
-    os.makedirs("prompts", exist_ok=True)
+    os.makedirs("prompts/group", exist_ok=True)
+    os.makedirs("prompts/user", exist_ok=True)
 
     prefix = "group" if is_group else "user"
     with open(f"prompts/{prefix}/{prefix}_{id_str}.txt", "w", encoding="utf-8") as file:
