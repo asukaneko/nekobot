@@ -324,6 +324,7 @@ load_admin()
 load_blak_list()
 load_running()
 load_novel_data()
+read_at_all_group()
 
 #----------------------
 #     region 命令
@@ -878,8 +879,13 @@ async def handle_list_black_list(msg, is_group=True):
         
 #------------------------
 
-@register_command("/set_prompt","/sp",help_text = "/set_prompt 或者 /sp <提示词> -> 设定提示词")
+@register_command("/set_prompt","/sp",help_text = "/set_prompt 或者 /sp <提示词> -> 设定提示词(admin)")
 async def handle_set_prompt(msg, is_group=True):
+    if (str(msg.user_id) not in admin) and is_group:
+        reply = "你没有权限喵~"
+        await msg.reply(text=reply)
+        return
+
     prompt_content = ""
     if msg.raw_message.startswith("/set_prompt"):
         prompt_content = msg.raw_message[len("/set_prompt"):].strip()
@@ -905,8 +911,13 @@ async def handle_set_prompt(msg, is_group=True):
         await bot.api.post_private_msg(msg.user_id, text=reply_text)
 
 
-@register_command("/del_prompt","/dp",help_text = "/del_prompt 或者 /dp -> 删除提示词")
+@register_command("/del_prompt","/dp",help_text = "/del_prompt 或者 /dp -> 删除提示词(admin)")
 async def handle_del_prompt(msg, is_group=True):
+    if (str(msg.user_id) not in admin) and is_group:
+        reply = "你没有权限喵~"
+        await msg.reply(text=reply)
+        return
+
     id_str = str(msg.group_id if is_group else msg.user_id)
     if is_group:
         if id_str in group_messages:
@@ -932,8 +943,13 @@ async def handle_del_prompt(msg, is_group=True):
             except FileNotFoundError:
                 await bot.api.post_private_msg(msg.user_id, text="没有可以删除的提示词喵~")
 
-@register_command("/get_prompt","/gp",help_text = "/get_prompt 或者 /gp -> 获取提示词")
+@register_command("/get_prompt","/gp",help_text = "/get_prompt 或者 /gp -> 获取提示词(admin)")
 async def handle_get_prompt(msg, is_group=True):
+    if (str(msg.user_id) not in admin) and is_group:
+        reply = "你没有权限喵~"
+        await msg.reply(text=reply)
+        return
+
     id_str = str(msg.group_id if is_group else msg.user_id)
     if is_group:
         try:
@@ -951,8 +967,16 @@ async def handle_get_prompt(msg, is_group=True):
             await bot.api.post_private_msg(msg.user_id, text="没有找到提示词喵~")
 
 
-@register_command("/agree",help_text="/agree -> 同意好友请求") # 同意好友请求
+@register_command("/agree",help_text="/agree -> 同意好友请求(admin)") # 同意好友请求
 async def handle_agree(msg, is_group=True):
+    if str(msg.user_id) not in admin:
+        reply = "你没有权限喵~"
+        if is_group:
+            await msg.reply(text=reply)
+        else:
+            await bot.api.post_private_msg(msg.user_id, text=reply)
+        return
+
     if not is_group:
         await bot.api.set_friend_add_request(flag=msg.user_id, approve=True,remark=msg.user_id)
         await bot.api.post_private_msg(msg.user_id, text="已同意好友请求喵~")
@@ -960,8 +984,7 @@ async def handle_agree(msg, is_group=True):
         await bot.api.set_friend_add_request(flag=msg.user_id, approve=True,remark=msg.user_id)
         await msg.reply(text="已同意好友请求喵~")
 
-
-@register_command("/restart",help_text="/restart -> 重启机器人(管理员)")
+@register_command("/restart",help_text="/restart -> 重启机器人(admin)")
 async def handle_restart(msg, is_group=True):
     if str(msg.user_id) not in admin:
         if is_group:
@@ -977,7 +1000,7 @@ async def handle_restart(msg, is_group=True):
     # 重启逻辑
     os.execv(sys.executable, [sys.executable] + sys.argv)
 
-@register_command("/shutdown",help_text="/shutdown -> 关闭机器人(管理员)")
+@register_command("/shutdown",help_text="/shutdown -> 关闭机器人(admin)")
 async def handle_shutdown(msg, is_group=True):
     if str(msg.user_id) not in admin:
         if is_group:
@@ -1211,8 +1234,12 @@ async def handle_random_rps(msg, is_group=True):
     else:
         await bot.api.post_private_msg(msg.user_id,rps=True)
 
-@register_command("/del_message","/dm",help_text = "/del_message 或者 /dm -> 删除对话记录")
+@register_command("/del_message","/dm",help_text = "/del_message 或者 /dm -> 删除对话记录(admin)")
 async def handle_del_message(msg, is_group=True):
+    if (str(msg.user_id) not in admin) and is_group:
+        await msg.reply(text="你没有权限喵~")
+        return
+
     if is_group:
         try:
             del group_messages[str(msg.group_id)]
@@ -1291,7 +1318,7 @@ async def handle_precise_remind(msg, is_group=True):
         else:
             await bot.api.post_private_msg(msg.user_id, text=error_msg)
 
-@register_command("/task",help_text="/task </bot.api.xxxx(参数1=值1...)> <时间(小时)> <是否循环(1/0)> -> 设置定时任务(管理员)")
+@register_command("/task",help_text="/task </bot.api.xxxx(参数1=值1...)> <时间(小时)> <是否循环(1/0)> -> 设置定时任务(admin)")
 async def handle_task(msg,is_group=True):
     if str(msg.user_id) not in admin:
         text = "你没有权限设置定时任务喵~"
@@ -1352,7 +1379,7 @@ async def handle_task(msg,is_group=True):
             await bot.api.post_private_msg(msg.user_id, text=f"已设置循环定时任务喵~{hours}小时后会执行：{command_str}")
         return
 
-@register_command("/list_tasks","/lt",help_text = "/list_tasks 或者 /lt -> 查看定时任务(管理员)")
+@register_command("/list_tasks","/lt",help_text = "/list_tasks 或者 /lt -> 查看定时任务(admin)")
 async def handle_list_tasks(msg, is_group=True):
     if str(msg.user_id) not in admin:
         text = "你没有权限查看定时任务喵~"
@@ -1372,7 +1399,7 @@ async def handle_list_tasks(msg, is_group=True):
         await bot.api.post_private_msg(msg.user_id, text=text)
     return
 
-@register_command("/cancel_tasks","/ct",help_text = "/cancel_tasks 或者 /ct <任务名> -> 取消定时任务(管理员)")
+@register_command("/cancel_tasks","/ct",help_text = "/cancel_tasks 或者 /ct <任务名> -> 取消定时任务(admin)")
 async def handle_cancel_tasks(msg, is_group=True):
     if str(msg.user_id) not in admin:
         text = "你没有权限取消定时任务喵~"
@@ -1546,10 +1573,16 @@ async def handle_set_qq_avatar(msg, is_group=True):
     else:
         await bot.api.post_private_msg(msg.user_id, text=text)
 
-@register_command("/send_like",help_text = "/send_like <目标QQ号> <次数> -> 发送点赞")
+@register_command("/send_like",help_text = "/send_like <目标QQ号> <次数> -> 发送点赞(admin)")
 async def handle_send_like(msg, is_group=True):
-    msgs = msg.raw_message[len("/send_like"):].split(" ")
+    if str(msg.user_id) not in admin:
+        if is_group:
+            await msg.reply(text="你没有权限发送点赞喵~")
+        else:
+            await bot.api.post_private_msg(msg.user_id, text="你没有权限发送点赞喵~")
+        return
 
+    msgs = msg.raw_message[len("/send_like"):].split(" ")
     if len(msgs) < 2:
         text = "格式错误喵~ 请输入 /send_like 目标QQ号 次数"
         if is_group:
@@ -1582,7 +1615,6 @@ async def handle_set_group_admin(msg, is_group=True):
 
 @register_command("/del_group_admin",help_text = "/del_group_admin <目标QQ号> -> 取消群管理员(admin)")
 async def handle_del_group_admin(msg, is_group=True):
-
     if not is_group:
         await bot.api.post_private_msg(msg.user_id, text="只能在群聊中取消群管理员喵~")
         return
@@ -1595,8 +1627,14 @@ async def handle_del_group_admin(msg, is_group=True):
     await bot.api.set_group_admin(msg.group_id, msgs,False)
     await msg.reply(text="取消成功喵~")
 
-@register_command("/show_chat","/sc",help_text = "/show_chat 或 /sc -> 发送完整聊天记录")    
+@register_command("/show_chat","/sc",help_text = "/show_chat 或 /sc -> 发送完整聊天记录(admin)")    
 async def handle_show_chat(msg, is_group=True):
+    if str(msg.user_id) not in admin:
+        if is_group:
+            await msg.reply(text="你没有权限发送聊天记录喵~")
+        else:
+            await bot.api.post_private_msg(msg.user_id, text="你没有权限发送聊天记录喵~")
+        return
     cache_dir = os.path.join(load_address(),"聊天记录.txt")
     if is_group:  
         with open("saved_message/group_messages.json","r",encoding="utf-8") as f:
