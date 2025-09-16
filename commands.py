@@ -87,7 +87,7 @@ def load_admin():
     except FileNotFoundError:
         write_admin()
 
-def register_command(*command,help_text = None): # 注册命令
+def register_command(*command,help_text = None,admin_show = False,category = "1"): # 注册命令
     """
     装饰器，用于注册命令。
     :param command: 命令名称，支持多个。
@@ -95,8 +95,9 @@ def register_command(*command,help_text = None): # 注册命令
     """
     def decorator(func):
         command_handlers[command] = func
-        if help_text is not None:
-            func.help_text = help_text
+        func.help_text = help_text
+        func.admin_show = admin_show
+        func.category = category
         return func
     return decorator
 
@@ -331,18 +332,14 @@ read_at_all_group()
 #     region 命令
 #----------------------
 
-@register_command("测试")
-async def handle_test(msg, is_group=True):
-    if not msg.raw_message == "测试":
-        return
-    reply_text = "测试成功喵~\n输入 /help 查看帮助喵~"
-    if is_group:
-        await msg.reply(text=reply_text)
-    else:
-        await bot.api.post_private_msg(msg.user_id, text=reply_text)
-
-@register_command("/tts",help_text = "/tts -> 开启或关闭TTS")
+@register_command("/tts",help_text = "/tts -> 开启或关闭TTS(admin)",admin_show = True,category = "4")
 async def handle_tts(msg, is_group=True):
+    if str(msg.user_id) not in admin:
+        if is_group:
+            await msg.reply(text="你没有权限使用此命令喵~")
+        else:
+            await bot.api.post_private_msg(msg.user_id, text="你没有权限使用此命令喵~")
+        return
     global if_tts
     if_tts = not if_tts
     text = "已开启TTS喵~" if if_tts else "已关闭TTS喵~"
@@ -353,7 +350,7 @@ async def handle_tts(msg, is_group=True):
 
 #漫画类命令----------------
 comic_cache = []
-@register_command("/jmrank",help_text = "/jmrank <月排行/周排行> -> 获取排行榜")
+@register_command("/jmrank",help_text = "/jmrank <月排行/周排行> -> 获取排行榜",category = "1")
 async def handle_jmrank(msg, is_group=True):
     if is_group:
         await msg.reply(text="正在获取排行喵~")
@@ -410,7 +407,7 @@ async def handle_jmrank(msg, is_group=True):
     else:
         await bot.api.upload_private_file(msg.user_id, os.path.join(cache_dir , f"{select}_{name}.md"), f"{select}_{name}.md")
 
-@register_command("/search",help_text = "/search <内容> -> 搜索漫画")
+@register_command("/search",help_text = "/search <内容> -> 搜索漫画",category = "1")
 async def handle_search(msg, is_group=True):
     if is_group:
         await msg.reply(text="正在搜索喵~")
@@ -460,7 +457,7 @@ async def handle_search(msg, is_group=True):
         await bot.api.upload_private_file(msg.user_id, os.path.join(cache_dir , f"{name}.md"), f"{content}.md")
 
 
-@register_command("/tag",help_text = "/tag <标签> -> 搜索漫画标签")
+@register_command("/tag",help_text = "/tag <标签> -> 搜索漫画标签",category = "1")
 async def handle_search(msg, is_group=True):
     if is_group:
         await msg.reply(text="正在搜索喵~")
@@ -488,7 +485,7 @@ async def handle_search(msg, is_group=True):
     else:
         await bot.api.upload_private_file(msg.user_id, os.path.join(cache_dir , f"{name}.md"), f"{content}.md")
 
-@register_command("/get_fav",help_text = "/get_fav <用户名> <密码> -> 获取收藏夹(群聊请私聊)")
+@register_command("/get_fav",help_text = "/get_fav <用户名> <密码> -> 获取收藏夹(群聊请私聊)",category = "1")
 async def handle_get_fav(msg, is_group=True):
     match = re.match(r'^/get_fav\s+(\S+)\s+(\S+)$', msg.raw_message)
     if not match:
@@ -533,7 +530,7 @@ async def handle_get_fav(msg, is_group=True):
     else:
         await bot.api.upload_private_file(msg.user_id, os.path.join(cache_dir , f"{name}.md"), f"{username}.md")
 
-@register_command("/jm",help_text = "/jm <漫画ID> -> 下载漫画")
+@register_command("/jm",help_text = "/jm <漫画ID> -> 下载漫画",category = "1")
 async def handle_jmcomic(msg, is_group=True):
     match = re.match(r'^/jm\s+(\d+)$', msg.raw_message)
     if match:
@@ -635,7 +632,7 @@ async def download_and_send_comic(comic_id, msg, is_group):
                 await bot.api.post_private_msg(msg.user_id,text="部分下载失败了喵~，正在发送剩余的文件喵~")
                 await bot.api.upload_private_file(msg.user_id, file_path, f"{comic_id}.pdf")
 
-@register_command("/jm_clear",help_text = "/jm_clear -> 清除缓存")
+@register_command("/jm_clear",help_text = "/jm_clear -> 清除缓存",category = "1")
 async def handle_jm_clear(msg, is_group=True):
     comic_cache.clear()
     if is_group:
@@ -644,7 +641,7 @@ async def handle_jm_clear(msg, is_group=True):
         await bot.api.post_private_msg(msg.user_id, text="缓存已清除喵~")
 
 # ====下面的收藏夹不是官方的收藏夹，是本地储存的====
-@register_command("/add_fav", help_text="/add_fav <漫画ID> -> 添加收藏")
+@register_command("/add_fav", help_text="/add_fav <漫画ID> -> 添加收藏",category = "1")
 async def handle_add_favorite(msg, is_group=True):
     comic_id = msg.raw_message[len("/add_fav"):].strip()
     if not comic_id.isdigit():
@@ -677,7 +674,7 @@ async def handle_add_favorite(msg, is_group=True):
     else:
         await bot.api.post_private_msg(msg.user_id, text=reply)
 
-@register_command("/list_fav", help_text="/list_fav -> 查看收藏列表")
+@register_command("/list_fav", help_text="/list_fav -> 查看收藏列表",category = "1")
 async def handle_list_favorites(msg, is_group=True):
     user_id = str(msg.user_id)
     if is_group:
@@ -699,7 +696,7 @@ async def handle_list_favorites(msg, is_group=True):
     else:
         await bot.api.post_private_msg(msg.user_id, text=reply)
 
-@register_command("/del_fav", help_text="/del_fav <漫画ID> -> 删除收藏")
+@register_command("/del_fav", help_text="/del_fav <漫画ID> -> 删除收藏",category = "1")
 async def handle_del_favorite(msg, is_group=True):
     comic_id = msg.raw_message[len("/del_fav"):].strip()
     user_id = str(msg.user_id)
@@ -729,7 +726,7 @@ async def handle_del_favorite(msg, is_group=True):
     else:
         await bot.api.post_private_msg(msg.user_id, text=reply)
 
-@register_command("/add_black_list","/abl",help_text = "/add_black_list 或 /abl  <漫画ID> -> 添加黑名单")
+@register_command("/add_black_list","/abl",help_text = "/add_black_list 或 /abl  <漫画ID> -> 添加黑名单",category = "1")
 async def handle_add_black_list(msg, is_group=True):
     comic_id = ""
     if msg.raw_message.startswith("/add_black_list"):
@@ -765,7 +762,7 @@ async def handle_add_black_list(msg, is_group=True):
     else:
         await bot.api.post_private_msg(msg.user_id, text=reply)
 
-@register_command("/add_global_black_list","/agbl",help_text = "/add_global_black_list 或 /agbl <漫画ID> -> 添加全局黑名单(admin)")
+@register_command("/add_global_black_list","/agbl",help_text = "/add_global_black_list 或 /agbl <漫画ID> -> 添加全局黑名单(admin)",category = "1",admin_show=True)
 async def handle_add_global_black_list(msg, is_group=True):
 
     if str(msg.user_id) not in admin:
@@ -796,7 +793,7 @@ async def handle_add_global_black_list(msg, is_group=True):
     else:
         await bot.api.post_private_msg(msg.user_id, text=reply)
 
-@register_command("/del_global_black_list","/dgbl",help_text = "/del_global_black_list 或 /dgbl <漫画ID> -> 删除全局黑名单(admin)")
+@register_command("/del_global_black_list","/dgbl",help_text = "/del_global_black_list 或 /dgbl <漫画ID> -> 删除全局黑名单(admin)",category = "1",admin_show=True)
 async def handle_del_global_black_list(msg, is_group=True):
 
     if str(msg.user_id) not in admin:
@@ -827,7 +824,7 @@ async def handle_del_global_black_list(msg, is_group=True):
     else:
         await bot.api.post_private_msg(msg.user_id, text=reply)
 
-@register_command("/del_black_list","/dbl",help_text = "/del_black_list 或 /dbl <漫画ID> -> 删除黑名单")
+@register_command("/del_black_list","/dbl",help_text = "/del_black_list 或 /dbl <漫画ID> -> 删除黑名单",category = "1")
 async def handle_del_black_list(msg, is_group=True):
     comic_id = ""
     if msg.raw_message.startswith("/del_black_list"):
@@ -859,7 +856,7 @@ async def handle_del_black_list(msg, is_group=True):
     else:
         await bot.api.post_private_msg(msg.user_id, text=reply)
 
-@register_command("/list_black_list","/lbl",help_text = "/list_black_list 或 /lbl -> 查看黑名单")
+@register_command("/list_black_list","/lbl",help_text = "/list_black_list 或 /lbl -> 查看黑名单",category = "1")
 async def handle_list_black_list(msg, is_group=True):
     if is_group:
         group_id = str(msg.group_id)
@@ -880,7 +877,7 @@ async def handle_list_black_list(msg, is_group=True):
         
 #------------------------
 
-@register_command("/set_prompt","/sp",help_text = "/set_prompt 或者 /sp <提示词> -> 设定提示词(admin)")
+@register_command("/set_prompt","/sp",help_text = "/set_prompt 或者 /sp <提示词> -> 设定提示词(仅群admin)",category = "2")
 async def handle_set_prompt(msg, is_group=True):
     if (str(msg.user_id) not in admin) and is_group:
         reply = "你没有权限喵~"
@@ -912,7 +909,7 @@ async def handle_set_prompt(msg, is_group=True):
         await bot.api.post_private_msg(msg.user_id, text=reply_text)
 
 
-@register_command("/del_prompt","/dp",help_text = "/del_prompt 或者 /dp -> 删除提示词(admin)")
+@register_command("/del_prompt","/dp",help_text = "/del_prompt 或者 /dp -> 删除提示词(仅群admin)",category = "2")
 async def handle_del_prompt(msg, is_group=True):
     if (str(msg.user_id) not in admin) and is_group:
         reply = "你没有权限喵~"
@@ -944,7 +941,7 @@ async def handle_del_prompt(msg, is_group=True):
             except FileNotFoundError:
                 await bot.api.post_private_msg(msg.user_id, text="没有可以删除的提示词喵~")
 
-@register_command("/get_prompt","/gp",help_text = "/get_prompt 或者 /gp -> 获取提示词(admin)")
+@register_command("/get_prompt","/gp",help_text = "/get_prompt 或者 /gp -> 获取提示词(仅群admin)",category = "2")
 async def handle_get_prompt(msg, is_group=True):
     if (str(msg.user_id) not in admin) and is_group:
         reply = "你没有权限喵~"
@@ -968,7 +965,7 @@ async def handle_get_prompt(msg, is_group=True):
             await bot.api.post_private_msg(msg.user_id, text="没有找到提示词喵~")
 
 
-@register_command("/agree",help_text="/agree -> 同意好友请求(admin)") # 同意好友请求
+@register_command("/agree",help_text="/agree -> 同意好友请求(admin)",category = "4",admin_show=True) # 同意好友请求
 async def handle_agree(msg, is_group=True):
     if str(msg.user_id) not in admin:
         reply = "你没有权限喵~"
@@ -985,7 +982,7 @@ async def handle_agree(msg, is_group=True):
         await bot.api.set_friend_add_request(flag=msg.user_id, approve=True,remark=msg.user_id)
         await msg.reply(text="已同意好友请求喵~")
 
-@register_command("/restart",help_text="/restart -> 重启机器人(admin)")
+@register_command("/restart",help_text="/restart -> 重启机器人(admin)",category = "4",admin_show=True)
 async def handle_restart(msg, is_group=True):
     if str(msg.user_id) not in admin:
         if is_group:
@@ -1001,7 +998,7 @@ async def handle_restart(msg, is_group=True):
     # 重启逻辑
     os.execv(sys.executable, [sys.executable] + sys.argv)
 
-@register_command("/shutdown",help_text="/shutdown -> 关闭机器人(admin)")
+@register_command("/shutdown",help_text="/shutdown -> 关闭机器人(admin)",category = "4",admin_show=True)
 async def handle_shutdown(msg, is_group=True):
     if str(msg.user_id) not in admin:
         if is_group:
@@ -1101,25 +1098,25 @@ async def handle_generic_file(msg, is_group: bool, section: str, file_type: str,
             await bot.api.post_private_msg(msg.user_id, text=error_msg)
 
 # 统一调用
-@register_command("/random_image","/ri",help_text = "/random_image 或者 /ri -> 随机图片")
+@register_command("/random_image","/ri",help_text = "/random_image 或者 /ri -> 随机图片",category = "3")
 async def handle_random_image(msg, is_group=True):
     await handle_generic_file(msg, is_group, 'ri', 'image')
 
-@register_command("/random_emoticons","/re",help_text = "/random_emoticons 或者 /re -> 随机表情包")
+@register_command("/random_emoticons","/re",help_text = "/random_emoticons 或者 /re -> 随机表情包",category = "3")
 async def handle_random_emoticons(msg, is_group=True):
     await handle_generic_file(msg, is_group, 're', 'image')
 
-@register_command("/st",help_text = "/st <标签名> -> 发送随机涩图,标签支持与或(& |)")
+@register_command("/st",help_text = "/st <标签名> -> 发送随机涩图,标签支持与或(& |)",category = "3")
 async def handle_st(msg, is_group=True):
     tags = msg.raw_message[len("/st"):].strip()
     res = requests.get(f"https://api.lolicon.app/setu/v2?tag={tags}").json().get("data")[0].get("urls").get("original")
     await handle_generic_file(msg, is_group,"","image",custom_url=res)  # 特殊处理API调用
 
-@register_command("/random_video","/rv",help_text = "/random_video 或者 /rv -> 随机二次元视频")
+@register_command("/random_video","/rv",help_text = "/random_video 或者 /rv -> 随机二次元视频",category = "3")
 async def handle_random_video(msg, is_group=True):
     await handle_generic_file(msg, is_group, 'rv', 'video')
 
-@register_command("/dv",help_text="/dv <link> -> 下载视频")
+@register_command("/dv",help_text="/dv <link> -> 下载视频",category = "3")
 async def handle_d(msg, is_group=True):
     link = msg.raw_message[len("/dv"):].strip()
     if not link:
@@ -1137,7 +1134,7 @@ async def handle_d(msg, is_group=True):
         else:
             await bot.api.post_private_msg(msg.user_id, text="请输入合法的链接喵~")
 
-@register_command("/di",help_text="/di <link> -> 下载图片")
+@register_command("/di",help_text="/di <link> -> 下载图片",category = "3")
 async def handle_di(msg, is_group=True):
     link = msg.raw_message[len("/di"):].strip()
     if not link:
@@ -1155,7 +1152,7 @@ async def handle_di(msg, is_group=True):
         else:
             await bot.api.post_private_msg(msg.user_id, text="请输入合法的链接喵~")
 
-@register_command("/df",help_text="/df <link> -> 下载文件")
+@register_command("/df",help_text="/df <link> -> 下载文件",category = "3")
 async def handle_df(msg, is_group=True):
     link = msg.raw_message[len("/df"):].strip()
     if not link:
@@ -1175,7 +1172,7 @@ async def handle_df(msg, is_group=True):
 
 #---------------------------------------------
 
-@register_command("/music","/m",help_text = "/music <音乐名/id> -> 发送音乐")
+@register_command("/music","/m",help_text = "/music <音乐名/id> -> 发送音乐",category = "3")
 async def handle_music(msg, is_group=True):
     music_name = msg.raw_message[len("/music"):].strip()
     if not music_name:
@@ -1210,7 +1207,7 @@ async def handle_music(msg, is_group=True):
     else:
         await bot.api.post_private_msg(msg.user_id, rtf=messagechain)
 
-@register_command("/random_music","/rm",help_text = "/random_music 或者 /rm -> 发送随机音乐")
+@register_command("/random_music","/rm",help_text = "/random_music 或者 /rm -> 发送随机音乐",category = "3")
 async def handle_random_music(msg, is_group=True):
     id = requests.get("https://api.mtbbs.top/Music/song/?id=2645495145").json()["data"]["id"]
     messagechain = MessageChain(
@@ -1221,21 +1218,21 @@ async def handle_random_music(msg, is_group=True):
     else:
         await bot.api.post_private_msg(msg.user_id, rtf=messagechain)
 
-@register_command("/random_dice","/rd",help_text = "/random_dice 或者 /rd -> 发送随机骰子")
+@register_command("/random_dice","/rd",help_text = "/random_dice 或者 /rd -> 发送随机骰子",category = "3")
 async def handle_random_dice(msg, is_group=True):
     if is_group:
         await bot.api.post_group_msg(msg.group_id,dice=True)
     else:
         await bot.api.post_private_msg(msg.user_id,dice=True)
 
-@register_command("/random_rps","/rps",help_text = "/random_rps 或者 /rps -> 发送随机石头剪刀布")
+@register_command("/random_rps","/rps",help_text = "/random_rps 或者 /rps -> 发送随机石头剪刀布",category = "3")
 async def handle_random_rps(msg, is_group=True):
     if is_group:
         await bot.api.post_group_msg(msg.group_id,rps=True)
     else:
         await bot.api.post_private_msg(msg.user_id,rps=True)
 
-@register_command("/del_message","/dm",help_text = "/del_message 或者 /dm -> 删除对话记录(admin)")
+@register_command("/del_message","/dm",help_text = "/del_message 或者 /dm -> 删除对话记录(admin)",category = "3")
 async def handle_del_message(msg, is_group=True):
     if (str(msg.user_id) not in admin) and is_group:
         await msg.reply(text="你没有权限喵~")
@@ -1260,7 +1257,7 @@ async def handle_del_message(msg, is_group=True):
             json.dump(user_messages, f, ensure_ascii=False, indent=4)
         await bot.api.post_private_msg(msg.user_id, text="主人要离我而去了吗？呜呜呜……好吧，那我们以后再见喵~")
 
-@register_command("/remind",help_text="/remind <时间(小时)> <内容> -> 定时提醒")
+@register_command("/remind",help_text="/remind <时间(小时)> <内容> -> 定时提醒",category = "7")
 async def handle_remind(msg, is_group=True):
     match = re.match(r'^/remind\s+(\d+\.?\d*)\s+(.+)$', msg.raw_message) #正则支持小数
     if match:
@@ -1280,7 +1277,7 @@ async def handle_remind(msg, is_group=True):
         await bot.api.post_private_msg(msg.user_id, text=f"已设置提醒喵~{hours}小时后会提醒你：{content}")
         asyncio.create_task(schedule_task(hours, bot.api.post_private_msg,msg.user_id,content))
 
-@register_command("/premind", help_text="/premind <MM-DD> <HH:MM> <内容> -> 精确时间提醒")
+@register_command("/premind", help_text="/premind <MM-DD> <HH:MM> <内容> -> 精确时间提醒",category = "7")
 async def handle_precise_remind(msg, is_group=True):
     try:
         # 解析日期时间
@@ -1319,7 +1316,7 @@ async def handle_precise_remind(msg, is_group=True):
         else:
             await bot.api.post_private_msg(msg.user_id, text=error_msg)
 
-@register_command("/task",help_text="/task </bot.api.xxxx(参数1=值1...)> <时间(小时)> <是否循环(1/0)> -> 设置定时任务(admin)")
+@register_command("/task",help_text="/task </bot.api.xxxx(参数1=值1...)> <时间(小时)> <是否循环(1/0)> -> 设置定时任务(admin)",category = "7",admin_show=True)
 async def handle_task(msg,is_group=True):
     if str(msg.user_id) not in admin:
         text = "你没有权限设置定时任务喵~"
@@ -1380,7 +1377,7 @@ async def handle_task(msg,is_group=True):
             await bot.api.post_private_msg(msg.user_id, text=f"已设置循环定时任务喵~{hours}小时后会执行：{command_str}")
         return
 
-@register_command("/list_tasks","/lt",help_text = "/list_tasks 或者 /lt -> 查看定时任务(admin)")
+@register_command("/list_tasks","/lt",help_text = "/list_tasks 或者 /lt -> 查看定时任务(admin)",category = "7",admin_show=True)
 async def handle_list_tasks(msg, is_group=True):
     if str(msg.user_id) not in admin:
         text = "你没有权限查看定时任务喵~"
@@ -1400,7 +1397,7 @@ async def handle_list_tasks(msg, is_group=True):
         await bot.api.post_private_msg(msg.user_id, text=text)
     return
 
-@register_command("/cancel_tasks","/ct",help_text = "/cancel_tasks 或者 /ct <任务名> -> 取消定时任务(admin)")
+@register_command("/cancel_tasks","/ct",help_text = "/cancel_tasks 或者 /ct <任务名> -> 取消定时任务(admin)",category = "7",admin_show=True)
 async def handle_cancel_tasks(msg, is_group=True):
     if str(msg.user_id) not in admin:
         text = "你没有权限取消定时任务喵~"
@@ -1437,7 +1434,7 @@ async def handle_cancel_tasks(msg, is_group=True):
         await bot.api.post_private_msg(msg.user_id, text=text)
     return
 
-@register_command("/set_admin","/sa",help_text = "/set_admin <qq号> 或者 /sa <qq号> -> 设置管理员(root)")
+@register_command("/set_admin","/sa",help_text = "/set_admin <qq号> 或者 /sa <qq号> -> 设置管理员(root)",category = "4",admin_show=True)
 async def handle_set_admin(msg, is_group=True):
     if is_group:
         await msg.reply(text="只能私聊设置喵~")
@@ -1459,7 +1456,7 @@ async def handle_set_admin(msg, is_group=True):
     write_admin()
     await bot.api.post_private_msg(msg.user_id, text="设置成功喵~，现在"+id+"是管理员喵~")
 
-@register_command("/del_admin","/da",help_text = "/del_admin <qq号> 或者 /da <qq号> -> 删除管理员(root)")
+@register_command("/del_admin","/da",help_text = "/del_admin <qq号> 或者 /da <qq号> -> 删除管理员(root)",category = "4",admin_show=True)
 async def handle_del_admin(msg, is_group=True):
     if is_group:
         await msg.reply(text="只能私聊设置喵~")
@@ -1480,7 +1477,7 @@ async def handle_del_admin(msg, is_group=True):
     else:
         await bot.api.post_private_msg(msg.user_id, text="没有这个管理员喵~")
 
-@register_command("/get_admin","/ga",help_text = "/get_admin 或者 /ga -> 获取管理员")
+@register_command("/get_admin","/ga",help_text = "/get_admin 或者 /ga -> 获取管理员",category = "4")
 async def handle_get_admin(msg, is_group=True):
     if is_group:
         await msg.reply(text="管理员列表："+str(admin))
@@ -1488,7 +1485,7 @@ async def handle_get_admin(msg, is_group=True):
         await bot.api.post_private_msg(msg.user_id, text="管理员列表："+str(admin))
 
 
-@register_command("/set_ids",help_text = "/set_ids <昵称> <个性签名> <性别> -> 设置账号信息(管理员)")
+@register_command("/set_ids",help_text = "/set_ids <昵称> <个性签名> <性别> -> 设置账号信息(管理员)",category = "4",admin_show=True)
 async def handle_set(msg, is_group=True):
     """
             nickname: 昵称
@@ -1527,7 +1524,7 @@ async def handle_set(msg, is_group=True):
         else:
             await bot.api.post_private_msg(msg.user_id, text=text)
 
-@register_command("/set_online_status",help_text = "/set_online_status <在线状态> -> 设置在线状态(管理员)")
+@register_command("/set_online_status",help_text = "/set_online_status <在线状态> -> 设置在线状态(管理员)",category = "4",admin_show=True)
 async def handle_set_online_status(msg, is_group=True):
     if is_group:
         await msg.reply(text="只能私聊设置喵~")
@@ -1543,7 +1540,7 @@ async def handle_set_online_status(msg, is_group=True):
     else:
         await bot.api.post_private_msg(msg.user_id, text=text)
 
-@register_command("/get_friends",help_text = "/get_friends -> 获取好友列表（管理员）")
+@register_command("/get_friends",help_text = "/get_friends -> 获取好友列表（管理员）",category = "4",admin_show=True)
 async def handle_get_friends(msg, is_group=True):
     if is_group:
         await msg.reply(text="只能私聊获取喵~")
@@ -1556,7 +1553,7 @@ async def handle_get_friends(msg, is_group=True):
     else:
         await bot.api.post_private_msg(msg.user_id, text=friends)
 
-@register_command("/set_qq_avatar",help_text = "/set_qq_avatar <地址> -> 更改头像（管理员）")
+@register_command("/set_qq_avatar",help_text = "/set_qq_avatar <地址> -> 更改头像（管理员）",category = "4",admin_show=True)
 async def handle_set_qq_avatar(msg, is_group=True):
     if is_group:
         await msg.reply(text="只能私聊设置喵~")
@@ -1574,7 +1571,7 @@ async def handle_set_qq_avatar(msg, is_group=True):
     else:
         await bot.api.post_private_msg(msg.user_id, text=text)
 
-@register_command("/send_like",help_text = "/send_like <目标QQ号> <次数> -> 发送点赞(admin)")
+@register_command("/send_like",help_text = "/send_like <目标QQ号> <次数> -> 发送点赞(admin)",category = "4",admin_show=True)
 async def handle_send_like(msg, is_group=True):
     if str(msg.user_id) not in admin:
         if is_group:
@@ -1600,7 +1597,7 @@ async def handle_send_like(msg, is_group=True):
     else:
         await bot.api.post_private_msg(msg.user_id, text=text)
 
-@register_command("/set_group_admin",help_text = "/set_group_admin <目标QQ号> -> 设置群管理员(admin)")
+@register_command("/set_group_admin",help_text = "/set_group_admin <目标QQ号> -> 设置群管理员(admin)",category = "4",admin_show=True)
 async def handle_set_group_admin(msg, is_group=True):
     if not is_group:
         await bot.api.post_private_msg(msg.user_id, text="只能在群聊中设置群管理员喵~")
@@ -1614,7 +1611,7 @@ async def handle_set_group_admin(msg, is_group=True):
     await bot.api.set_group_admin(msg.group_id, msgs,True)
     await msg.reply(text="设置成功喵~")
 
-@register_command("/del_group_admin",help_text = "/del_group_admin <目标QQ号> -> 取消群管理员(admin)")
+@register_command("/del_group_admin",help_text = "/del_group_admin <目标QQ号> -> 取消群管理员(admin)",category = "4",admin_show=True)
 async def handle_del_group_admin(msg, is_group=True):
     if not is_group:
         await bot.api.post_private_msg(msg.user_id, text="只能在群聊中取消群管理员喵~")
@@ -1628,13 +1625,10 @@ async def handle_del_group_admin(msg, is_group=True):
     await bot.api.set_group_admin(msg.group_id, msgs,False)
     await msg.reply(text="取消成功喵~")
 
-@register_command("/show_chat","/sc",help_text = "/show_chat 或 /sc -> 发送完整聊天记录(admin)")    
+@register_command("/show_chat","/sc",help_text = "/show_chat 或 /sc -> 发送完整聊天记录(仅群admin)",category = "2")    
 async def handle_show_chat(msg, is_group=True):
-    if str(msg.user_id) not in admin:
-        if is_group:
-            await msg.reply(text="你没有权限发送聊天记录喵~")
-        else:
-            await bot.api.post_private_msg(msg.user_id, text="你没有权限发送聊天记录喵~")
+    if (str(msg.user_id) not in admin) and is_group:
+        await msg.reply(text="你没有权限发送聊天记录喵~")
         return
     cache_dir = os.path.join(load_address(),"聊天记录.txt")
     if is_group:  
@@ -1661,7 +1655,7 @@ async def handle_show_chat(msg, is_group=True):
 
     os.remove(cache_dir)    
 
-@register_command("/主动聊天",help_text = "/主动聊天 <间隔时间(小时)> <是否开启(1/0)> -> 开启主动聊天")
+@register_command("/主动聊天",help_text = "/主动聊天 <间隔时间(小时)> <是否开启(1/0)> -> 开启主动聊天",category = "2")
 async def handle_active_chat(msg, is_group=True):
     if is_group:
         await msg.reply(text="只能私聊设置喵~")
@@ -1714,7 +1708,7 @@ async def handle_active_chat(msg, is_group=True):
 # 添加临时存储字典
 temp_selections = {}
 
-@register_command("/findbook","/fb",help_text="/findbook 或者 /fb <书名> -> 搜索并选择下载轻小说")
+@register_command("/findbook","/fb",help_text="/findbook 或者 /fb <书名> -> 搜索并选择下载轻小说",category = "6")
 async def handle_find_book(msg, is_group=True):
     search_term = ""
     if msg.raw_message.startswith("/findbook"):
@@ -1764,7 +1758,7 @@ async def handle_find_book(msg, is_group=True):
     else:
         await bot.api.post_private_msg(msg.user_id, text=reply)
 
-@register_command("/fa",help_text="/fa <作者> -> 搜索作者")
+@register_command("/fa",help_text="/fa <作者> -> 搜索作者",category = "6")
 async def handle_find_author(msg, is_group=True):
     search_term = msg.raw_message[len("/fa"):].strip()
     if not search_term:
@@ -1803,7 +1797,7 @@ async def handle_find_author(msg, is_group=True):
 
 
 # 添加选择处理函数
-@register_command("/select", help_text="/select <编号> -> 选择要下载的轻小说")
+@register_command("/select", help_text="/select <编号> -> 选择要下载的轻小说",category = "6")
 async def handle_select_book(msg, is_group=True):
     if msg.user_id not in temp_selections:
         reply = "没有找到主人的搜索记录喵~请先使用/findbook搜索喵~"
@@ -1840,7 +1834,7 @@ async def handle_select_book(msg, is_group=True):
     
     del temp_selections[msg.user_id]  # 清理临时数据
 
-@register_command("/info",help_text="/info <书名> -> 获取轻小说信息")
+@register_command("/info",help_text="/info <书名> -> 获取轻小说信息",category = "6")
 async def handle_info(msg, is_group=True):
     if msg.user_id not in temp_selections:
         reply = "没有找到您的搜索记录喵~请先使用/findbook搜索喵~"
@@ -1881,7 +1875,7 @@ async def handle_info(msg, is_group=True):
         else:
             await bot.api.post_private_msg(msg.user_id, text=reply)
 
-@register_command("/random_novel","/rn",help_text = "/random_novel 或者 /rn -> 发送随机小说")
+@register_command("/random_novel","/rn",help_text = "/random_novel 或者 /rn -> 发送随机小说",category = "6")
 async def handle_random_novel(msg, is_group=True):
     novel = random.choice(list(books.keys()))
     url = books[novel]["download_url"]
@@ -1900,7 +1894,7 @@ async def handle_random_novel(msg, is_group=True):
         await handle_generic_file(msg, is_group, '', 'file', custom_url=url,file_name=novel+".txt",custom_send_method=bot.api.upload_private_file)
 
 mc = {}
-@register_command("/mc",help_text = "/mc <服务器地址> -> 发送mc服务器状态")
+@register_command("/mc",help_text = "/mc <服务器地址> -> 发送mc服务器状态",category = "3")
 async def handle_mc(msg, is_group=True):
     if os.path.exists("mc.txt"):
         with open("mc.txt", "r") as f:
@@ -1947,7 +1941,7 @@ async def handle_mc(msg, is_group=True):
         else:
             await bot.api.post_private_msg(msg.user_id, text=reply)
 
-@register_command("/mc_bind",help_text = "/mc_bind <服务器地址> -> 绑定mc服务器")
+@register_command("/mc_bind",help_text = "/mc_bind <服务器地址> -> 绑定mc服务器",category = "3")
 async def handle_mc_bind(msg, is_group=True):
     server = msg.raw_message[len("/mc_bind"):].strip()
     if not server:
@@ -1966,7 +1960,7 @@ async def handle_mc_bind(msg, is_group=True):
     else:
         await bot.api.post_private_msg(msg.user_id, text=reply)
 
-@register_command("/mc_unbind",help_text = "/mc_unbind -> 解绑mc服务器")
+@register_command("/mc_unbind",help_text = "/mc_unbind -> 解绑mc服务器",category = "3")
 async def handle_mc_unbind(msg, is_group=True):
     if str(msg.user_id) in mc:
         del mc[str(msg.user_id)]
@@ -1988,7 +1982,7 @@ async def handle_mc_unbind(msg, is_group=True):
         else:
             await bot.api.post_private_msg(msg.user_id, text=reply)
 
-@register_command("/mc_show",help_text = "/mc_show -> 查看绑定的mc服务器")
+@register_command("/mc_show",help_text = "/mc_show -> 查看绑定的mc服务器",category = "3")
 async def handle_mc_show(msg, is_group=True):
     if str(msg.user_id) in mc:
         reply = f"你绑定的mc服务器是：{mc[str(msg.user_id)]}"
@@ -2003,7 +1997,7 @@ async def handle_mc_show(msg, is_group=True):
         else:
             await bot.api.post_private_msg(msg.user_id, text=reply)
 
-@register_command("/generate_photo","/gf",help_text = "/generate_photo 或 /gf <图片描述(不能有空格)> <大小> -> 生成图片")
+@register_command("/generate_photo","/gf",help_text = "/generate_photo 或 /gf <图片描述(不能有空格)> <大小> -> 生成图片",category = "3")
 async def handle_gf(msg,is_group=True):
     prefix = "/generate_photo" if msg.raw_message.startswith("/generate_photo") else "/gf"
     default_size = "1024x1024"
@@ -2064,7 +2058,7 @@ async def handle_gf(msg,is_group=True):
         await bot.api.post_private_msg(msg.user_id,text="绘制完成喵~")
         await bot.api.post_private_file(msg.user_id,image=url)
 
-@register_command("/识别人物",help_text = "/识别人物 -> 识别图片中的二次元人物")
+@register_command("/识别人物",help_text = "/识别人物 -> 识别图片中的二次元人物",category = "3")
 async def handle_rec(msg, is_group=True):
     if is_group:
         await msg.reply(text="请先发送图片，再回复图片，加上@我，/识别人物")
@@ -2072,7 +2066,7 @@ async def handle_rec(msg, is_group=True):
         await bot.api.post_private_msg(msg.user_id,text="请先发送图片，再回复图片，加上/识别人物")
     return
 
-@register_command("/at_all",help_text = "/at_all -> 识别@全体成员功能(admin)")
+@register_command("/at_all",help_text = "/at_all -> 识别@全体成员功能(admin)",category = "2",admin_show=True)
 async def handle_at_all_group(msg, is_group=True):
     if is_group:
         if str(msg.user_id) not in admin:
@@ -2090,40 +2084,69 @@ async def handle_at_all_group(msg, is_group=True):
         await bot.api.post_private_msg(msg.user_id,text="请在群聊中使用该命令")
 
 #将help命令放在最后
-@register_command("/help","/h",help_text = "/help 或者 /h -> 查看帮助")
+@register_command("/help","/h",help_text = "/help 或者 /h -> 查看帮助",category = "8")
 async def handle_help(msg, is_group=True):
     # 定义命令分类
     command_categories = {
-        "1": {"name": "漫画相关", "commands": ["/jm", "/jmrank","/jm_clear", "/search","/tag","/add_black_list","/del_black_list","/list_black_list","/add_global_black_list","/del_global_black_list","/get_fav", "/add_fav", "/del_fav","/list_fav"]},
-        "2": {"name": "聊天设置", "commands": ["/set_prompt", "/del_prompt", "/get_prompt","/del_message","/主动聊天","/sc"]},
-        "3": {"name": "娱乐功能", "commands": ["/random_image", "/random_emoticons", "/st","/random_video","/random_dice","/random_rps","/music","/random_music","/dv","/di","/df","/mc","/mc_bind","/mc_unbind","/mc_show","/gf","/识别人物"]},
-        "4": {"name": "系统处理", "commands": ["/restart", "/tts", "/agree","/set_admin","/del_admin","/get_admin","/set_ids","/set_online_status","/get_friends","/set_qq_avatar","/send_like","/bot","/shutdown","/at_all"]},
-        "5": {"name": "群聊管理", "commands": ["/set_group_admin", "/del_group_admin"]},
-        "6": {"name": "轻小说", "commands": ["/findbook","/fa" , "/select", "/info","/random_novel"]},
-        "7": {"name": "定时任务", "commands": ["/task","/cancel_task","/list_task","/remind","/premind"]}
+    "1": {"name": "漫画相关", "commands": [handler.help_text for handler in command_handlers.values() if handler.category == "1"]},
+    "2": {"name": "聊天设置", "commands": [handler.help_text for handler in command_handlers.values() if handler.category == "2"]},
+    "3": {"name": "娱乐功能", "commands": [handler.help_text for handler in command_handlers.values() if handler.category == "3"]},
+    "4": {"name": "系统处理", "commands": [handler.help_text for handler in command_handlers.values() if handler.category == "4"]},
+    "5": {"name": "群聊管理", "commands": [handler.help_text for handler in command_handlers.values() if handler.category == "5"]},
+    "6": {"name": "轻小说", "commands": [handler.help_text for handler in command_handlers.values() if handler.category == "6"]},
+    "7": {"name": "定时任务", "commands": [handler.help_text for handler in command_handlers.values() if handler.category == "7"]}
     }
     # 添加全部功能分类
     command_categories["8"] = {
         "name": "全部功能", 
-        "commands": [cmd for category in command_categories.values() for cmd in category["commands"]] + ["/help"]
+        "commands": [cmd for category in command_categories.values() for cmd in category["commands"]] + ["/help 或者 /h -> 查看帮助"]
     }
 
-    # 第一阶段：显示分类菜单
+    # 显示分类菜单
     if not msg.raw_message.strip().endswith("help") and not msg.raw_message.strip().endswith("h"):
         # 用户选择了分类
         selected_category = msg.raw_message.split()[-1]
         if selected_category in command_categories:
-            # 显示该分类下的详细命令
+        # 显示该分类下的详细命令
             help_text = f"{command_categories[selected_category]['name']}命令喵~\n"
-            for cmd in command_categories[selected_category]['commands']:
-                # 精确匹配命令别名
-                for command_aliases, handler_func in command_handlers.items():
-                    if cmd in command_aliases:
-                        handler = handler_func
-                        break
-                if hasattr(handler, 'help_text'):
-                    help_text += handler.help_text + "\n"
-            
+            if str(msg.user_id) in admin:
+                command_categories = {
+                    "1": {"name": "漫画相关", "commands": [handler.help_text for handler in command_handlers.values() if handler.category == "1"]},
+                    "2": {"name": "聊天设置", "commands": [handler.help_text for handler in command_handlers.values() if handler.category == "2"]},
+                    "3": {"name": "娱乐功能", "commands": [handler.help_text for handler in command_handlers.values() if handler.category == "3"]},
+                    "4": {"name": "系统处理", "commands": [handler.help_text for handler in command_handlers.values() if handler.category == "4"]},
+                    "5": {"name": "群聊管理", "commands": [handler.help_text for handler in command_handlers.values() if handler.category == "5"]},
+                    "6": {"name": "轻小说", "commands": [handler.help_text for handler in command_handlers.values() if handler.category == "6"]},
+                    "7": {"name": "定时任务", "commands": [handler.help_text for handler in command_handlers.values() if handler.category == "7"]}
+                }
+                # 添加全部功能分类
+                command_categories["8"] = {
+                    "name": "全部功能", 
+                    "commands": [cmd for category in command_categories.values() for cmd in category["commands"]] + ["/help"]
+                 }
+                for cmd_text in command_categories[selected_category]['commands']:
+                    help_text += f"{cmd_text}\n"
+            else:
+                command_categories = {
+                    "1": {"name": "漫画相关", "commands": [handler.help_text for handler in command_handlers.values() if handler.category == "1" and handler.admin_show == False]},
+                    "2": {"name": "聊天设置", "commands": [handler.help_text for handler in command_handlers.values() if handler.category == "2" and handler.admin_show == False]},
+                    "3": {"name": "娱乐功能", "commands": [handler.help_text for handler in command_handlers.values() if handler.category == "3" and handler.admin_show == False]},
+                    "4": {"name": "系统处理", "commands": [handler.help_text for handler in command_handlers.values() if handler.category == "4" and handler.admin_show == False]},
+                    "5": {"name": "群聊管理", "commands": [handler.help_text for handler in command_handlers.values() if handler.category == "5" and handler.admin_show == False]},
+                    "6": {"name": "轻小说", "commands": [handler.help_text for handler in command_handlers.values() if handler.category == "6" and handler.admin_show == False]},
+                    "7": {"name": "定时任务", "commands": [handler.help_text for handler in command_handlers.values() if handler.category == "7" and handler.admin_show == False]}
+                }
+                # 添加全部功能分类
+                command_categories["8"] = {
+                    "name": "全部功能", 
+                    "commands": [cmd for category in command_categories.values() for cmd in category["commands"]] + ["/help"]
+                }
+                if len(command_categories[selected_category]['commands']) == 0:
+                    help_text += f"你没有权限查看当前分类的命令喵~\n"
+
+                for cmd_text in command_categories[selected_category]['commands']:
+                    help_text += f"{cmd_text}\n"
+                
             if is_group:
                 await msg.reply(text=help_text)
             else:
@@ -2135,7 +2158,7 @@ async def handle_help(msg, is_group=True):
     for num, category in command_categories.items():
         help_text += f"{num}. {category['name']}\n"
     
-    help_text += "\n输入 /help 加分类编号查看详细命令，例如: /help 1"
+    help_text += "\n输入 /help 或者 /h 加分类编号查看详细命令，例如: /help 1"
 
     help_text += "\n\n 一共有"+str(len(command_handlers))+"个命令"
     
@@ -2165,7 +2188,7 @@ def parse_command_string(cmd_str):
         'params': params
     }
 
-@register_command("/bot",help_text="/bot.api.函数名(参数1=值1,参数2=值2) -> 用户自定义api(admin)，详情可见https://docs.ncatbot.xyz/guide/p8aun9nh/")
+@register_command("/bot",help_text="/bot.api.函数名(参数1=值1,参数2=值2) -> 用户自定义api(admin)，详情可见https://docs.ncatbot.xyz/guide/p8aun9nh/",category = "4",admin_show=True)
 async def handle_api(msg,is_group):
     dict = parse_command_string(msg.raw_message)
     command = dict["func"]
