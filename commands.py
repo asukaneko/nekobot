@@ -2086,22 +2086,6 @@ async def handle_at_all_group(msg, is_group=True):
 #将help命令放在最后
 @register_command("/help","/h",help_text = "/help 或者 /h -> 查看帮助",category = "8")
 async def handle_help(msg, is_group=True):
-    # 定义命令分类
-    command_categories = {
-    "1": {"name": "漫画相关", "commands": [handler.help_text for handler in command_handlers.values() if handler.category == "1"]},
-    "2": {"name": "聊天设置", "commands": [handler.help_text for handler in command_handlers.values() if handler.category == "2"]},
-    "3": {"name": "娱乐功能", "commands": [handler.help_text for handler in command_handlers.values() if handler.category == "3"]},
-    "4": {"name": "系统处理", "commands": [handler.help_text for handler in command_handlers.values() if handler.category == "4"]},
-    "5": {"name": "群聊管理", "commands": [handler.help_text for handler in command_handlers.values() if handler.category == "5"]},
-    "6": {"name": "轻小说", "commands": [handler.help_text for handler in command_handlers.values() if handler.category == "6"]},
-    "7": {"name": "定时任务", "commands": [handler.help_text for handler in command_handlers.values() if handler.category == "7"]}
-    }
-    # 添加全部功能分类
-    command_categories["8"] = {
-        "name": "全部功能", 
-        "commands": [cmd for category in command_categories.values() for cmd in category["commands"]] + ["/help 或者 /h -> 查看帮助"]
-    }
-
     # 显示分类菜单
     if not msg.raw_message.strip().endswith("help") and not msg.raw_message.strip().endswith("h"):
         # 用户选择了分类
@@ -2122,7 +2106,7 @@ async def handle_help(msg, is_group=True):
                 # 添加全部功能分类
                 command_categories["8"] = {
                     "name": "全部功能", 
-                    "commands": [cmd for category in command_categories.values() for cmd in category["commands"]] + ["/help"]
+                    "commands": [cmd for category in command_categories.values() for cmd in category["commands"]] + ["/help 或者 /h -> 查看帮助"]
                  }
                 for cmd_text in command_categories[selected_category]['commands']:
                     help_text += f"{cmd_text}\n"
@@ -2139,7 +2123,7 @@ async def handle_help(msg, is_group=True):
                 # 添加全部功能分类
                 command_categories["8"] = {
                     "name": "全部功能", 
-                    "commands": [cmd for category in command_categories.values() for cmd in category["commands"]] + ["/help"]
+                    "commands": [cmd for category in command_categories.values() for cmd in category["commands"]] + ["/help 或者 /h -> 查看帮助"]
                 }
                 if len(command_categories[selected_category]['commands']) == 0:
                     help_text += f"你没有权限查看当前分类的命令喵~\n"
