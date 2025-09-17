@@ -1,8 +1,6 @@
 <div align="center">
 <h1 style = "text-align:center;">🚀可以下载本子和聊天的QQ猫娘机器人</h1>
 
-![cover](https://img.picui.cn/free/2025/04/19/6803c76d2bbf9.png)
-
 > _a catgirl QQ bot for downloading comics and chatting with ai_
 
 </div>
@@ -16,7 +14,7 @@
 
 ---
 ## ✨Updates 更新  
-![](https://img.shields.io/badge/LatestVersion-1.5.4-blue?&logo=react)
+![](https://img.shields.io/badge/LatestVersion-1.5.6-blue?&logo=react)
 
 + 详细查看[CHANGLOG.md](https://github.com/asukaneko/NapCat-jmcomic_download-bot/blob/master/CHANGELOG.md)
 ---
