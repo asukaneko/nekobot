@@ -557,11 +557,12 @@ async def handle_jmcomic(msg, is_group=True):
                 return
 
         if os.path.exists(os.path.join(load_address(),f"pdf/{comic_id}.pdf")):
+            file_size = os.path.getsize(os.path.join(load_address(),f"pdf/{comic_id}.pdf"))
             if is_group:
-                await msg.reply(text="该漫画已存在喵~,正在发送喵~")
+                await msg.reply(text=f"该漫画已存在喵~,文件大小：{file_size:.2f} MB，正在发送喵~")
                 await bot.api.post_group_file(msg.group_id, file=os.path.join(load_address(),f"pdf/{comic_id}.pdf"))
             else:
-                await bot.api.post_private_msg(msg.user_id,text="该漫画已存在喵~,正在发送喵~")
+                await bot.api.post_private_msg(msg.user_id,text=f"该漫画已存在喵~,文件大小：{file_size:.2f} MB，正在发送喵~")
                 await bot.api.upload_private_file(msg.user_id, os.path.join(load_address(),f"pdf/{comic_id}.pdf"), f"{comic_id}.pdf")
             return
 
@@ -602,18 +603,22 @@ async def download_and_send_comic(comic_id, msg, is_group):
             )
         )
 
-        pdf_dir = load_address()
-        file_path = os.path.join(pdf_dir, f"pdf/{comic_id}.pdf")
+        file_path = os.path.join(load_address(), f"pdf/{comic_id}.pdf")
 
         # 检查文件是否真正生成
         if not os.path.exists(file_path):
             raise FileNotFoundError(f"PDF文件未生成：{file_path}")
-
+        
+        file_size = os.path.getsize(file_path) / (1024 * 1024)  # 转换为MB
+        file_text = f"文件大小：{file_size:.2f} MB，正在上传喵~"
         success_text = f"漫画 {comic_id} 下载完成喵~"
+
         if is_group:
+            await msg.reply(text=file_text)
             await bot.api.post_group_file(msg.group_id, file=file_path)
             await msg.reply(text=success_text)
         else:
+            await bot.api.post_private_msg(msg.user_id, text=file_text)
             await bot.api.upload_private_file(msg.user_id, file_path, f"{comic_id}.pdf")
             await bot.api.post_private_msg(msg.user_id, text=success_text)
 
@@ -625,11 +630,13 @@ async def download_and_send_comic(comic_id, msg, is_group):
         else:
             await bot.api.post_private_msg(msg.user_id, text=error_msg)
         if os.path.exists(file_path):
+            file_size = os.path.getsize(file_path) / (1024 * 1024)  # 转换为MB
+            file_text = f"文件大小：{file_size:.2f} MB，正在上传喵~"
             if is_group:
-                await msg.reply(text="部分下载失败了喵~，正在发送剩余的文件喵~")
+                await msg.reply(text="部分下载失败了喵~，正在发送剩余的文件喵~\n"+file_text)
                 await bot.api.post_group_file(msg.group_id, file=file_path)
             else:
-                await bot.api.post_private_msg(msg.user_id,text="部分下载失败了喵~，正在发送剩余的文件喵~")
+                await bot.api.post_private_msg(msg.user_id, text="部分下载失败了喵~，正在发送剩余的文件喵~\n"+file_text)
                 await bot.api.upload_private_file(msg.user_id, file_path, f"{comic_id}.pdf")
 
 @register_command("/jm_clear",help_text = "/jm_clear -> 清除缓存",category = "1")
@@ -2086,6 +2093,16 @@ async def handle_at_all_group(msg, is_group=True):
 #将help命令放在最后
 @register_command("/help","/h",help_text = "/help 或者 /h -> 查看帮助",category = "8")
 async def handle_help(msg, is_group=True):
+    command_categories = {
+        "1": {"name": "漫画相关"},
+        "2": {"name": "聊天设置"},
+        "3": {"name": "娱乐功能"},
+        "4": {"name": "系统处理"},
+        "5": {"name": "群聊管理"},
+        "6": {"name": "轻小说"},
+        "7": {"name": "定时任务"},
+        "8": {"name": "全部功能"}
+    }
     # 显示分类菜单
     if not msg.raw_message.strip().endswith("help") and not msg.raw_message.strip().endswith("h"):
         # 用户选择了分类
