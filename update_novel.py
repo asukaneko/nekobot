@@ -91,7 +91,8 @@ class NovelDownloader:
                     'status': '未知',
                     'last_update': '未知',
                     'length': '未知',
-                    'introduction':'未知'
+                    'introduction':'未知',
+                    'hot':'未知',
                 }
 
                 # 提取文库分类
@@ -115,8 +116,20 @@ class NovelDownloader:
                 length_elem = soup.select_one('td:-soup-contains("全文长度：")')
                 length = length_elem.text.replace('全文长度：', '').strip() if length_elem else default_values['length']
                 
-                # 提取简介
+                # 提取简介             
                 introduction = soup.find('span', string='内容简介：').find_next('span').get_text(strip=True) if soup.find('span', string='内容简介：') else default_values['introduction']
+                #hot = soup.find('span', string='作品热度').find_next('span').get_text(strip=True) if soup.find('span', string='作品热度：') else default_values['hot']
+                
+                hot_tag = soup.find('b', string=lambda text: '作品热度：' in str(text))
+                if hot_tag:
+                    hot = hot_tag.get_text(strip=True).replace('作品热度：', '')
+                else:
+                    hot = default_values['hot']
+
+                res = url
+                lent = len(res)
+                for i in range(4-lent):
+                    res = '0' + res
 
                 new = {
                     "res": url,
@@ -127,7 +140,9 @@ class NovelDownloader:
                     "introduction":introduction,
                     "download_url": f"https://dl.wenku8.com/down.php?type=txt&node=1&id={url}",
                     "is_serialize": status,
-                    "page": f"https://www.wenku8.net/book/{url}.htm"
+                    "page": f"https://www.wenku8.net/book/{url}.htm",
+                    "cover_url":f"https://img.wenku8.com/image/{res[0]}/{res}/{res}s.jpg",
+                    "hot": hot
                 }
 
                 if name in data:

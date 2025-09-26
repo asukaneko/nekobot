@@ -92,6 +92,8 @@ def register_command(*command,help_text = None,admin_show = False,category = "1"
     装饰器，用于注册命令。
     :param command: 命令名称，支持多个。
     :param help_text: 命令的帮助文本。
+    :param admin_show: 是否在帮助中显示管理员命令，默认False。
+    :param category: 命令所属分类，默认"1"。
     """
     def decorator(func):
         command_handlers[command] = func
@@ -1239,7 +1241,7 @@ async def handle_random_rps(msg, is_group=True):
     else:
         await bot.api.post_private_msg(msg.user_id,rps=True)
 
-@register_command("/del_message","/dm",help_text = "/del_message 或者 /dm -> 删除对话记录(admin)",category = "3")
+@register_command("/del_message","/dm",help_text = "/del_message 或者 /dm -> 删除对话记录(仅群admin)",category = "3")
 async def handle_del_message(msg, is_group=True):
     if (str(msg.user_id) not in admin) and is_group:
         await msg.reply(text="你没有权限喵~")
@@ -1862,7 +1864,8 @@ async def handle_info(msg, is_group=True):
                 introduction = "暂无"
             cover = info['cover_url']
             reply =  MessageChain(
-                f"《{title}》的信息如下喵~\n作者: {author}\n分类: {info['category']}\n字数: {info['word_count']}\n状态: {info['is_serialize']}\n简介：{introduction}\n更新日期: {info['last_date']}\n下载链接: {url}\n详细页面：{info['page']}",
+                f"《{title}》的信息如下喵~\n作者: {author}\n分类: {info['category']}\n字数: {info['word_count']}\n状态: {info['is_serialize']}\n热度：{info['hot']}\n简介：{introduction}\n更新日期: {info['last_date']}\n下载链接: {url}\n详细页面：{info['page']}",
+
                 Image(f"{cover}")
                 )
             if is_group:
@@ -1887,7 +1890,8 @@ async def handle_random_novel(msg, is_group=True):
     novel = random.choice(list(books.keys()))
     url = books[novel]["download_url"]
     reply = f"抽选到了《{novel}》喵~\n"
-    reply += f"简介如下喵~\n作者：{books[novel]['author']}\n字数：{books[novel]['word_count']}\n状态：{books[novel]['is_serialize']}\n最新更新：{books[novel]['last_date']}\n简介：{books[novel]['introduction']}"
+    reply += f"简介如下喵~\n作者：{books[novel]['author']}\n字数：{books[novel]['word_count']}\n状态：{books[novel]['is_serialize']}\n热度：{books[novel]['hot']}\n最新更新：{books[novel]['last_date']}\n简介：{books[novel]['introduction']}"
+
     cover = books[novel]['cover_url']
     reply =  MessageChain(
         reply,

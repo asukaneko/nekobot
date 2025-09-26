@@ -44,7 +44,7 @@ def remove_brackets_content(text) -> str:
     - 英文括号：()
     - 花括号：{}
     """
-    text = re.sub(r'（.*?）', '', text)
+    text = re.sub(r'（.*?）', '', text) 
     text = re.sub(r'【.*?】', '', text)
     text = re.sub(r'\(.*?\)', '', text)
     text = re.sub(r'\{.*?\}', '', text)
