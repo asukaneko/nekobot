@@ -34,7 +34,6 @@
 
  **📝相关文档**
 
-docker部署指南：https://asukanas.iepose.cn/archives/5f583afd-c9b1-420f-bc4b-41f4dfc039d3
 | jmcomic | [![](https://img.shields.io/badge/jmcomic-on_Github-blue)](https://github.com/hect0x7/JMComic-Crawler-Python) | [![](https://img.shields.io/badge/jmcomic-Readthedocs.io-orange)](https://jmcomic.readthedocs.io/zh-cn/latest/) |
 |:-:|:-:|:-:|
 
