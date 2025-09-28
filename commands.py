@@ -1889,9 +1889,9 @@ async def handle_info(msg, is_group=True):
 async def handle_random_novel(msg, is_group=True):
     novel = random.choice(list(books.keys()))
     url = books[novel]["download_url"]
+    hot = books[novel].get('hot', '未知')
     reply = f"抽选到了《{novel}》喵~\n"
-    reply += f"简介如下喵~\n作者：{books[novel]['author']}\n字数：{books[novel]['word_count']}\n状态：{books[novel]['is_serialize']}\n热度：{books[novel]['hot']}\n最新更新：{books[novel]['last_date']}\n简介：{books[novel]['introduction']}"
-
+    reply += f"简介如下喵~\n作者：{books[novel]['author']}\n字数：{books[novel]['word_count']}\n状态：{books[novel]['is_serialize']}\n热度：{hot}\n最新更新：{books[novel]['last_date']}\n简介：{books[novel]['introduction']}\n下载链接：{url}"
     cover = books[novel]['cover_url']
     reply =  MessageChain(
         reply,
