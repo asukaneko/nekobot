@@ -383,7 +383,7 @@ def upload_voice(file_path,name,text):
         "file": open(fr"{file_path}", "rb")  # 参考音频文件
     }
     data = {
-        "model": "FunAudioLLM/CosyVoice2-0.5B",  # 模型名称
+        "model": "fnlp/MOSS-TTSD-v0.5",  # 模型名称
         "customName": name,  # 参考音频名称
         "text": text  # 参考音频的文字内容
     }
