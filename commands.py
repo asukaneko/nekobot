@@ -1029,7 +1029,10 @@ async def async_send_file(is_group,send_method, target_id, file_type, url,file_n
     try:
         # 处理可能的重定向
         loop = asyncio.get_event_loop()
-        response = await loop.run_in_executor(None, lambda: requests.get(url, allow_redirects=True, timeout=10))
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+        }
+        response = await loop.run_in_executor(None, lambda: requests.get(url, allow_redirects=True, timeout=10,headers=headers))
         final_url = response.url
 
         # 异步发送文件
@@ -1046,7 +1049,7 @@ async def async_send_file(is_group,send_method, target_id, file_type, url,file_n
             
 # 修改通用处理函数
 async def handle_generic_file(msg, is_group: bool, section: str, file_type: str, custom_url: str = None, file_name:str = None,custom_send_method=None):
-    """通用文件处理函数（修复版）
+    """通用文件处理函数
        :param msg: 消息对象
        :param is_group: 是否为群组消息
        :param section: 配置文件中的section名称(可选)
