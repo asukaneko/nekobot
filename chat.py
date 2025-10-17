@@ -115,7 +115,7 @@ def chat_image(iurl) -> str:
                 },
                 {
                     "type": "text", 
-                    "text": "请分析这个图片的内容"
+                    "text": "请描述这个图片的内容，仅作描述，不要分析内容"
                 }
             ]
             }

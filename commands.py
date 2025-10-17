@@ -165,7 +165,6 @@ async def schedule_task_by_date(target_time: datetime, task_func, *args, **kwarg
     await task_func(*args, **kwargs)
 
 async def schedule_job_task(delay_hours: float,loop:bool,name:str, task_func, *args, **kwargs):
-
     """延时执行任务
     :param delay_hours: 延迟的小时数
     :param loop: 是否循环执行
@@ -1157,7 +1156,11 @@ async def handle_di(msg, is_group=True):
         return
 
     if re.match(r'^https?://', link):  # 检查是否为合法链接
-        await handle_generic_file(msg, is_group, '', 'image', custom_url=link)
+        #await handle_generic_file(msg, is_group, '', 'image', custom_url=link,file_name="download.jpg")
+        if is_group:
+            await bot.api.post_group_file(group_id=msg.group_id,file=link)
+        else:
+            await bot.api.upload_private_file(user_id=msg.user_id,file=link,name="download.jpg")
     else:
         if is_group:
             await msg.reply(text="请输入合法的链接喵~")
