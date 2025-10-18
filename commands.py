@@ -577,7 +577,18 @@ async def handle_jmcomic(msg, is_group=True):
                 else:
                     await bot.api.post_private_msg(msg.user_id, text=error_msg)
                 return
-
+        
+        client = JmOption.default().new_jm_client()
+        try:
+            album: JmAlbumDetail = client.get_album_detail(comic_id)
+        except MissingAlbumPhotoException as e:
+            error_msg = f"该漫画ID不存在喵~"
+            if is_group:
+                await msg.reply(text=error_msg)
+            else:
+                await bot.api.post_private_msg(msg.user_id, text=error_msg)
+            return
+        
         # 立即回复用户，不等待下载完成
         reply_text = f"已开始下载漫画ID：{comic_id}，下载完成后会自动通知喵~"
         if is_group:
@@ -586,7 +597,15 @@ async def handle_jmcomic(msg, is_group=True):
             await bot.api.post_private_msg(msg.user_id, text=reply_text)
 
         # 创建后台任务
-        asyncio.create_task(download_and_send_comic(comic_id, msg, is_group))
+        try:
+            await asyncio.gather(download_and_send_comic(comic_id, msg, is_group))
+        except Exception as e:
+            error_msg = f"下载漫画失败喵~: {str(e)}"
+            if is_group:
+                await msg.reply(text=error_msg)
+            else:
+                await bot.api.post_private_msg(msg.user_id, text=error_msg)
+
     else:
         error_msg = "格式错误了喵~，请输入 /jm 后跟漫画ID"
         if not is_group:
