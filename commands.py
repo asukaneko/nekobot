@@ -336,7 +336,7 @@ class SwitchManager:
     def _init_default_switches(self):
         """初始化默认开关配置"""
         self.switch_configs = {
-            'tts': {'default': False, 'description': 'TTS语音开关'},
+            
         }
     
     def add_switch(self, switch_name: str, default_value: bool = False, description: str = ""):
@@ -345,6 +345,7 @@ class SwitchManager:
             'default': default_value,
             'description': description
         }
+        self.save_switches()
     
     def get_switch_state(self, switch_name: str, group_id: str = None, user_id: str = None):
         """获取开关状态"""
@@ -379,12 +380,14 @@ class SwitchManager:
             self.group_switches[group_id][switch_name] = state
         else:
             raise ValueError("必须提供group_id或user_id")
+        self.save_switches()
     
     def toggle_switch(self, switch_name: str, group_id: str = None, user_id: str = None):
         """切换开关状态"""
         current_state = self.get_switch_state(switch_name, group_id, user_id)
         new_state = not current_state
         self.set_switch_state(switch_name, new_state, group_id, user_id)
+        self.save_switches()
         return new_state
     
     def get_switch_info(self, switch_name: str):
