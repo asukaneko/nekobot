@@ -336,7 +336,7 @@ class SwitchManager:
     def _init_default_switches(self):
         """初始化默认开关配置"""
         self.switch_configs = {
-            
+
         }
     
     def add_switch(self, switch_name: str, default_value: bool = False, description: str = ""):
@@ -436,7 +436,7 @@ load_blak_list()
 load_running()
 load_novel_data()
 read_at_all_group()
-switch = SwitchManager()
+switch = SwitchManager() #加载开关
 switch.load_switches()
 switch.add_switch('tts', default_value=False, description='TTS语音开关')
 switch.add_switch('jm_send', default_value=True, description='漫画发送开关')
@@ -464,7 +464,7 @@ async def handle_tts(msg, is_group=True):
         await bot.api.post_private_msg(msg.user_id, text=text)
     switch.save_switches()
 
-#漫画类命令----------------
+# ---------------漫画类命令----------------
 comic_cache = []
 @register_command("/jmrank",help_text = "/jmrank <月排行/周排行> -> 获取排行榜",category = "1")
 async def handle_jmrank(msg, is_group=True):
@@ -571,7 +571,6 @@ async def handle_search(msg, is_group=True):
         await bot.api.post_group_file(msg.group_id, file=os.path.join(cache_dir , f"{name}.md"))
     else:
         await bot.api.upload_private_file(msg.user_id, os.path.join(cache_dir , f"{name}.md"), f"{content}.md")
-
 
 @register_command("/tag",help_text = "/tag <标签> -> 搜索漫画标签",category = "1")
 async def handle_search(msg, is_group=True):
@@ -755,7 +754,7 @@ async def download_and_send_comic(comic_id, msg, is_group):
             raise FileNotFoundError(f"PDF文件未生成：{file_path}")
         
         if not switch.get_switch_state('jm_send', group_id=str(msg.group_id) if is_group else None,user_id=str(msg.user_id) if not is_group else None):
-            await msg.reply(text="漫画发送已关闭喵~")
+            await msg.reply(text="漫画已下载，但发送已关闭喵~")
             return
 
         file_size = os.path.getsize(file_path) / (1024 * 1024)  # 转换为MB
