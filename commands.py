@@ -318,6 +318,111 @@ def fetch_cover_url(id:str) -> str:
     """
     return f"https://cdn-msp3.jmapinodeudzn.net/media/photos/{id}/00001.webp"
 
+class SwitchManager:
+    """
+    开关管理器，支持群聊和个人开关的批量管理
+    群聊开关以群为整体
+    """
+    
+    def __init__(self):
+        # 存储所有开关状态
+        self.group_switches = {}  # {group_id: {switch_name: bool}}
+        self.user_switches = {}   # {user_id: {switch_name: bool}}
+        self.switch_configs = {}   # {switch_name: {'default': bool, 'description': str}}
+        
+        # 初始化默认开关
+        self._init_default_switches()
+    
+    def _init_default_switches(self):
+        """初始化默认开关配置"""
+        self.switch_configs = {
+            'tts': {'default': False, 'description': 'TTS语音开关'},
+        }
+    
+    def add_switch(self, switch_name: str, default_value: bool = False, description: str = ""):
+        """添加新的开关类型"""
+        self.switch_configs[switch_name] = {
+            'default': default_value,
+            'description': description
+        }
+    
+    def get_switch_state(self, switch_name: str, group_id: str = None, user_id: str = None):
+        """获取开关状态"""
+        if switch_name not in self.switch_configs:
+            raise ValueError(f"未知的开关类型: {switch_name}")
+        
+        # 优先检查用户开关
+        if user_id and user_id in self.user_switches:
+            if switch_name in self.user_switches[user_id]:
+                return self.user_switches[user_id][switch_name]
+        
+        # 检查群聊开关
+        if group_id and group_id in self.group_switches:
+            if switch_name in self.group_switches[group_id]:
+                return self.group_switches[group_id][switch_name]
+        
+        # 返回默认值
+        return self.switch_configs[switch_name]['default']
+    
+    def set_switch_state(self, switch_name: str, state: bool, group_id: str = None, user_id: str = None):
+        """设置开关状态"""
+        if switch_name not in self.switch_configs:
+            raise ValueError(f"未知的开关类型: {switch_name}")
+        
+        if user_id:
+            if user_id not in self.user_switches:
+                self.user_switches[user_id] = {}
+            self.user_switches[user_id][switch_name] = state
+        elif group_id:
+            if group_id not in self.group_switches:
+                self.group_switches[group_id] = {}
+            self.group_switches[group_id][switch_name] = state
+        else:
+            raise ValueError("必须提供group_id或user_id")
+    
+    def toggle_switch(self, switch_name: str, group_id: str = None, user_id: str = None):
+        """切换开关状态"""
+        current_state = self.get_switch_state(switch_name, group_id, user_id)
+        new_state = not current_state
+        self.set_switch_state(switch_name, new_state, group_id, user_id)
+        return new_state
+    
+    def get_switch_info(self, switch_name: str):
+        """获取开关信息"""
+        if switch_name not in self.switch_configs:
+            return None
+        return self.switch_configs[switch_name]
+    
+    def list_all_switches(self):
+        """列出所有开关类型"""
+        return list(self.switch_configs.keys())
+    
+    def save_switches(self, file_path: str = "switches.json"):
+        """
+        保存开关状态到文件
+        :param file_path: 保存路径
+        """
+        data = {
+            'group_switches': self.group_switches,
+            'user_switches': self.user_switches
+        }
+        with open(file_path, 'w', encoding='utf-8') as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+    
+    def load_switches(self, file_path: str = "switches.json"):
+        """
+        从文件加载开关状态
+        :param file_path: 加载路径
+        """
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                self.group_switches = data.get('group_switches', {})
+                self.user_switches = data.get('user_switches', {})
+        except FileNotFoundError:
+            # 文件不存在时使用默认值
+            pass
+
 #-------------------------
 #     region 加载参数
 #-------------------------
@@ -328,6 +433,12 @@ load_blak_list()
 load_running()
 load_novel_data()
 read_at_all_group()
+switch = SwitchManager()
+switch.load_switches()
+switch.add_switch('tts', default_value=False, description='TTS语音开关')
+switch.add_switch('jm_send', default_value=True, description='漫画发送开关')
+switch.add_switch('jm_send_user', default_value=False, description='用户私信发送漫画开关')
+switch.save_switches()
 
 #----------------------
 #     region 命令
@@ -341,13 +452,14 @@ async def handle_tts(msg, is_group=True):
         else:
             await bot.api.post_private_msg(msg.user_id, text="你没有权限使用此命令喵~")
         return
-    global if_tts
-    if_tts = not if_tts
+    if_tts = switch.toggle_switch('tts', group_id=str(msg.group_id) if is_group else None, user_id=str(msg.user_id) if not is_group else None)
+
     text = "已开启TTS喵~" if if_tts else "已关闭TTS喵~"
     if is_group:
         await msg.reply(text=text)
     else:
         await bot.api.post_private_msg(msg.user_id, text=text)
+    switch.save_switches()
 
 #漫画类命令----------------
 comic_cache = []
@@ -560,11 +672,21 @@ async def handle_jmcomic(msg, is_group=True):
         if os.path.exists(os.path.join(load_address(),f"pdf/{comic_id}.pdf")):
             file_size = os.path.getsize(os.path.join(load_address(),f"pdf/{comic_id}.pdf"))
             if is_group:
-                await msg.reply(text=f"该漫画已存在喵~,文件大小：{file_size:.2f} MB，正在发送喵~")
-                await bot.api.post_group_file(msg.group_id, file=os.path.join(load_address(),f"pdf/{comic_id}.pdf"))
+                if switch.get_switch_state('jm_send', group_id=str(msg.group_id)):
+                    if switch.get_switch_state('jm_send_user', group_id=str(msg.group_id)):
+                        await bot.api.post_private_msg(msg.user_id,text=f"该漫画已存在喵~,文件大小：{file_size:.2f} MB，正在发送喵~")
+                        await bot.api.upload_private_file(msg.user_id, os.path.join(load_address(),f"pdf/{comic_id}.pdf"), f"{comic_id}.pdf")
+                    else:
+                        await msg.reply(text=f"该漫画已存在喵~,文件大小：{file_size:.2f} MB，正在发送到群组喵~")
+                        await bot.api.post_group_file(msg.group_id, file=os.path.join(load_address(),f"pdf/{comic_id}.pdf"))
+                else:
+                    await msg.reply(text=f"群组发送漫画已关闭喵~")
             else:
-                await bot.api.post_private_msg(msg.user_id,text=f"该漫画已存在喵~,文件大小：{file_size:.2f} MB，正在发送喵~")
-                await bot.api.upload_private_file(msg.user_id, os.path.join(load_address(),f"pdf/{comic_id}.pdf"), f"{comic_id}.pdf")
+                if switch.get_switch_state('jm_send', user_id=str(msg.user_id)):
+                    await bot.api.post_private_msg(msg.user_id,text=f"该漫画已存在喵~,文件大小：{file_size:.2f} MB，正在发送喵~")
+                    await bot.api.upload_private_file(msg.user_id, os.path.join(load_address(),f"pdf/{comic_id}.pdf"), f"{comic_id}.pdf")
+                else:
+                    await msg.reply(text=f"该漫画已下载，但用户私信发送漫画已关闭喵~")
             return
 
         if int(comic_id) <= len(comic_cache) and len(comic_cache) > 0 :
@@ -629,14 +751,23 @@ async def download_and_send_comic(comic_id, msg, is_group):
         if not os.path.exists(file_path):
             raise FileNotFoundError(f"PDF文件未生成：{file_path}")
         
+        if not switch.get_switch_state('jm_send', group_id=str(msg.group_id) if is_group else None,user_id=str(msg.user_id) if not is_group else None):
+            await msg.reply(text="漫画发送已关闭喵~")
+            return
+
         file_size = os.path.getsize(file_path) / (1024 * 1024)  # 转换为MB
         file_text = f"文件大小：{file_size:.2f} MB，正在上传喵~"
         success_text = f"漫画 {comic_id} 下载完成喵~"
 
         if is_group:
-            await msg.reply(text=file_text)
-            await bot.api.post_group_file(msg.group_id, file=file_path)
-            await msg.reply(text=success_text)
+            if switch.get_switch_state('jm_send_user', group_id=str(msg.group_id)):
+                await bot.api.post_private_msg(msg.user_id, text=file_text)
+                await bot.api.upload_private_file(msg.user_id, file_path, f"{comic_id}.pdf")
+                await bot.api.post_private_msg(msg.user_id, text=success_text)
+            else:
+                await msg.reply(text=file_text)
+                await bot.api.post_group_file(msg.group_id, file=file_path)
+                await msg.reply(text=success_text)
         else:
             await bot.api.post_private_msg(msg.user_id, text=file_text)
             await bot.api.upload_private_file(msg.user_id, file_path, f"{comic_id}.pdf")
@@ -666,6 +797,36 @@ async def handle_jm_clear(msg, is_group=True):
         await msg.reply(text="缓存已清除喵~")
     else:
         await bot.api.post_private_msg(msg.user_id, text="缓存已清除喵~")
+
+@register_command("/jm_send_user", help_text="/jm_send_user <on|off> -> 开启/关闭群聊用户私信发送漫画",category = "1")
+async def handle_jm_send_user(msg, is_group=True):
+    state = msg.raw_message[len("/jm_send_user"):].strip().lower()
+    if state not in ['on', 'off']:
+        reply = "请输入 on 或 off 喵~"
+    else:
+        switch.set_switch_state('jm_send_user', state == 'on', group_id=str(msg.group_id) if is_group else None,user_id=str(msg.user_id) if not is_group else None)
+
+        reply = f"用户私信发送漫画已 {'开启' if state == 'on' else '关闭'} 喵~"
+    if is_group:
+        await msg.reply(text=reply)
+    else:
+        await bot.api.post_private_msg(msg.user_id, text=reply)
+    switch.save_switches()
+
+@register_command("/jm_send", help_text="/jm_send <on|off> -> 开启/关闭发送漫画",category = "1")
+async def handle_jm_send(msg, is_group=True):
+    state = msg.raw_message[len("/jm_send"):].strip().lower()
+    if state not in ['on', 'off']:
+        reply = "请输入 on 或 off 喵~"
+    else:
+        switch.set_switch_state('jm_send', state == 'on', group_id=str(msg.group_id) if is_group else None,user_id=str(msg.user_id) if not is_group else None)
+
+        reply = f"{'群组' if is_group else '用户'}发送漫画已 {'开启' if state == 'on' else '关闭'} 喵~"
+    if is_group:
+        await msg.reply(text=reply)
+    else:
+        await bot.api.post_private_msg(msg.user_id, text=reply)
+    switch.save_switches()
 
 # ====下面的收藏夹不是官方的收藏夹，是本地储存的====
 @register_command("/add_fav", help_text="/add_fav <漫画ID> -> 添加收藏",category = "1")

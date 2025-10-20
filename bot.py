@@ -142,8 +142,7 @@ def recognize_image(iurl):
 
 @bot.group_event()
 async def on_group_message(msg: GroupMessage):
-    global if_tts
-    if_tts = commands.if_tts
+    if_tts = switch.get_switch_state('tts', group_id=str(msg.group_id))
     _log.info(msg)
     for command, handler in command_handlers.items():
         if isinstance(command, tuple):  # 处理命令别名情况
@@ -293,8 +292,7 @@ async def on_group_message(msg: GroupMessage):
 
 @bot.private_event()
 async def on_private_message(msg: PrivateMessage):
-    global if_tts
-    if_tts = commands.if_tts
+    if_tts = switch.get_switch_state('tts', user_id=str(msg.user_id))
     _log.info(msg)
     for command, handler in command_handlers.items():
         if isinstance(command, tuple):  # 处理命令别名情况
