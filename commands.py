@@ -798,8 +798,12 @@ async def handle_jm_clear(msg, is_group=True):
     else:
         await bot.api.post_private_msg(msg.user_id, text="缓存已清除喵~")
 
-@register_command("/jm_send_user", help_text="/jm_send_user <on|off> -> 开启/关闭群聊用户私信发送漫画",category = "1")
+@register_command("/jm_send_user", help_text="/jm_send_user <on|off> -> 开启/关闭群聊用户私信发送漫画(admin)",category = "1",admin_show=True)
 async def handle_jm_send_user(msg, is_group=True):
+    if msg.user_id not in admin:
+        await msg.reply(text="只有管理员才能使用该命令喵~")
+        return
+
     state = msg.raw_message[len("/jm_send_user"):].strip().lower()
     if state not in ['on', 'off']:
         reply = "请输入 on 或 off 喵~"
@@ -813,8 +817,11 @@ async def handle_jm_send_user(msg, is_group=True):
         await bot.api.post_private_msg(msg.user_id, text=reply)
     switch.save_switches()
 
-@register_command("/jm_send", help_text="/jm_send <on|off> -> 开启/关闭发送漫画",category = "1")
+@register_command("/jm_send", help_text="/jm_send <on|off> -> 开启/关闭发送漫画(admin)",category = "1",admin_show=True)
 async def handle_jm_send(msg, is_group=True):
+    if msg.user_id not in admin:
+        await msg.reply(text="只有管理员才能使用该命令喵~")
+        return
     state = msg.raw_message[len("/jm_send"):].strip().lower()
     if state not in ['on', 'off']:
         reply = "请输入 on 或 off 喵~"
