@@ -142,19 +142,32 @@ def recognize_image(iurl):
 
 @bot.group_event()
 async def on_group_message(msg: GroupMessage):
-    if_tts = switch.get_switch_state('tts', group_id=str(msg.group_id))
     _log.info(msg)
-    for command, handler in command_handlers.items():
-        if isinstance(command, tuple):  # 处理命令别名情况
-            for cmd in command:
-                if re.match(rf'^{re.escape(cmd)}(?:\s|\.|$)', msg.raw_message):
-                    await handler(msg, is_group=True)
-                    _log.info(f"调用{cmd}命令")
-                    return
-        elif re.match(rf'^{re.escape(cmd)}(?:\s|\.|$)', msg.raw_message): # 处理单个命令情况
-            await handler(msg, is_group=False)
-            _log.info(f"调用{command}命令")
-            return
+    if_tts = switch.get_switch_state('tts', group_id=str(msg.group_id))
+    if msg.raw_message.startswith("/command"):
+        if str(msg.user_id) in admin:
+            command = msg.raw_message.split(" ")[1].lower()
+            if command == "on":
+                switch.set_switch_state('command', True, group_id=str(msg.group_id))
+                await msg.reply(text="已开启命令功能")
+            elif command == "off":
+                switch.set_switch_state('command', False, group_id=str(msg.group_id))
+                await msg.reply(text="已关闭命令功能")
+            else:
+                await msg.reply(text="未知命令")
+
+    if switch.get_switch_state('command', group_id=str(msg.group_id)):
+        for command, handler in command_handlers.items():
+            if isinstance(command, tuple):  # 处理命令别名情况
+                for cmd in command:
+                    if re.match(rf'^{re.escape(cmd)}(?:\s|\.|$)', msg.raw_message):
+                        await handler(msg, is_group=True)
+                        _log.info(f"调用{cmd}命令")
+                        return
+            elif re.match(rf'^{re.escape(cmd)}(?:\s|\.|$)', msg.raw_message): # 处理单个命令情况
+                await handler(msg, is_group=False)
+                _log.info(f"调用{command}命令")
+                return
 
     if msg.raw_message.startswith("/chat"):
         content = chat(msg.raw_message, group_id=msg.group_id,group_user_id=msg.sender.nickname)
@@ -292,20 +305,31 @@ async def on_group_message(msg: GroupMessage):
 
 @bot.private_event()
 async def on_private_message(msg: PrivateMessage):
-    if_tts = switch.get_switch_state('tts', user_id=str(msg.user_id))
     _log.info(msg)
-    for command, handler in command_handlers.items():
-        if isinstance(command, tuple):  # 处理命令别名情况
-            for cmd in command:
-                if re.match(rf'^{re.escape(cmd)}(?:\s|\.|$)', msg.raw_message):
-                    _log.info(f"调用{cmd}命令")
-                    await handler(msg, is_group=False)
-                    return
-        elif re.match(fr'^{re.escape(command)}(?:\s|\.|$)', msg.raw_message): # 处理单个命令情况
-            _log.info(f"调用{command}命令")
-            await handler(msg, is_group=False)
-            return
-    
+    if_tts = switch.get_switch_state('tts', user_id=str(msg.user_id))
+    if msg.raw_message.startswith("/command"):
+        command = msg.raw_message.split(" ")[1].lower()
+        if command == "on":
+            switch.set_switch_state('command', True, user_id=str(msg.user_id))
+            await msg.reply(text="已开启命令功能")
+        elif command == "off":
+            switch.set_switch_state('command', False, user_id=str(msg.user_id))
+            await msg.reply(text="已关闭命令功能")
+        else:
+            await msg.reply(text="未知命令")
+                
+    if switch.get_switch_state('command', user_id=str(msg.user_id)):
+        for command, handler in command_handlers.items():
+            if isinstance(command, tuple):  # 处理命令别名情况
+                for cmd in command:
+                    if re.match(rf'^{re.escape(cmd)}(?:\s|\.|$)', msg.raw_message):
+                        _log.info(f"调用{cmd}命令")
+                        await handler(msg, is_group=False)
+                        return
+            elif re.match(fr'^{re.escape(command)}(?:\s|\.|$)', msg.raw_message): # 处理单个命令情况
+                _log.info(f"调用{command}命令")
+                await handler(msg, is_group=False)
+                return
     try:
         if running[str(msg.user_id)]["state"]:
             running[str(msg.user_id)]["last_time"] = time.time()
