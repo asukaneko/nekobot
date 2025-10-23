@@ -441,6 +441,7 @@ switch.load_switches()
 switch.add_switch('tts', default_value=False, description='TTS语音开关')
 switch.add_switch('jm_send', default_value=True, description='漫画发送开关')
 switch.add_switch('jm_send_user', default_value=False, description='用户私信发送漫画开关')
+switch.add_switch('command', default_value=True, description='命令开关')
 switch.save_switches()
 
 #----------------------
