@@ -2229,27 +2229,31 @@ async def handle_gf(msg,is_group=True):
         await msg.reply(text="正在绘制喵……")
     else:
         await bot.api.post_private_msg(msg.user_id,text="正在绘制喵……")
+    
     config_parser = configparser.ConfigParser()
     config_parser.read('config.ini')
-    api_key = config_parser.get('ApiKey', 'api_key')
+    api_key = config_parser.get('gf', 'api_key')
 
-    url = "https://api.siliconflow.cn/v1/images/generations"
+    url = "https://ark.cn-beijing.volces.com/api/v3/images/generations"
 
     payload = {
-        "model": "Kwai-Kolors/Kolors",
+        "model": "doubao-seedream-4-0-250828",
         "prompt": prompt,
-        "image_size": size,
-        "batch_size": 1,
-        "num_inference_steps": 20,
-        "guidance_scale": 7.5
+        "sequential_image_generation": "disabled",
+        "response_format": "url",
+        "size": size,
+        "stream": False,
+        "watermark": True
     }
+    
     headers = {
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json"
     }
     response = requests.post(url, json=payload, headers=headers)
+
     try:
-        url = response.json().get("images")[0].get("url")
+        url = response.json().get("data")[0].get("url")
     except Exception as e:
         reply = f"绘制失败喵~,{e}\n{response.json()}"
 
