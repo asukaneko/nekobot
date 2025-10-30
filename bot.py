@@ -134,7 +134,8 @@ def recognize_image(iurl):
             print(resp.status_code)
             print(json.dumps(resp.json(), indent=2, ensure_ascii=False))
         os.remove("image.jpg")
-        return "这是来自"+resp.json()['faces'][0]['anime']+"的"+resp.json()['faces'][0]['name']
+        return "这是来自"+resp.json()['faces'][0]['anime']+"的"+resp.json()['faces'][0]['name']+"，识别结果的置信度为"+str(resp.json()['faces'][0]['score'])
+
     except Exception as e:
         _log.error(f"识别失败: {e}")
         os.remove("image.jpg")
@@ -219,13 +220,13 @@ async def on_group_message(msg: GroupMessage):
             url = msg_obj.get("data").get("message")[0].get("data").get("url")
             summary = msg_obj.get("data").get("message")[0].get("data").get("summary")
             if summary == "[动画表情]":
-                content = chat(content=ori_content+"发送了一个动画表情",group_id=msg.group_id,group_user_id=msg.sender.nickname,image=True,url=url)
-            else:
-                res = ""
-                if ori_content.strip() == "/识别人物":
-                    _log.info("识别人物中...")
-                    res = ":"+recognize_image(url)
-                content = chat(content=ori_content+res,group_id=msg.group_id,group_user_id=msg.sender.nickname,image=True,url=url)        
+                ori_content += "[发送了一个动画表情]"
+
+            res = ""
+            if "/识别人物" in ori_content.strip():
+                _log.info("识别人物中...")
+                res = ":"+recognize_image(url)
+            content = chat(content=ori_content+res,group_id=msg.group_id,group_user_id=msg.sender.nickname,image=True,url=url)        
             if if_tts:
                 rtf = tts(content)
                 await bot.api.post_group_msg(msg.group_id, rtf=rtf)
@@ -419,7 +420,7 @@ async def on_private_message(msg: PrivateMessage):
                 try:  #预防回复图片时没有内容的情况
                     text = msg.message[1].get("data").get("text")
                     res = ""
-                    if text == "/识别人物":
+                    if "/识别人物" in text:
                         _log.info("识别人物中...")
                         res = ":"+recognize_image(url)
                     content = chat(content=msg.message[1].get("data").get("text")+res,user_id=msg.user_id,image=True,url=url)
