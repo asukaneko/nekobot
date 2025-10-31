@@ -169,11 +169,6 @@ async def on_group_message(msg: GroupMessage):
                 await handler(msg, is_group=False)
                 _log.info(f"调用{command}命令")
                 return
-
-    if msg.raw_message.startswith("/chat"):
-        content = chat(msg.raw_message, group_id=msg.group_id,group_user_id=msg.sender.nickname)
-        _log.info("调用chat命令")
-        await msg.reply(text=content)
     
     if (msg.message[0].get("type") == "at" and msg.message[0].get("data").get("qq") == bot_id) or (msg.message[0].get("type") == "at" and msg.message[0].get("data").get("qq") == 'all' and str(msg.group_id) in at_all_group):
     #如果是at机器人或者at全体成员并且该群开启了识别@全体成员功能
@@ -222,11 +217,11 @@ async def on_group_message(msg: GroupMessage):
             if summary == "[动画表情]":
                 ori_content += "[发送了一个动画表情]"
 
-            res = ""
             if "/识别人物" in ori_content.strip():
                 _log.info("识别人物中...")
-                res = ":"+recognize_image(url)
-            content = chat(content=ori_content+res,group_id=msg.group_id,group_user_id=msg.sender.nickname,image=True,url=url)        
+                ori_content += f"(识别结果：{recognize_image(url)})"
+
+            content = chat(content=ori_content,group_id=msg.group_id,group_user_id=msg.sender.nickname,image=True,url=url)        
             if if_tts:
                 rtf = tts(content)
                 await bot.api.post_group_msg(msg.group_id, rtf=rtf)
@@ -422,7 +417,7 @@ async def on_private_message(msg: PrivateMessage):
                     res = ""
                     if "/识别人物" in text:
                         _log.info("识别人物中...")
-                        res = ":"+recognize_image(url)
+                        res = f"(识别结果：{recognize_image(url)})"
                     content = chat(content=msg.message[1].get("data").get("text")+res,user_id=msg.user_id,image=True,url=url)
                 except IndexError:
                     content = chat(user_id=msg.user_id,image=True,url=url)
