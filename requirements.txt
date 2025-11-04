@@ -5,3 +5,4 @@ configparser == 7.2.0
 img2pdf == 0.6.0
 requests~=2.32.3
 pyyaml
+pikepdf
