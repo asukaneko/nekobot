@@ -442,6 +442,7 @@ switch.add_switch('tts', default_value=False, description='TTS语音开关')
 switch.add_switch('jm_send', default_value=True, description='漫画发送开关')
 switch.add_switch('jm_send_user', default_value=False, description='用户私信发送漫画开关')
 switch.add_switch('command', default_value=True, description='命令开关')
+switch.add_switch('pdf_password', default_value=False, description='PDF密码开关')
 switch.save_switches()
 
 #----------------------
@@ -754,6 +755,21 @@ async def download_and_send_comic(comic_id, msg, is_group):
         if not os.path.exists(file_path):
             raise FileNotFoundError(f"PDF文件未生成：{file_path}")
         
+        #pdf加密功能，密码为comic_id
+        if switch.get_switch_state('pdf_password', group_id=str(msg.group_id) if is_group else None,user_id=str(msg.user_id) if not is_group else None):
+            try:
+                import pikepdf
+                with pikepdf.open(file_path,allow_overwriting_input=True) as pdf:
+
+                    pdf.save(file_path, encryption=pikepdf.Encryption(
+                        owner=comic_id,  # 所有者密码
+                        user=comic_id,   # 用户密码
+                        R=4              # 加密版本
+                    ))
+            except ImportError:
+                error_msg = "缺少pikepdf库，无法加密PDF文件喵~"
+                msg.reply(text=error_msg)
+
         if not switch.get_switch_state('jm_send', group_id=str(msg.group_id) if is_group else None,user_id=str(msg.user_id) if not is_group else None):
             await msg.reply(text="漫画已下载，但发送已关闭喵~")
             return
@@ -777,7 +793,7 @@ async def download_and_send_comic(comic_id, msg, is_group):
             await bot.api.post_private_msg(msg.user_id, text=success_text)
 
     except Exception as e:
-        file_path = os.path.join(pdf_dir, f"pdf/{comic_id}.pdf")
+        file_path = os.path.join(load_address(), f"pdf/{comic_id}.pdf")
         error_msg = f"下载失败喵~: {str(e)}"
         if is_group:
             await msg.reply(text=error_msg)
@@ -803,7 +819,7 @@ async def handle_jm_clear(msg, is_group=True):
 
 @register_command("/jm_send_user", help_text="/jm_send_user <on|off> -> 开启/关闭群聊用户私信发送漫画(admin)",category = "1",admin_show=True)
 async def handle_jm_send_user(msg, is_group=True):
-    if msg.user_id not in admin:
+    if str(msg.user_id) not in admin:
         await msg.reply(text="只有管理员才能使用该命令喵~")
         return
 
@@ -822,7 +838,7 @@ async def handle_jm_send_user(msg, is_group=True):
 
 @register_command("/jm_send", help_text="/jm_send <on|off> -> 开启/关闭发送漫画(admin)",category = "1",admin_show=True)
 async def handle_jm_send(msg, is_group=True):
-    if msg.user_id not in admin:
+    if str(msg.user_id) not in admin:
         await msg.reply(text="只有管理员才能使用该命令喵~")
         return
     state = msg.raw_message[len("/jm_send"):].strip().lower()
@@ -837,6 +853,19 @@ async def handle_jm_send(msg, is_group=True):
     else:
         await bot.api.post_private_msg(msg.user_id, text=reply)
     switch.save_switches()
+
+@register_command("/jm_pwd", help_text="/jm_pwd <on|off> -> 开启/关闭密码加密(admin)",category = "1",admin_show=True)
+async def handle_jm_pwd(msg, is_group=True):
+    if str(msg.user_id) not in admin:
+        await msg.reply(text="只有管理员才能使用该命令喵~")
+        return
+    state = msg.raw_message[len("/jm_pwd"):].strip().lower()
+    if state not in ['on', 'off']:
+        reply = "请输入 on 或 off 喵~"
+    else:
+        switch.set_switch_state('pdf_password', state == 'on', group_id=str(msg.group_id) if is_group else None,user_id=str(msg.user_id) if not is_group else None)
+        reply = f"{'群组' if is_group else '用户'}密码加密已 {'开启' if state == 'on' else '关闭'} 喵~，密码为漫画id"
+        await msg.reply(text=reply)
 
 # ====下面的收藏夹不是官方的收藏夹，是本地储存的====
 @register_command("/add_fav", help_text="/add_fav <漫画ID> -> 添加收藏",category = "1")
