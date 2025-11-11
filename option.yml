@@ -14,6 +14,6 @@ plugins:
     # 使用前需要安装依赖库: [pip install img2pdf]
     - plugin: img2pdf
       kwargs:
-        pdf_dir: ./cache/pdf/ # pdf存放文件夹
+        pdf_dir: ./cache/pdf/ # pdf存放文件夹，最好是绝对路径，避免napcat服务端找不到文件
         filename_rule: Aid
         delete_original_file: true # 是否删除原图
