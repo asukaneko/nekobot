@@ -2003,7 +2003,7 @@ async def handle_find_book(msg, is_group=True):
             author = books[title].get("author")
             matches.append((author,title, books[title].get("download_url")))
 
-    if not matches:
+    if not matches and not api_book[msg.user_id]:
         reply = f"没有找到包含'{search_term}'的轻小说喵~"
         if is_group:
             await msg.reply(text=reply)
