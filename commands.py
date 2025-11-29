@@ -318,6 +318,34 @@ def fetch_cover_url(id:str) -> str:
     """
     return f"https://cdn-msp3.jmapinodeudzn.net/media/photos/{id}/00001.webp"
 
+
+def find_book_from_api(search_term: str) -> list:
+    """
+    从API搜索小说
+    :param search_term: 搜索关键词
+    :return: 包含匹配小说信息的列表
+    """
+    url = "https://fq.shusan.cn/api/search"
+    params = {
+        "key": search_term,
+        "tab_type": 3,
+    }
+    res = requests.get(url, params=params)
+    book_ids = {}
+    if res.ok:
+        data = res.json()
+        for tab in data.get("data", {}).get("search_tabs", []):
+            if tab.get("tab_type") == 3:  # 书籍类 tab
+                for item in tab.get("data", []):
+                    book_data = item.get("book_data", [])
+                    for book in book_data:
+                        book_id = book.get("book_id")
+                        book_name = book.get("book_name")
+                        if book_id:
+                            book_ids[book_id] = book_name
+    
+    return book_ids
+
 class SwitchManager:
     """
     开关管理器，支持群聊和个人开关的批量管理
@@ -1941,6 +1969,7 @@ async def handle_active_chat(msg, is_group=True):
 
 # 添加临时存储字典
 temp_selections = {}
+api_book = {}
 
 @register_command("/findbook","/fb",help_text="/findbook 或者 /fb <书名> -> 搜索并选择下载轻小说",category = "6")
 async def handle_find_book(msg, is_group=True):
@@ -1965,7 +1994,9 @@ async def handle_find_book(msg, is_group=True):
         if (search_term.lower() in title.lower() or search_term.lower() in clean_title.lower()):
             author = book_info.get("author")
             matches.append((author,title, book_info.get("download_url")))
-        
+
+    api_book[msg.user_id] = find_book_from_api(search_term)
+
     if not matches:
         matches2 = get_close_matches(search_term, books.keys(), n=5, cutoff=0.4)
         for title in matches2:
@@ -1982,7 +2013,12 @@ async def handle_find_book(msg, is_group=True):
     
     # 生成选择列表
     choices = "\n".join([f"{i+1}. {title} -- {author}" for i, (author,title, _) in enumerate(matches)])
+    if api_book[msg.user_id]:
+        api_text = "\n".join([f"{i+1+len(matches)}. {title}" for i, (_, title) in enumerate(api_book[msg.user_id].items())])
+        choices += f"\n\nAPI找到以下匹配的小说喵~:\n{api_text}"
+
     reply = f"找到以下匹配的轻小说喵~:\n{choices}\n\n请回复'/select 编号'选择要下载的轻小说喵~\n回复'/info 编号'获取轻小说信息喵~"
+    
     
     # 存储匹配结果临时数据
     temp_selections[msg.user_id] = matches
@@ -2029,30 +2065,87 @@ async def handle_find_author(msg, is_group=True):
     else:
         await bot.api.post_private_msg(msg.user_id, text=reply)
 
+def download_api_book(id,name):
+    url = "https://fq.shusan.cn/api/content"
+    params = {
+        "tab":"下载",
+        "book_id":id
+    }
+    response = requests.get(url, params=params)
+    if response.status_code == 200:
+        content = response.text
+        path = os.path.join(os.path.dirname(__file__), f"cache/{name}.txt")
+        with open(path, "w", encoding="utf-8") as file:
+            file.write(content)
+    else:
+        print(f"下载失败，状态码：{response.status_code}")
+
+def get_api_book_info(id):
+    url = "https://fq.shusan.cn/api/detail"
+    params = {
+        "book_id":id
+    }
+    response = requests.get(url, params=params)
+    if response.status_code == 200:
+        raw = json.loads(response.text)
+        book  = raw['data']['data']          
+
+        info = {
+            'author'       : book['author'],
+            'category'     : book['category'],
+            'word_count'   : f"{int(book['word_number']):,}",   # 加千分位
+            'is_serialize' : '连载中' if int(book['creation_status']) == 1 else '已完结',
+            'hot'          : book['read_cnt_text'],             # “157.4万人在读”
+            'last_date'    : datetime.fromtimestamp(int(book['last_publish_time'])).strftime('%Y-%m-%d'),
+            'download_url' : f"https://tomato-novel-downloader.vercel.app/?book_id={book['book_id']}",  # 示例拼接
+            'page'         : f"https://fanqienovel.com/page/{book['book_id']}",                       # 番茄详情页
+            'cover'        : book['thumb_url'],
+            'introduction' : book['abstract'].replace('\n', ''),   # 去掉换行
+            'title'        : book['book_name'],
+        }
+        return info
+
+    else:
+        print(f"获取失败，状态码：{response.status_code}")
+        return None
+
 
 # 添加选择处理函数
 @register_command("/select", help_text="/select <编号> -> 选择要下载的轻小说",category = "6")
 async def handle_select_book(msg, is_group=True):
-    if msg.user_id not in temp_selections:
+    if (msg.user_id not in temp_selections) and (msg.user_id not in api_book):
         reply = "没有找到主人的搜索记录喵~请先使用/findbook搜索喵~"
         if is_group:
             await msg.reply(text=reply)
         else:
             await bot.api.post_private_msg(msg.user_id, text=reply)
         return
-    
     try:
         selection = int(msg.raw_message[len("/select"):].strip()) - 1
         matches = temp_selections[msg.user_id]
-        if 0 <= selection < len(matches):
-            author,title, url = matches[selection]
-            reply = f"已开始下载《{title}》-- {author}喵~"
-            if is_group:
-                await msg.reply(text=reply)
-                await bot.api.post_group_file(msg.group_id,file=url)
+        api_books = api_book[msg.user_id]
+
+        if 0 <= selection < len(matches) or (selection >= len(matches) and selection < len(matches) + len(api_books)):
+            if selection < len(matches):
+                author,title, url = matches[selection]
+                reply = f"已开始下载《{title}》-- {author}喵~"
+                if is_group:
+                    await msg.reply(text=reply)
+                    await bot.api.post_group_file(msg.group_id,file=url)
+                else:
+                    await bot.api.post_private_msg(msg.user_id, text=reply)
+                    await bot.api.upload_private_file(msg.user_id,file=url,name=title+".txt")     
             else:
-                await bot.api.post_private_msg(msg.user_id, text=reply)
-                await bot.api.upload_private_file(msg.user_id,file=url,name=title+".txt")
+                id, title = list(api_books.items())[selection - len(matches)]
+                download_api_book(id,title)
+                reply = f"已开始下载《{title}》喵~"
+                await msg.reply(text=reply)
+                api_book_file_path = os.path.join(os.path.dirname(__file__), f"cache/{title}.txt")
+                if is_group:
+                    await bot.api.post_group_file(msg.group_id,file=api_book_file_path)
+                else:
+                    await bot.api.upload_private_file(msg.user_id,file=api_book_file_path,name=title+".txt")
+            
         else:
             reply = "编号无效喵~请选择列表中的编号喵~"
             if is_group:
@@ -2066,11 +2159,12 @@ async def handle_select_book(msg, is_group=True):
         else:
             await bot.api.post_private_msg(msg.user_id, text=reply)
     
-    del temp_selections[msg.user_id]  # 清理临时数据
+    #del temp_selections[msg.user_id]  # 清理临时数据
+    #del api_books[msg.user_id]  # 清理临时数据
 
 @register_command("/info",help_text="/info <书名> -> 获取轻小说信息",category = "6")
 async def handle_info(msg, is_group=True):
-    if msg.user_id not in temp_selections:
+    if (msg.user_id not in temp_selections) and (msg.user_id not in api_book):
         reply = "没有找到您的搜索记录喵~请先使用/findbook搜索喵~"
         if is_group:
             await msg.reply(text=reply)
@@ -2080,23 +2174,39 @@ async def handle_info(msg, is_group=True):
     try:
         selection = int(msg.raw_message[len("/info"):].strip()) - 1
         matches = temp_selections[msg.user_id]
-        if 0 <= selection < len(matches):
-            author,title, url = matches[selection]
-            info = books[title]
-            try:
-                introduction = info['introduction']
-            except Exception:
-                introduction = "暂无"
-            cover = info['cover_url']
-            reply =  MessageChain(
-                f"《{title}》的信息如下喵~\n作者: {author}\n分类: {info['category']}\n字数: {info['word_count']}\n状态: {info['is_serialize']}\n热度：{info['hot']}\n简介：{introduction}\n更新日期: {info['last_date']}\n下载链接: {url}\n详细页面：{info['page']}",
+        api_books = api_book[msg.user_id]
 
-                Image(f"{cover}")
+        if 0 <= selection < len(matches) or (selection >= len(matches) and selection < len(matches) + len(api_books)):
+            if selection < len(matches):
+                author,title, url = matches[selection]
+                info = books[title]
+                try:
+                    introduction = info['introduction']
+                except Exception:
+                    introduction = "暂无"
+                cover = info['cover_url']
+                reply =  MessageChain(
+                f"《{title}》的信息如下喵~\n作者: {author}\n分类: {info['category']}\n字数: {info['word_count']}\n状态: {info['is_serialize']}\n热度：{info['hot']}\n简介：{introduction}\n更新日期: {info['last_date']}\n下载链接: {url}\n详细页面：{info['page']}",Image(f"{cover}")
                 )
-            if is_group:
-                await msg.reply(rtf=reply)
+                if is_group:
+                    await msg.reply(rtf=reply)
+                else:
+                    await bot.api.post_private_msg(msg.user_id, rtf=reply)
             else:
-                await bot.api.post_private_msg(msg.user_id, rtf=reply)
+                id, title = list(api_books.items())[selection - len(matches)]
+                
+                info = get_api_book_info(id)
+                if(info==None):
+                    reply = "没有找到该轻小说的信息喵~"
+                    await msg.reply(text=reply)
+                    return
+
+                reply =  MessageChain(
+                f"《{title}》的信息如下喵~\n作者: {info['author']}\n分类: {info['category']}\n字数: {info['word_count']}\n状态: {info['is_serialize']}\n热度：{info['hot']}\n简介：{info['introduction']}\n更新日期: {info['last_date']}\n下载链接: {info['download_url']}\n详细页面：{info['page']}",Image(f"{info['cover']}")
+
+                )
+                await msg.reply(rtf=reply)
+
         else:
             reply = "编号无效喵~请选择列表中的编号喵~"
             if is_group:
