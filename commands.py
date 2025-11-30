@@ -2093,14 +2093,14 @@ def get_api_book_info(id):
         info = {
             'author'       : book['author'],
             'category'     : book['category'],
-            'word_count'   : f"{int(book['word_number']):,}",   # 加千分位
+            'word_count'   : f"{int(book['word_number']):,}",  
             'is_serialize' : '连载中' if int(book['creation_status']) == 1 else '已完结',
-            'hot'          : book['read_cnt_text'],             # “157.4万人在读”
+            'hot'          : book['read_cnt_text'],            
             'last_date'    : datetime.fromtimestamp(int(book['last_publish_time'])).strftime('%Y-%m-%d'),
-            'download_url' : f"https://tomato-novel-downloader.vercel.app/?book_id={book['book_id']}",  # 示例拼接
-            'page'         : f"https://fanqienovel.com/page/{book['book_id']}",                       # 番茄详情页
+            'download_url' : f"https://tomato-novel-downloader.vercel.app/?book_id={book['book_id']}", 
+            'page'         : f"https://fanqienovel.com/page/{book['book_id']}",                       
             'cover'        : book['thumb_url'],
-            'introduction' : book['abstract'].replace('\n', ''),   # 去掉换行
+            'introduction' : book['abstract'].replace('\n', ''),   
             'title'        : book['book_name'],
         }
         return info
@@ -2159,8 +2159,8 @@ async def handle_select_book(msg, is_group=True):
         else:
             await bot.api.post_private_msg(msg.user_id, text=reply)
     
-    #del temp_selections[msg.user_id]  # 清理临时数据
-    #del api_books[msg.user_id]  # 清理临时数据
+    del temp_selections[msg.user_id] 
+    del api_books[msg.user_id]  
 
 @register_command("/info",help_text="/info <书名> -> 获取轻小说信息",category = "6")
 async def handle_info(msg, is_group=True):
