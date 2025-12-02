@@ -85,7 +85,7 @@ def online_search(content) -> str:
     data = {
         "query": content,
         "query_rewrite": True,
-        "top_k":3
+        "top_k":6
     }
     try:
         response = requests.post(search_api_url, headers=headers, json=data)
@@ -265,7 +265,7 @@ def judge_search(content) -> bool:
             "content": [
                 {
                     "type": "text", 
-                    "text": f"请判断这个内容AI是否需要搜索才能获取准确回答；如果需要搜索，则只返回1；如果不需要搜索，则只返回0：{content}"
+                    "text": f"请判断这个内容AI是否需要搜索才能获取准确且最新的回答；如果需要搜索，则只返回1；如果不需要搜索，则只返回0：{content}"
 
                 }
             ]
