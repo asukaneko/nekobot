@@ -15,6 +15,9 @@
 ---
 ## ✨Updates 更新  
 ![](https://img.shields.io/badge/LatestVersion-1.6.0-blue?&logo=react)
+### 新增
+- 新增功能:
+  - 支持通过直接询问AI调用命令，如“请帮我下载漫画xxxxxx”，“请帮我生成一张图片,xxxx”等
 
 + 详细查看[CHANGLOG.md](https://github.com/asukaneko/NapCat-jmcomic_download-bot/blob/master/CHANGELOG.md)
 ---
