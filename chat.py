@@ -249,6 +249,41 @@ def chat_json(content) -> str:
     except:
         return ""
 
+def judge_search(content) -> bool:
+    """
+    判断是否是搜索。
+    :param content: 用户输入的内容。
+    :return: 是否是搜索。
+    """
+    url = "https://api.siliconflow.cn/v1/chat/completions"
+
+    payload = {
+            "model": "Qwen/Qwen2.5-7B-Instruct",
+            "messages": [
+            {
+            "role": "user",
+            "content": [
+                {
+                    "type": "text", 
+                    "text": f"请判断这个内容AI是否需要搜索才能获取准确回答；如果需要搜索，则只返回1；如果不需要搜索，则只返回0：{content}"
+
+                }
+            ]
+            }
+            ]
+    }
+    headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json"
+    }
+    response = requests.post(url, json=payload, headers=headers)
+    print("搜索判断:",response.json()["choices"][0]["message"]["content"])
+    try:
+        return int(response.json()["choices"][0]["message"]["content"]) == 1
+    except:
+        return False
+
+
 def chat(content="", user_id=None, group_id=None, group_user_id=None,image=False,url=None,video=None):
     """
     与Ai进行对话。
@@ -283,7 +318,7 @@ def chat(content="", user_id=None, group_id=None, group_user_id=None,image=False
     else:
         pre_text = ""
 
-    if content.startswith("搜索") | ("搜索" in content):
+    if content.startswith("搜索") | ("搜索" in content) | judge_search(content):
         search_status = 1
         search_res = online_search(content)
     else:
