@@ -882,7 +882,8 @@ async def handle_jm_send(msg, is_group=True):
         await bot.api.post_private_msg(msg.user_id, text=reply)
     switch.save_switches()
 
-@register_command("/jm_pwd", help_text="/jm_pwd <on|off> -> 开启/关闭密码加密(admin)",category = "1",admin_show=True)
+@register_command("/jm_pwd", help_text="/jm_pwd <on|off> -> 开启/关闭密码加密(admin)，密码为漫画id",category = "1",admin_show=True)
+
 async def handle_jm_pwd(msg, is_group=True):
     if str(msg.user_id) not in admin:
         await msg.reply(text="只有管理员才能使用该命令喵~")
