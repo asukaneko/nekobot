@@ -2112,7 +2112,7 @@ def get_api_book_info(id):
 
 
 # 添加选择处理函数
-@register_command("/select", help_text="/select <编号> -> 选择要下载的轻小说",category = "6")
+@register_command("/select", help_text="/select <编号> -> 选择要下载的轻小说(先使用/findbook或/fb搜索，再进行选择，重复使用/fb会覆盖之前的搜索结果)",category = "6")
 async def handle_select_book(msg, is_group=True):
     if (msg.user_id not in temp_selections) and (msg.user_id not in api_book):
         reply = "没有找到主人的搜索记录喵~请先使用/findbook搜索喵~"
@@ -2235,10 +2235,10 @@ async def handle_random_novel(msg, is_group=True):
         )
     if is_group:
         await msg.reply(rtf=reply)
-        await handle_generic_file(msg, is_group, '', 'file', custom_url=url,file_name=novel+".txt")
+        await bot.api.post_group_file(msg.group_id, file=url)
     else:
         await bot.api.post_private_msg(msg.user_id, rtf=reply)
-        await handle_generic_file(msg, is_group, '', 'file', custom_url=url,file_name=novel+".txt",custom_send_method=bot.api.upload_private_file)
+        await bot.api.upload_private_file(msg.user_id, file=url,name=novel+".txt")
 
 mc = {}
 @register_command("/mc",help_text = "/mc <服务器地址> -> 发送mc服务器状态",category = "3")

@@ -75,7 +75,7 @@
 /bot.api.函数名(参数1=值1,参数2=值2) -> 用户自定义api(admin)，详情可见https://docs.ncatbot.xyz/guide/p8aun9nh/
 /findbook 或者 /fb <书名> -> 搜索并选择下载轻小说
 /fa <作者> -> 搜索作者
-/select <编号> -> 选择要下载的轻小说
+/select <编号> -> 选择要下载的轻小说(先使用/findbook或/fb搜索，再进行选择，重复使用/fb会覆盖之前的搜索结果)
 /info <书名> -> 获取轻小说信息
 /random_novel 或者 /rn -> 发送随机小说
 /remind <时间(小时)> <内容> -> 定时提醒
