@@ -158,17 +158,10 @@ async def on_group_message(msg: GroupMessage):
                 await msg.reply(text="未知命令")
 
     if switch.get_switch_state('command', group_id=str(msg.group_id)):
-        for command, handler in command_handlers.items():
-            if isinstance(command, tuple):  # 处理命令别名情况
-                for cmd in command:
-                    if re.match(rf'^{re.escape(cmd)}(?:\s|\.|$)', msg.raw_message):
-                        await handler(msg, is_group=True)
-                        _log.info(f"调用{cmd}命令")
-                        return
-            elif re.match(rf'^{re.escape(cmd)}(?:\s|\.|$)', msg.raw_message): # 处理单个命令情况
-                await handler(msg, is_group=False)
-                _log.info(f"调用{command}命令")
-                return
+        ok = await handle_command(msg, is_group=True)
+        if(ok):
+            return
+
     
     if (msg.message[0].get("type") == "at" and msg.message[0].get("data").get("qq") == bot_id) or (msg.message[0].get("type") == "at" and msg.message[0].get("data").get("qq") == 'all' and str(msg.group_id) in at_all_group):
     #如果是at机器人或者at全体成员并且该群开启了识别@全体成员功能
@@ -193,10 +186,23 @@ async def on_group_message(msg: GroupMessage):
             ori_content = f"用户{msg.user_id}@了你"
         
         content = chat(ori_content, group_id=msg.group_id,group_user_id=msg.sender.nickname)
+        res_json = json.loads(content)
+        content = res_json.get("msg")
         if if_tts:
             rtf = tts(content)
             await bot.api.post_group_msg(msg.group_id, rtf=rtf)
         await msg.reply(text=content)
+        cmds = res_json.get("cmd")
+        if cmds:
+            for cmd in cmds:
+                message = {
+                "raw_message":cmd,
+                "group_id":str(msg.group_id),
+                "user_id":str(msg.user_id)
+                }
+                msg2 = GroupMessage(message)
+                await handle_command(msg2, is_group=True)
+                time.sleep(1)
 
     if msg.message[0].get("type") == "reply" and msg.message[1].get("type") == "at" and msg.message[1].get("data").get("qq") == bot_id:
         #如果是回复机器人的消息
@@ -221,7 +227,9 @@ async def on_group_message(msg: GroupMessage):
                 _log.info("识别人物中...")
                 ori_content += f"(识别结果：{recognize_image(url)})"
 
-            content = chat(content=ori_content,group_id=msg.group_id,group_user_id=msg.sender.nickname,image=True,url=url)        
+            content = chat(content=ori_content,group_id=msg.group_id,group_user_id=msg.sender.nickname,image=True,url=url)    
+            res_json = json.loads(content)
+            content = res_json.get("msg")
             if if_tts:
                 rtf = tts(content)
                 await bot.api.post_group_msg(msg.group_id, rtf=rtf)
@@ -231,6 +239,8 @@ async def on_group_message(msg: GroupMessage):
         if msg_obj.get("data").get("message")[0].get("type") == "video": #处理视频
             url = msg_obj.get("data").get("message")[0].get("data").get("url")
             content = chat(content=ori_content,group_id=msg.group_id,group_user_id=msg.sender.nickname,video=url)
+            res_json = json.loads(content)
+            content = res_json.get("msg")
             if if_tts:
                 rtf = tts(content)
                 await bot.api.post_group_msg(msg.group_id, rtf=rtf)
@@ -246,6 +256,8 @@ async def on_group_message(msg: GroupMessage):
             except Exception:
                 content = "发送了一个QQ小程序分享:"+chat_json(str(msg_obj.get("data").get("message")[0].get("data").get("data")))
                 res = chat(group_id=msg.group_id,group_user_id=msg.sender.nickname,content=content)
+                res_json = json.loads(res)
+                res = res_json.get("msg")
                 if if_tts:
                     rtf = tts(res)
                     await bot.api.post_group_msg(msg.group_id, rtf=rtf)
@@ -261,6 +273,8 @@ async def on_group_message(msg: GroupMessage):
                 content = content+"视频内容:"+res
             
             res = chat(group_id=msg.group_id,group_user_id=msg.sender.nickname,content=content,image=True,url=preview)
+            res_json = json.loads(res)
+            res = res_json.get("msg")
             if if_tts:
                 rtf = tts(res)
                 await bot.api.post_group_msg(msg.group_id, rtf=rtf)
@@ -271,6 +285,8 @@ async def on_group_message(msg: GroupMessage):
             msg_forward_obj = await bot.api.get_msg(message_id=reply_id)
             content = deal_forward(msg_forward_obj)
             res = chat(group_id=msg.group_id,group_user_id=msg.sender.nickname,content=ori_content+content)
+            res_json = json.loads(res)
+            res = res_json.get("msg")
             if if_tts:
                 rtf = tts(res)
                 await bot.api.post_group_msg(msg.group_id, rtf=rtf)
@@ -287,6 +303,8 @@ async def on_group_message(msg: GroupMessage):
             content = f"发送了一个表情:{emo}"
             ori_content = ori_content+content
             res = chat(group_id=msg.group_id,group_user_id=msg.sender.nickname,content=ori_content)
+            res_json = json.loads(res)
+            res = res_json.get("msg")
             if if_tts:
                 rtf = tts(res)
                 await bot.api.post_group_msg(msg.group_id, rtf=rtf)
@@ -294,10 +312,23 @@ async def on_group_message(msg: GroupMessage):
             return
 
         content = chat(reply_text+ori_content, group_id=msg.group_id,group_user_id=msg.sender.nickname)
+        res_json = json.loads(content)
+        content = res_json.get("msg")
         if if_tts:
             rtf = tts(content)
             await bot.api.post_group_msg(msg.group_id, rtf=rtf)
         await msg.reply(text=content)
+        cmds = res_json.get("cmd")
+        if cmds:
+            for cmd in cmds:
+                message = {
+                "raw_message":cmd,
+                "group_id":str(msg.group_id),
+                "user_id":str(msg.user_id)
+                }
+                msg2 = GroupMessage(message)
+                await handle_command(msg2, is_group=True)
+                time.sleep(1) 
 
 @bot.private_event()
 async def on_private_message(msg: PrivateMessage):
@@ -315,17 +346,10 @@ async def on_private_message(msg: PrivateMessage):
             await msg.reply(text="未知命令")
                 
     if switch.get_switch_state('command', user_id=str(msg.user_id)):
-        for command, handler in command_handlers.items():
-            if isinstance(command, tuple):  # 处理命令别名情况
-                for cmd in command:
-                    if re.match(rf'^{re.escape(cmd)}(?:\s|\.|$)', msg.raw_message):
-                        _log.info(f"调用{cmd}命令")
-                        await handler(msg, is_group=False)
-                        return
-            elif re.match(fr'^{re.escape(command)}(?:\s|\.|$)', msg.raw_message): # 处理单个命令情况
-                _log.info(f"调用{command}命令")
-                await handler(msg, is_group=False)
-                return
+        ok = await handle_command(msg, is_group=False)
+        if ok:
+            return
+
     try:
         if running[str(msg.user_id)]["state"]:
             running[str(msg.user_id)]["last_time"] = time.time()
@@ -361,6 +385,8 @@ async def on_private_message(msg: PrivateMessage):
                 content = content+"\n视频描述: "+video_content
             
             res = chat(user_id=msg.user_id,content=content,image=True,url=preview)
+            res_json = json.loads(res)
+            res = res_json.get("msg")
             if if_tts:
                 rtf = tts(res)
                 await bot.api.post_private_msg(msg.user_id, rtf=rtf)
@@ -370,6 +396,8 @@ async def on_private_message(msg: PrivateMessage):
             _log.info(f"处理QQ小程序分享出错: {e}，切换为普通文本")
             content = "发送了一个QQ小程序分享:"+chat_json(str(msg.message[0].get("data").get("data")))
             res = chat(user_id=msg.user_id,content=content)
+            res_json = json.loads(res)
+            res = res_json.get("msg")
             if if_tts:
                 rtf = tts(res)
                 await bot.api.post_private_msg(msg.user_id, rtf=rtf)
@@ -379,6 +407,8 @@ async def on_private_message(msg: PrivateMessage):
     if msg.message[0].get("type") == "video": #处理视频
         url = msg.message[0].get("data").get("url")
         content = chat(user_id=msg.user_id,video=url)
+        res_json = json.loads(content)
+        content = res_json.get("msg")
         if if_tts:
             rtf = tts(content)
             await bot.api.post_private_msg(msg.user_id, rtf=rtf)
@@ -393,6 +423,8 @@ async def on_private_message(msg: PrivateMessage):
                 content = chat(user_id=msg.user_id,image=True,url=url,content="发送了一个动画表情")
             else:
                 content = chat(user_id=msg.user_id,image=True,url=url)
+            res_json = json.loads(content)
+            content = res_json.get("msg")
             if if_tts:
                 rtf = tts(content)
                 await bot.api.set_input_status(event_type=0,user_id=bot_id)
@@ -421,7 +453,8 @@ async def on_private_message(msg: PrivateMessage):
                     content = chat(content=msg.message[1].get("data").get("text")+res,user_id=msg.user_id,image=True,url=url)
                 except IndexError:
                     content = chat(user_id=msg.user_id,image=True,url=url)
-
+                res_json = json.loads(content)
+                content = res_json.get("msg")
                 if if_tts:
                     rtf = tts(content)
                     await bot.api.set_input_status(event_type=0,user_id=msg.user_id)
@@ -437,6 +470,8 @@ async def on_private_message(msg: PrivateMessage):
             except IndexError:
                 ori_content = "回复了你"
             content = chat(reply_text+ori_content, user_id=msg.user_id)
+            res_json = json.loads(content)
+            content = res_json.get("msg")
             if if_tts:
                 rtf = tts(content)
                 await bot.api.set_input_status(event_type=0,user_id=msg.user_id)
@@ -453,6 +488,8 @@ async def on_private_message(msg: PrivateMessage):
         print(msg_obj)
         res = deal_forward(msg_obj)
         content = chat(res, user_id=msg.user_id)
+        res_json = json.loads(content)
+        content = res_json.get("msg")
         if if_tts:
             rtf = tts(content)
             await bot.api.set_input_status(event_type=0,user_id=msg.user_id)
@@ -471,6 +508,8 @@ async def on_private_message(msg: PrivateMessage):
                 emo = ""
         res = f"发送了一个表情:{emo}"
         content = chat(res, user_id=msg.user_id)
+        res_json = json.loads(content)
+        content = res_json.get("msg")
         if if_tts:
             rtf = tts(content)
             await bot.api.set_input_status(event_type=0,user_id=msg.user_id)
@@ -482,6 +521,9 @@ async def on_private_message(msg: PrivateMessage):
 
     if msg.raw_message and not msg.raw_message.startswith("/"): # 检查消息是否为空,避免接受文件后的空消息被回复
         content = chat(msg.raw_message, user_id=msg.user_id)
+        res_json = json.loads(content)
+        content = res_json.get("msg")
+        cmds = res_json.get("cmd")
         if if_tts:
             rtf = tts(content)
             await bot.api.set_input_status(event_type=0,user_id=msg.user_id)
@@ -489,19 +531,30 @@ async def on_private_message(msg: PrivateMessage):
         else:
             await bot.api.set_input_status(event_type=1,user_id=msg.user_id)
         await bot.api.post_private_msg(msg.user_id, text=content)
+        if cmds:
+            for cmd in cmds:
+                message = {
+                "raw_message":cmd,
+                "user_id":str(msg.user_id)
+                }
+                msg2 = PrivateMessage(message)
+                await handle_command(msg2, is_group=False)
+                time.sleep(1)
 
-async def handle_command(msg, command_handlers):
+
+async def handle_command(msg, is_group):
     for command, handler in command_handlers.items():
         if isinstance(command, tuple):  # 处理命令别名情况
             for cmd in command:
                 if re.match(rf'^{re.escape(cmd)}(?:\s|\.|$)', msg.raw_message):
                     _log.info(f"调用{cmd}命令")
-                    await handler(msg, is_group=False)
-                    return
+                    await handler(msg, is_group=is_group)
+                    return 1
         elif re.match(fr'^{re.escape(command)}(?:\s|\.|$)', msg.raw_message): # 处理单个命令情况
             _log.info(f"调用{command}命令")
-            await handler(msg, is_group=False)
-            return
+            await handler(msg, is_group=is_group)
+            return 1
+    return 0
 
 if __name__ == "__main__":
     import threading
@@ -522,7 +575,7 @@ if __name__ == "__main__":
                 "user_id":admin_id
             }
             msg = GroupMessage(message)
-            loop.run_until_complete(handle_command(msg, command_handlers))
+            loop.run_until_complete(handle_command(msg, is_group=False))
             time.sleep(1)
         except KeyboardInterrupt:
             _log.info("退出命令输入")
