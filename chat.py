@@ -366,6 +366,11 @@ def chat(content="", user_id=None, group_id=None, group_user_id=None,image=False
     )
     
     assistant_response = response.choices[0].message.content
+    try:
+        import json_repair
+        assistant_response = json_repair.repair(assistant_response)
+    except:
+        pass
     messages.append({"role": "assistant", "content": assistant_response})
 
     #保存数据
