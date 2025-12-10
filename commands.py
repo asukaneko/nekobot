@@ -2388,7 +2388,7 @@ async def handle_gf(msg,is_group=True):
     url = "https://ark.cn-beijing.volces.com/api/v3/images/generations"
 
     payload = {
-        "model": "doubao-seedream-4-0-250828",
+        "model": "doubao-seedream-4-5-251128",
         "prompt": prompt,
         "sequential_image_generation": "disabled",
         "response_format": "url",
