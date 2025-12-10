@@ -2346,10 +2346,11 @@ async def handle_mc_show(msg, is_group=True):
 
 @register_command("/generate_photo","/gf",help_text = "/generate_photo 或 /gf <图片描述(不能有空格)> <大小> -> 生成图片",category = "3")
 async def handle_gf(msg,is_group=True):
-    prefix = "/generate_photo" if msg.raw_message.startswith("/generate_photo") else "/gf"
+    text = re.sub(r'\[CQ:[^]]*\]', '', msg.raw_message).strip()
+    prefix = "/generate_photo" if text.startswith("/generate_photo") else "/gf"
     default_size = "1024x1024"
     try:
-        args = msg.raw_message[len(prefix):].strip().split()
+        args = text[len(prefix):].strip().split()
         if not args:
             raise ValueError
         if len(args) == 1:
@@ -2358,7 +2359,8 @@ async def handle_gf(msg,is_group=True):
         else:
             size = args[-1]
             prompt = ' '.join(args[:-1])
-        if 'x' not in size:
+
+        if ('x' not in size) and ('k' not in size) :
             size = default_size   
     except Exception as e:
         error_msg = f"请输入图片描述喵~ 格式: {prefix} <描述> [大小，默认{default_size}]"
@@ -2370,6 +2372,15 @@ async def handle_gf(msg,is_group=True):
     else:
         await bot.api.post_private_msg(msg.user_id,text="正在绘制喵……")
     
+    if(msg.message[0]["type"] == "reply"):
+        id = msg.message[0]["data"]["id"]
+        msg_obj = await bot.api.get_msg(message_id=id)
+        if msg_obj.get("data").get("message")[0].get("type") == "image": #处理图片
+            image = msg_obj.get("data").get("message")[0].get("data").get("url")
+    else:
+        image = None
+
+
     config_parser = configparser.ConfigParser()
     config_parser.read('config.ini')
     api_key = config_parser.get('gf', 'api_key')
@@ -2385,7 +2396,9 @@ async def handle_gf(msg,is_group=True):
         "stream": False,
         "watermark": True
     }
-    
+    if(image):
+        payload["image"] = image
+
     headers = {
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json"
