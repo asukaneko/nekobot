@@ -543,14 +543,15 @@ async def on_private_message(msg: PrivateMessage):
 
 
 async def handle_command(msg, is_group):
+    clean = re.sub(r'\[CQ:[^]]*\]', '', msg.raw_message).strip()
     for command, handler in command_handlers.items():
         if isinstance(command, tuple):  # 处理命令别名情况
             for cmd in command:
-                if re.match(rf'^{re.escape(cmd)}(?:\s|\.|$)', msg.raw_message):
+                if re.match(rf'^{re.escape(cmd)}(?:\s|\.|$)', clean):           
                     _log.info(f"调用{cmd}命令")
                     await handler(msg, is_group=is_group)
                     return 1
-        elif re.match(fr'^{re.escape(command)}(?:\s|\.|$)', msg.raw_message): # 处理单个命令情况
+        elif re.match(fr'^{re.escape(command)}(?:\s|\.|$)', clean): # 处理单个命令情况
             _log.info(f"调用{command}命令")
             await handler(msg, is_group=is_group)
             return 1
