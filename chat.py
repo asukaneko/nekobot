@@ -69,13 +69,23 @@ def load_prompt(user_id=None, group_id=None):
 
     try:
         with open(prompt_file, "r", encoding="utf-8") as file:
-            return file.read()
+            prompt = file.read()
     except FileNotFoundError:
         try:
             with open("neko.txt", "r", encoding="utf-8") as file:
-                return file.read()
+                prompt = file.read()
         except FileNotFoundError:
-            return ""
+            prompt = ""
+    try:
+        from commands import get_all_help_text_for_prompt
+        help_text = get_all_help_text_for_prompt()
+        if help_text:
+            if prompt:
+                return prompt + "\n\n" + help_text
+            return help_text
+    except Exception:
+        return prompt
+    return prompt
 
 def online_search(content) -> str:
     headers = {

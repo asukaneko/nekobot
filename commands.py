@@ -2525,6 +2525,27 @@ async def handle_help(msg, is_group=True):
     else:
         await bot.api.post_private_msg(msg.user_id, text=help_text)
 
+def get_all_help_text_for_prompt() -> str:
+    command_categories = {
+        "1": {"name": "漫画相关", "commands": [handler.help_text for handler in command_handlers.values() if handler.category == "1"]},
+        "2": {"name": "聊天设置", "commands": [handler.help_text for handler in command_handlers.values() if handler.category == "2"]},
+        "3": {"name": "娱乐功能", "commands": [handler.help_text for handler in command_handlers.values() if handler.category == "3"]},
+        "4": {"name": "系统处理", "commands": [handler.help_text for handler in command_handlers.values() if handler.category == "4"]},
+        "5": {"name": "群聊管理", "commands": [handler.help_text for handler in command_handlers.values() if handler.category == "5"]},
+        "6": {"name": "轻小说", "commands": [handler.help_text for handler in command_handlers.values() if handler.category == "6"]},
+        "7": {"name": "定时任务", "commands": [handler.help_text for handler in command_handlers.values() if handler.category == "7"]}
+    }
+    command_categories["8"] = {
+        "name": "全部功能",
+        "commands": [cmd for category in command_categories.values() for cmd in category["commands"]] + ["/help 或者 /h -> 查看帮助"]
+    }
+    help_text = "以下是全部命令：\n"
+    for cmd_text in command_categories["8"]["commands"]:
+        if cmd_text:
+            help_text += f"{cmd_text}\n"
+    help_text += "\n一共有"+str(len(command_handlers))+"个命令"
+    return help_text
+
 def parse_command_string(cmd_str):
     # 提取函数名和参数部分，支持带点的函数名
     func_match = re.match(r'^/([\w.]+)\((.*)\)$', cmd_str)
