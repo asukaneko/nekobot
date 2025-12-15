@@ -2348,7 +2348,7 @@ async def handle_mc_show(msg, is_group=True):
 async def handle_gf(msg,is_group=True):
     text = re.sub(r'\[CQ:[^]]*\]', '', msg.raw_message).strip()
     prefix = "/generate_photo" if text.startswith("/generate_photo") else "/gf"
-    default_size = "1024x1024"
+    default_size = "2k"
     try:
         args = text[len(prefix):].strip().split()
         if not args:
@@ -2388,7 +2388,7 @@ async def handle_gf(msg,is_group=True):
     url = "https://ark.cn-beijing.volces.com/api/v3/images/generations"
 
     payload = {
-        "model": "doubao-seedream-4-5-251128",
+        "model": "doubao-seedream-4-0-250828",
         "prompt": prompt,
         "sequential_image_generation": "disabled",
         "response_format": "url",
