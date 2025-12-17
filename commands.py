@@ -319,33 +319,6 @@ def fetch_cover_url(id:str) -> str:
     return f"https://cdn-msp3.jmapinodeudzn.net/media/photos/{id}/00001.webp"
 
 
-def find_book_from_api(search_term: str) -> list:
-    """
-    从API搜索小说
-    :param search_term: 搜索关键词
-    :return: 包含匹配小说信息的列表
-    """
-    url = "https://fq.shusan.cn/api/search"
-    params = {
-        "key": search_term,
-        "tab_type": 3,
-    }
-    res = requests.get(url, params=params)
-    book_ids = {}
-    if res.ok:
-        data = res.json()
-        for tab in data.get("data", {}).get("search_tabs", []):
-            if tab.get("tab_type") == 3:  # 书籍类 tab
-                for item in tab.get("data", []):
-                    book_data = item.get("book_data", [])
-                    for book in book_data:
-                        book_id = book.get("book_id")
-                        book_name = book.get("book_name")
-                        if book_id:
-                            book_ids[book_id] = book_name
-    
-    return book_ids
-
 class SwitchManager:
     """
     开关管理器，支持群聊和个人开关的批量管理
@@ -2066,8 +2039,37 @@ async def handle_find_author(msg, is_group=True):
     else:
         await bot.api.post_private_msg(msg.user_id, text=reply)
 
+        
+def find_book_from_api(search_term: str) -> list:
+    """
+    从API搜索小说
+    :param search_term: 搜索关键词
+    :return: 包含匹配小说信息的列表
+    """
+    url = "http://43.248.77.205:22222/api/search"
+    params = {
+        "key": search_term,
+        "tab_type": 3,
+    }
+    res = requests.get(url, params=params)
+    book_ids = {}
+    if res.ok:
+        data = res.json()
+        for tab in data.get("data", {}).get("search_tabs", []):
+            if tab.get("tab_type") == 3:  # 书籍类 tab
+                for item in tab.get("data", []):
+                    book_data = item.get("book_data", [])
+                    for book in book_data:
+                        book_id = book.get("book_id")
+                        book_name = book.get("book_name")
+                        if book_id:
+                            book_ids[book_id] = book_name
+    
+    return book_ids
+
+
 def download_api_book(id,name):
-    url = "https://fq.shusan.cn/api/content"
+    url = "http://43.248.77.205:22222/api/content"
     params = {
         "tab":"下载",
         "book_id":id
@@ -2075,14 +2077,14 @@ def download_api_book(id,name):
     response = requests.get(url, params=params)
     if response.status_code == 200:
         content = response.text
-        path = os.path.join(os.path.dirname(__file__), f"cache/{name}.txt")
+        path = os.path.join(os.path.dirname(__file__), f"cache/novel/{name}.txt")
         with open(path, "w", encoding="utf-8") as file:
             file.write(content)
     else:
         print(f"下载失败，状态码：{response.status_code}")
 
 def get_api_book_info(id):
-    url = "https://fq.shusan.cn/api/detail"
+    url = "http://43.248.77.205:22222/api/detail"
     params = {
         "book_id":id
     }
