@@ -2077,7 +2077,9 @@ def download_api_book(id,name):
     response = requests.get(url, params=params)
     if response.status_code == 200:
         content = response.text
+        # 确保目录存在
         path = os.path.join(os.path.dirname(__file__), f"cache/novel/{name}.txt")
+        os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, "w", encoding="utf-8") as file:
             file.write(content)
     else:
@@ -2143,7 +2145,7 @@ async def handle_select_book(msg, is_group=True):
                 download_api_book(id,title)
                 reply = f"已开始下载《{title}》喵~"
                 await msg.reply(text=reply)
-                api_book_file_path = os.path.join(os.path.dirname(__file__), f"cache/{title}.txt")
+                api_book_file_path = os.path.join(os.path.dirname(__file__), f"cache/novel/{title}.txt")
                 if is_group:
                     await bot.api.post_group_file(msg.group_id,file=api_book_file_path)
                 else:
@@ -2162,8 +2164,8 @@ async def handle_select_book(msg, is_group=True):
         else:
             await bot.api.post_private_msg(msg.user_id, text=reply)
     
-    del temp_selections[msg.user_id] 
-    del api_books[msg.user_id]  
+    del temp_selections[str(msg.user_id)] 
+    del api_books[str(msg.user_id)]  
 
 @register_command("/info",help_text="/info <书名> -> 获取轻小说信息",category = "6")
 async def handle_info(msg, is_group=True):
