@@ -2,6 +2,9 @@ from ncatbot.utils.logger import get_log
 import commands
 from chat import chat,tts,chat_video,chat_image,chat_webpage,chat_json
 from commands import *
+import os
+import json
+import datetime
 
 _log = get_log()
 
@@ -15,6 +18,74 @@ def load_emotions():
         emotions = json.load(f)
 
 load_emotions()
+
+def extract_group_plain_text(msg):
+    try:
+        segments = msg.message
+    except Exception:
+        return getattr(msg, "raw_message", "")
+    if not segments:
+        return getattr(msg, "raw_message", "")
+    parts = []
+    for seg in segments:
+        t = seg.get("type")
+        d = seg.get("data", {})
+        if t == "text":
+            parts.append(d.get("text", ""))
+        elif t == "at":
+            qq = d.get("qq")
+            if qq == "all":
+                parts.append("@全体成员")
+            else:
+                parts.append(f"@{qq}")
+        elif t == "face":
+            try:
+                emo = emotions[d.get("id")]
+            except Exception:
+                raw = d.get("raw") or {}
+                emo = raw.get("faceText") or ""
+            if emo:
+                parts.append(f"[表情:{emo}]")
+        elif t == "image":
+            parts.append("[图片]")
+        elif t == "video":
+            parts.append("[视频]")
+        elif t == "json":
+            parts.append("[小程序]")
+        elif t == "reply":
+            parts.append("[回复消息]")
+        elif t == "forward":
+            parts.append("[转发消息]")
+        else:
+            if t:
+                parts.append(f"[{t}]")
+    if parts:
+        return "".join(parts)
+    return getattr(msg, "raw_message", "")
+
+def log_group_message(msg):
+    try:
+        content = extract_group_plain_text(msg)
+    except Exception:
+        content = getattr(msg, "raw_message", "")
+    now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    date_str = datetime.datetime.now().strftime("%Y-%m-%d")
+    group_id = str(getattr(msg, "group_id", ""))
+    user_id = str(getattr(msg, "user_id", ""))
+    nickname = ""
+    try:
+        nickname = msg.sender.nickname
+    except Exception:
+        nickname = ""
+    line = f"[{now}] [{group_id}] [{user_id}] {nickname}: {content}\n"
+    base_dir = os.path.join("saved_message", "group_full")
+    os.makedirs(base_dir, exist_ok=True)
+    file_path = os.path.join(base_dir, f"group_{group_id}_{date_str}.txt")
+    try:
+        with open(file_path, "a", encoding="utf-8") as f:
+            f.write(line)
+    except Exception as e:
+        _log.error(f"写入群聊日志失败: {e}")
 
 def get_bilibili_real_url(short_url):
     """
@@ -144,6 +215,10 @@ def recognize_image(iurl):
 @bot.group_event()
 async def on_group_message(msg: GroupMessage):
     _log.info(msg)
+    try:
+        log_group_message(msg)
+    except Exception:
+        pass
     if_tts = switch.get_switch_state('tts', group_id=str(msg.group_id))
     if msg.raw_message.startswith("/command"):
         if str(msg.user_id) in admin:

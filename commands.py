@@ -1,6 +1,6 @@
 from ncatbot.core import BotClient, GroupMessage, PrivateMessage
 from config import load_config
-from chat import group_messages, user_messages, tts, chat
+from chat import group_messages, user_messages, tts, chat, generate_today_summary, summarize_group_text
 import jmcomic,requests,random,configparser,json,yaml,re,os,asyncio
 from jmcomic import *
 from typing import Dict, List
@@ -1890,6 +1890,102 @@ async def handle_show_chat(msg, is_group=True):
         await bot.api.upload_private_file(msg.user_id, file=cache_dir,name="聊天记录.txt")
 
     os.remove(cache_dir)    
+
+def _extract_history_text_item(item):
+    raw = None
+    if hasattr(item, "raw_message"):
+        raw = getattr(item, "raw_message")
+    if raw is None and isinstance(item, dict):
+        raw = item.get("raw_message")
+    if raw is None:
+        msg_val = None
+        if hasattr(item, "message"):
+            msg_val = getattr(item, "message")
+        elif isinstance(item, dict):
+            msg_val = item.get("message")
+        if msg_val is not None:
+            raw = msg_val
+    if raw is None:
+        raw = ""
+    return str(raw)
+
+@register_command("/summary_recent","/sr", help_text="/summary_recent [数量] 或 /sr [数量] -> 总结最近若干条群聊消息", category="2")
+async def handle_summary_recent(msg, is_group=True):
+    if not is_group:
+        await bot.api.post_private_msg(msg.user_id, text="请在群聊中使用该命令喵~")
+        return
+    parts = msg.raw_message.split()
+    count = 200
+    if len(parts) >= 2:
+        try:
+            count = int(parts[1])
+        except ValueError:
+            await msg.reply(text="格式错误喵~ 请输入 /summary_recent [数量] 或 /sr [数量]")
+            return
+    if count <= 0:
+        count = 1
+    if count > 500:
+        count = 500
+    try:
+        history = await bot.api.get_group_msg_history(msg.group_id, message_seq=0, count=count, reverse_order=True)
+    except Exception as e:
+        await msg.reply(text=f"获取群聊历史失败喵~：{e}")
+        return
+    items = []
+    if isinstance(history, list):
+        items = history
+    elif isinstance(history, dict):
+        data = history.get("data")
+        if isinstance(data, list):
+            items = data
+        elif isinstance(data, dict):
+            msgs = data.get("messages")
+            if isinstance(msgs, list):
+                items = msgs
+    if not items:
+        await msg.reply(text="没有获取到群聊历史消息喵~")
+        return
+    lines = []
+    for item in items:
+        user_id = None
+        nickname = ""
+        if isinstance(item, dict):
+            user_id = item.get("user_id")
+            sender = item.get("sender")
+            if isinstance(sender, dict):
+                nickname = sender.get("nickname", "") or ""
+        else:
+            if hasattr(item, "user_id"):
+                user_id = getattr(item, "user_id")
+            sender = getattr(item, "sender", None)
+            if sender is not None:
+                try:
+                    nickname = sender.nickname
+                except Exception:
+                    if isinstance(sender, dict):
+                        nickname = sender.get("nickname", "") or ""
+        text = _extract_history_text_item(item)
+        uid_str = str(user_id) if user_id is not None else ""
+        name_part = nickname or uid_str
+        if not name_part:
+            line = text
+        else:
+            line = f"{name_part}: {text}"
+        lines.append(line)
+    log_text = "\n".join(lines)
+    summary = summarize_group_text(log_text)
+    await msg.reply(text=summary)
+
+@register_command("/summary_today", help_text="/summary_today -> 总结今天与机器人的聊天内容", category="2")
+async def handle_summary_today(msg, is_group=True):
+    if is_group:
+        group_id = msg.group_id
+        summary = generate_today_summary(group_id=group_id)
+        await msg.reply(text=summary)
+    else:
+        user_id = msg.user_id
+        summary = generate_today_summary(user_id=user_id)
+        await bot.api.post_private_msg(user_id, text=summary)
 
 @register_command("/主动聊天",help_text = "/主动聊天 <间隔时间(小时)> <是否开启(1/0)> -> 开启主动聊天",category = "2")
 async def handle_active_chat(msg, is_group=True):
