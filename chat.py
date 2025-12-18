@@ -391,6 +391,87 @@ def chat(content="", user_id=None, group_id=None, group_user_id=None,image=False
 
     return assistant_response
 
+def summarize_group_text(text: str) -> str:
+    text = text.strip()
+    if not text:
+        return "没有可总结的聊天记录喵~"
+    client = OpenAI(api_key=api_key,base_url=base_url)
+    system_prompt = "你是一个群聊记录总结助手，只根据提供的内容生成简洁的中文摘要。"
+    user_prompt = (
+        "下面是一整个QQ群的一段聊天记录，每一行代表一条消息，包含时间、群号、QQ号或昵称以及内容。\n"
+        "请用中文总结出群聊的大致内容和几个主要话题，可以适当分点列出，不要复述所有细节：\n"
+        f"{text}"
+    )
+    try:
+        response = client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            stream=False
+        )
+        summary = response.choices[0].message.content
+        return summary or "总结结果为空喵~"
+    except Exception:
+        return "总结时出错喵，请稍后再试~"
+
+def generate_today_summary(user_id=None, group_id=None) -> str:
+    today_str = datetime.datetime.now().strftime("%Y-%m-%d")
+    if group_id:
+        group_id_str = str(group_id)
+        base_dir = os.path.join("saved_message", "group_full")
+        file_path = os.path.join(base_dir, f"group_{group_id_str}_{today_str}.txt")
+        if not os.path.exists(file_path):
+            return "今天群里还没有记录到消息喵~"
+        try:
+            with open(file_path, "r", encoding="utf-8") as f:
+                text = f.read().strip()
+        except Exception:
+            return "读取群聊记录失败喵~"
+        if not text:
+            return "今天群里还没有记录到消息喵~"
+        return summarize_group_text(text)
+    if user_id:
+        key = str(user_id)
+        messages_list = user_messages.get(key, [])
+        if not messages_list:
+            return "今天还没有和我聊天喵~"
+        lines = []
+        has_today = False
+        for m in messages_list:
+            content = m.get("content", "")
+            role = m.get("role", "")
+            if today_str in content:
+                has_today = True
+            if role in ("user", "assistant"):
+                lines.append(f"[{role}] {content}")
+        if not has_today:
+            return "今天还没有和我聊天喵~"
+        text = "\n".join(lines)
+        client = OpenAI(api_key=api_key,base_url=base_url)
+        system_prompt = "你是一个聊天记录总结助手，只根据提供的内容生成简洁的中文摘要。"
+        user_prompt = (
+            "下面是用户和机器人的历史聊天记录，每条内容中可能包含形如(当前时间：YYYY-MM-DD HH:MM:SS)的时间信息。\n"
+            f"请只总结日期为 {today_str} 的对话内容，忽略其他日期的内容。\n"
+            "用中文输出一个大约200字的摘要，可以适当分点列出要点，不要重复原句：\n"
+            f"{text}"
+        )
+        try:
+            response = client.chat.completions.create(
+                model=model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                stream=False
+            )
+            summary = response.choices[0].message.content
+            return summary or "总结结果为空喵~"
+        except Exception:
+            return "总结时出错喵，请稍后再试~"
+    return "没有可总结的聊天记录喵~"
+
 def tts(content) -> MessageChain:
     file_path = os.path.join(cache_address , "tts/")
     os.makedirs(file_path, exist_ok=True)

@@ -12,10 +12,13 @@
 ---
 [中文版 | Chinese](https://github.com/asukaneko/NapCat-jmcomic_download-bot/blob/master/Chinese.md)
 ## ✨Updates  
-![](https://img.shields.io/badge/LatestVersion-1.6.1-blue?&logo=react)
+![](https://img.shields.io/badge/LatestVersion-1.6.2-blue?&logo=react)
 ### New Features
 - New features:
   - Support invoking commands by directly asking the AI, such as "Please help me download manga xxxxxx", "Please generate an image for me, xxxx", etc.
+  - Full group message logging for each day, which can be used for statistics and summarization
+  - `/summary_today`: summarize today's group or private chat content
+  - `/summary_recent` or `/sr`: summarize the latest N group messages based on QQ history
   
 + [CHANGLOG.md](https://github.com/asukaneko/NapCat-jmcomic_download-bot/blob/master/CHANGELOG.md)
 ---
