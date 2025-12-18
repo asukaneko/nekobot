@@ -1979,8 +1979,78 @@ async def handle_summary_recent(msg, is_group=True):
 @register_command("/summary_today", help_text="/summary_today -> 总结今天与机器人的聊天内容", category="2")
 async def handle_summary_today(msg, is_group=True):
     if is_group:
-        group_id = msg.group_id
-        summary = generate_today_summary(group_id=group_id)
+        max_count = 500
+        try:
+            history = await bot.api.get_group_msg_history(
+                msg.group_id,
+                message_seq=0,
+                count=max_count,
+                reverse_order=True,
+            )
+        except Exception as e:
+            await msg.reply(text=f"获取群聊历史失败喵~：{e}")
+            return
+        items = []
+        if isinstance(history, list):
+            items = history
+        elif isinstance(history, dict):
+            data = history.get("data")
+            if isinstance(data, list):
+                items = data
+            elif isinstance(data, dict):
+                msgs = data.get("messages")
+                if isinstance(msgs, list):
+                    items = msgs
+        if not items:
+            await msg.reply(text="今天群里还没有记录到消息喵~")
+            return
+        today = datetime.now().date()
+        filtered = []
+        for item in items:
+            t = None
+            if isinstance(item, dict):
+                t = item.get("time")
+            else:
+                if hasattr(item, "time"):
+                    t = getattr(item, "time")
+            try:
+                dt = datetime.fromtimestamp(int(t)) if t is not None else None
+            except Exception:
+                dt = None
+            if dt is not None and dt.date() == today:
+                filtered.append(item)
+        if not filtered:
+            await msg.reply(text="今天群里还没有记录到消息喵~")
+            return
+        lines = []
+        for item in filtered:
+            user_id = None
+            nickname = ""
+            if isinstance(item, dict):
+                user_id = item.get("user_id")
+                sender = item.get("sender")
+                if isinstance(sender, dict):
+                    nickname = sender.get("nickname", "") or ""
+            else:
+                if hasattr(item, "user_id"):
+                    user_id = getattr(item, "user_id")
+                sender = getattr(item, "sender", None)
+                if sender is not None:
+                    try:
+                        nickname = sender.nickname
+                    except Exception:
+                        if isinstance(sender, dict):
+                            nickname = sender.get("nickname", "") or ""
+            text = _extract_history_text_item(item)
+            uid_str = str(user_id) if user_id is not None else ""
+            name_part = nickname or uid_str
+            if not name_part:
+                line = text
+            else:
+                line = f"{name_part}: {text}"
+            lines.append(line)
+        log_text = "\n".join(lines)
+        summary = summarize_group_text(log_text)
         await msg.reply(text=summary)
     else:
         user_id = msg.user_id
