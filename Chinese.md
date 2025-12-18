@@ -14,7 +14,7 @@
 
 ---
 ## ✨Updates 更新  
-![](https://img.shields.io/badge/LatestVersion-1.6.2-blue?&logo=react)
+![](https://img.shields.io/badge/LatestVersion-1.6.3-blue?&logo=react)
 ### 新增
 - 新增功能:
   - 支持通过直接询问AI调用命令，如“请帮我下载漫画xxxxxx”，“请帮我生成一张图片,xxxx”等
