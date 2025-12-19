@@ -706,7 +706,15 @@ async def handle_jmcomic(msg, is_group=True):
                     await bot.api.post_private_msg(msg.user_id, text=error_msg)
                 return
         
-        client = JmOption.default().new_jm_client()
+        try:
+            client = JmOption.default().new_jm_client()
+        except JmcomicException as e:
+            error_msg = "当前禁漫站点接口不可用喵~ 可能是 /setting 接口返回异常，请稍后重试或检查jmcomic配置喵~"
+            if is_group:
+                await msg.reply(text=error_msg)
+            else:
+                await bot.api.post_private_msg(msg.user_id, text=error_msg)
+            return
         try:
             album: JmAlbumDetail = client.get_album_detail(comic_id)
         except MissingAlbumPhotoException as e:
