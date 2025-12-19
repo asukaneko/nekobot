@@ -21,6 +21,7 @@
   - 群聊全量消息日志记录，可用于统计与总结
   - `/summary_today` 命令，总结今天整天的群聊或私聊内容
   - `/summary_recent` 或 `/sr` 命令，基于 QQ 历史记录总结最近若干条群聊消息
+  - `/summary_auto` 命令，开启或关闭每日自动总结群聊记录(管理员)
 
 + 详细查看[CHANGLOG.md](https://github.com/asukaneko/NapCat-jmcomic_download-bot/blob/master/CHANGELOG.md)
 ---
@@ -140,6 +141,7 @@ Command List:
 /task </bot.api.xxxx(参数1=值1...)> <时间(小时)> <是否循环(1/0)> -> 设置定时任务(管理员)
 /summary_today -> 总结今天与机器人的聊天内容（群聊或私聊）
 /summary_recent 或 /sr [数量] -> 总结最近若干条群聊消息，默认200条
+/summary_auto -> 开启或关闭每日自动总结群聊记录(管理员)
 /task </bot.api.xxxx(参数1=值1...)> <时间(小时)> <是否循环(1/0)> -> 设置定时任务(管理员)
 /task </bot.api.xxxx(参数1=值1...)> <时间(小时)> <是否循环(1/0)> -> 设置定时任务(管理员)
 /remind <时间(小时)> <内容> -> 定时提醒

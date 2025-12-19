@@ -638,6 +638,12 @@ if __name__ == "__main__":
     # 启动机器人
     bot_thread = threading.Thread(target=bot.run, kwargs={'enable_webui_interaction': False})
     bot_thread.start()
+
+    # 启动每日自动总结任务
+    def start_auto_summary():
+        asyncio.run(auto_summary_task())
+    threading.Thread(target=start_auto_summary, daemon=True).start()
+
     loop = asyncio.new_event_loop()
     _log.info("命令行模式已启动，可以在命令行内输入命令")
     while True:
