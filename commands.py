@@ -444,6 +444,7 @@ switch.add_switch('jm_send', default_value=True, description='漫画发送开关
 switch.add_switch('jm_send_user', default_value=False, description='用户私信发送漫画开关')
 switch.add_switch('command', default_value=True, description='命令开关')
 switch.add_switch('pdf_password', default_value=False, description='PDF密码开关')
+switch.add_switch('summary_auto', default_value=False, description='每日自动总结开关')
 switch.save_switches()
 
 #----------------------
@@ -1976,86 +1977,130 @@ async def handle_summary_recent(msg, is_group=True):
     summary = summarize_group_text(log_text)
     await msg.reply(text=summary)
 
+async def get_group_today_summary_text(group_id):
+    max_count = 500
+    try:
+        history = await bot.api.get_group_msg_history(
+            group_id,
+            message_seq=0,
+            count=max_count,
+            reverse_order=True,
+        )
+    except Exception as e:
+        _log.error(f"获取群聊历史失败喵~：{e}")
+        return None
+    items = []
+    if isinstance(history, list):
+        items = history
+    elif isinstance(history, dict):
+        data = history.get("data")
+        if isinstance(data, list):
+            items = data
+        elif isinstance(data, dict):
+            msgs = data.get("messages")
+            if isinstance(msgs, list):
+                items = msgs
+    if not items:
+        return "今天群里还没有记录到消息喵~"
+    today = datetime.now().date()
+    filtered = []
+    for item in items:
+        t = None
+        if isinstance(item, dict):
+            t = item.get("time")
+        else:
+            if hasattr(item, "time"):
+                t = getattr(item, "time")
+        try:
+            dt = datetime.fromtimestamp(int(t)) if t is not None else None
+        except Exception:
+            dt = None
+        if dt is not None and dt.date() == today:
+            filtered.append(item)
+    if not filtered:
+        return "今天群里还没有记录到消息喵~"
+    lines = []
+    for item in filtered:
+        user_id = None
+        nickname = ""
+        if isinstance(item, dict):
+            user_id = item.get("user_id")
+            sender = item.get("sender")
+            if isinstance(sender, dict):
+                nickname = sender.get("nickname", "") or ""
+        else:
+            if hasattr(item, "user_id"):
+                user_id = getattr(item, "user_id")
+            sender = getattr(item, "sender", None)
+            if sender is not None:
+                try:
+                    nickname = sender.nickname
+                except Exception:
+                    if isinstance(sender, dict):
+                        nickname = sender.get("nickname", "") or ""
+        text = _extract_history_text_item(item)
+        uid_str = str(user_id) if user_id is not None else ""
+        name_part = nickname or uid_str
+        if not name_part:
+            line = text
+        else:
+            line = f"{name_part}: {text}"
+        lines.append(line)
+    log_text = "\n".join(lines)
+    return summarize_group_text(log_text)
+
 @register_command("/summary_today", help_text="/summary_today -> 总结今天与机器人的聊天内容", category="2")
 async def handle_summary_today(msg, is_group=True):
     if is_group:
-        max_count = 500
-        try:
-            history = await bot.api.get_group_msg_history(
-                msg.group_id,
-                message_seq=0,
-                count=max_count,
-                reverse_order=True,
-            )
-        except Exception as e:
-            await msg.reply(text=f"获取群聊历史失败喵~：{e}")
-            return
-        items = []
-        if isinstance(history, list):
-            items = history
-        elif isinstance(history, dict):
-            data = history.get("data")
-            if isinstance(data, list):
-                items = data
-            elif isinstance(data, dict):
-                msgs = data.get("messages")
-                if isinstance(msgs, list):
-                    items = msgs
-        if not items:
-            await msg.reply(text="今天群里还没有记录到消息喵~")
-            return
-        today = datetime.now().date()
-        filtered = []
-        for item in items:
-            t = None
-            if isinstance(item, dict):
-                t = item.get("time")
-            else:
-                if hasattr(item, "time"):
-                    t = getattr(item, "time")
-            try:
-                dt = datetime.fromtimestamp(int(t)) if t is not None else None
-            except Exception:
-                dt = None
-            if dt is not None and dt.date() == today:
-                filtered.append(item)
-        if not filtered:
-            await msg.reply(text="今天群里还没有记录到消息喵~")
-            return
-        lines = []
-        for item in filtered:
-            user_id = None
-            nickname = ""
-            if isinstance(item, dict):
-                user_id = item.get("user_id")
-                sender = item.get("sender")
-                if isinstance(sender, dict):
-                    nickname = sender.get("nickname", "") or ""
-            else:
-                if hasattr(item, "user_id"):
-                    user_id = getattr(item, "user_id")
-                sender = getattr(item, "sender", None)
-                if sender is not None:
-                    try:
-                        nickname = sender.nickname
-                    except Exception:
-                        if isinstance(sender, dict):
-                            nickname = sender.get("nickname", "") or ""
-            text = _extract_history_text_item(item)
-            uid_str = str(user_id) if user_id is not None else ""
-            name_part = nickname or uid_str
-            if not name_part:
-                line = text
-            else:
-                line = f"{name_part}: {text}"
-            lines.append(line)
-        log_text = "\n".join(lines)
-        summary = summarize_group_text(log_text)
-        await msg.reply(text=summary)
+        summary = await get_group_today_summary_text(msg.group_id)
+        if summary:
+            await msg.reply(text=summary)
     else:
         user_id = msg.user_id
         summary = generate_today_summary(user_id=user_id)
         await bot.api.post_private_msg(user_id, text=summary)
+
+async def auto_summary_task():
+    """每日自动总结定时任务"""
+    _log.info("每日自动总结定时任务已启动")
+    while True:
+        try:
+            now = datetime.now()
+            # 每天 23:55 执行
+            if now.hour == 23 and now.minute == 55:
+                _log.info("开始执行每日自动总结任务")
+                # 遍历所有群组开关
+                for group_id, switches in switch.group_switches.items():
+                    if switches.get('summary_auto', False):
+                        try:
+                            summary = await get_group_today_summary_text(int(group_id))
+                            if summary and "今天群里还没有记录到消息喵" not in summary:
+                                await bot.api.post_group_msg(group_id=int(group_id), text=f"【每日自动总结】\n{summary}")
+                                _log.info(f"已向群 {group_id} 发送自动总结")
+                        except Exception as e:
+                            _log.error(f"自动总结群 {group_id} 失败: {e}")
+                # 执行完后等 65 秒，确保不会在同一分钟内再次触发
+                await asyncio.sleep(65)
+            else:
+                # 每 30 秒检查一次时间
+                await asyncio.sleep(30)
+        except Exception as e:
+            _log.error(f"每日自动总结任务发生异常: {e}")
+            await asyncio.sleep(60)
+
+@register_command("/summary_auto", help_text="/summary_auto -> 开启或关闭每日自动总结群聊记录(admin)", category="2", admin_show=True)
+async def handle_summary_auto(msg, is_group=True):
+    if not is_group:
+        await bot.api.post_private_msg(msg.user_id, text="请在群聊中使用该命令喵~")
+        return
+    if str(msg.user_id) not in admin:
+        await msg.reply(text="你没有权限开启自动总结喵~")
+        return
+    
+    state = switch.toggle_switch('summary_auto', group_id=str(msg.group_id))
+    text = "已开启每日自动总结喵~（将在每天23:55发送）" if state else "已关闭每日自动总结喵~"
+    await msg.reply(text=text)
+    switch.save_switches()
 
 @register_command("/主动聊天",help_text = "/主动聊天 <间隔时间(小时)> <是否开启(1/0)> -> 开启主动聊天",category = "2")
 async def handle_active_chat(msg, is_group=True):
