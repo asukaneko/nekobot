@@ -1,4 +1,5 @@
 from ncatbot.core import BotClient, GroupMessage, PrivateMessage
+from ncatbot.utils.logger import get_log
 from config import load_config
 from chat import group_messages, user_messages, tts, chat, generate_today_summary, summarize_group_text
 import jmcomic,requests,random,configparser,json,yaml,re,os,asyncio
@@ -28,6 +29,8 @@ from ncatbot.core import (
 #----------------------
 
 if_tts = False #判断是否开启TTS
+
+_log = get_log()
 
 bot_id,admin_id = load_config() # 加载配置,返回机器人qq号
 
@@ -2164,6 +2167,32 @@ async def handle_active_chat(msg, is_group=True):
 temp_selections = {}
 api_book = {}
 
+NOVEL_API_BASE_URLS = [
+    "http://43.248.77.205:22222",
+    "https://fq.shusan.cn",
+]
+_novel_api_base_url = None
+
+def get_novel_api_base_url():
+    global _novel_api_base_url
+    if _novel_api_base_url:
+        return _novel_api_base_url
+
+    for base_url in NOVEL_API_BASE_URLS:
+        try:
+            url = f"{base_url.rstrip('/')}/api/search"
+            res = requests.get(url, params={"key": "test", "tab_type": 3}, timeout=5)
+            if not res.ok:
+                continue
+            data = res.json()
+            if isinstance(data, dict) and isinstance(data.get("data"), dict):
+                _novel_api_base_url = base_url.rstrip("/")
+                return _novel_api_base_url
+        except Exception:
+            continue
+
+    return None
+
 @register_command("/findbook","/fb",help_text="/findbook 或者 /fb <书名> -> 搜索并选择下载轻小说",category = "6")
 async def handle_find_book(msg, is_group=True):
     search_term = ""
@@ -2265,12 +2294,18 @@ def find_book_from_api(search_term: str) -> list:
     :param search_term: 搜索关键词
     :return: 包含匹配小说信息的列表
     """
-    url = "http://43.248.77.205:22222/api/search"
+    base_url = get_novel_api_base_url()
+    if not base_url:
+        return {}
+    url = f"{base_url}/api/search"
     params = {
         "key": search_term,
         "tab_type": 3,
     }
-    res = requests.get(url, params=params)
+    try:
+        res = requests.get(url, params=params, timeout=10)
+    except Exception:
+        return {}
     book_ids = {}
     if res.ok:
         data = res.json()
@@ -2288,12 +2323,20 @@ def find_book_from_api(search_term: str) -> list:
 
 
 def download_api_book(id,name):
-    url = "http://43.248.77.205:22222/api/content"
+    base_url = get_novel_api_base_url()
+    if not base_url:
+        print("下载失败：没有可用的API地址")
+        return
+    url = f"{base_url}/api/content"
     params = {
         "tab":"下载",
         "book_id":id
     }
-    response = requests.get(url, params=params)
+    try:
+        response = requests.get(url, params=params, timeout=30)
+    except Exception as e:
+        print(f"下载失败：{e}")
+        return
     if response.status_code == 200:
         content = response.text
         # 确保目录存在
@@ -2305,11 +2348,19 @@ def download_api_book(id,name):
         print(f"下载失败，状态码：{response.status_code}")
 
 def get_api_book_info(id):
-    url = "http://43.248.77.205:22222/api/detail"
+    base_url = get_novel_api_base_url()
+    if not base_url:
+        print("获取失败：没有可用的API地址")
+        return None
+    url = f"{base_url}/api/detail"
     params = {
         "book_id":id
     }
-    response = requests.get(url, params=params)
+    try:
+        response = requests.get(url, params=params, timeout=10)
+    except Exception as e:
+        print(f"获取失败：{e}")
+        return None
     if response.status_code == 200:
         raw = json.loads(response.text)
         book  = raw['data']['data']          
