@@ -63,6 +63,24 @@ def extract_group_plain_text(msg):
         return "".join(parts)
     return getattr(msg, "raw_message", "")
 
+def safe_parse_chat_response(content):
+    """
+    安全解析 chat 函数返回的 JSON 字符串。
+    如果解析成功，只返回 msg 字段的内容。
+    如果解析失败，则将 content 作为普通文本回复。
+    """
+    try:
+        if not content:
+            return "", []
+        res_json = json.loads(content)
+        if isinstance(res_json, dict):
+            # 严格只获取 msg 字段内容，如果不存在则返回空字符串
+            msg_content = res_json.get("msg", "")
+            return msg_content, res_json.get("cmd", [])
+    except Exception:
+        pass
+    return content, []
+
 def log_group_message(msg):
     try:
         content = extract_group_plain_text(msg)
@@ -261,13 +279,11 @@ async def on_group_message(msg: GroupMessage):
             ori_content = f"用户{msg.user_id}@了你"
         
         content = chat(ori_content, group_id=msg.group_id,group_user_id=msg.sender.nickname)
-        res_json = json.loads(content)
-        content = res_json.get("msg")
+        content, cmds = safe_parse_chat_response(content)
         if if_tts:
             rtf = tts(content)
             await bot.api.post_group_msg(msg.group_id, rtf=rtf)
         await msg.reply(text=content)
-        cmds = res_json.get("cmd")
         if cmds:
             for cmd in cmds:
                 message = {
@@ -303,8 +319,7 @@ async def on_group_message(msg: GroupMessage):
                 ori_content += f"(识别结果：{recognize_image(url)})"
 
             content = chat(content=ori_content,group_id=msg.group_id,group_user_id=msg.sender.nickname,image=True,url=url)    
-            res_json = json.loads(content)
-            content = res_json.get("msg")
+            content, _ = safe_parse_chat_response(content)
             if if_tts:
                 rtf = tts(content)
                 await bot.api.post_group_msg(msg.group_id, rtf=rtf)
@@ -314,8 +329,7 @@ async def on_group_message(msg: GroupMessage):
         if msg_obj.get("data").get("message")[0].get("type") == "video": #处理视频
             url = msg_obj.get("data").get("message")[0].get("data").get("url")
             content = chat(content=ori_content,group_id=msg.group_id,group_user_id=msg.sender.nickname,video=url)
-            res_json = json.loads(content)
-            content = res_json.get("msg")
+            content, _ = safe_parse_chat_response(content)
             if if_tts:
                 rtf = tts(content)
                 await bot.api.post_group_msg(msg.group_id, rtf=rtf)
@@ -331,8 +345,7 @@ async def on_group_message(msg: GroupMessage):
             except Exception:
                 content = "发送了一个QQ小程序分享:"+chat_json(str(msg_obj.get("data").get("message")[0].get("data").get("data")))
                 res = chat(group_id=msg.group_id,group_user_id=msg.sender.nickname,content=content)
-                res_json = json.loads(res)
-                res = res_json.get("msg")
+                res, _ = safe_parse_chat_response(res)
                 if if_tts:
                     rtf = tts(res)
                     await bot.api.post_group_msg(msg.group_id, rtf=rtf)
@@ -348,8 +361,7 @@ async def on_group_message(msg: GroupMessage):
                 content = content+"视频内容:"+res
             
             res = chat(group_id=msg.group_id,group_user_id=msg.sender.nickname,content=content,image=True,url=preview)
-            res_json = json.loads(res)
-            res = res_json.get("msg")
+            res, _ = safe_parse_chat_response(res)
             if if_tts:
                 rtf = tts(res)
                 await bot.api.post_group_msg(msg.group_id, rtf=rtf)
@@ -360,8 +372,7 @@ async def on_group_message(msg: GroupMessage):
             msg_forward_obj = await bot.api.get_msg(message_id=reply_id)
             content = deal_forward(msg_forward_obj)
             res = chat(group_id=msg.group_id,group_user_id=msg.sender.nickname,content=ori_content+content)
-            res_json = json.loads(res)
-            res = res_json.get("msg")
+            res, _ = safe_parse_chat_response(res)
             if if_tts:
                 rtf = tts(res)
                 await bot.api.post_group_msg(msg.group_id, rtf=rtf)
@@ -378,8 +389,7 @@ async def on_group_message(msg: GroupMessage):
             content = f"发送了一个表情:{emo}"
             ori_content = ori_content+content
             res = chat(group_id=msg.group_id,group_user_id=msg.sender.nickname,content=ori_content)
-            res_json = json.loads(res)
-            res = res_json.get("msg")
+            res, _ = safe_parse_chat_response(res)
             if if_tts:
                 rtf = tts(res)
                 await bot.api.post_group_msg(msg.group_id, rtf=rtf)
@@ -387,13 +397,11 @@ async def on_group_message(msg: GroupMessage):
             return
 
         content = chat(reply_text+ori_content, group_id=msg.group_id,group_user_id=msg.sender.nickname)
-        res_json = json.loads(content)
-        content = res_json.get("msg")
+        content, cmds = safe_parse_chat_response(content)
         if if_tts:
             rtf = tts(content)
             await bot.api.post_group_msg(msg.group_id, rtf=rtf)
         await msg.reply(text=content)
-        cmds = res_json.get("cmd")
         if cmds:
             for cmd in cmds:
                 message = {
@@ -460,8 +468,7 @@ async def on_private_message(msg: PrivateMessage):
                 content = content+"\n视频描述: "+video_content
             
             res = chat(user_id=msg.user_id,content=content,image=True,url=preview)
-            res_json = json.loads(res)
-            res = res_json.get("msg")
+            res, _ = safe_parse_chat_response(res)
             if if_tts:
                 rtf = tts(res)
                 await bot.api.post_private_msg(msg.user_id, rtf=rtf)
@@ -471,8 +478,7 @@ async def on_private_message(msg: PrivateMessage):
             _log.info(f"处理QQ小程序分享出错: {e}，切换为普通文本")
             content = "发送了一个QQ小程序分享:"+chat_json(str(msg.message[0].get("data").get("data")))
             res = chat(user_id=msg.user_id,content=content)
-            res_json = json.loads(res)
-            res = res_json.get("msg")
+            res, _ = safe_parse_chat_response(res)
             if if_tts:
                 rtf = tts(res)
                 await bot.api.post_private_msg(msg.user_id, rtf=rtf)
@@ -482,8 +488,7 @@ async def on_private_message(msg: PrivateMessage):
     if msg.message[0].get("type") == "video": #处理视频
         url = msg.message[0].get("data").get("url")
         content = chat(user_id=msg.user_id,video=url)
-        res_json = json.loads(content)
-        content = res_json.get("msg")
+        content, _ = safe_parse_chat_response(content)
         if if_tts:
             rtf = tts(content)
             await bot.api.post_private_msg(msg.user_id, rtf=rtf)
@@ -498,8 +503,7 @@ async def on_private_message(msg: PrivateMessage):
                 content = chat(user_id=msg.user_id,image=True,url=url,content="发送了一个动画表情")
             else:
                 content = chat(user_id=msg.user_id,image=True,url=url)
-            res_json = json.loads(content)
-            content = res_json.get("msg")
+            content, _ = safe_parse_chat_response(content)
             if if_tts:
                 rtf = tts(content)
                 await bot.api.set_input_status(event_type=0,user_id=bot_id)
@@ -528,8 +532,7 @@ async def on_private_message(msg: PrivateMessage):
                     content = chat(content=msg.message[1].get("data").get("text")+res,user_id=msg.user_id,image=True,url=url)
                 except IndexError:
                     content = chat(user_id=msg.user_id,image=True,url=url)
-                res_json = json.loads(content)
-                content = res_json.get("msg")
+                content, _ = safe_parse_chat_response(content)
                 if if_tts:
                     rtf = tts(content)
                     await bot.api.set_input_status(event_type=0,user_id=msg.user_id)
@@ -545,8 +548,7 @@ async def on_private_message(msg: PrivateMessage):
             except IndexError:
                 ori_content = "回复了你"
             content = chat(reply_text+ori_content, user_id=msg.user_id)
-            res_json = json.loads(content)
-            content = res_json.get("msg")
+            content, _ = safe_parse_chat_response(content)
             if if_tts:
                 rtf = tts(content)
                 await bot.api.set_input_status(event_type=0,user_id=msg.user_id)
@@ -563,8 +565,7 @@ async def on_private_message(msg: PrivateMessage):
         print(msg_obj)
         res = deal_forward(msg_obj)
         content = chat(res, user_id=msg.user_id)
-        res_json = json.loads(content)
-        content = res_json.get("msg")
+        content, _ = safe_parse_chat_response(content)
         if if_tts:
             rtf = tts(content)
             await bot.api.set_input_status(event_type=0,user_id=msg.user_id)
@@ -583,8 +584,7 @@ async def on_private_message(msg: PrivateMessage):
                 emo = ""
         res = f"发送了一个表情:{emo}"
         content = chat(res, user_id=msg.user_id)
-        res_json = json.loads(content)
-        content = res_json.get("msg")
+        content, _ = safe_parse_chat_response(content)
         if if_tts:
             rtf = tts(content)
             await bot.api.set_input_status(event_type=0,user_id=msg.user_id)
@@ -596,9 +596,7 @@ async def on_private_message(msg: PrivateMessage):
 
     if msg.raw_message and not msg.raw_message.startswith("/"): # 检查消息是否为空,避免接受文件后的空消息被回复
         content = chat(msg.raw_message, user_id=msg.user_id)
-        res_json = json.loads(content)
-        content = res_json.get("msg")
-        cmds = res_json.get("cmd")
+        content, cmds = safe_parse_chat_response(content)
         if if_tts:
             rtf = tts(content)
             await bot.api.set_input_status(event_type=0,user_id=msg.user_id)
@@ -643,6 +641,11 @@ if __name__ == "__main__":
     def start_auto_summary():
         asyncio.run(auto_summary_task())
     threading.Thread(target=start_auto_summary, daemon=True).start()
+
+    # 启动主动聊天任务
+    def start_auto_active_chat():
+        asyncio.run(auto_active_chat_task())
+    threading.Thread(target=start_auto_active_chat, daemon=True).start()
 
     loop = asyncio.new_event_loop()
     _log.info("命令行模式已启动，可以在命令行内输入命令")
