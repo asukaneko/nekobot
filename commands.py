@@ -1,7 +1,7 @@
 from ncatbot.core import BotClient, GroupMessage, PrivateMessage
 from ncatbot.utils.logger import get_log
 from config import load_config
-from chat import group_messages, user_messages, tts, chat, generate_today_summary, summarize_group_text
+from chat import group_messages, user_messages, tts, chat, generate_today_summary, summarize_group_text, ai_client
 import jmcomic,requests,random,configparser,json,yaml,re,os,asyncio
 from jmcomic import *
 from typing import Dict, List
@@ -2851,16 +2851,8 @@ async def handle_translate(msg, is_group=True):
         return
 
     try:
-        from openai import OpenAI
-        config_parser = configparser.ConfigParser()
-        config_parser.read('config.ini')
-        api_key = config_parser.get('ApiKey', 'api_key')
-        base_url = config_parser.get('ApiKey', 'base_url')
-        model = config_parser.get('ApiKey', 'model')
-        
-        client = OpenAI(api_key=api_key, base_url=base_url)
-        response = client.chat.completions.create(
-            model=model,
+        response = ai_client.chat_completion(
+            model=None,
             messages=[
                 {"role": "system", "content": "你是一个专业的翻译官。如果输入是中文，请翻译成英文；如果输入是其他语言，请翻译成中文。只返回翻译结果，不要有任何多余的解释。"},
                 {"role": "user", "content": text}
