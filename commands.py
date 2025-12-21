@@ -2,7 +2,7 @@ from ncatbot.core import BotClient, GroupMessage, PrivateMessage
 from ncatbot.utils.logger import get_log
 from config import load_config
 from chat import group_messages, user_messages, tts, chat, generate_today_summary, summarize_group_text, ai_client
-import jmcomic,requests,random,configparser,json,yaml,re,os,asyncio
+import jmcomic,requests,random,configparser,json,yaml,re,os,asyncio,time
 from jmcomic import *
 from typing import Dict, List
 from datetime import datetime
@@ -448,6 +448,7 @@ switch.add_switch('jm_send_user', default_value=False, description='用户私信
 switch.add_switch('command', default_value=True, description='命令开关')
 switch.add_switch('pdf_password', default_value=False, description='PDF密码开关')
 switch.add_switch('summary_auto', default_value=False, description='每日自动总结开关')
+switch.add_switch('active_chat', default_value=False, description='主动聊天开关')
 switch.save_switches()
 
 #----------------------
@@ -2099,6 +2100,35 @@ async def auto_summary_task():
             _log.error(f"每日自动总结任务发生异常: {e}")
             await asyncio.sleep(60)
 
+
+async def auto_active_chat_task():
+    _log.info("主动聊天定时任务已启动")
+    while True:
+        try:
+            now = datetime.now()
+            if 8 <= now.hour < 24:
+                current_time = time.time()
+                for user_id, info in list(running.items()):
+                    if not info.get("active", False):
+                        continue
+                    interval = float(info.get("interval", 1.0))
+                    last_time = float(info.get("last_time", 0))
+                    if last_time == 0:
+                        running[user_id]["last_time"] = current_time
+                        write_running()
+                        continue
+                    if current_time - last_time >= 60 * 60 * interval:
+                        try:
+                            await chatter(int(user_id))
+                            running[user_id]["last_time"] = current_time
+                            write_running()
+                        except Exception as e:
+                            _log.error(f"主动聊天用户 {user_id} 发送失败: {e}")
+            await asyncio.sleep(60)
+        except Exception as e:
+            _log.error(f"主动聊天定时任务发生异常: {e}")
+            await asyncio.sleep(60)
+
 @register_command("/summary_auto", help_text="/summary_auto -> 开启或关闭每日自动总结群聊记录(admin)", category="2", admin_show=True)
 async def handle_summary_auto(msg, is_group=True):
     if not is_group:
@@ -2120,22 +2150,34 @@ async def handle_active_chat(msg, is_group=True):
         return
 
     try:
-        params = msg.raw_message[len("/主动聊天"):].strip().split()
-        if len(params) < 2 or params[1] not in ('0', '1'):
-            raise ValueError
-            
-        interval = float(params[0])
-        active = bool(int(params[1]))
+        raw = msg.raw_message[len("/主动聊天"):].strip()
+        parts = raw.split() if raw else []
         user_id = str(msg.user_id)
+        current = running.get(user_id, {})
+        interval = float(current.get("interval", 2))
+        active = bool(current.get("active", False))
 
-        # 统一处理用户状态
-        running[user_id] = {
-            "interval": interval, 
-            "active": active,
-            "state": False
-        }
+        if not parts:
+            active = not active
+        elif len(parts) == 1:
+            if parts[0] in ("0", "1"):
+                active = bool(int(parts[0]))
+            else:
+                interval = float(parts[0])
+                active = True
+        else:
+            if parts[1] not in ("0", "1"):
+                raise ValueError
+            interval = float(parts[0])
+            active = bool(int(parts[1]))
 
-        # 获取最近联系人
+        user_id = str(msg.user_id)
+        if user_id not in running:
+            running[user_id] = {}
+        running[user_id]["interval"] = interval
+        running[user_id]["active"] = active
+        running[user_id]["state"] = False
+        switch.set_switch_state('active_chat', active, user_id=user_id)
         try:
             ori = await bot.api.get_recent_contact(100)
             for contact in ori.get("data", []):
@@ -2144,24 +2186,11 @@ async def handle_active_chat(msg, is_group=True):
                     break
         except Exception as e:
             print(f"获取最近联系人失败: {e}")
-
-        # 处理任务状态
-        if active:
-            if user_id in tasks:
-                tasks[user_id].cancel()
-            tasks[user_id] = asyncio.create_task(chat_loop(user_id))
-        else:
-            if user_id in tasks:
-                tasks[user_id].cancel()
-                del tasks[user_id]
-
         write_running()
         reply = f"设置成功喵~，{'现在'+str(interval)+'小时后会主动聊天喵~' if active else '已关闭主动聊天喵~'}"
         await bot.api.post_private_msg(user_id, text=reply)
-        
     except ValueError:
-        await bot.api.post_private_msg(msg.user_id, 
-            text="格式错误喵~ 请输入 /主动聊天 间隔时间(小时) 是否开启(1/0)")
+        await bot.api.post_private_msg(msg.user_id, text="格式错误喵~ 请输入 /主动聊天 间隔时间(小时) 是否开启(1/0)")
 
 # 添加临时存储字典
 temp_selections = {}

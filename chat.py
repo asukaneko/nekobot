@@ -481,7 +481,7 @@ def generate_today_summary(user_id=None, group_id=None) -> str:
             return "今天还没有和我聊天喵~"
         text = "\n".join(lines)
         client = OpenAI(api_key=api_key,base_url=base_url)
-        system_prompt = "你是一个聊天记录总结助手，只根据提供的内容生成简洁的中文摘要。"
+        system_prompt = "你是一个聊天记录总结助手，只根据提供的内容生成简洁的中文摘要。" 
         user_prompt = (
             "下面是用户和机器人的历史聊天记录，每条内容中可能包含形如(当前时间：YYYY-MM-DD HH:MM:SS)的时间信息。\n"
             f"请只总结日期为 {today_str} 的对话内容，忽略其他日期的内容。\n"
