@@ -1,6 +1,6 @@
 from ncatbot.utils.logger import get_log
 import commands
-from chat import chat,tts,chat_video,chat_image,chat_webpage,chat_json
+from chat import chat,tts,chat_video,chat_image,chat_webpage,chat_json,record_assistant_message,record_user_message,log_to_group_full_file
 from commands import *
 import os
 import json
@@ -86,8 +86,6 @@ def log_group_message(msg):
         content = extract_group_plain_text(msg)
     except Exception:
         content = getattr(msg, "raw_message", "")
-    now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    date_str = datetime.datetime.now().strftime("%Y-%m-%d")
     group_id = str(getattr(msg, "group_id", ""))
     user_id = str(getattr(msg, "user_id", ""))
     nickname = ""
@@ -95,15 +93,7 @@ def log_group_message(msg):
         nickname = msg.sender.nickname
     except Exception:
         nickname = ""
-    line = f"[{now}] [{group_id}] [{user_id}] {nickname}: {content}\n"
-    base_dir = os.path.join("saved_message", "group_full")
-    os.makedirs(base_dir, exist_ok=True)
-    file_path = os.path.join(base_dir, f"group_{group_id}_{date_str}.txt")
-    try:
-        with open(file_path, "a", encoding="utf-8") as f:
-            f.write(line)
-    except Exception as e:
-        _log.error(f"写入群聊日志失败: {e}")
+    log_to_group_full_file(group_id, user_id, nickname, content)
 
 def get_bilibili_real_url(short_url):
     """
@@ -232,6 +222,8 @@ def recognize_image(iurl):
 
 @bot.group_event()
 async def on_group_message(msg: GroupMessage):
+    if str(msg.user_id) == str(bot_id):
+        return
     _log.info(msg)
     try:
         log_group_message(msg)
@@ -415,6 +407,8 @@ async def on_group_message(msg: GroupMessage):
 
 @bot.private_event()
 async def on_private_message(msg: PrivateMessage):
+    if str(msg.user_id) == str(bot_id):
+        return
     _log.info(msg)
     if_tts = switch.get_switch_state('tts', user_id=str(msg.user_id))
     if msg.raw_message.startswith("/command"):
@@ -622,10 +616,26 @@ async def handle_command(msg, is_group):
             for cmd in command:
                 if re.match(rf'^{re.escape(cmd)}(?:\s|\.|$)', clean):           
                     _log.info(f"调用{cmd}命令")
+                    # 记录指令到历史记录
+                    try:
+                        if is_group:
+                            record_user_message(msg.raw_message, group_id=msg.group_id)
+                        else:
+                            record_user_message(msg.raw_message, user_id=msg.user_id)
+                    except Exception:
+                        pass
                     await handler(msg, is_group=is_group)
                     return 1
         elif re.match(fr'^{re.escape(command)}(?:\s|\.|$)', clean): # 处理单个命令情况
             _log.info(f"调用{command}命令")
+            # 记录指令到历史记录
+            try:
+                if is_group:
+                    record_user_message(msg.raw_message, group_id=msg.group_id)
+                else:
+                    record_user_message(msg.raw_message, user_id=msg.user_id)
+            except Exception:
+                pass
             await handler(msg, is_group=is_group)
             return 1
     return 0
