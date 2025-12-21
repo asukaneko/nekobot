@@ -310,15 +310,27 @@ def chat(content="", user_id=None, group_id=None, group_user_id=None,image=False
 
     if user_id:
         user_id = str(user_id)
+        prompt = load_prompt(user_id=user_id)
         if user_id not in user_messages:
-            prompt = load_prompt(user_id=user_id)
             user_messages[user_id] = [{"role": "system", "content": prompt}]
+        else:
+            # 确保第一条系统消息始终是最新的提示词（包含最新的 helptext）
+            if user_messages[user_id] and user_messages[user_id][0].get("role") == "system":
+                user_messages[user_id][0]["content"] = prompt
+            else:
+                user_messages[user_id].insert(0, {"role": "system", "content": prompt})
         messages = user_messages[user_id]
     elif group_id:
         group_id = str(group_id)
+        prompt = load_prompt(group_id=group_id)
         if group_id not in group_messages:
-            prompt = load_prompt(group_id=group_id)
             group_messages[group_id] = [{"role": "system", "content": prompt}]
+        else:
+            # 确保第一条系统消息始终是最新的提示词（包含最新的 helptext）
+            if group_messages[group_id] and group_messages[group_id][0].get("role") == "system":
+                group_messages[group_id][0]["content"] = prompt
+            else:
+                group_messages[group_id].insert(0, {"role": "system", "content": prompt})
         messages = group_messages[group_id]
     else:
         messages = []

@@ -2841,6 +2841,72 @@ def parse_command_string(cmd_str):
         'params': params
     }
 
+@register_command("/translate", "/tr", help_text="/translate <文本> -> 将文本翻译为中文/英文", category="3")
+async def handle_translate(msg, is_group=True):
+    text = msg.raw_message[len("/translate"):].strip() if msg.raw_message.startswith("/translate") else msg.raw_message[len("/tr"):].strip()
+    if not text:
+        reply = "请输入要翻译的文本喵~"
+        if is_group: await msg.reply(text=reply)
+        else: await bot.api.post_private_msg(msg.user_id, text=reply)
+        return
+
+    try:
+        from openai import OpenAI
+        config_parser = configparser.ConfigParser()
+        config_parser.read('config.ini')
+        api_key = config_parser.get('ApiKey', 'api_key')
+        base_url = config_parser.get('ApiKey', 'base_url')
+        model = config_parser.get('ApiKey', 'model')
+        
+        client = OpenAI(api_key=api_key, base_url=base_url)
+        response = client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": "你是一个专业的翻译官。如果输入是中文，请翻译成英文；如果输入是其他语言，请翻译成中文。只返回翻译结果，不要有任何多余的解释。"},
+                {"role": "user", "content": text}
+            ]
+        )
+        result = response.choices[0].message.content.strip()
+        reply = f"翻译结果如下喵：\n{result}"
+        if is_group: await msg.reply(text=reply)
+        else: await bot.api.post_private_msg(msg.user_id, text=reply)
+    except Exception as e:
+        reply = f"翻译出错喵：{e}"
+        if is_group: await msg.reply(text=reply)
+        else: await bot.api.post_private_msg(msg.user_id, text=reply)
+
+@register_command("/fortune", "/jrrp", help_text="/fortune -> 查看今日运势", category="3")
+async def handle_fortune(msg, is_group=True):
+    user_id = str(msg.user_id)
+    today = datetime.now().strftime("%Y%m%d")
+    seed = int(user_id) + int(today)
+    random.seed(seed)
+    
+    luck_score = random.randint(1, 100)
+    
+    fortunes = [
+        "大吉：万事如意，心想事成喵！",
+        "中吉：今天会有好事发生喵~",
+        "小吉：平平安安就是福喵~",
+        "末吉：虽然平淡，但也是充实的一天喵。",
+        "凶：出门记得带伞，注意安全喵……",
+        "大凶：建议今天宅在家里看漫画喵QAQ"
+    ]
+    
+    if luck_score >= 90: fortune = fortunes[0]
+    elif luck_score >= 70: fortune = fortunes[1]
+    elif luck_score >= 50: fortune = fortunes[2]
+    elif luck_score >= 30: fortune = fortunes[3]
+    elif luck_score >= 10: fortune = fortunes[4]
+    else: fortune = fortunes[5]
+    
+    # 恢复随机种子
+    random.seed()
+    
+    reply = f"今日运势：{luck_score}点\n评价：{fortune}"
+    if is_group: await msg.reply(text=reply)
+    else: await bot.api.post_private_msg(msg.user_id, text=reply)
+
 @register_command("/bot",help_text="/bot.api.函数名(参数1=值1,参数2=值2) -> 用户自定义api(admin)，详情可见https://docs.ncatbot.xyz/guide/p8aun9nh/",category = "4",admin_show=True)
 async def handle_api(msg,is_group):
     dict = parse_command_string(msg.raw_message)
