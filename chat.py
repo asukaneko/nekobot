@@ -485,12 +485,33 @@ def _record_message(role, content, user_id=None, group_id=None):
     except Exception as e:
         print(f"保存历史记录失败: {e}")
 
+# 记录最后一次写入的内容，用于简单的重复过滤
+last_log_entry = {}
+
 def log_to_group_full_file(group_id, user_id, nickname, content):
     """
     将消息记录到 group_full 文本文件中，用于每日总结。
     """
     if not group_id or not content:
         return
+    
+    group_id = str(group_id)
+    user_id = str(user_id)
+    content = str(content).strip()
+    
+    # 简单的重复记录过滤：如果同一个群在 1 秒内发送了完全相同的内容，则忽略
+    now_ts = time.time()
+    last_entry = last_log_entry.get(group_id)
+    if last_entry and last_entry['user_id'] == user_id and last_entry['content'] == content:
+        if now_ts - last_entry['time'] < 1.0:
+            return
+            
+    last_log_entry[group_id] = {
+        'user_id': user_id,
+        'content': content,
+        'time': now_ts
+    }
+
     now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     date_str = datetime.datetime.now().strftime("%Y-%m-%d")
     group_id = str(group_id)

@@ -67,32 +67,9 @@ async def wrapped_post_group_msg(self, group_id, **kwargs):
             pass
     return await original_post_group_msg(self, group_id, **kwargs)
 
-async def wrapped_group_reply(self, **kwargs):
-    content = kwargs.get('text', '')
-    if content and isinstance(content, str):
-        try:
-            from chat import record_assistant_message, log_to_group_full_file
-            record_assistant_message(content, group_id=self.group_id)
-            log_to_group_full_file(self.group_id, bot_id, "机器人", content)
-        except Exception:
-            pass
-    return await original_group_reply(self, **kwargs)
-
-async def wrapped_private_reply(self, **kwargs):
-    content = kwargs.get('text', '')
-    if content and isinstance(content, str):
-        try:
-            from chat import record_assistant_message
-            record_assistant_message(content, user_id=self.user_id)
-        except Exception:
-            pass
-    return await original_private_reply(self, **kwargs)
-
 # 应用补丁到类级别
 BotAPI.post_private_msg = wrapped_post_private_msg
 BotAPI.post_group_msg = wrapped_post_group_msg
-GroupMessage.reply = wrapped_group_reply
-PrivateMessage.reply = wrapped_private_reply
 # ----------------------
 
 command_handlers = {}
