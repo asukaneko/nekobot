@@ -421,7 +421,9 @@ def chat(content="", user_id=None, group_id=None, group_user_id=None,image=False
         assistant_response = json_repair.repair(assistant_response)
     except:
         pass
-    messages.append({"role": "assistant", "content": assistant_response})
+    
+    # 记录由发送函数统一处理，此处不再重复添加
+    # messages.append({"role": "assistant", "content": assistant_response})
 
     #保存数据
     with open("saved_message/user_messages.json","w",encoding="utf-8") as f:
@@ -430,6 +432,90 @@ def chat(content="", user_id=None, group_id=None, group_user_id=None,image=False
         json.dump(group_messages,f,ensure_ascii=False,indent = 4)
 
     return assistant_response
+
+def _record_message(role, content, user_id=None, group_id=None):
+    """
+    统一记录消息到历史记录中的内部函数。
+    """
+    if not content:
+        return
+
+    now_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    # 如果是用户消息，自动带上时间戳（模拟 chat 函数的行为）
+    if role == "user" and "(当前时间：" not in content:
+        record_content = f"(当前时间：{now_time})\n{content}"
+    else:
+        record_content = content
+
+    if user_id:
+        user_id = str(user_id)
+        prompt = load_prompt(user_id=user_id)
+        if user_id not in user_messages:
+            user_messages[user_id] = [{"role": "system", "content": prompt}]
+        else:
+            if user_messages[user_id] and user_messages[user_id][0].get("role") == "system":
+                user_messages[user_id][0]["content"] = prompt
+            else:
+                user_messages[user_id].insert(0, {"role": "system", "content": prompt})
+        
+        user_messages[user_id].append({"role": role, "content": record_content})
+        if len(user_messages[user_id]) > MAX_HISTORY_LENGTH:
+            user_messages[user_id] = [user_messages[user_id][0]] + user_messages[user_id][-MAX_HISTORY_LENGTH:]
+    elif group_id:
+        group_id = str(group_id)
+        prompt = load_prompt(group_id=group_id)
+        if group_id not in group_messages:
+            group_messages[group_id] = [{"role": "system", "content": prompt}]
+        else:
+            if group_messages[group_id] and group_messages[group_id][0].get("role") == "system":
+                group_messages[group_id][0]["content"] = prompt
+            else:
+                group_messages[group_id].insert(0, {"role": "system", "content": prompt})
+        
+        group_messages[group_id].append({"role": role, "content": record_content})
+        if len(group_messages[group_id]) > MAX_HISTORY_LENGTH:
+            group_messages[group_id] = [group_messages[group_id][0]] + group_messages[group_id][-MAX_HISTORY_LENGTH:]
+
+    # 保存数据
+    try:
+        with open("saved_message/user_messages.json", "w", encoding="utf-8") as f:
+            json.dump(user_messages, f, ensure_ascii=False, indent=4)
+        with open("saved_message/group_messages.json", "w", encoding="utf-8") as f:
+            json.dump(group_messages, f, ensure_ascii=False, indent=4)
+    except Exception as e:
+        print(f"保存历史记录失败: {e}")
+
+def log_to_group_full_file(group_id, user_id, nickname, content):
+    """
+    将消息记录到 group_full 文本文件中，用于每日总结。
+    """
+    if not group_id or not content:
+        return
+    now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    date_str = datetime.datetime.now().strftime("%Y-%m-%d")
+    group_id = str(group_id)
+    user_id = str(user_id)
+    line = f"[{now}] [{group_id}] [{user_id}] {nickname}: {content}\n"
+    base_dir = os.path.join("saved_message", "group_full")
+    os.makedirs(base_dir, exist_ok=True)
+    file_path = os.path.join(base_dir, f"group_{group_id}_{date_str}.txt")
+    try:
+        with open(file_path, "a", encoding="utf-8") as f:
+            f.write(line)
+    except Exception as e:
+        print(f"写入群聊日志失败: {e}")
+
+def record_assistant_message(content, user_id=None, group_id=None):
+    """
+    手动记录机器人的回复到历史记录中。
+    """
+    _record_message("assistant", content, user_id, group_id)
+
+def record_user_message(content, user_id=None, group_id=None):
+    """
+    手动记录用户的消息到历史记录中。
+    """
+    _record_message("user", content, user_id, group_id)
 
 def summarize_group_text(text: str) -> str:
     text = text.strip()

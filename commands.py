@@ -1,4 +1,4 @@
-from ncatbot.core import BotClient, GroupMessage, PrivateMessage
+from ncatbot.core import BotClient, GroupMessage, PrivateMessage, BotAPI
 from ncatbot.utils.logger import get_log
 from config import load_config
 from chat import group_messages, user_messages, tts, chat, generate_today_summary, summarize_group_text, ai_client
@@ -35,6 +35,65 @@ _log = get_log()
 bot_id,admin_id = load_config() # 加载配置,返回机器人qq号
 
 bot = BotClient()
+
+# ----------------------
+# region 统一消息发送与记录
+# ----------------------
+# 记录机器人发送的所有消息到历史记录中
+# 通过直接补丁 BotAPI 和消息类，确保所有发送方式都能被记录
+original_post_private_msg = BotAPI.post_private_msg
+original_post_group_msg = BotAPI.post_group_msg
+original_group_reply = GroupMessage.reply
+original_private_reply = PrivateMessage.reply
+
+async def wrapped_post_private_msg(self, user_id, **kwargs):
+    content = kwargs.get('text', '')
+    if content and isinstance(content, str):
+        try:
+            from chat import record_assistant_message
+            record_assistant_message(content, user_id=user_id)
+        except Exception:
+            pass
+    return await original_post_private_msg(self, user_id, **kwargs)
+
+async def wrapped_post_group_msg(self, group_id, **kwargs):
+    content = kwargs.get('text', '')
+    if content and isinstance(content, str):
+        try:
+            from chat import record_assistant_message, log_to_group_full_file
+            record_assistant_message(content, group_id=group_id)
+            log_to_group_full_file(group_id, bot_id, "机器人", content)
+        except Exception:
+            pass
+    return await original_post_group_msg(self, group_id, **kwargs)
+
+async def wrapped_group_reply(self, **kwargs):
+    content = kwargs.get('text', '')
+    if content and isinstance(content, str):
+        try:
+            from chat import record_assistant_message, log_to_group_full_file
+            record_assistant_message(content, group_id=self.group_id)
+            log_to_group_full_file(self.group_id, bot_id, "机器人", content)
+        except Exception:
+            pass
+    return await original_group_reply(self, **kwargs)
+
+async def wrapped_private_reply(self, **kwargs):
+    content = kwargs.get('text', '')
+    if content and isinstance(content, str):
+        try:
+            from chat import record_assistant_message
+            record_assistant_message(content, user_id=self.user_id)
+        except Exception:
+            pass
+    return await original_private_reply(self, **kwargs)
+
+# 应用补丁到类级别
+BotAPI.post_private_msg = wrapped_post_private_msg
+BotAPI.post_group_msg = wrapped_post_group_msg
+GroupMessage.reply = wrapped_group_reply
+PrivateMessage.reply = wrapped_private_reply
+# ----------------------
 
 command_handlers = {}
 
@@ -1506,7 +1565,7 @@ async def handle_del_message(msg, is_group=True):
             json.dump(user_messages, f, ensure_ascii=False, indent=4)
         await bot.api.post_private_msg(msg.user_id, text="主人要离我而去了吗？呜呜呜……好吧，那我们以后再见喵~")
 
-@register_command("/remind",help_text="/remind <时间(小时)> <内容> -> 定时提醒",category = "7")
+@register_command("/remind",help_text="/remind <多少小时后> <内容> -> 定时提醒",category = "7")
 async def handle_remind(msg, is_group=True):
     match = re.match(r'^/remind\s+(\d+\.?\d*)\s+(.+)$', msg.raw_message) #正则支持小数
     if match:
