@@ -25,17 +25,195 @@ api_key = config_parser.get('ApiKey', 'api_key')
 base_url = config_parser.get('ApiKey', 'base_url')
 model = config_parser.get('ApiKey', 'model')
 MAX_HISTORY_LENGTH = config_parser.getint('chat', 'MAX_HISTORY_LENGTH')
-#用于图片识别：
 pic_model = config_parser.get('pic', 'model')
 cache_address = config_parser.get('cache','cache_address')
-
 voice = config_parser.get('voice','voice')
-
-#用于在线搜索：
 search_api_key = config_parser.get('search','api_key')
 search_api_url = config_parser.get('search','api_url')
-
 video_api = config_parser.get('video','api_key')
+
+
+class AIClient:
+    def __init__(self, api_key: str, base_url: str, model: str, pic_model: str, search_api_key: str, search_api_url: str, video_api: str):
+        self.api_key = api_key
+        self.base_url = base_url
+        self.model = model
+        self.pic_model = pic_model
+        self.search_api_key = search_api_key
+        self.search_api_url = search_api_url
+        self.video_api = video_api
+
+    def openai_client(self):
+        return OpenAI(api_key=self.api_key, base_url=self.base_url)
+
+    def chat_completion(self, messages, model: str = None, stream: bool = False):
+        client = self.openai_client()
+        return client.chat.completions.create(
+            model=model or self.model,
+            messages=messages,
+            stream=stream
+        )
+
+    def summarize_text(self, system_prompt: str, user_prompt: str, model: str = None) -> str:
+        response = self.chat_completion(
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            model=model,
+            stream=False,
+        )
+        return response.choices[0].message.content
+
+    def silicon_chat(self, model_name: str, messages):
+        url = "https://api.siliconflow.cn/v1/chat/completions"
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json"
+        }
+        payload = {
+            "model": model_name,
+            "messages": messages
+        }
+        return requests.post(url, json=payload, headers=headers)
+
+    def describe_image(self, image_url: str, text: str) -> str:
+        messages = [
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "image_url",
+                        "image_url": {
+                            "url": image_url
+                        }
+                    },
+                    {
+                        "type": "text",
+                        "text": text
+                    }
+                ]
+            }
+        ]
+        response = self.silicon_chat(self.pic_model, messages)
+        try:
+            return response.json()["choices"][0]["message"]["content"]
+        except Exception:
+            return "链接失效"
+
+    def describe_webpage_html(self, html: str) -> str:
+        messages = [
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "text",
+                        "text": f"请描述这个网页的内容，仅分析网页的主体内容，忽略网页的其他内容和技术相关的细节；仅返回主体内容的描述：{html}"
+                    }
+                ]
+            }
+        ]
+        response = self.silicon_chat(self.model, messages)
+        try:
+            return response.json()["choices"][0]["message"]["content"]
+        except Exception:
+            return "链接失效"
+
+    def analyze_json(self, content: str) -> str:
+        messages = [
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "text",
+                        "text": f"请分析这个json字符串的内容；如果有链接，则还需列出最重要的一个链接，忽略其他链接：{content}"
+                    }
+                ]
+            }
+        ]
+        response = self.silicon_chat(self.model, messages)
+        try:
+            return response.json()["choices"][0]["message"]["content"]
+        except Exception:
+            return ""
+
+    def should_search(self, content: str) -> bool:
+        messages = [
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "text",
+                        "text": f"请判断这个内容AI是否需要搜索才能获取准确且最新的回答；如果需要搜索，则只返回1；如果不需要搜索，则只返回0：{content}"
+                    }
+                ]
+            }
+        ]
+        response = self.silicon_chat("Qwen/Qwen2.5-7B-Instruct", messages)
+        try:
+            return int(response.json()["choices"][0]["message"]["content"]) == 1
+        except Exception:
+            return False
+
+    def search(self, content: str) -> str:
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {self.search_api_key}"
+        }
+        data = {
+            "query": content,
+            "query_rewrite": True,
+            "top_k": 6
+        }
+        try:
+            response = requests.post(self.search_api_url, headers=headers, json=data)
+            return str(response.json()["result"]["search_result"])
+        except Exception:
+            return ""
+
+    def describe_video(self, video_url: str) -> str:
+        url = "https://open.bigmodel.cn/api/paas/v4/chat/completions"
+        payload = {
+            "model": "glm-4.5v",
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "video_url",
+                            "video_url": {
+                                "url": video_url
+                            }
+                        },
+                        {
+                            "type": "text",
+                            "text": "请分析这个视频的内容"
+                        }
+                    ]
+                }
+            ]
+        }
+        headers = {
+            "Authorization": f"Bearer {self.video_api}",
+            "Content-Type": "application/json"
+        }
+        response = requests.post(url, json=payload, headers=headers)
+        try:
+            return response.json()["choices"][0]["message"]["content"]
+        except Exception:
+            return "链接失效"
+
+
+ai_client = AIClient(
+    api_key=api_key,
+    base_url=base_url,
+    model=model,
+    pic_model=pic_model,
+    search_api_key=search_api_key,
+    search_api_url=search_api_url,
+    video_api=video_api,
+)
+
 
 def remove_brackets_content(text) -> str:
     """
@@ -88,20 +266,7 @@ def load_prompt(user_id=None, group_id=None):
     return prompt
 
 def online_search(content) -> str:
-    headers = {
-        "Content-Type": "application/json",
-        "Authorization": f"Bearer {search_api_key}"
-    }
-    data = {
-        "query": content,
-        "query_rewrite": True,
-        "top_k":6
-    }
-    try:
-        response = requests.post(search_api_url, headers=headers, json=data)
-        return str(response.json()["result"]["search_result"])
-    except:
-        return ""
+    return ai_client.search(content)
 
 def chat_image(iurl) -> str:
     """
@@ -109,37 +274,7 @@ def chat_image(iurl) -> str:
     :param url: 图片URL。
     :return: 图片识别结果。
     """
-    url = "https://api.siliconflow.cn/v1/chat/completions"
-
-    payload = {
-            "model":pic_model,
-            "messages": [
-            {
-            "role": "user",
-            "content": [
-                {
-                    "type": "image_url",
-                    "image_url": {
-                        "url": iurl
-                    }
-                },
-                {
-                    "type": "text", 
-                    "text": "请描述这个图片的内容，仅作描述，不要分析内容"
-                }
-            ]
-            }
-            ]
-    }
-    headers = {
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json"
-    }
-    response = requests.post(url, json=payload, headers=headers)
-    try:
-        return response.json()["choices"][0]["message"]["content"]
-    except:
-        return "链接失效"
+    return ai_client.describe_image(iurl, "请描述这个图片的内容，仅作描述，不要分析内容")
 
 def chat_video(vurl) -> str:
     """
@@ -147,37 +282,7 @@ def chat_video(vurl) -> str:
     :param url: 视频URL。
     :return: 视频识别结果。
     """
-    url = "https://open.bigmodel.cn/api/paas/v4/chat/completions"
-
-    payload = {
-            "model": "glm-4.5v",
-            "messages": [
-            {
-            "role": "user",
-            "content": [
-                {
-                    "type": "video_url",
-                    "video_url": {
-                        "url": vurl
-                    }
-                },
-                {
-                    "type": "text", 
-                    "text": "请分析这个视频的内容"
-                }
-            ]
-            }
-            ]
-    }
-    headers = {
-            "Authorization": f"Bearer {video_api}",
-            "Content-Type": "application/json"
-    }
-    response = requests.post(url, json=payload, headers=headers)
-    try:
-        return response.json()["choices"][0]["message"]["content"]
-    except:
-        return "链接失效"
+    return ai_client.describe_video(vurl)
 
 def chat_webpage(wurl) -> str:
     """
@@ -201,31 +306,7 @@ def chat_webpage(wurl) -> str:
     if len(html) > max_seq_len:
         html = html[:max_seq_len]
 
-    url = "https://api.siliconflow.cn/v1/chat/completions"
-
-    payload = {
-            "model": model,
-            "messages": [
-            {
-            "role": "user",
-            "content": [
-                {
-                    "type": "text", 
-                    "text": f"请描述这个网页的内容，仅分析网页的主体内容，忽略网页的其他内容和技术相关的细节；仅返回主体内容的描述：{html}"
-                }
-            ]
-            }
-            ]
-    }
-    headers = {
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json"
-    }
-    response = requests.post(url, json=payload, headers=headers)
-    try:
-        return response.json()["choices"][0]["message"]["content"]
-    except:
-        return "链接失效"
+    return ai_client.describe_webpage_html(html)
 
 def chat_json(content) -> str:
     """
@@ -233,31 +314,7 @@ def chat_json(content) -> str:
     :param content: json字符串。
     :return: 处理后的字符串。
     """
-    url = "https://api.siliconflow.cn/v1/chat/completions"
-
-    payload = {
-            "model":model,
-            "messages": [
-            {
-            "role": "user",
-            "content": [
-                {
-                    "type": "text", 
-                    "text": f"请分析这个json字符串的内容；如果有链接，则还需列出最重要的一个链接，忽略其他链接：{content}"
-                }
-            ]
-            }
-            ]
-    }
-    headers = {
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json"
-    }
-    response = requests.post(url, json=payload, headers=headers)
-    try:
-        return response.json()["choices"][0]["message"]["content"]
-    except:
-        return ""
+    return ai_client.analyze_json(content)
 
 def judge_search(content) -> bool:
     """
@@ -265,33 +322,7 @@ def judge_search(content) -> bool:
     :param content: 用户输入的内容。
     :return: 是否是搜索。
     """
-    url = "https://api.siliconflow.cn/v1/chat/completions"
-
-    payload = {
-            "model": "Qwen/Qwen2.5-7B-Instruct",
-            "messages": [
-            {
-            "role": "user",
-            "content": [
-                {
-                    "type": "text", 
-                    "text": f"请判断这个内容AI是否需要搜索才能获取准确且最新的回答；如果需要搜索，则只返回1；如果不需要搜索，则只返回0：{content}"
-
-                }
-            ]
-            }
-            ]
-    }
-    headers = {
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json"
-    }
-    response = requests.post(url, json=payload, headers=headers)
-    print("搜索判断:",response.json()["choices"][0]["message"]["content"])
-    try:
-        return int(response.json()["choices"][0]["message"]["content"]) == 1
-    except:
-        return False
+    return ai_client.should_search(content)
 
 
 def chat(content="", user_id=None, group_id=None, group_user_id=None,image=False,url=None,video=None):
@@ -379,14 +410,11 @@ def chat(content="", user_id=None, group_id=None, group_user_id=None,image=False
     if len(messages) > MAX_HISTORY_LENGTH:
         messages = [messages[0]] + messages[-MAX_HISTORY_LENGTH:]
 
-    client = OpenAI(api_key=api_key,base_url=base_url)
-
-    response = client.chat.completions.create(
+    response = ai_client.chat_completion(
         model=model,
         messages=messages,
         stream=False
     )
-    
     assistant_response = response.choices[0].message.content
     try:
         import json_repair
@@ -407,7 +435,6 @@ def summarize_group_text(text: str) -> str:
     text = text.strip()
     if not text:
         return "没有可总结的聊天记录喵~"
-    client = OpenAI(api_key=api_key,base_url=base_url)
     system_prompt = "你是一个群聊记录总结助手，只根据提供的内容生成简洁的中文摘要。"
     user_prompt = (
         "下面是一整个QQ群的一段聊天记录，每一行代表一条消息，包含时间、群号、QQ号或昵称以及内容。\n"
@@ -415,15 +442,7 @@ def summarize_group_text(text: str) -> str:
         f"{text}"
     )
     try:
-        response = client.chat.completions.create(
-            model=model,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
-            stream=False
-        )
-        summary = response.choices[0].message.content
+        summary = ai_client.summarize_text(system_prompt, user_prompt, model=model)
         return summary or "总结结果为空喵~"
     except Exception:
         return "总结时出错喵，请稍后再试~"
