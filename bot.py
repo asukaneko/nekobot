@@ -95,6 +95,56 @@ def log_group_message(msg):
         nickname = ""
     log_to_group_full_file(group_id, user_id, nickname, content)
 
+async def get_recent_group_messages(group_id, count=10):
+    """获取最近的群聊消息作为上下文"""
+    try:
+        history = await bot.api.get_group_msg_history(group_id, message_seq=0, count=count, reverse_order=True)
+        items = []
+        if isinstance(history, list):
+            items = history
+        elif isinstance(history, dict):
+            data = history.get("data")
+            if isinstance(data, list):
+                items = data
+            elif isinstance(data, dict):
+                msgs = data.get("messages")
+                if isinstance(msgs, list):
+                    items = msgs
+        
+        lines = []
+        for item in items:
+            nickname = ""
+            user_id = ""
+            text = ""
+            if isinstance(item, dict):
+                user_id = item.get("user_id", "")
+                sender = item.get("sender", {})
+                if isinstance(sender, dict):
+                    nickname = sender.get("nickname", "")
+                
+                # 尝试从 message 数组中提取文本
+                msg_segments = item.get("message", [])
+                if isinstance(msg_segments, list):
+                    # 模拟一个消息对象来调用 extract_group_plain_text
+                    class DummyMsg:
+                        def __init__(self, message):
+                            self.message = message
+                    
+                    text = extract_group_plain_text(DummyMsg(msg_segments))
+                else:
+                    text = item.get("raw_message", "")
+            
+            name = nickname or str(user_id)
+            if name and text:
+                lines.append(f"{name}: {text}")
+            elif text:
+                lines.append(text)
+        
+        return "\n".join(lines)
+    except Exception as e:
+        _log.error(f"获取最近消息失败: {e}")
+        return ""
+
 def get_bilibili_real_url(short_url):
     """
     获取哔哩哔哩视频的真实URL。
@@ -248,16 +298,19 @@ async def on_group_message(msg: GroupMessage):
             return
 
     
-    if (msg.message[0].get("type") == "at" and msg.message[0].get("data").get("qq") == bot_id) or (msg.message[0].get("type") == "at" and msg.message[0].get("data").get("qq") == 'all' and str(msg.group_id) in at_all_group):
+    is_at_bot = msg.message[0].get("type") == "at" and msg.message[0].get("data").get("qq") == bot_id
+    is_at_all = msg.message[0].get("type") == "at" and msg.message[0].get("data").get("qq") == 'all' and str(msg.group_id) in at_all_group
+    
+    if is_at_bot or is_at_all:
     #如果是at机器人或者at全体成员并且该群开启了识别@全体成员功能
         try:
-            if msg.message[1].get("type") == "text":
+            if len(msg.message) > 1 and msg.message[1].get("type") == "text":
                 ori_content = ""
                 for i in range(1,len(msg.message)):
                     if msg.message[i].get("type") == "text":
                         ori_content += msg.message[i].get("data").get("text")
     
-            elif msg.message[1].get("type") == "face":
+            elif len(msg.message) > 1 and msg.message[1].get("type") == "face":
                 try:
                     emo = emotions[msg.message[1].get('data').get('id')]
                 except KeyError:
@@ -267,9 +320,17 @@ async def on_group_message(msg: GroupMessage):
                     else:
                         emo = ""
                 ori_content = f"发送了一个表情:{emo}"
-        except IndexError:
+            else:
+                ori_content = f"用户{msg.user_id}@了你"
+        except (IndexError, AttributeError):
             ori_content = f"用户{msg.user_id}@了你"
         
+        if is_at_all:
+            # 获取最近10条消息作为上下文
+            recent_msgs = await get_recent_group_messages(msg.group_id, 10)
+            if recent_msgs:
+                ori_content = f"【群聊上下文记录】\n{recent_msgs}\n\n【当前消息】\n{ori_content}\n\n请根据以上上下文记录，理解并回复当前这条@全体成员的消息。"
+
         content = chat(ori_content, group_id=msg.group_id,group_user_id=msg.sender.nickname)
         content, cmds = safe_parse_chat_response(content)
         if if_tts:
