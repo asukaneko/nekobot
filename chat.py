@@ -46,6 +46,22 @@ class AIClient:
     def openai_client(self):
         return OpenAI(api_key=self.api_key, base_url=self.base_url)
 
+    @staticmethod
+    def clean_response(content: str) -> str:
+        """剥离 markdown 代码块标记"""
+        if not content:
+            return ""
+        content = content.strip()
+        if content.startswith("```json"):
+            content = content[7:]
+            if content.endswith("```"):
+                content = content[:-3]
+        elif content.startswith("```"):
+            content = content[3:]
+            if content.endswith("```"):
+                content = content[:-3]
+        return content.strip()
+
     def chat_completion(self, messages, model: str = None, stream: bool = False):
         client = self.openai_client()
         return client.chat.completions.create(
@@ -63,7 +79,7 @@ class AIClient:
             model=model,
             stream=False,
         )
-        return response.choices[0].message.content
+        return self.clean_response(response.choices[0].message.content)
 
     def silicon_chat(self, model_name: str, messages):
         url = "https://api.siliconflow.cn/v1/chat/completions"
@@ -97,7 +113,7 @@ class AIClient:
         ]
         response = self.silicon_chat(self.pic_model, messages)
         try:
-            return response.json()["choices"][0]["message"]["content"]
+            return self.clean_response(response.json()["choices"][0]["message"]["content"])
         except Exception:
             return "链接失效"
 
@@ -115,7 +131,7 @@ class AIClient:
         ]
         response = self.silicon_chat(self.model, messages)
         try:
-            return response.json()["choices"][0]["message"]["content"]
+            return self.clean_response(response.json()["choices"][0]["message"]["content"])
         except Exception:
             return "链接失效"
 
@@ -133,7 +149,7 @@ class AIClient:
         ]
         response = self.silicon_chat(self.model, messages)
         try:
-            return response.json()["choices"][0]["message"]["content"]
+            return self.clean_response(response.json()["choices"][0]["message"]["content"])
         except Exception:
             return ""
 
@@ -151,9 +167,32 @@ class AIClient:
         ]
         response = self.silicon_chat("Qwen/Qwen2.5-7B-Instruct", messages)
         try:
-            return int(response.json()["choices"][0]["message"]["content"]) == 1
+            return int(self.clean_response(response.json()["choices"][0]["message"]["content"])) == 1
         except Exception:
             return False
+
+    def should_reply(self, content: str) -> float:
+        messages = [
+            {
+                "role": "system",
+                "content": "你是一个对话助手，需要根据群聊上下文和机器人的人设来判断是否应该回复当前消息。请输出 0 到 1 之间的一个小数，表示“应该回复程度”：0 表示完全不应该回复，1 表示非常应该回复，只输出这个数字，不要输出其他内容。"
+            },
+            {
+                "role": "user",
+                "content": content
+            }
+        ]
+        response = self.chat_completion(messages=messages, stream=False)
+        try:
+            score_str = self.clean_response(response.choices[0].message.content)
+            score = float(score_str)
+            if score < 0:
+                score = 0.0
+            if score > 1:
+                score = 1.0
+            return score
+        except Exception:
+            return 0.0
 
     def search(self, content: str) -> str:
         headers = {
@@ -199,7 +238,7 @@ class AIClient:
         }
         response = requests.post(url, json=payload, headers=headers)
         try:
-            return response.json()["choices"][0]["message"]["content"]
+            return self.clean_response(response.json()["choices"][0]["message"]["content"])
         except Exception:
             return "链接失效"
 
@@ -324,6 +363,9 @@ def judge_search(content) -> bool:
     """
     return ai_client.should_search(content)
 
+def judge_reply(content) -> float:
+    return ai_client.should_reply(content)
+
 
 def chat(content="", user_id=None, group_id=None, group_user_id=None,image=False,url=None,video=None):
     """
@@ -416,6 +458,20 @@ def chat(content="", user_id=None, group_id=None, group_user_id=None,image=False
         stream=False
     )
     assistant_response = response.choices[0].message.content
+    
+    # 处理 markdown 代码块包裹的情况
+    temp_content = assistant_response.strip()
+    if temp_content.startswith("```json"):
+        temp_content = temp_content[7:]
+        if temp_content.endswith("```"):
+            temp_content = temp_content[:-3]
+        assistant_response = temp_content.strip()
+    elif temp_content.startswith("```"):
+        temp_content = temp_content[3:]
+        if temp_content.endswith("```"):
+            temp_content = temp_content[:-3]
+        assistant_response = temp_content.strip()
+
     try:
         import json_repair
         assistant_response = json_repair.repair(assistant_response)

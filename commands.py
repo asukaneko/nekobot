@@ -227,6 +227,7 @@ async def chatter(id):
     :param msg: 消息对象。
     """
     content = chat(content="现在请你根据上下文，主动和用户聊天",user_id=id)
+    content, _ = safe_parse_chat_response(content)
     if if_tts:
         rtf = tts(content)
         await bot.api.post_private_msg(id, rtf=rtf)
@@ -485,6 +486,7 @@ switch.add_switch('command', default_value=True, description='命令开关')
 switch.add_switch('pdf_password', default_value=False, description='PDF密码开关')
 switch.add_switch('summary_auto', default_value=False, description='每日自动总结开关')
 switch.add_switch('active_chat', default_value=False, description='主动聊天开关')
+switch.add_switch('auto_reply', default_value=False, description='群聊智能自动回复开关')
 switch.save_switches()
 
 #----------------------
@@ -2178,6 +2180,41 @@ async def handle_summary_auto(msg, is_group=True):
     text = "已开启每日自动总结喵~（将在每天23:55发送）" if state else "已关闭每日自动总结喵~"
     await msg.reply(text=text)
     switch.save_switches()
+
+@register_command("/auto_reply", help_text="/auto_reply [话痨程度0-1] -> 开启或关闭群聊智能自动回复(admin)", category="2", admin_show=True)
+async def handle_auto_reply(msg, is_group=True):
+    if not is_group:
+        await bot.api.post_private_msg(msg.user_id, text="请在群聊中使用该命令喵~")
+        return
+    if str(msg.user_id) not in admin:
+        await msg.reply(text="你没有权限开启智能自动回复喵~")
+        return
+    group_id_str = str(msg.group_id)
+    raw = msg.raw_message[len("/auto_reply"):].strip()
+    level = None
+    if raw:
+        try:
+            level = float(raw.split()[0])
+        except ValueError:
+            await msg.reply(text="格式错误喵~ 请输入 0~1 之间的小数，例如 0.3 或 0.8")
+            return
+        if level < 0:
+            level = 0.0
+        if level > 1:
+            level = 1.0
+        if group_id_str not in switch.group_switches:
+            switch.group_switches[group_id_str] = {}
+        switch.group_switches[group_id_str]['auto_reply_level'] = level
+        switch.save_switches()
+    state = switch.toggle_switch('auto_reply', group_id=group_id_str)
+    current_level = level
+    if current_level is None:
+        try:
+            current_level = float(switch.group_switches.get(group_id_str, {}).get('auto_reply_level', 0.5))
+        except Exception:
+            current_level = 0.5
+    text = ("已开启群聊智能自动回复喵~" if state else "已关闭群聊智能自动回复喵~") + f" 当前话痨程度：{current_level:.2f}"
+    await msg.reply(text=text)
 
 @register_command("/主动聊天",help_text = "/主动聊天 <间隔时间(小时)> <是否开启(1/0)> -> 开启主动聊天",category = "2")
 async def handle_active_chat(msg, is_group=True):
