@@ -1,6 +1,6 @@
 from ncatbot.utils.logger import get_log
 import commands
-from chat import chat,tts,chat_video,chat_image,chat_webpage,chat_json,record_assistant_message,record_user_message,log_to_group_full_file
+from chat import chat,tts,chat_video,chat_image,chat_webpage,chat_json,record_assistant_message,record_user_message,log_to_group_full_file,judge_reply,load_prompt
 from commands import *
 import os
 import json
@@ -72,6 +72,20 @@ def safe_parse_chat_response(content):
     try:
         if not content:
             return "", []
+        
+        # 处理 markdown 代码块包裹的情况
+        temp_content = content.strip()
+        if temp_content.startswith("```json"):
+            temp_content = temp_content[7:]
+            if temp_content.endswith("```"):
+                temp_content = temp_content[:-3]
+            content = temp_content.strip()
+        elif temp_content.startswith("```"):
+            temp_content = temp_content[3:]
+            if temp_content.endswith("```"):
+                temp_content = temp_content[:-3]
+            content = temp_content.strip()
+
         res_json = json.loads(content)
         if isinstance(res_json, dict):
             # 严格只获取 msg 字段内容，如果不存在则返回空字符串
@@ -95,7 +109,7 @@ def log_group_message(msg):
         nickname = ""
     log_to_group_full_file(group_id, user_id, nickname, content)
 
-async def get_recent_group_messages(group_id, count=10):
+async def get_recent_group_messages(group_id, count=20):
     """获取最近的群聊消息作为上下文"""
     try:
         history = await bot.api.get_group_msg_history(group_id, message_seq=0, count=count, reverse_order=True)
@@ -326,8 +340,7 @@ async def on_group_message(msg: GroupMessage):
             ori_content = f"用户{msg.user_id}@了你"
         
         if is_at_all:
-            # 获取最近10条消息作为上下文
-            recent_msgs = await get_recent_group_messages(msg.group_id, 10)
+            recent_msgs = await get_recent_group_messages(msg.group_id, 20)
             if recent_msgs:
                 ori_content = f"【群聊上下文记录】\n{recent_msgs}\n\n【当前消息】\n{ori_content}\n\n请根据以上上下文记录，理解并回复当前这条@全体成员的消息。"
 
@@ -465,6 +478,75 @@ async def on_group_message(msg: GroupMessage):
                 msg2 = GroupMessage(message)
                 await handle_command(msg2, is_group=True)
                 time.sleep(1) 
+
+    try:
+        if not msg.message:
+            return
+        first_seg = msg.message[0]
+    except Exception:
+        return
+
+    if not switch.get_switch_state('auto_reply', group_id=str(msg.group_id)):
+        return
+
+    if first_seg.get("type") != "text":
+        return
+
+    try:
+        plain_text = extract_group_plain_text(msg)
+    except Exception:
+        plain_text = msg.raw_message
+
+    if not plain_text:
+        return
+
+    try:
+        recent_msgs = await get_recent_group_messages(msg.group_id, 20)
+    except Exception as e:
+        _log.error(f"auto_reply get_recent_group_messages error: {e}")
+        recent_msgs = ""
+
+    try:
+        persona = load_prompt(group_id=msg.group_id)
+    except Exception:
+        persona = ""
+
+    judge_text = plain_text
+    if recent_msgs:
+        judge_text = f"【最近群聊记录】\n{recent_msgs}\n\n【当前消息】\n{plain_text}"
+    if persona:
+        judge_text = f"【机器人人设与行为说明】\n{persona}\n\n{judge_text}"
+
+    try:
+        reply_score = judge_reply(judge_text)
+    except Exception as e:
+        _log.error(f"auto_reply judge error: {e}")
+        return
+
+    try:
+        level = float(switch.group_switches.get(str(msg.group_id), {}).get('auto_reply_level', 0.5))
+    except Exception:
+        level = 0.5
+
+    if reply_score < level:
+        return
+
+    content = chat(plain_text, group_id=msg.group_id, group_user_id=msg.sender.nickname)
+    content, cmds = safe_parse_chat_response(content)
+    if if_tts:
+        rtf = tts(content)
+        await bot.api.post_group_msg(msg.group_id, rtf=rtf)
+    await msg.reply(text=content)
+    if cmds:
+        for cmd in cmds:
+            message = {
+            "raw_message":cmd,
+            "group_id":str(msg.group_id),
+            "user_id":str(msg.user_id)
+            }
+            msg2 = GroupMessage(message)
+            await handle_command(msg2, is_group=True)
+            time.sleep(1)
 
 @bot.private_event()
 async def on_private_message(msg: PrivateMessage):
