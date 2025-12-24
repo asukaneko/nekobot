@@ -4,7 +4,6 @@
 #  .prompts
 #   |---... 
 import configparser,requests,os,base64,time,json,datetime,re
-from openai import OpenAI
 from ncatbot.core.element import Record,MessageChain
 
 config_parser = configparser.ConfigParser()
@@ -43,9 +42,6 @@ class AIClient:
         self.search_api_url = search_api_url
         self.video_api = video_api
 
-    def openai_client(self):
-        return OpenAI(api_key=self.api_key, base_url=self.base_url)
-
     @staticmethod
     def clean_response(content: str) -> str:
         """剥离 markdown 代码块标记"""
@@ -63,12 +59,37 @@ class AIClient:
         return content.strip()
 
     def chat_completion(self, messages, model: str = None, stream: bool = False):
-        client = self.openai_client()
-        return client.chat.completions.create(
-            model=model or self.model,
-            messages=messages,
-            stream=stream
-        )
+        url_base = (self.base_url or "").rstrip("/")
+        if not url_base:
+            raise ValueError("base_url 未配置")
+        url = f"{url_base}/chat/completions"
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json"
+        }
+        payload = {
+            "model": model or self.model,
+            "messages": messages,
+            "stream": stream
+        }
+        resp = requests.post(url, json=payload, headers=headers)
+        resp.raise_for_status()
+        data = resp.json()
+        content = ""
+        try:
+            content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+        except Exception:
+            content = ""
+        Message = type("Message", (), {})
+        Choice = type("Choice", (), {})
+        Resp = type("Resp", (), {})
+        msg_obj = Message()
+        msg_obj.content = content
+        choice_obj = Choice()
+        choice_obj.message = msg_obj
+        resp_obj = Resp()
+        resp_obj.choices = [choice_obj]
+        return resp_obj
 
     def summarize_text(self, system_prompt: str, user_prompt: str, model: str = None) -> str:
         response = self.chat_completion(

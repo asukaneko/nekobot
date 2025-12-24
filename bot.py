@@ -5,12 +5,21 @@ from commands import *
 import os
 import json
 import datetime
+import asyncio
 
 _log = get_log()
 
 if_tts = commands.if_tts
 
 emotions = {}
+
+async def safe_set_input_status(event_type, user_id):
+    try:
+        await bot.api.set_input_status(event_type=event_type, user_id=user_id)
+    except Exception:
+        pass
+
+private_text_buffers = {}
 
 def load_emotions():
     with open('emotions.json', 'r', encoding='utf-8') as f:
@@ -110,6 +119,50 @@ def log_group_message(msg):
     except Exception:
         nickname = ""
     log_to_group_full_file(group_id, user_id, nickname, content)
+
+async def _flush_user_text_buffer(user_id):
+    buf = private_text_buffers.get(user_id)
+    if not buf:
+        return
+    texts = buf.get("texts") or []
+    msg = buf.get("last_msg")
+    if_tts_local = buf.get("if_tts", False)
+    private_text_buffers.pop(user_id, None)
+    if not msg or not texts:
+        return
+    merged_text = "\n".join(texts)
+    await _handle_plain_text_message(msg, merged_text, if_tts_local)
+
+async def _schedule_flush_user_text_buffer(user_id):
+    await asyncio.sleep(1.0)   # 缓冲区时间，1秒内的消息会合并发送
+    await _flush_user_text_buffer(user_id)
+
+async def _handle_plain_text_message(msg, raw_text, if_tts_local):
+    try:
+        content = chat(raw_text, user_id=msg.user_id)
+    except Exception as e:
+        try:
+            _log.error(f"chat error: {e}")
+        except Exception:
+            pass
+        return
+    content, cmds = safe_parse_chat_response(content)
+    if if_tts_local:
+        rtf = tts(content)
+        await safe_set_input_status(event_type=0,user_id=msg.user_id)
+        await bot.api.post_private_msg(msg.user_id, rtf=rtf)
+    else:
+        await safe_set_input_status(event_type=1,user_id=msg.user_id)
+    await bot.api.post_private_msg(msg.user_id, text=content)
+    if cmds:
+        for cmd in cmds:
+            message = {
+            "raw_message":cmd,
+            "user_id":str(msg.user_id)
+            }
+            msg2 = PrivateMessage(message)
+            await handle_command(msg2, is_group=False)
+            time.sleep(1)
 
 async def get_recent_group_messages(group_id, count=20):
     """获取最近的群聊消息作为上下文"""
@@ -586,6 +639,28 @@ async def on_private_message(msg: PrivateMessage):
     except Exception as e:
         pass
 
+    if msg.raw_message and not msg.raw_message.startswith("/"):
+        try:
+            if msg.message and msg.message[0].get("type") == "text":
+                user_id_str = str(msg.user_id)
+                buf = private_text_buffers.get(user_id_str)
+                if not buf:
+                    private_text_buffers[user_id_str] = {
+                        "texts": [msg.raw_message],
+                        "last_msg": msg,
+                        "if_tts": if_tts,
+                    }
+                    private_text_buffers[user_id_str]["task"] = asyncio.create_task(
+                        _schedule_flush_user_text_buffer(user_id_str)
+                    )
+                else:
+                    buf["texts"].append(msg.raw_message)
+                    buf["last_msg"] = msg
+                    buf["if_tts"] = if_tts
+                return
+        except Exception:
+            pass
+
     # 处理QQ小程序消息
     if msg.message[0].get("type") == "json":
         try:
@@ -645,10 +720,10 @@ async def on_private_message(msg: PrivateMessage):
             content, _ = safe_parse_chat_response(content)
             if if_tts:
                 rtf = tts(content)
-                await bot.api.set_input_status(event_type=0,user_id=bot_id)
+                await safe_set_input_status(event_type=0,user_id=msg.user_id)
                 await bot.api.post_private_msg(msg.user_id, rtf=rtf)
             else:
-                await bot.api.set_input_status(event_type=1,user_id=bot_id)
+                await safe_set_input_status(event_type=1,user_id=msg.user_id)
             await bot.api.post_private_msg(msg.user_id, text=content)
             return
     except IndexError:
@@ -674,10 +749,10 @@ async def on_private_message(msg: PrivateMessage):
                 content, _ = safe_parse_chat_response(content)
                 if if_tts:
                     rtf = tts(content)
-                    await bot.api.set_input_status(event_type=0,user_id=msg.user_id)
+                    await safe_set_input_status(event_type=0,user_id=msg.user_id)
                     await bot.api.post_private_msg(msg.user_id, rtf=rtf)
                 else:
-                    await bot.api.set_input_status(event_type=1,user_id=msg.user_id)
+                    await safe_set_input_status(event_type=1,user_id=msg.user_id)
                 await bot.api.post_private_msg(msg.user_id, text=content)
                 return
 
@@ -690,10 +765,10 @@ async def on_private_message(msg: PrivateMessage):
             content, _ = safe_parse_chat_response(content)
             if if_tts:
                 rtf = tts(content)
-                await bot.api.set_input_status(event_type=0,user_id=msg.user_id)
+                await safe_set_input_status(event_type=0,user_id=msg.user_id)
                 await bot.api.post_private_msg(msg.user_id, rtf=rtf)
             else:
-                await bot.api.set_input_status(event_type=1,user_id=msg.user_id)
+                await safe_set_input_status(event_type=1,user_id=msg.user_id)
             await bot.api.post_private_msg(msg.user_id, text=content)
             return
     except IndexError:
@@ -707,10 +782,10 @@ async def on_private_message(msg: PrivateMessage):
         content, _ = safe_parse_chat_response(content)
         if if_tts:
             rtf = tts(content)
-            await bot.api.set_input_status(event_type=0,user_id=msg.user_id)
+            await safe_set_input_status(event_type=0,user_id=msg.user_id)
             await bot.api.post_private_msg(msg.user_id, rtf=rtf)
         else:
-            await bot.api.set_input_status(event_type=1,user_id=msg.user_id)
+            await safe_set_input_status(event_type=1,user_id=msg.user_id)
         await bot.api.post_private_msg(msg.user_id, text=content)
         return
     
@@ -726,32 +801,15 @@ async def on_private_message(msg: PrivateMessage):
         content, _ = safe_parse_chat_response(content)
         if if_tts:
             rtf = tts(content)
-            await bot.api.set_input_status(event_type=0,user_id=msg.user_id)
+            await safe_set_input_status(event_type=0,user_id=msg.user_id)
             await bot.api.post_private_msg(msg.user_id, rtf=rtf)
         else:
-            await bot.api.set_input_status(event_type=1,user_id=msg.user_id)
+            await safe_set_input_status(event_type=1,user_id=msg.user_id)
         await bot.api.post_private_msg(msg.user_id, text=content)
         return
 
-    if msg.raw_message and not msg.raw_message.startswith("/"): # 检查消息是否为空,避免接受文件后的空消息被回复
-        content = chat(msg.raw_message, user_id=msg.user_id)
-        content, cmds = safe_parse_chat_response(content)
-        if if_tts:
-            rtf = tts(content)
-            await bot.api.set_input_status(event_type=0,user_id=msg.user_id)
-            await bot.api.post_private_msg(msg.user_id, rtf=rtf)
-        else:
-            await bot.api.set_input_status(event_type=1,user_id=msg.user_id)
-        await bot.api.post_private_msg(msg.user_id, text=content)
-        if cmds:
-            for cmd in cmds:
-                message = {
-                "raw_message":cmd,
-                "user_id":str(msg.user_id)
-                }
-                msg2 = PrivateMessage(message)
-                await handle_command(msg2, is_group=False)
-                time.sleep(1)
+    if msg.raw_message and not msg.raw_message.startswith("/"):
+        await _handle_plain_text_message(msg, msg.raw_message, if_tts)
 
 
 async def handle_command(msg, is_group):
