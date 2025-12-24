@@ -2,7 +2,11 @@ from ncatbot.core import BotClient, GroupMessage, PrivateMessage, BotAPI
 from ncatbot.utils.logger import get_log
 from config import load_config
 from chat import group_messages, user_messages, tts, chat, generate_today_summary, summarize_group_text, ai_client
-import jmcomic,requests,random,configparser,json,yaml,re,os,asyncio,time
+import jmcomic,requests,random,configparser,json,yaml,re,os,asyncio,time,smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+from email.mime.base import MIMEBase
+from email import encoders
 from jmcomic import *
 from typing import Dict, List
 from datetime import datetime
@@ -85,6 +89,9 @@ running = {}  #用于定时聊天的开关
 tasks = {}  # 用于存储聊天的定时任务
 
 books = {}
+
+smtp_config = {}
+user_email = {}
 
 schedule_tasks = {} #用于存储定时任务
 
@@ -169,6 +176,34 @@ def load_favorites():
     if os.path.exists(group_file):
         with open(group_file, 'r', encoding='utf-8') as f:
             group_favorites.update(json.load(f))
+
+def load_smtp_config():
+    global smtp_config
+    try:
+        with open("smtp_config.json", "r", encoding="utf-8") as f:
+            data = json.load(f)
+            if isinstance(data, dict) and "host" in data:
+                smtp_config = {"global": data}
+            else:
+                smtp_config = data
+    except FileNotFoundError:
+        smtp_config = {}
+
+def save_smtp_config():
+    with open("smtp_config.json", "w", encoding="utf-8") as f:
+        json.dump(smtp_config, f, ensure_ascii=False, indent=2)
+
+def load_email_config():
+    global user_email
+    try:
+        with open("email_config.json", "r", encoding="utf-8") as f:
+            user_email = json.load(f)
+    except FileNotFoundError:
+        user_email = {}
+
+def save_email_config():
+    with open("email_config.json", "w", encoding="utf-8") as f:
+        json.dump(user_email, f, ensure_ascii=False, indent=2)
 
 def save_favorites():
     """保存收藏夹数据"""
@@ -477,6 +512,8 @@ load_blak_list()
 load_running()
 load_novel_data()
 read_at_all_group()
+load_smtp_config()
+load_email_config()
 switch = SwitchManager() #加载开关
 switch.load_switches()
 switch.add_switch('tts', default_value=False, description='TTS语音开关')
@@ -487,6 +524,7 @@ switch.add_switch('pdf_password', default_value=False, description='PDF密码开
 switch.add_switch('summary_auto', default_value=False, description='每日自动总结开关')
 switch.add_switch('active_chat', default_value=False, description='主动聊天开关')
 switch.add_switch('auto_reply', default_value=False, description='群聊智能自动回复开关')
+switch.add_switch('jm_send_email', default_value=False, description='漫画邮箱发送开关')
 switch.save_switches()
 
 #----------------------
@@ -806,24 +844,35 @@ async def download_and_send_comic(comic_id, msg, is_group):
         # 检查文件是否真正生成
         if not os.path.exists(file_path):
             raise FileNotFoundError(f"PDF文件未生成：{file_path}")
-        
-        #pdf加密功能，密码为comic_id
-        if switch.get_switch_state('pdf_password', group_id=str(msg.group_id) if is_group else None,user_id=str(msg.user_id) if not is_group else None):
+        encrypt_needed = switch.get_switch_state('pdf_password', group_id=str(msg.group_id) if is_group else None,user_id=str(msg.user_id) if not is_group else None)
+        if switch.get_switch_state('jm_send_email', user_id=str(msg.user_id)):
+            encrypt_needed = True
+        if encrypt_needed:
             try:
                 import pikepdf
                 with pikepdf.open(file_path,allow_overwriting_input=True) as pdf:
-
                     pdf.save(file_path, encryption=pikepdf.Encryption(
-                        owner=comic_id,  # 所有者密码
-                        user=comic_id,   # 用户密码
-                        R=4              # 加密版本
+                        owner=comic_id,
+                        user=comic_id,
+                        R=4
                     ))
             except ImportError:
                 error_msg = "缺少pikepdf库，无法加密PDF文件喵~"
-                msg.reply(text=error_msg)
-
+                await msg.reply(text=error_msg)
+        email_sent = False
+        try:
+            if switch.get_switch_state('jm_send_email', user_id=str(msg.user_id)):
+                email_sent = await send_comic_email(str(msg.user_id), comic_id, file_path)
+        except Exception as e:
+            _log.error(f"发送漫画邮件失败: {e}")
         if not switch.get_switch_state('jm_send', group_id=str(msg.group_id) if is_group else None,user_id=str(msg.user_id) if not is_group else None):
-            await msg.reply(text="漫画已下载，但发送已关闭喵~")
+            text = "漫画已下载，但发送已关闭喵~"
+            if email_sent:
+                text = "漫画已下载，并已发送到你的邮箱喵~"
+            if is_group:
+                await msg.reply(text=text)
+            else:
+                await bot.api.post_private_msg(msg.user_id, text=text)
             return
 
         file_size = os.path.getsize(file_path) / (1024 * 1024)  # 转换为MB
@@ -918,7 +967,64 @@ async def handle_jm_pwd(msg, is_group=True):
     else:
         switch.set_switch_state('pdf_password', state == 'on', group_id=str(msg.group_id) if is_group else None,user_id=str(msg.user_id) if not is_group else None)
         reply = f"{'群组' if is_group else '用户'}密码加密已 {'开启' if state == 'on' else '关闭'} 喵~，密码为漫画id"
+    if is_group:
         await msg.reply(text=reply)
+    else:
+        await bot.api.post_private_msg(msg.user_id, text=reply)
+
+@register_command("/jm_email", help_text="/jm_email <邮箱> <on|off> -> 配置邮箱并开启或关闭发送漫画到邮箱",category = "1")
+async def handle_jm_email(msg, is_group=True):
+    user_id = str(msg.user_id)
+    raw = msg.raw_message[len("/jm_email"):].strip()
+    parts = raw.split() if raw else []
+    email = None
+    state = None
+    if not parts:
+        current_email = user_email.get(user_id)
+        enabled = switch.get_switch_state('jm_send_email', user_id=user_id)
+        text = f"当前邮箱：{current_email or '未设置'}，状态：{'开启' if enabled else '关闭'}"
+        if is_group:
+            await msg.reply(text=text)
+        else:
+            await bot.api.post_private_msg(msg.user_id, text=text)
+        return
+    if len(parts) == 1:
+        if parts[0].lower() in ("on", "off"):
+            state = parts[0].lower() == "on"
+        else:
+            email = parts[0]
+            state = True
+    else:
+        email = parts[0]
+        if parts[1].lower() in ("on", "off"):
+            state = parts[1].lower() == "on"
+        else:
+            text = "第二个参数请输入 on 或 off 喵~"
+            if is_group:
+                await msg.reply(text=text)
+            else:
+                await bot.api.post_private_msg(msg.user_id, text=text)
+            return
+    if email:
+        if "@" not in email:
+            text = "请输入正确的邮箱地址喵~"
+            if is_group:
+                await msg.reply(text=text)
+            else:
+                await bot.api.post_private_msg(msg.user_id, text=text)
+            return
+        user_email[user_id] = email
+        save_email_config()
+    if state is not None:
+        switch.set_switch_state('jm_send_email', state, user_id=user_id)
+        switch.save_switches()
+    text = "邮箱配置已更新喵~"
+    if state is not None:
+        text = f"邮箱配置已更新喵~，发送到邮箱已{'开启' if state else '关闭'}"
+    if is_group:
+        await msg.reply(text=text)
+    else:
+        await bot.api.post_private_msg(msg.user_id, text=text)
 
 # ====下面的收藏夹不是官方的收藏夹，是本地储存的====
 @register_command("/add_fav", help_text="/add_fav <漫画ID> -> 添加收藏",category = "1")
@@ -1317,6 +1423,50 @@ async def async_send_file(is_group,send_method, target_id, file_type, url,file_n
             await msg.reply(text=error_msg)
         else:
             await bot.api.post_private_msg(target_id, text=error_msg)
+
+def _send_comic_email_sync(to_addr, subject, body, file_path, conf):
+    if not conf:
+        raise ValueError("smtp未配置")
+    host = conf.get("host")
+    port = int(conf.get("port", 587))
+    user = conf.get("user")
+    password = conf.get("password")
+    use_tls = bool(conf.get("use_tls", True))
+    from_addr = conf.get("from_addr") or user
+    if not host or not from_addr:
+        raise ValueError("smtp配置不完整")
+    msg = MIMEMultipart()
+    msg["From"] = from_addr
+    msg["To"] = to_addr
+    msg["Subject"] = subject
+    msg.attach(MIMEText(body, "plain", "utf-8"))
+    with open(file_path, "rb") as f:
+        part = MIMEBase("application", "pdf")
+        part.set_payload(f.read())
+    encoders.encode_base64(part)
+    part.add_header("Content-Disposition", f'attachment; filename="{os.path.basename(file_path)}"')
+    msg.attach(part)
+    server = smtplib.SMTP(host, port, timeout=30)
+    if use_tls:
+        server.starttls()
+    if user and password:
+        server.login(user, password)
+    server.sendmail(from_addr, [to_addr], msg.as_string())
+    server.quit()
+
+async def send_comic_email(user_id, comic_id, file_path):
+    uid = str(user_id)
+    to_addr = user_email.get(uid)
+    if not to_addr:
+        return False
+    conf = smtp_config.get(uid) or smtp_config.get("global")
+    if not conf:
+        return False
+    subject = f"漫画 {comic_id}"
+    body = f"漫画 {comic_id} 已发送喵~"
+    loop = asyncio.get_event_loop()
+    await loop.run_in_executor(None, lambda: _send_comic_email_sync(to_addr, subject, body, file_path, conf))
+    return True
             
 # 修改通用处理函数
 async def handle_generic_file(msg, is_group: bool, section: str, file_type: str, custom_url: str = None, file_name:str = None,custom_send_method=None):
@@ -1595,6 +1745,58 @@ async def handle_precise_remind(msg, is_group=True):
             await msg.reply(text=error_msg)
         else:
             await bot.api.post_private_msg(msg.user_id, text=error_msg)
+
+@register_command("/smtp", help_text="/smtp <host> <port> <user> <password> <tls(1/0)> <from> -> 配置当前用户SMTP服务",category = "4")
+async def handle_smtp_config_command(msg, is_group=True):
+    user_id = str(msg.user_id)
+    raw = msg.raw_message[len("/smtp"):].strip()
+    parts = raw.split() if raw else []
+    if not parts:
+        conf = smtp_config.get(user_id) or smtp_config.get("global")
+        if conf:
+            text = f"当前SMTP已配置喵~ host={conf.get('host')}, port={conf.get('port')}"
+        else:
+            text = "当前还没有配置SMTP喵~"
+        if is_group:
+            await msg.reply(text=text)
+        else:
+            await bot.api.post_private_msg(msg.user_id, text=text)
+        return
+    if len(parts) < 5:
+        text = "格式错误喵~ 应为: /smtp host port user password tls(1/0) [from]"
+        if is_group:
+            await msg.reply(text=text)
+        else:
+            await bot.api.post_private_msg(msg.user_id, text=text)
+        return
+    host = parts[0]
+    try:
+        port = int(parts[1])
+    except ValueError:
+        text = "端口必须是数字喵~"
+        if is_group:
+            await msg.reply(text=text)
+        else:
+            await bot.api.post_private_msg(msg.user_id, text=text)
+        return
+    user = parts[2]
+    password = parts[3]
+    use_tls = parts[4] != "0"
+    from_addr = parts[5] if len(parts) > 5 else user
+    smtp_config[user_id] = {
+        "host": host,
+        "port": port,
+        "user": user,
+        "password": password,
+        "use_tls": use_tls,
+        "from_addr": from_addr
+    }
+    save_smtp_config()
+    text = "SMTP配置已更新喵~"
+    if is_group:
+        await msg.reply(text=text)
+    else:
+        await bot.api.post_private_msg(msg.user_id, text=text)
 
 @register_command("/task",help_text="/task </bot.api.xxxx(参数1=值1...)> <时间(小时)> <是否循环(1/0)> -> 设置定时任务(admin)",category = "7",admin_show=True)
 async def handle_task(msg,is_group=True):

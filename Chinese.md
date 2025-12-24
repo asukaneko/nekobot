@@ -14,14 +14,14 @@
 
 ---
 ## ✨Updates 更新  
-![](https://img.shields.io/badge/LatestVersion-1.6.3-blue?&logo=react)
+![](https://img.shields.io/badge/LatestVersion-1.6.4-blue?&logo=react)
 ### 新增
 - 新增功能:
-  - 支持通过直接询问AI调用命令，如“请帮我下载漫画xxxxxx”，“请帮我生成一张图片,xxxx”等
-  - 群聊全量消息日志记录，可用于统计与总结
-  - `/summary_today` 命令，总结今天整天的群聊或私聊内容
-  - `/summary_recent` 或 `/sr` 命令，基于 QQ 历史记录总结最近若干条群聊消息
-  - `/summary_auto` 命令，开启或关闭每日自动总结群聊记录(管理员)
+  - 支持将下载的漫画以加密 PDF 发送到指定邮箱
+  - 新增每个用户可独立配置的 SMTP 邮箱服务命令
+  - 私聊 1 秒内多条文本消息自动合并后统一回复
+  - 修复主动聊天发送失败等问题，提升整体稳定性
+  - 重构大模型调用方式，移除 OpenAI SDK，统一使用 requests
 
 + 详细查看[CHANGLOG.md](https://github.com/asukaneko/NapCat-jmcomic_download-bot/blob/master/CHANGELOG.md)
 ---
