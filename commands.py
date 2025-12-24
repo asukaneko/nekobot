@@ -1337,13 +1337,6 @@ async def handle_generic_file(msg, is_group: bool, section: str, file_type: str,
         file: 文件
         markdown: Markdown
     """
-    # 立即回复用户
-    initial_text = "正在获取喵~"
-    
-    if is_group:
-        await msg.reply(text=initial_text)
-    else:
-        await bot.api.post_private_msg(msg.user_id, text=initial_text)
 
     try:
         # 修复配置读取逻辑
