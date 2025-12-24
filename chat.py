@@ -495,7 +495,12 @@ def chat(content="", user_id=None, group_id=None, group_user_id=None,image=False
 
     try:
         import json_repair
-        assistant_response = json_repair.repair(assistant_response)
+        s = assistant_response
+        first = s.find("{")
+        last = s.rfind("}")
+        if first != -1 and last != -1 and first < last:
+            s = s[first:last+1]
+        assistant_response = s
     except:
         pass
     
