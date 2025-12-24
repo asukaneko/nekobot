@@ -95,6 +95,8 @@ def safe_parse_chat_response(content):
         pass
     return content, []
 
+commands.safe_parse_chat_response = safe_parse_chat_response
+
 def log_group_message(msg):
     try:
         content = extract_group_plain_text(msg)
