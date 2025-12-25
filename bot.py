@@ -81,8 +81,6 @@ def safe_parse_chat_response(content):
     try:
         if not content:
             return "", []
-        
-        # 处理 markdown 代码块包裹的情况
         temp_content = content.strip()
         if temp_content.startswith("```json"):
             temp_content = temp_content[7:]
@@ -94,12 +92,25 @@ def safe_parse_chat_response(content):
             if temp_content.endswith("```"):
                 temp_content = temp_content[:-3]
             content = temp_content.strip()
-
-        res_json = json.loads(content)
+        s = content
+        first = s.find("{")
+        last = s.rfind("}")
+        if first != -1 and last != -1 and first < last:
+            s = s[first:last+1]
+        try:
+            from json_repair import repair_json
+            s = repair_json(s)
+        except Exception:
+            pass
+        res_json = json.loads(s)
         if isinstance(res_json, dict):
-            # 严格只获取 msg 字段内容，如果不存在则返回空字符串
             msg_content = res_json.get("msg", "")
-            return msg_content, res_json.get("cmd", [])
+            cmds = res_json.get("cmd", [])
+            if not isinstance(cmds, list):
+                cmds = []
+            else:
+                cmds = [c for c in cmds if isinstance(c, str)]
+            return msg_content, cmds
     except Exception:
         pass
     return content, []
@@ -573,7 +584,7 @@ async def on_group_message(msg: GroupMessage):
         judge_text = f"【机器人人设与行为说明】\n{persona}\n\n{judge_text}"
 
     try:
-        reply_score = judge_reply(judge_text)
+        reply_score = await asyncio.to_thread(judge_reply, judge_text)
     except Exception as e:
         _log.error(f"auto_reply judge error: {e}")
         return
@@ -586,7 +597,16 @@ async def on_group_message(msg: GroupMessage):
     if reply_score < level:
         return
 
-    content = chat(plain_text, group_id=msg.group_id, group_user_id=msg.sender.nickname)
+    content = await asyncio.to_thread(
+        chat,
+        plain_text,
+        None,
+        msg.group_id,
+        msg.sender.nickname,
+        False,
+        None,
+        None,
+    )
     content, cmds = safe_parse_chat_response(content)
     if if_tts:
         rtf = tts(content)
@@ -626,10 +646,12 @@ async def on_private_message(msg: PrivateMessage):
             return
 
     try:
-        if running[str(msg.user_id)]["state"]:
-            running[str(msg.user_id)]["last_time"] = time.time()
-        write_running()
-    except KeyError:
+        uid = str(msg.user_id)
+        info = running.get(uid)
+        if info and info.get("active"):
+            running[uid]["last_time"] = time.time()
+            write_running()
+    except Exception:
         pass
     
     try:
@@ -862,6 +884,31 @@ if __name__ == "__main__":
 
     loop = asyncio.new_event_loop()
     _log.info("命令行模式已启动，可以在命令行内输入命令")
+    try:
+        pending = load_pending_jm_command()
+        if pending:
+            raw = pending.get("raw_message") or "/jm"
+            uid = int(pending.get("user_id"))
+            is_group = bool(pending.get("is_group"))
+            if is_group:
+                gid = int(pending.get("group_id"))
+                message = {
+                    "raw_message": raw,
+                    "user_id": uid,
+                    "group_id": gid
+                }
+                msg = GroupMessage(message)
+            else:
+                message = {
+                    "raw_message": raw,
+                    "user_id": uid
+                }
+                msg = PrivateMessage(message)
+            setattr(msg, "from_pending_restart", True)
+            loop.run_until_complete(handle_jmcomic(msg, is_group=is_group))
+            clear_pending_jm_command()
+    except Exception as e:
+        _log.error(f"处理待执行jm命令失败: {e}")
     while True:
         try:
             command = input("").strip()

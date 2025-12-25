@@ -494,14 +494,14 @@ def chat(content="", user_id=None, group_id=None, group_user_id=None,image=False
         assistant_response = temp_content.strip()
 
     try:
-        import json_repair
+        from json_repair import repair_json
         s = assistant_response
         first = s.find("{")
         last = s.rfind("}")
         if first != -1 and last != -1 and first < last:
             s = s[first:last+1]
-        assistant_response = s
-    except:
+        assistant_response = repair_json(s)
+    except Exception:
         pass
     
     # 记录由发送函数统一处理，此处不再重复添加

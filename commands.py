@@ -160,6 +160,39 @@ def load_address(): # 加载配置文件，返回图片保存地址
         pdf_dir = os.path.normpath(pdf_dir)
         return os.path.dirname(pdf_dir)  # 返回pdf目录的父目录
 
+pending_jm_path = os.path.join(load_address(), "pending_jm_command.json")
+
+def save_pending_jm_command(msg, is_group: bool):
+    data = {
+        "raw_message": msg.raw_message,
+        "user_id": str(msg.user_id),
+        "is_group": bool(is_group)
+    }
+    if is_group:
+        data["group_id"] = str(msg.group_id)
+    try:
+        with open(pending_jm_path, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False)
+    except Exception as e:
+        _log.error(f"保存待执行jm命令失败: {e}")
+
+def load_pending_jm_command():
+    try:
+        with open(pending_jm_path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except FileNotFoundError:
+        return None
+    except Exception as e:
+        _log.error(f"读取待执行jm命令失败: {e}")
+        return None
+
+def clear_pending_jm_command():
+    try:
+        if os.path.exists(pending_jm_path):
+            os.remove(pending_jm_path)
+    except Exception as e:
+        _log.error(f"清理待执行jm命令失败: {e}")
+
 def load_favorites():
     """加载收藏夹数据"""
     cache_dir = os.path.join(load_address(),"list")
@@ -731,6 +764,10 @@ async def handle_get_fav(msg, is_group=True):
 
 @register_command("/jm",help_text = "/jm <漫画ID> -> 下载漫画",category = "1")
 async def handle_jmcomic(msg, is_group=True):
+    if not getattr(msg, "from_pending_restart", False):
+        if str(msg.user_id) in admin:
+            save_pending_jm_command(msg, is_group)
+            os.execv(sys.executable, [sys.executable] + sys.argv)
     match = re.match(r'^/jm\s+(\d+)$', msg.raw_message)
     if match:
         comic_id = match.group(1)
@@ -860,15 +897,23 @@ async def download_and_send_comic(comic_id, msg, is_group):
                 error_msg = "缺少pikepdf库，无法加密PDF文件喵~"
                 await msg.reply(text=error_msg)
         email_sent = False
+        email_error = None
         try:
             if switch.get_switch_state('jm_send_email', user_id=str(msg.user_id)):
                 email_sent = await send_comic_email(str(msg.user_id), comic_id, file_path)
         except Exception as e:
             _log.error(f"发送漫画邮件失败: {e}")
+            email_error = e
         if not switch.get_switch_state('jm_send', group_id=str(msg.group_id) if is_group else None,user_id=str(msg.user_id) if not is_group else None):
             text = "漫画已下载，但发送已关闭喵~"
             if email_sent:
                 text = "漫画已下载，并已发送到你的邮箱喵~"
+            elif email_error is not None:
+                err_msg = str(email_error)
+                if "552" in err_msg or "mailsize limit" in err_msg.lower():
+                    text = "漫画已下载，但发送到邮箱失败喵~，原因是邮件大小超过邮箱限制喵~"
+                else:
+                    text = "漫画已下载，但发送到邮箱失败喵~，请检查邮箱配置或稍后重试喵~"
             if is_group:
                 await msg.reply(text=text)
             else:
