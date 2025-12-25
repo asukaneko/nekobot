@@ -904,8 +904,7 @@ if __name__ == "__main__":
                     "user_id": uid
                 }
                 msg = PrivateMessage(message)
-            setattr(msg, "from_pending_restart", True)
-            loop.run_until_complete(handle_jmcomic(msg, is_group=is_group))
+            loop.run_until_complete(handle_jmcomic(msg, is_group=is_group, from_pending_restart=True))
             clear_pending_jm_command()
     except Exception as e:
         _log.error(f"处理待执行jm命令失败: {e}")
