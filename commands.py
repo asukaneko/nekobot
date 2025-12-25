@@ -763,8 +763,8 @@ async def handle_get_fav(msg, is_group=True):
         await bot.api.upload_private_file(msg.user_id, os.path.join(cache_dir , f"{name}.md"), f"{username}.md")
 
 @register_command("/jm",help_text = "/jm <漫画ID> -> 下载漫画",category = "1")
-async def handle_jmcomic(msg, is_group=True):
-    if not getattr(msg, "from_pending_restart", False):
+async def handle_jmcomic(msg, is_group=True, from_pending_restart=False):
+    if not from_pending_restart:
         if str(msg.user_id) in admin:
             save_pending_jm_command(msg, is_group)
             os.execv(sys.executable, [sys.executable] + sys.argv)
