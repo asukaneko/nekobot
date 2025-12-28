@@ -3,7 +3,8 @@
 #   |--- ...
 #  .prompts
 #   |---... 
-import configparser,requests,os,base64,time,json,datetime,re
+import configparser,requests,os,base64,time,json,datetime,re,io
+from PIL import Image
 from ncatbot.core.element import Record,MessageChain
 
 config_parser = configparser.ConfigParser()
@@ -138,6 +139,67 @@ class AIClient:
         except Exception:
             return "链接失效"
 
+    def describe_gif(self, image_url: str, max_frames: int = 10) -> str:
+        try:
+            res = requests.get(image_url, timeout=10)
+            if res.status_code != 200:
+                return "链接失效"
+            img = Image.open(io.BytesIO(res.content))
+            total = getattr(img, "n_frames", 1)
+            if total <= 1:
+                return self.describe_image(image_url, "请描述这个图片的内容，仅作描述，不要分析内容")
+            
+            content_list = []
+            used = set()
+            # 均匀采样，减少帧数以保证请求效率和模型理解效果
+            count = min(max_frames, total)
+            for i in range(count):
+                idx = int(i * total / count)
+                if idx >= total:
+                    idx = total - 1
+                if idx in used:
+                    continue
+                used.add(idx)
+                try:
+                    img.seek(idx)
+                    frame = img.convert("RGB")
+                    buf = io.BytesIO()
+                    frame.save(buf, format="PNG")
+                    b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
+                    data_url = "data:image/png;base64," + b64
+                    content_list.append({
+                        "type": "image_url",
+                        "image_url": {
+                            "url": data_url
+                        }
+                    })
+                except Exception:
+                    continue
+            
+            if not content_list:
+                return "解析失败"
+
+            # 添加整体分析的提示词
+            content_list.append({
+                "type": "text",
+                "text": "以上是一个 GIF 动画的连续帧序列。请作为一个整体分析这个动画，描述其中发生的动作、情节以及角色的情绪。"
+            })
+
+            messages = [
+                {
+                    "role": "user",
+                    "content": content_list
+                }
+            ]
+            
+            response = self.silicon_chat(self.pic_model, messages)
+            try:
+                return self.clean_response(response.json()["choices"][0]["message"]["content"])
+            except Exception:
+                return "解析失败"
+        except Exception:
+            return "解析失败"
+
     def describe_webpage_html(self, html: str) -> str:
         messages = [
             {
@@ -232,9 +294,9 @@ class AIClient:
             return ""
 
     def describe_video(self, video_url: str) -> str:
-        url = "https://open.bigmodel.cn/api/paas/v4/chat/completions"
+        url = self.base_url + "/chat/completions"
         payload = {
-            "model": "glm-4.5v",
+            "model": "zai-org/GLM-4.6V",
             "messages": [
                 {
                     "role": "user",
@@ -254,14 +316,14 @@ class AIClient:
             ]
         }
         headers = {
-            "Authorization": f"Bearer {self.video_api}",
+            "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json"
         }
         response = requests.post(url, json=payload, headers=headers)
         try:
             return self.clean_response(response.json()["choices"][0]["message"]["content"])
         except Exception:
-            return "链接失效"
+            return "链接失效,完整json:" + str(response.json())
 
 
 ai_client = AIClient(
@@ -335,6 +397,9 @@ def chat_image(iurl) -> str:
     :return: 图片识别结果。
     """
     return ai_client.describe_image(iurl, "请描述这个图片的内容，仅作描述，不要分析内容")
+
+def chat_gif(iurl) -> str:
+    return ai_client.describe_gif(iurl)
 
 def chat_video(vurl) -> str:
     """
@@ -493,17 +558,6 @@ def chat(content="", user_id=None, group_id=None, group_user_id=None,image=False
             temp_content = temp_content[:-3]
         assistant_response = temp_content.strip()
 
-    try:
-        from json_repair import repair_json
-        s = assistant_response
-        first = s.find("{")
-        last = s.rfind("}")
-        if first != -1 and last != -1 and first < last:
-            s = s[first:last+1]
-        assistant_response = repair_json(s)
-    except Exception:
-        pass
-    
     # 记录由发送函数统一处理，此处不再重复添加
     # messages.append({"role": "assistant", "content": assistant_response})
 
