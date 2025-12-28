@@ -117,11 +117,14 @@ def safe_parse_chat_response(content):
 
 commands.safe_parse_chat_response = safe_parse_chat_response
 
-def log_group_message(msg):
+async def log_group_message(msg):
+    # 记录消息收到的时刻
+    timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     try:
         content = extract_group_plain_text(msg)
     except Exception:
         content = getattr(msg, "raw_message", "")
+    
     group_id = str(getattr(msg, "group_id", ""))
     user_id = str(getattr(msg, "user_id", ""))
     nickname = ""
@@ -129,7 +132,29 @@ def log_group_message(msg):
         nickname = msg.sender.nickname
     except Exception:
         nickname = ""
-    log_to_group_full_file(group_id, user_id, nickname, content)
+
+    # 检查是否有图片需要解析
+    try:
+        segments = getattr(msg, "message", []) or []
+        url = None
+        for seg in segments:
+            if isinstance(seg, dict) and seg.get("type") == "image":
+                url = (seg.get("data") or {}).get("url")
+                if url:
+                    break
+        
+        if url:
+            # 异步调用模型解析图片，不阻塞其他任务
+            desc = await asyncio.to_thread(chat_image, url)
+            if desc:
+                content += f" [图片内容: {desc}]"
+    except Exception as e:
+        try:
+            _log.error(f"解析群聊图片内容失败: {e}")
+        except Exception:
+            pass
+
+    log_to_group_full_file(group_id, user_id, nickname, content, timestamp=timestamp)
 
 async def _flush_user_text_buffer(user_id):
     buf = private_text_buffers.get(user_id)
@@ -356,7 +381,7 @@ async def on_group_message(msg: GroupMessage):
         return
     _log.info(msg)
     try:
-        log_group_message(msg)
+        asyncio.create_task(log_group_message(msg))
     except Exception:
         pass
     if_tts = switch.get_switch_state('tts', group_id=str(msg.group_id))
@@ -443,14 +468,19 @@ async def on_group_message(msg: GroupMessage):
         if msg_obj.get("data").get("message")[0].get("type") == "image": #处理图片
             url = msg_obj.get("data").get("message")[0].get("data").get("url")
             summary = msg_obj.get("data").get("message")[0].get("data").get("summary")
-            if summary == "[动画表情]":
+            is_animated = summary == "[动画表情]"
+            if is_animated:
                 ori_content += "[发送了一个动画表情]"
 
             if "/识别人物" in ori_content.strip():
                 _log.info("识别人物中...")
                 ori_content += f"(识别结果：{recognize_image(url)})"
-
-            content = chat(content=ori_content,group_id=msg.group_id,group_user_id=msg.sender.nickname,image=True,url=url)    
+                content = chat(content=ori_content,group_id=msg.group_id,group_user_id=msg.sender.nickname,image=True,url=url)
+            else:
+                if is_animated:
+                    content = chat(content=ori_content,group_id=msg.group_id,group_user_id=msg.sender.nickname,video=url)
+                else:
+                    content = chat(content=ori_content,group_id=msg.group_id,group_user_id=msg.sender.nickname,image=True,url=url)
             content, _ = safe_parse_chat_response(content)
             if if_tts:
                 rtf = tts(content)
@@ -736,7 +766,7 @@ async def on_private_message(msg: PrivateMessage):
             url = msg.message[0].get("data").get("url")
             summary = msg.message[0].get("data").get("summary")
             if summary == "[动画表情]":
-                content = chat(user_id=msg.user_id,image=True,url=url,content="发送了一个动画表情")
+                content = chat(user_id=msg.user_id,video=url,content="发送了一个动画表情")
             else:
                 content = chat(user_id=msg.user_id,image=True,url=url)
             content, _ = safe_parse_chat_response(content)

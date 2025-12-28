@@ -570,7 +570,7 @@ def _record_message(role, content, user_id=None, group_id=None):
 # 记录最后一次写入的内容，用于简单的重复过滤
 last_log_entry = {}
 
-def log_to_group_full_file(group_id, user_id, nickname, content):
+def log_to_group_full_file(group_id, user_id, nickname, content, timestamp=None):
     """
     将消息记录到 group_full 文本文件中，用于每日总结。
     """
@@ -594,7 +594,10 @@ def log_to_group_full_file(group_id, user_id, nickname, content):
         'time': now_ts
     }
 
-    now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    if timestamp:
+        now = timestamp
+    else:
+        now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     date_str = datetime.datetime.now().strftime("%Y-%m-%d")
     group_id = str(group_id)
     user_id = str(user_id)
