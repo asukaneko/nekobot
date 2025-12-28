@@ -12,9 +12,12 @@
 ---
 [中文版 | Chinese](https://github.com/asukaneko/NapCat-jmcomic_download-bot/blob/master/Chinese.md)
 ## ✨Updates  
-![](https://img.shields.io/badge/LatestVersion-1.6.4-blue?&logo=react)
+![](https://img.shields.io/badge/LatestVersion-1.6.5-blue?&logo=react)
 ### New Features
 - New features:
+  - GIF recognition optimization: Support for local multi-frame splitting and multi-image recognition for animated emojis
+  - Stability improvement: Fixed empty AI responses when containing braces but no `msg` field
+  - Dependency update: Added `Pillow` for image processing
   - Support sending downloaded comics as encrypted PDF files to a specified email
   - Add per-user SMTP configuration command so each user can use their own mailbox
   - Merge multiple private text messages within 1 second into a single reply

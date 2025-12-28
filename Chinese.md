@@ -14,9 +14,12 @@
 
 ---
 ## ✨Updates 更新  
-![](https://img.shields.io/badge/LatestVersion-1.6.4-blue?&logo=react)
+![](https://img.shields.io/badge/LatestVersion-1.6.5-blue?&logo=react)
 ### 新增
 - 新增功能:
+  - 动画表情识别优化：支持 GIF 动图本地多帧截取与多图识别，提升对动态内容的理解能力
+  - 稳定性提升：修复 AI 回复中包含大括号但非协议格式时可能导致回复为空的问题
+  - 依赖更新：新增 `Pillow` 库支持图像处理
   - 支持将下载的漫画以加密 PDF 发送到指定邮箱
   - 新增每个用户可独立配置的 SMTP 邮箱服务命令
   - 私聊 1 秒内多条文本消息自动合并后统一回复
