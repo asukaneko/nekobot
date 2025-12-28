@@ -1,6 +1,6 @@
 from ncatbot.utils.logger import get_log
 import commands
-from chat import chat,tts,chat_video,chat_image,chat_webpage,chat_json,record_assistant_message,record_user_message,log_to_group_full_file,judge_reply,load_prompt
+from chat import chat,tts,chat_video,chat_image,chat_webpage,chat_json,record_assistant_message,record_user_message,log_to_group_full_file,judge_reply,load_prompt,chat_gif
 from commands import *
 import os
 import json
@@ -104,13 +104,18 @@ def safe_parse_chat_response(content):
             pass
         res_json = json.loads(s)
         if isinstance(res_json, dict):
-            msg_content = res_json.get("msg", "")
-            cmds = res_json.get("cmd", [])
-            if not isinstance(cmds, list):
-                cmds = []
+            # 只有当确实包含 msg 字段时才认为是有效的 JSON 协议格式
+            if "msg" in res_json:
+                msg_content = res_json.get("msg", "")
+                cmds = res_json.get("cmd", [])
+                if not isinstance(cmds, list):
+                    cmds = []
+                else:
+                    cmds = [c for c in cmds if isinstance(c, str)]
+                return msg_content, cmds
+            # 如果是 dict 但没有 msg 字段，可能是普通的包含大括号的内容，回退到原样返回
             else:
-                cmds = [c for c in cmds if isinstance(c, str)]
-            return msg_content, cmds
+                return content, []
     except Exception:
         pass
     return content, []
@@ -478,7 +483,8 @@ async def on_group_message(msg: GroupMessage):
                 content = chat(content=ori_content,group_id=msg.group_id,group_user_id=msg.sender.nickname,image=True,url=url)
             else:
                 if is_animated:
-                    content = chat(content=ori_content,group_id=msg.group_id,group_user_id=msg.sender.nickname,video=url)
+                    desc = chat_gif(url)
+                    content = chat(content=f"{ori_content} 动画多帧识别结果:{desc}",group_id=msg.group_id,group_user_id=msg.sender.nickname)
                 else:
                     content = chat(content=ori_content,group_id=msg.group_id,group_user_id=msg.sender.nickname,image=True,url=url)
             content, _ = safe_parse_chat_response(content)
@@ -766,7 +772,8 @@ async def on_private_message(msg: PrivateMessage):
             url = msg.message[0].get("data").get("url")
             summary = msg.message[0].get("data").get("summary")
             if summary == "[动画表情]":
-                content = chat(user_id=msg.user_id,video=url,content="发送了一个动画表情")
+                desc = chat_gif(url)
+                content = chat(user_id=msg.user_id,content="发送了一个动画表情 动画多帧识别结果:"+desc)
             else:
                 content = chat(user_id=msg.user_id,image=True,url=url)
             content, _ = safe_parse_chat_response(content)
