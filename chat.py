@@ -7,6 +7,7 @@ import configparser,requests,os,base64,time,json,datetime,re,io
 from PIL import Image
 import imageio.v2 as imageio
 from ncatbot.core.element import Record,MessageChain
+from life_core import life_system
 
 config_parser = configparser.ConfigParser()
 config_parser.read('config.ini')
@@ -498,10 +499,13 @@ def chat(content="", user_id=None, group_id=None, group_user_id=None,image=False
     if user_id:
         user_id = str(user_id)
         prompt = load_prompt(user_id=user_id)
+        # 注入生命周期 Prompt
+        prompt += life_system.get_prompt_suffix(user_id=user_id)
+        
         if user_id not in user_messages:
             user_messages[user_id] = [{"role": "system", "content": prompt}]
         else:
-            # 确保第一条系统消息始终是最新的提示词（包含最新的 helptext）
+            # 确保第一条系统消息始终是最新的提示词（包含最新的 helptext 和生命状态）
             if user_messages[user_id] and user_messages[user_id][0].get("role") == "system":
                 user_messages[user_id][0]["content"] = prompt
             else:
@@ -510,10 +514,13 @@ def chat(content="", user_id=None, group_id=None, group_user_id=None,image=False
     elif group_id:
         group_id = str(group_id)
         prompt = load_prompt(group_id=group_id)
+        # 注入生命周期 Prompt
+        prompt += life_system.get_prompt_suffix(group_id=group_id)
+        
         if group_id not in group_messages:
             group_messages[group_id] = [{"role": "system", "content": prompt}]
         else:
-            # 确保第一条系统消息始终是最新的提示词（包含最新的 helptext）
+            # 确保第一条系统消息始终是最新的提示词（包含最新的 helptext 和生命状态）
             if group_messages[group_id] and group_messages[group_id][0].get("role") == "system":
                 group_messages[group_id][0]["content"] = prompt
             else:
