@@ -8,3 +8,5 @@ pyyaml
 pikepdf
 json_repair
 Pillow==11.0.0
+imageio==2.36.0
+imageio-ffmpeg==0.5.1

@@ -5,6 +5,7 @@
 #   |---... 
 import configparser,requests,os,base64,time,json,datetime,re,io
 from PIL import Image
+import imageio.v2 as imageio
 from ncatbot.core.element import Record,MessageChain
 
 config_parser = configparser.ConfigParser()
@@ -139,6 +140,25 @@ class AIClient:
         except Exception:
             return "链接失效"
 
+    def gif_to_mp4_data_url(self, image_url: str, fps: int = 10) -> str:
+        try:
+            res = requests.get(image_url, timeout=10)
+            if res.status_code != 200:
+                return ""
+            buf_in = io.BytesIO(res.content)
+            frames = imageio.mimread(buf_in, format="gif")
+            if not frames:
+                return ""
+            buf_out = io.BytesIO()
+            imageio.mimsave(buf_out, frames, format="ffmpeg", fps=fps)
+            mp4_bytes = buf_out.getvalue()
+            if not mp4_bytes:
+                return ""
+            b64 = base64.b64encode(mp4_bytes).decode("utf-8")
+            return "data:video/mp4;base64," + b64
+        except Exception:
+            return ""
+
     def describe_gif(self, image_url: str, max_frames: int = 10) -> str:
         try:
             res = requests.get(image_url, timeout=10)
@@ -199,6 +219,14 @@ class AIClient:
                 return "解析失败"
         except Exception:
             return "解析失败"
+
+    def describe_gif_as_video(self, image_url: str) -> str:
+        data_url = self.gif_to_mp4_data_url(image_url)
+        if data_url:
+            result = self.describe_video(data_url)
+            if result and not result.startswith("链接失效"):
+                return result
+        return self.describe_gif(image_url)
 
     def describe_webpage_html(self, html: str) -> str:
         messages = [
@@ -399,7 +427,7 @@ def chat_image(iurl) -> str:
     return ai_client.describe_image(iurl, "请描述这个图片的内容，仅作描述，不要分析内容")
 
 def chat_gif(iurl) -> str:
-    return ai_client.describe_gif(iurl)
+    return ai_client.describe_gif_as_video(iurl)
 
 def chat_video(vurl) -> str:
     """
