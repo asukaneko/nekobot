@@ -1,5 +1,7 @@
 from ncatbot.core import BotClient, GroupMessage, PrivateMessage, BotAPI
 from ncatbot.utils.logger import get_log
+from heartbeat import HeartbeatCore
+
 from config import load_config
 from chat import group_messages, user_messages, tts, chat, generate_today_summary, summarize_group_text, ai_client
 import jmcomic,requests,random,configparser,json,yaml,re,os,asyncio,time,smtplib
@@ -39,6 +41,7 @@ _log = get_log()
 bot_id,admin_id = load_config() # 加载配置,返回机器人qq号
 
 bot = BotClient()
+heartbeat_core = HeartbeatCore(bot.api)
 
 # ----------------------
 # region 统一消息发送与记录
@@ -396,6 +399,16 @@ def load_running():
         with open(os.path.join(cache_dir,"running.json"), "r", encoding="utf-8") as f:
             running.update(json.load(f))
     except FileNotFoundError:
+        write_running()
+
+def update_user_active_chat_time(user_id):
+    """
+    当用户主动发消息时，更新最后活跃时间。
+    这会推迟机器人的下一次主动聊天。
+    """
+    user_id = str(user_id)
+    if user_id in running and running[user_id].get("active", False):
+        running[user_id]["last_time"] = time.time()
         write_running()
 
 def update_running(id):
@@ -2397,7 +2410,9 @@ async def auto_active_chat_task():
                         continue
                     if current_time - last_time >= 60 * 60 * interval:
                         try:
-                            await chatter(int(user_id))
+                            next_interval = await heartbeat_core.process_user(int(user_id), interval)
+                            if next_interval is not None:
+                                running[user_id]["interval"] = next_interval
                             running[user_id]["last_time"] = current_time
                             write_running()
                         except Exception as e:
@@ -2456,7 +2471,7 @@ async def handle_auto_reply(msg, is_group=True):
     text = ("已开启群聊智能自动回复喵~" if state else "已关闭群聊智能自动回复喵~") + f" 当前话痨程度：{current_level:.2f}"
     await msg.reply(text=text)
 
-@register_command("/主动聊天",help_text = "/主动聊天 <间隔时间(小时)> <是否开启(1/0)> -> 开启主动聊天",category = "2")
+@register_command("/主动聊天",help_text = "/主动聊天 [是否开启(1/0)] -> 开启/关闭主动聊天（AI将自行决定聊天频率）",category = "2")
 async def handle_active_chat(msg, is_group=True):
     if is_group:
         await msg.reply(text="只能私聊设置喵~")
@@ -2467,7 +2482,9 @@ async def handle_active_chat(msg, is_group=True):
         parts = raw.split() if raw else []
         user_id = str(msg.user_id)
         current = running.get(user_id, {})
-        interval = float(current.get("interval", 2))
+        
+        # 默认值
+        interval = float(current.get("interval", 1.0)) # 默认初始间隔1小时
         active = bool(current.get("active", False))
 
         if not parts:
@@ -2476,34 +2493,46 @@ async def handle_active_chat(msg, is_group=True):
             if parts[0] in ("0", "1"):
                 active = bool(int(parts[0]))
             else:
-                interval = float(parts[0])
-                active = True
-        else:
-            if parts[1] not in ("0", "1"):
-                raise ValueError
-            interval = float(parts[0])
-            active = bool(int(parts[1]))
-
-        user_id = str(msg.user_id)
+                 # 兼容旧指令，如果是数字但不是0/1，认为是设置初始间隔（虽然现在AI会动态调整）
+                try:
+                    interval = float(parts[0])
+                    active = True
+                except ValueError:
+                    raise ValueError
+        elif len(parts) >= 2:
+             # 兼容旧指令：间隔 + 开关
+             interval = float(parts[0])
+             if parts[1] in ("0", "1"):
+                 active = bool(int(parts[1]))
+        
         if user_id not in running:
             running[user_id] = {}
+        
         running[user_id]["interval"] = interval
         running[user_id]["active"] = active
         running[user_id]["state"] = False
         switch.set_switch_state('active_chat', active, user_id=user_id)
-        try:
-            ori = await bot.api.get_recent_contact(100)
-            for contact in ori.get("data", []):
-                if str(contact['lastestMsg'].get("user_id")) == user_id:
-                    running[user_id]["last_time"] = contact['lastestMsg']["time"]
-                    break
-        except Exception as e:
-            print(f"获取最近联系人失败: {e}")
+        
+        # 如果开启，尝试获取最近消息时间作为基准
+        if active:
+            try:
+                ori = await bot.api.get_recent_contact(100)
+                for contact in ori.get("data", []):
+                    if str(contact['lastestMsg'].get("user_id")) == user_id:
+                        running[user_id]["last_time"] = contact['lastestMsg']["time"]
+                        break
+                # 如果没找到最近联系记录，就用当前时间
+                if "last_time" not in running[user_id]:
+                    running[user_id]["last_time"] = time.time()
+            except Exception as e:
+                print(f"获取最近联系人失败: {e}")
+                running[user_id]["last_time"] = time.time()
+                
         write_running()
-        reply = f"设置成功喵~，{'现在'+str(interval)+'小时后会主动聊天喵~' if active else '已关闭主动聊天喵~'}"
+        reply = f"设置成功喵~，{'AI现在会自行决定什么时候找你聊天喵~' if active else '已关闭主动聊天喵~'}"
         await bot.api.post_private_msg(user_id, text=reply)
     except ValueError:
-        await bot.api.post_private_msg(msg.user_id, text="格式错误喵~ 请输入 /主动聊天 间隔时间(小时) 是否开启(1/0)")
+        await bot.api.post_private_msg(msg.user_id, text="格式错误喵~ 请输入 /主动聊天 [1/0]")
 
 # 添加临时存储字典
 temp_selections = {}

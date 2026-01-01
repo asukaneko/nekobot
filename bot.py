@@ -664,6 +664,13 @@ async def on_private_message(msg: PrivateMessage):
     if str(msg.user_id) == str(bot_id):
         return
     _log.info(msg)
+    
+    # 更新主动聊天的时间
+    try:
+        commands.update_user_active_chat_time(msg.user_id)
+    except Exception:
+        pass
+        
     if_tts = switch.get_switch_state('tts', user_id=str(msg.user_id))
     if msg.raw_message.startswith("/command"):
         command = msg.raw_message.split(" ")[1].lower()
@@ -681,14 +688,7 @@ async def on_private_message(msg: PrivateMessage):
         if ok:
             return
 
-    try:
-        uid = str(msg.user_id)
-        info = running.get(uid)
-        if info and info.get("active"):
-            running[uid]["last_time"] = time.time()
-            write_running()
-    except Exception:
-        pass
+    # 此处原来的更新逻辑已移除，改用上方统一调用
     
     try:
         if msg.message == []:
