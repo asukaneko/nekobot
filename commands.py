@@ -389,6 +389,15 @@ def write_running():
     except Exception as e:
         print(f"写入定时聊天开关文件失败: {e}")
 
+def normalize_timestamp(ts):
+    try:
+        value = float(ts)
+    except Exception:
+        return 0.0
+    if value > 1e11:
+        return value / 1000.0
+    return value
+
 def load_running():
     """
     加载定时聊天开关
@@ -397,7 +406,11 @@ def load_running():
     os.makedirs(cache_dir, exist_ok=True)
     try:
         with open(os.path.join(cache_dir,"running.json"), "r", encoding="utf-8") as f:
-            running.update(json.load(f))
+            data = json.load(f)
+            for uid, info in data.items():
+                if isinstance(info, dict) and "last_time" in info:
+                    info["last_time"] = normalize_timestamp(info["last_time"])
+            running.update(data)
     except FileNotFoundError:
         write_running()
 
@@ -2403,7 +2416,7 @@ async def auto_active_chat_task():
                     if not info.get("active", False):
                         continue
                     interval = float(info.get("interval", 1.0))
-                    last_time = float(info.get("last_time", 0))
+                    last_time = normalize_timestamp(info.get("last_time", 0))
                     if last_time == 0:
                         running[user_id]["last_time"] = current_time
                         write_running()
@@ -2519,7 +2532,7 @@ async def handle_active_chat(msg, is_group=True):
                 ori = await bot.api.get_recent_contact(100)
                 for contact in ori.get("data", []):
                     if str(contact['lastestMsg'].get("user_id")) == user_id:
-                        running[user_id]["last_time"] = contact['lastestMsg']["time"]
+                        running[user_id]["last_time"] = normalize_timestamp(contact['lastestMsg'].get("time", 0))
                         break
                 # 如果没找到最近联系记录，就用当前时间
                 if "last_time" not in running[user_id]:

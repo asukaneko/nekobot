@@ -948,6 +948,8 @@ if __name__ == "__main__":
     while True:
         try:
             command = input("").strip()
+            if not command:
+                continue
             if command.lower() == 'exit':
                 _log.info("已退出命令行模式")
                 break
@@ -958,6 +960,9 @@ if __name__ == "__main__":
             msg = GroupMessage(message)
             loop.run_until_complete(handle_command(msg, is_group=False))
             time.sleep(1)
+        except EOFError:
+            _log.info("标准输入已关闭，命令行模式结束")
+            break
         except KeyboardInterrupt:
             _log.info("退出命令输入")
             break
