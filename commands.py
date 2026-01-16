@@ -2550,7 +2550,7 @@ async def handle_active_chat(msg, is_group=True):
 # 添加临时存储字典
 temp_selections = {}
 api_book = {}
-WENKU8_COOKIE = "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" # 去 www.wenku8.net 登录获取
+WENKU8_COOKIE = "" # 去 www.wenku8.net 登录获取
 def load_wenku8_cookie():
     global WENKU8_COOKIE
     if os.path.exists("wenku8_cookie.txt"):
@@ -2912,7 +2912,7 @@ async def handle_random_novel(msg, is_group=True):
         await bot.api.post_private_msg(msg.user_id, rtf=reply)
         await bot.api.upload_private_file(msg.user_id, file=url,name=novel+".txt")
 
-@register_command("/hotnovel", help_text="/hotnovel <day|month> [10|20] -> 获取今日/本月热门轻小说", category="6")
+@register_command("/hotnovel", help_text="/hotnovel <day|month> [数量] -> 获取今日/本月热门轻小说(支持翻页)", category="6")
 async def handle_hotnovel(msg, is_group=True):
     parts = msg.raw_message.split()
     if len(parts) < 2:
@@ -2924,11 +2924,12 @@ async def handle_hotnovel(msg, is_group=True):
         return
 
     rank_type = parts[1].lower()
+    base_url = ""
     if rank_type == "day":
-        url = "https://www.wenku8.net/modules/article/toplist.php?sort=dayvisit"
+        base_url = "https://www.wenku8.net/modules/article/toplist.php?sort=dayvisit"
         type_name = "今日热门"
     elif rank_type in ["month", "mouth"]:
-        url = "https://www.wenku8.net/modules/article/toplist.php?sort=monthvisit"
+        base_url = "https://www.wenku8.net/modules/article/toplist.php?sort=monthvisit"
         type_name = "本月热门"
     else:
         reply = "目前只支持 day 或 month 喵~"
@@ -2938,51 +2939,61 @@ async def handle_hotnovel(msg, is_group=True):
             await bot.api.post_private_msg(msg.user_id, text=reply)
         return
 
-    count = 10
+    requested_count = 10
     if len(parts) >= 3:
         try:
             requested_count = int(parts[2])
-            if requested_count in [10, 20]:
-                count = requested_count
-            else:
-                reply = "目前只支持查看前 10 或 20 条喵，已为您默认显示前 10 条~"
-                if is_group:
-                    await msg.reply(text=reply)
-                else:
-                    await bot.api.post_private_msg(msg.user_id, text=reply)
+            if requested_count <= 0:
+                requested_count = 10
+            if requested_count > 100:  # 设置一个合理的上限避免滥用
+                requested_count = 100
         except ValueError:
             pass
-    else:
-        # 如果没指定，默认10，并提示可以选20
-        pass
 
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
         "Cookie": WENKU8_COOKIE
     }
 
+    all_matches = []
+    current_page = 1
+    
     try:
-        response = requests.get(url, headers=headers, timeout=10)
-        response.encoding = 'gbk'
-        content = response.text
-        
-        pattern = r'<div style="width:373px;height:136px;float:left;margin:5px 0px 5px 5px;">(.*?)</div>\s*</div>'
-        matches = re.findall(pattern, content, re.DOTALL)
-        
-        if not matches:
-            if "出现错误" in content or "登录" in content or "login" in content.lower():
-                reply = "❌ 榜单获取失败，Cookie 可能已失效喵！\n请管理员使用 `/set_wenku_cookie <新Cookie>` 命令更新 Cookie 喵~"
-            else:
-                reply = "没找到热门榜单喵，可能网页结构变了喵~"
+        while len(all_matches) < requested_count:
+            url = f"{base_url}&page={current_page}"
+            response = requests.get(url, headers=headers, timeout=10)
+            response.encoding = 'gbk'
+            content = response.text
             
-            if is_group:
-                await msg.reply(text=reply)
-            else:
-                await bot.api.post_private_msg(msg.user_id, text=reply)
-            return
+            pattern = r'<div style="width:373px;height:136px;float:left;margin:5px 0px 5px 5px;">(.*?)</div>\s*</div>'
+            page_matches = re.findall(pattern, content, re.DOTALL)
+            
+            if not page_matches:
+                if current_page == 1:
+                    if "出现错误" in content or "登录" in content or "login" in content.lower():
+                        reply = "❌ 榜单获取失败，Cookie 可能已失效喵！\n请管理员使用 `/set_wenku_cookie <新Cookie>` 命令更新 Cookie 喵~"
+                    else:
+                        reply = "没找到热门榜单喵，可能网页结构变了喵~"
+                    
+                    if is_group:
+                        await msg.reply(text=reply)
+                    else:
+                        await bot.api.post_private_msg(msg.user_id, text=reply)
+                    return
+                else:
+                    # 如果不是第一页没结果，说明到底了
+                    break
+            
+            all_matches.extend(page_matches)
+            if len(page_matches) < 20: # 每一页通常是20个，如果少于20说明是最后一页
+                break
+            
+            current_page += 1
+            if current_page > 5: # 最多翻5页(100条)，防止无限循环
+                break
 
         results = []
-        for match in matches[:count]:
+        for match in all_matches[:requested_count]:
             # 提取基本信息
             title_url_match = re.search(r'<b><a style="font-size:13px;" href="([^"]+)" title="([^"]+)" target="_blank">', match)
             book_url = title_url_match.group(1) if title_url_match else ""
@@ -3015,12 +3026,11 @@ async def handle_hotnovel(msg, is_group=True):
             img_match = re.search(r'<img src="([^"]+)"', match)
             cover_url = img_match.group(1) if img_match else f"https://img.wenku8.com/image/{node}/{book_id}/{book_id}s.jpg"
 
-            # 构造下载链接 (参考 novel_details2.json 的格式)
-            # 实际上 wenku8 的下载链接比较复杂，这里先用一个常见的格式
+            # 构造下载链接
             download_url = f"https://dl.wenku8.com/down.php?type=txt&node={node}&id={book_id}"
             page_url = f"https://www.wenku8.net/book/{book_id}.htm"
 
-            # 更新全局 books 字典，这样 /info 命令就能直接查到这些书了
+            # 更新全局 books 字典
             books[title] = {
                 "author": author,
                 "category": category,
@@ -3046,10 +3056,7 @@ async def handle_hotnovel(msg, is_group=True):
         for i, (author, title, _) in enumerate(results):
             reply_text += f"{i+1}. 《{title}》 - {author}\n"
         
-        if len(parts) < 3:
-            reply_text += "\n💡 提示：默认显示前 10 条，使用 `/hotnovel <类型> 20` 可查看前 20 条喵~"
-        
-        reply_text += "\n\n请使用 `/info 编号` 查看详情，或 `/select 编号` 下载喵~"
+        reply_text += "\n请使用 `/info 编号` 查看详情，或 `/select 编号` 下载喵~"
         
         if is_group:
             await msg.reply(text=reply_text)
