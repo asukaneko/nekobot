@@ -2550,6 +2550,20 @@ async def handle_active_chat(msg, is_group=True):
 # 添加临时存储字典
 temp_selections = {}
 api_book = {}
+WENKU8_COOKIE = "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" # 去 www.wenku8.net 登录获取
+def load_wenku8_cookie():
+    global WENKU8_COOKIE
+    if os.path.exists("wenku8_cookie.txt"):
+        with open("wenku8_cookie.txt", "r", encoding="utf-8") as f:
+            WENKU8_COOKIE = f.read().strip()
+
+def save_wenku8_cookie(cookie):
+    global WENKU8_COOKIE
+    WENKU8_COOKIE = cookie
+    with open("wenku8_cookie.txt", "w", encoding="utf-8") as f:
+        f.write(cookie)
+
+load_wenku8_cookie()
 
 NOVEL_API_BASE_URLS = [
     "http://43.248.77.205:22222",
@@ -2897,6 +2911,184 @@ async def handle_random_novel(msg, is_group=True):
     else:
         await bot.api.post_private_msg(msg.user_id, rtf=reply)
         await bot.api.upload_private_file(msg.user_id, file=url,name=novel+".txt")
+
+@register_command("/hotnovel", help_text="/hotnovel <day|month> [10|20] -> 获取今日/本月热门轻小说", category="6")
+async def handle_hotnovel(msg, is_group=True):
+    parts = msg.raw_message.split()
+    if len(parts) < 2:
+        reply = "请输入查询类型喵~ 例如：/hotnovel day 或 /hotnovel month"
+        if is_group:
+            await msg.reply(text=reply)
+        else:
+            await bot.api.post_private_msg(msg.user_id, text=reply)
+        return
+
+    rank_type = parts[1].lower()
+    if rank_type == "day":
+        url = "https://www.wenku8.net/modules/article/toplist.php?sort=dayvisit"
+        type_name = "今日热门"
+    elif rank_type in ["month", "mouth"]:
+        url = "https://www.wenku8.net/modules/article/toplist.php?sort=monthvisit"
+        type_name = "本月热门"
+    else:
+        reply = "目前只支持 day 或 month 喵~"
+        if is_group:
+            await msg.reply(text=reply)
+        else:
+            await bot.api.post_private_msg(msg.user_id, text=reply)
+        return
+
+    count = 10
+    if len(parts) >= 3:
+        try:
+            requested_count = int(parts[2])
+            if requested_count in [10, 20]:
+                count = requested_count
+            else:
+                reply = "目前只支持查看前 10 或 20 条喵，已为您默认显示前 10 条~"
+                if is_group:
+                    await msg.reply(text=reply)
+                else:
+                    await bot.api.post_private_msg(msg.user_id, text=reply)
+        except ValueError:
+            pass
+    else:
+        # 如果没指定，默认10，并提示可以选20
+        pass
+
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Cookie": WENKU8_COOKIE
+    }
+
+    try:
+        response = requests.get(url, headers=headers, timeout=10)
+        response.encoding = 'gbk'
+        content = response.text
+        
+        pattern = r'<div style="width:373px;height:136px;float:left;margin:5px 0px 5px 5px;">(.*?)</div>\s*</div>'
+        matches = re.findall(pattern, content, re.DOTALL)
+        
+        if not matches:
+            if "出现错误" in content or "登录" in content or "login" in content.lower():
+                reply = "❌ 榜单获取失败，Cookie 可能已失效喵！\n请管理员使用 `/set_wenku_cookie <新Cookie>` 命令更新 Cookie 喵~"
+            else:
+                reply = "没找到热门榜单喵，可能网页结构变了喵~"
+            
+            if is_group:
+                await msg.reply(text=reply)
+            else:
+                await bot.api.post_private_msg(msg.user_id, text=reply)
+            return
+
+        results = []
+        for match in matches[:count]:
+            # 提取基本信息
+            title_url_match = re.search(r'<b><a style="font-size:13px;" href="([^"]+)" title="([^"]+)" target="_blank">', match)
+            book_url = title_url_match.group(1) if title_url_match else ""
+            title = title_url_match.group(2) if title_url_match else "未知"
+            
+            # 提取 ID
+            book_id = "0"
+            id_match = re.search(r'/book/(\d+)\.htm', book_url)
+            if id_match:
+                book_id = id_match.group(1)
+            
+            node = int(book_id) // 1000
+            
+            # 提取其他详细信息以供 /info 使用
+            author_cat_match = re.search(r'<p>作者:([^/]+)/分类:([^<]+)</p>', match)
+            author = author_cat_match.group(1) if author_cat_match else "未知"
+            category = author_cat_match.group(2) if author_cat_match else "未知"
+            
+            stats_match = re.search(r'<p>更新:([^/]+)/字数:([^/]+)/([^<]+)</p>', match)
+            last_date = stats_match.group(1) if stats_match else "未知"
+            word_count = stats_match.group(2) if stats_match else "未知"
+            is_serialize = stats_match.group(3) if stats_match else "未知"
+            
+            tags_match = re.search(r'Tags:<span[^>]*>([^<]+)</span>', match)
+            tags = tags_match.group(1) if tags_match else "无"
+            
+            intro_match = re.search(r'简介:([^<]+)', match)
+            introduction = intro_match.group(1).strip() if intro_match else "暂无简介"
+            
+            img_match = re.search(r'<img src="([^"]+)"', match)
+            cover_url = img_match.group(1) if img_match else f"https://img.wenku8.com/image/{node}/{book_id}/{book_id}s.jpg"
+
+            # 构造下载链接 (参考 novel_details2.json 的格式)
+            # 实际上 wenku8 的下载链接比较复杂，这里先用一个常见的格式
+            download_url = f"https://dl.wenku8.com/down.php?type=txt&node={node}&id={book_id}"
+            page_url = f"https://www.wenku8.net/book/{book_id}.htm"
+
+            # 更新全局 books 字典，这样 /info 命令就能直接查到这些书了
+            books[title] = {
+                "author": author,
+                "category": category,
+                "last_date": last_date,
+                "word_count": word_count,
+                "is_serialize": is_serialize,
+                "introduction": introduction,
+                "tags": tags,
+                "cover_url": cover_url,
+                "download_url": download_url,
+                "page": page_url,
+                "hot": "热门榜单书籍"
+            }
+            
+            results.append((author, title, download_url))
+
+        # 存储到临时选择列表
+        temp_selections[msg.user_id] = results
+        # 同时清空 api_book 避免干扰
+        api_book[msg.user_id] = {}
+
+        reply_text = f"✨ {type_name}前{len(results)}名如下喵：\n"
+        for i, (author, title, _) in enumerate(results):
+            reply_text += f"{i+1}. 《{title}》 - {author}\n"
+        
+        if len(parts) < 3:
+            reply_text += "\n💡 提示：默认显示前 10 条，使用 `/hotnovel <类型> 20` 可查看前 20 条喵~"
+        
+        reply_text += "\n\n请使用 `/info 编号` 查看详情，或 `/select 编号` 下载喵~"
+        
+        if is_group:
+            await msg.reply(text=reply_text)
+        else:
+            await bot.api.post_private_msg(msg.user_id, text=reply_text)
+
+    except Exception as e:
+        _log.error(f"Error in handle_hotnovel: {e}")
+        reply = f"获取热门榜单失败了喵，请稍后再试喵~"
+        if is_group:
+            await msg.reply(text=reply)
+        else:
+            await bot.api.post_private_msg(msg.user_id, text=reply)
+
+@register_command("/set_wenku_cookie", help_text="/set_wenku_cookie <Cookie> -> 更新文库8的Cookie(仅限管理员)", category="6", admin_show=True)
+async def handle_set_wenku_cookie(msg, is_group=True):
+    if str(msg.user_id) not in admin:
+        reply = "主人，这个功能只有管理员才能使用喵~"
+        if is_group:
+            await msg.reply(text=reply)
+        else:
+            await bot.api.post_private_msg(msg.user_id, text=reply)
+        return
+
+    new_cookie = msg.raw_message[len("/set_wenku_cookie"):].strip()
+    if not new_cookie:
+        reply = "请输入新的 Cookie 喵~"
+        if is_group:
+            await msg.reply(text=reply)
+        else:
+            await bot.api.post_private_msg(msg.user_id, text=reply)
+        return
+
+    save_wenku8_cookie(new_cookie)
+    reply = "✅ Cookie 更新成功喵！现在可以尝试使用 /hotnovel 喵~"
+    if is_group:
+        await msg.reply(text=reply)
+    else:
+        await bot.api.post_private_msg(msg.user_id, text=reply)
 
 mc = {}
 @register_command("/mc",help_text = "/mc <服务器地址> -> 发送mc服务器状态",category = "3")
