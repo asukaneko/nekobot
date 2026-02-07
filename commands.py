@@ -3071,6 +3071,53 @@ async def handle_hotnovel(msg, is_group=True):
         else:
             await bot.api.post_private_msg(msg.user_id, text=reply)
 
+@register_command("/res", help_text="/res <res值> -> 根据res编号下载轻小说", category="6")
+async def handle_novel_by_res(msg, is_group=True):
+    res_value = msg.raw_message[len("/res"):].strip()
+    if not res_value:
+        reply = "请输入要下载的res编号喵~例如：/res 1121"
+        if is_group:
+            await msg.reply(text=reply)
+        else:
+            await bot.api.post_private_msg(msg.user_id, text=reply)
+        return
+
+    target_title = None
+    target_info = None
+    for title, info in books.items():
+        if str(info.get("res")) == res_value:
+            target_title = title
+            target_info = info
+            break
+
+    if not target_info:
+        download_url = f"https://dl.wenku8.com/down.php?type=txt&node=1&id={res_value}"
+        reply = f"已开始下载res为 {res_value} 的轻小说喵~"
+        if is_group:
+            await msg.reply(text=reply)
+            await bot.api.post_group_file(msg.group_id, file=download_url)
+        else:
+            await bot.api.post_private_msg(msg.user_id, text=reply)
+            await bot.api.upload_private_file(msg.user_id, file=download_url, name=f"{res_value}.txt")
+        return
+
+    download_url = target_info.get("download_url")
+    if not download_url:
+        reply = "该轻小说没有可用的下载链接喵~"
+        if is_group:
+            await msg.reply(text=reply)
+        else:
+            await bot.api.post_private_msg(msg.user_id, text=reply)
+        return
+
+    reply = f"已开始下载《{target_title}》喵~"
+    if is_group:
+        await msg.reply(text=reply)
+        await bot.api.post_group_file(msg.group_id, file=download_url)
+    else:
+        await bot.api.post_private_msg(msg.user_id, text=reply)
+        await bot.api.upload_private_file(msg.user_id, file=download_url, name=target_title + ".txt")
+
 @register_command("/set_wenku_cookie", help_text="/set_wenku_cookie <Cookie> -> 更新文库8的Cookie(仅限管理员)", category="6", admin_show=True)
 async def handle_set_wenku_cookie(msg, is_group=True):
     if str(msg.user_id) not in admin:
