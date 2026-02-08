@@ -2606,22 +2606,8 @@ async def handle_find_book(msg, is_group=True):
             await bot.api.post_private_msg(msg.user_id, text=reply)
         return
 
-    # 模糊匹配书籍
-    matches = []
-    for title, book_info in books.items():
-        # 同时匹配原始书名和去除括号后的书名
-        clean_title = re.sub(r'\(.*?\)', '', title).strip()
-        if (search_term.lower() in title.lower() or search_term.lower() in clean_title.lower()):
-            author = book_info.get("author")
-            matches.append((author,title, book_info.get("download_url")))
-
+    matches = search_wenku8_books(search_term, "articlename")
     api_book[msg.user_id] = find_book_from_api(search_term)
-
-    if not matches:
-        matches2 = get_close_matches(search_term, books.keys(), n=5, cutoff=0.4)
-        for title in matches2:
-            author = books[title].get("author")
-            matches.append((author,title, books[title].get("download_url")))
 
     if not matches and not api_book[msg.user_id]:
         reply = f"没有找到包含'{search_term}'的轻小说喵~"
@@ -2659,12 +2645,7 @@ async def handle_find_author(msg, is_group=True):
             await bot.api.post_private_msg(msg.user_id, text=reply)
         return
 
-    # 模糊匹配作者
-    matches = []
-    for title, book_info in books.items():
-        author = book_info.get("author")
-        if search_term.lower() in author.lower():
-            matches.append((author, title, book_info.get("download_url")))
+    matches = search_wenku8_books(search_term, "author")
 
     if not matches:
         reply = f"没有找到包含'{search_term}'的作者喵~"
@@ -2685,7 +2666,66 @@ async def handle_find_author(msg, is_group=True):
     else:
         await bot.api.post_private_msg(msg.user_id, text=reply)
 
-        
+def search_wenku8_books(search_term: str, search_type: str) -> list:
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Cookie": WENKU8_COOKIE
+    }
+    import urllib.parse
+    try:
+        encoded_key = urllib.parse.quote(search_term.encode("gbk"))
+    except Exception:
+        return []
+    url = f"https://www.wenku8.net/modules/article/search.php?searchtype={search_type}&searchkey={encoded_key}"
+    try:
+        response = requests.get(url, headers=headers, timeout=10)
+    except Exception:
+        return []
+    response.encoding = "gbk"
+    content = response.text
+    pattern = r'<div style="width:373px;height:136px;float:left;margin:5px 0px 5px 5px;">(.*?)</div>\s*</div>'
+    page_matches = re.findall(pattern, content, re.DOTALL)
+    results = []
+    for match in page_matches:
+        title_url_match = re.search(r'<b><a style="font-size:13px;" href="([^"]+)" title="([^"]+)" target="_blank">', match)
+        book_url = title_url_match.group(1) if title_url_match else ""
+        title = title_url_match.group(2) if title_url_match else "未知"
+        book_id = "0"
+        id_match = re.search(r'/book/(\d+)\.htm', book_url)
+        if id_match:
+            book_id = id_match.group(1)
+        node = int(book_id) // 1000 if book_id.isdigit() else 0
+        author_cat_match = re.search(r'<p>作者:([^/]+)/分类:([^<]+)</p>', match)
+        author = author_cat_match.group(1) if author_cat_match else "未知"
+        category = author_cat_match.group(2) if author_cat_match else "未知"
+        stats_match = re.search(r'<p>更新:([^/]+)/字数:([^/]+)/([^<]+)</p>', match)
+        last_date = stats_match.group(1) if stats_match else "未知"
+        word_count = stats_match.group(2) if stats_match else "未知"
+        is_serialize = stats_match.group(3) if stats_match else "未知"
+        tags_match = re.search(r'Tags:<span[^>]*>([^<]+)</span>', match)
+        tags = tags_match.group(1) if tags_match else "无"
+        intro_match = re.search(r'简介:([^<]+)', match)
+        introduction = intro_match.group(1).strip() if intro_match else "暂无简介"
+        img_match = re.search(r'<img src="([^"]+)"', match)
+        cover_url = img_match.group(1) if img_match else f"https://img.wenku8.com/image/{node}/{book_id}/{book_id}s.jpg"
+        download_url = f"https://dl.wenku8.com/down.php?type=txt&node={node}&id={book_id}"
+        page_url = f"https://www.wenku8.net/book/{book_id}.htm"
+        books[title] = {
+            "author": author,
+            "category": category,
+            "last_date": last_date,
+            "word_count": word_count,
+            "is_serialize": is_serialize,
+            "introduction": introduction,
+            "tags": tags,
+            "cover_url": cover_url,
+            "download_url": download_url,
+            "page": page_url,
+            "hot": "搜索结果书籍"
+        }
+        results.append((author, title, download_url))
+    return results
+
 def find_book_from_api(search_term: str) -> list:
     """
     从API搜索小说
