@@ -3,7 +3,7 @@ from ncatbot.utils.config import config
 
 def load_config():
     config_parser = configparser.ConfigParser()
-    config_parser.read('config.ini')
+    config_parser.read('config.ini', encoding='utf-8')
 
     bot_uin = config_parser.get('BotConfig', 'bot_uin')
     root = config_parser.get('BotConfig', 'root')
