@@ -1,6 +1,7 @@
 import asyncio
 import logging
 
+import commands
 from commands import command_handlers, bot
 
 logging.getLogger().setLevel(logging.ERROR)
@@ -50,6 +51,47 @@ async def run_command(raw_message: str, is_group: bool = True, user_id: int = 12
     await handler(msg, is_group=is_group)
 
 
+async def run_chat(raw_message: str, is_group: bool = True, user_id: int = 123456, group_id: int = 654321):
+    if is_group:
+        content = commands.chat(
+            content=raw_message,
+            user_id=None,
+            group_id=group_id,
+            group_user_id=str(user_id),
+            image=False,
+            url=None,
+            video=None,
+        )
+    else:
+        content = commands.chat(
+            content=raw_message,
+            user_id=user_id,
+            group_id=None,
+            group_user_id=None,
+            image=False,
+            url=None,
+            video=None,
+        )
+
+    try:
+        parse = getattr(commands, "safe_parse_chat_response", None)
+        if parse is not None:
+            content, cmds = parse(content)
+        else:
+            cmds = []
+    except Exception:
+        cmds = []
+    print(f"[AI] {content}")
+    if cmds:
+        print(f"[AI 内嵌命令] {cmds}")
+        for cmd in cmds:
+            if isinstance(cmd, str):
+                cmd_str = cmd.strip()
+                if cmd_str:
+                    print(f"[AI 触发命令] {cmd_str}")
+                    await run_command(cmd_str, is_group=is_group, user_id=user_id, group_id=group_id)
+
+
 def main():
     print("commands 测试工具")
     print("输入 QQ 号与模式后，可以直接输入如 `/fb 书名`、`/fa 作者` 等命令进行测试")
@@ -73,7 +115,10 @@ def main():
             continue
         if raw.lower() in ("exit", "quit", "q"):
             break
-        asyncio.run(run_command(raw, is_group=is_group, user_id=user_id, group_id=group_id))
+        if raw.startswith("/"):
+            asyncio.run(run_command(raw, is_group=is_group, user_id=user_id, group_id=group_id))
+        else:
+            asyncio.run(run_chat(raw, is_group=is_group, user_id=user_id, group_id=group_id))
 
 
 if __name__ == "__main__":
