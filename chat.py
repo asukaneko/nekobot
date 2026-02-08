@@ -10,7 +10,7 @@ from ncatbot.core.element import Record,MessageChain
 from life_core import life_system
 
 config_parser = configparser.ConfigParser()
-config_parser.read('config.ini')
+config_parser.read('config.ini', encoding='utf-8')
 
 user_messages = {}
 group_messages = {}
