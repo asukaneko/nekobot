@@ -124,7 +124,7 @@ def write_admin():
         with open("admin.txt", "w", encoding="utf-8") as f:
             f.write("\n".join(admin) + "\n")  # 每行一个管理员ID
     except Exception as e:
-        print(f"写入管理员文件失败: {e}")
+        _log.error(f"写入管理员文件失败: {e}")
 
 def load_admin():
     try:
@@ -285,11 +285,11 @@ async def schedule_job_task(delay_hours: float,loop:bool,name:str, task_func, *a
         while True:
             await asyncio.sleep(delay_hours * 3600)  # 转换为秒
             await task_func(*args, **kwargs)
-            print(f"任务 {name} 执行完成")
+            _log.info(f"任务 {name} 执行完成")
     else:
         await asyncio.sleep(delay_hours * 3600)  # 转换为秒
         await task_func(*args, **kwargs)
-        print(f"任务 {name} 执行完成")
+        _log.info(f"任务 {name} 执行完成")
         del schedule_tasks[name]
 
 async def chatter(id):
@@ -349,7 +349,7 @@ async def chat_loop(id:str):
             await asyncio.sleep(60 * 60 * running[id]["interval"])
             
         except Exception as e:
-            print(f"主动聊天循环出错: {e}")
+            _log.error(f"主动聊天循环出错: {e}")
             await asyncio.sleep(60)  # 出错后等待1分钟再重试
 
 def write_blak_list():
@@ -362,7 +362,7 @@ def write_blak_list():
         with open(os.path.join(cache_dir,"blak_list.json"), "w", encoding="utf-8") as f:
             json.dump(black_list_comic, f, ensure_ascii=False, indent=2)
     except Exception as e:
-        print(f"写入黑名单文件失败: {e}")
+        _log.error(f"写入黑名单文件失败: {e}")
 
 def load_blak_list():
     """
@@ -387,7 +387,7 @@ def write_running():
         with open(os.path.join(cache_dir,"running.json"), "w", encoding="utf-8") as f:
             json.dump(running, f, ensure_ascii=False, indent=2)
     except Exception as e:
-        print(f"写入定时聊天开关文件失败: {e}")
+        _log.error(f"写入定时聊天开关文件失败: {e}")
 
 def normalize_timestamp(ts):
     try:
@@ -2549,7 +2549,7 @@ async def handle_active_chat(msg, is_group=True):
                 if "last_time" not in running[user_id]:
                     running[user_id]["last_time"] = time.time()
             except Exception as e:
-                print(f"获取最近联系人失败: {e}")
+                _log.error(f"获取最近联系人失败: {e}")
                 running[user_id]["last_time"] = time.time()
                 
         write_running()
@@ -2774,7 +2774,7 @@ def find_book_from_api(search_term: str) -> list:
 def download_api_book(id,name):
     base_url = get_novel_api_base_url()
     if not base_url:
-        print("下载失败：没有可用的API地址")
+        _log.error("下载失败：没有可用的API地址")
         return
     url = f"{base_url}/api/content"
     params = {
@@ -2784,7 +2784,7 @@ def download_api_book(id,name):
     try:
         response = requests.get(url, params=params, timeout=30)
     except Exception as e:
-        print(f"下载失败：{e}")
+        _log.error(f"下载失败：{e}")
         return
     if response.status_code == 200:
         content = response.text
@@ -2794,12 +2794,12 @@ def download_api_book(id,name):
         with open(path, "w", encoding="utf-8") as file:
             file.write(content)
     else:
-        print(f"下载失败，状态码：{response.status_code}")
+        _log.error(f"下载失败，状态码：{response.status_code}")
 
 def get_api_book_info(id):
     base_url = get_novel_api_base_url()
     if not base_url:
-        print("获取失败：没有可用的API地址")
+        _log.error("获取失败：没有可用的API地址")
         return None
     url = f"{base_url}/api/detail"
     params = {
@@ -2808,7 +2808,7 @@ def get_api_book_info(id):
     try:
         response = requests.get(url, params=params, timeout=10)
     except Exception as e:
-        print(f"获取失败：{e}")
+        _log.error(f"获取失败：{e}")
         return None
     if response.status_code == 200:
         raw = json.loads(response.text)
@@ -2830,7 +2830,7 @@ def get_api_book_info(id):
         return info
 
     else:
-        print(f"获取失败，状态码：{response.status_code}")
+        _log.error(f"获取失败，状态码：{response.status_code}")
         return None
 
 

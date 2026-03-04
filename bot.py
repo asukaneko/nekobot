@@ -180,7 +180,7 @@ async def _schedule_flush_user_text_buffer(user_id):
 
 async def _handle_plain_text_message(msg, raw_text, if_tts_local):
     try:
-        content = chat(raw_text, user_id=msg.user_id)
+        content = await asyncio.to_thread(chat, raw_text, user_id=msg.user_id)
     except Exception as e:
         try:
             _log.error(f"chat error: {e}")
@@ -189,7 +189,7 @@ async def _handle_plain_text_message(msg, raw_text, if_tts_local):
         return
     content, cmds = safe_parse_chat_response(content)
     if if_tts_local:
-        rtf = tts(content)
+        rtf = await asyncio.to_thread(tts, content)
         await safe_set_input_status(event_type=0,user_id=msg.user_id)
         await bot.api.post_private_msg(msg.user_id, rtf=rtf)
     else:
@@ -203,7 +203,7 @@ async def _handle_plain_text_message(msg, raw_text, if_tts_local):
             }
             msg2 = PrivateMessage(message)
             await handle_command(msg2, is_group=False)
-            time.sleep(1)
+            await asyncio.sleep(1)
 
 async def get_recent_group_messages(group_id, count=20):
     """获取最近的群聊消息作为上下文"""
@@ -370,14 +370,20 @@ def recognize_image(iurl):
             files = {"file": ("image.jpg", f, "image/jpeg")}
             data = {"use_correction": "1"}
             resp = requests.post(url, files=files, data=data, timeout=30)
-            print(resp.status_code)
-            print(json.dumps(resp.json(), indent=2, ensure_ascii=False))
+            _log.debug(f"人物识别API响应状态码: {resp.status_code}")
+            _log.debug(f"人物识别API响应内容: {resp.json()}")
         os.remove("image.jpg")
-        return "这是来自"+resp.json()['faces'][0]['anime']+"的"+resp.json()['faces'][0]['name']+"，识别结果的置信度为"+str(resp.json()['faces'][0]['score'])
-
+        
+        resp_data = resp.json()
+        if resp_data.get("faces") and len(resp_data["faces"]) > 0:
+            face = resp_data["faces"][0]
+            return f"这是来自{face.get('anime', '未知')}{face.get('name', '未知')}的，识别结果的置信度为{face.get('score', 0)}"
+        return "未识别到人物"
+        
     except Exception as e:
         _log.error(f"识别失败: {e}")
-        os.remove("image.jpg")
+        if os.path.exists("image.jpg"):
+            os.remove("image.jpg")
         return "识别失败"
 
 @bot.group_event()
@@ -440,10 +446,10 @@ async def on_group_message(msg: GroupMessage):
             if recent_msgs:
                 ori_content = f"【群聊上下文记录】\n{recent_msgs}\n\n【当前消息】\n{ori_content}\n\n请根据以上上下文记录，理解并回复当前这条@全体成员的消息。"
 
-        content = chat(ori_content, group_id=msg.group_id,group_user_id=msg.sender.nickname)
+        content = await asyncio.to_thread(chat, ori_content, group_id=msg.group_id, group_user_id=msg.sender.nickname)
         content, cmds = safe_parse_chat_response(content)
         if if_tts:
-            rtf = tts(content)
+            rtf = await asyncio.to_thread(tts, content)
             await bot.api.post_group_msg(msg.group_id, rtf=rtf)
         await msg.reply(text=content)
         if cmds:
@@ -455,7 +461,7 @@ async def on_group_message(msg: GroupMessage):
                 }
                 msg2 = GroupMessage(message)
                 await handle_command(msg2, is_group=True)
-                time.sleep(1)
+                await asyncio.sleep(1)
 
     if msg.message[0].get("type") == "reply" and msg.message[1].get("type") == "at" and msg.message[1].get("data").get("qq") == bot_id:
         #如果是回复机器人的消息
@@ -564,6 +570,8 @@ async def on_group_message(msg: GroupMessage):
             await msg.reply(text=res)
             return
 
+        # 处理普通文本回复
+        reply_text = "这是被回复的消息：" + str(msg_obj.get("data", {}).get("raw_message", "")) + "。 "
         content = chat(reply_text+ori_content, group_id=msg.group_id,group_user_id=msg.sender.nickname)
         content, cmds = safe_parse_chat_response(content)
         if if_tts:
@@ -579,7 +587,7 @@ async def on_group_message(msg: GroupMessage):
                 }
                 msg2 = GroupMessage(message)
                 await handle_command(msg2, is_group=True)
-                time.sleep(1) 
+                await asyncio.sleep(1) 
 
     try:
         if not msg.message:
@@ -657,7 +665,7 @@ async def on_group_message(msg: GroupMessage):
             }
             msg2 = GroupMessage(message)
             await handle_command(msg2, is_group=True)
-            time.sleep(1)
+            await asyncio.sleep(1)
 
 @bot.private_event()
 async def on_private_message(msg: PrivateMessage):
@@ -792,7 +800,7 @@ async def on_private_message(msg: PrivateMessage):
         if msg.message[0].get("type") == "reply": #处理回复
             reply_id = msg.message[0].get("data").get("id")
             msg_obj = await bot.api.get_msg(message_id=reply_id)
-            print(msg_obj)
+            _log.debug(f"私聊回复消息内容: {msg_obj}")
 
             if msg_obj.get("data").get("message")[0].get("type") == "image": #处理图片
                 url = msg_obj.get("data").get("message")[0].get("data").get("url")
@@ -835,7 +843,7 @@ async def on_private_message(msg: PrivateMessage):
     
     if msg.message[0].get("type") == "forward": # 处理转发消息
         msg_obj = await bot.api.get_msg(message_id=msg.message_id)
-        print(msg_obj)
+        _log.debug(f"私聊转发消息内容: {msg_obj}")
         res = deal_forward(msg_obj)
         content = chat(res, user_id=msg.user_id)
         content, _ = safe_parse_chat_response(content)
