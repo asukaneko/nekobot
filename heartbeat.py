@@ -6,7 +6,6 @@ import os
 import logging
 from datetime import datetime
 from chat import ai_client, user_messages, load_prompt
-from life_core import life_system
 
 _log = logging.getLogger(__name__)
 
@@ -51,6 +50,7 @@ class HeartbeatCore:
         :return: next_interval (float) 下次唤醒间隔(小时)，如果为None则保持原值
         """
         user_id = str(user_id)
+        _log.info(f"[Heartbeat] 开始处理用户 {user_id} 的心跳请求，间隔: {interval}小时")
         
         # 1. 获取上下文
         history = user_messages.get(user_id, [])
@@ -60,6 +60,7 @@ class HeartbeatCore:
 
         # 获取用户画像
         profile = self.load_user_profile(user_id)
+        _log.info(f"[Heartbeat] 用户 {user_id} 历史记录数: {len(history)}")
         
         # 截取最近聊天记录 (最近 20 条，避免 token 过多)
         recent_msgs = history[-20:]
@@ -72,8 +73,6 @@ class HeartbeatCore:
             history_text += f"{role}: {content}\n"
 
         prompt = load_prompt(user_id=user_id)
-        # 注入生命周期 Prompt
-        prompt += life_system.get_prompt_suffix(user_id=user_id)
         
         # 2. 构建 Prompt
         system_prompt = f"""
@@ -110,6 +109,7 @@ class HeartbeatCore:
 """
         
         # 3. 调用 LLM
+        _log.info(f"[Heartbeat] 正在调用 LLM 为用户 {user_id} 进行心跳思考...")
         try:
             messages_payload = [
                 {"role": "system", "content": system_prompt},
@@ -119,6 +119,7 @@ class HeartbeatCore:
             response = ai_client.chat_completion(messages_payload, model=ai_client.model)
             content = response.choices[0].message.content
             content = ai_client.clean_response(content)
+            _log.info(f"[Heartbeat] 用户 {user_id} LLM 返回原始内容: {content[:200]}...")
             
             # 尝试修复 JSON
             try:
@@ -135,6 +136,8 @@ class HeartbeatCore:
             msgs = result.get("messages", [])
             new_profile = result.get("update_profile")
             next_interval = result.get("next_interval")
+            
+            _log.info(f"[Heartbeat] 用户 {user_id} 决策结果 - should_chat: {should_chat}, thought: {thought}, messages: {msgs}, next_interval: {next_interval}")
 
             if next_interval is not None:
                 try:
@@ -186,7 +189,10 @@ class HeartbeatCore:
             
             return next_interval
                     
+        except json.JSONDecodeError as e:
+            _log.error(f"[Heartbeat] 用户 {user_id} JSON 解析失败: {e}, 内容: {content[:500] if content else 'empty'}")
+            return None
         except Exception as e:
-            _log.error(f"[Heartbeat] 思考过程异常: {e}")
+            _log.error(f"[Heartbeat] 用户 {user_id} 思考过程异常: {e}")
             return None
 
