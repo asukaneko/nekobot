@@ -183,7 +183,10 @@ async def _handle_plain_text_message(msg, raw_text, if_tts_local):
         content = await asyncio.to_thread(chat, raw_text, user_id=msg.user_id)
     except Exception as e:
         try:
-            _log.error(f"chat error: {e}")
+            if "interpreter shutdown" in str(e):
+                pass
+            else:
+                _log.error(f"chat error: {e}")
         except Exception:
             pass
         return

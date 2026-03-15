@@ -32,10 +32,11 @@ voice = config_parser.get('voice','voice')
 search_api_key = config_parser.get('search','api_key')
 search_api_url = config_parser.get('search','api_url')
 video_api = config_parser.get('video','api_key')
+silicon_api_key = config_parser.get('ApiKey', 'silicon_api_key')
 
 
 class AIClient:
-    def __init__(self, api_key: str, base_url: str, model: str, pic_model: str, search_api_key: str, search_api_url: str, video_api: str):
+    def __init__(self, api_key: str, base_url: str, model: str, pic_model: str, search_api_key: str, search_api_url: str, video_api: str, silicon_api_key: str):
         self.api_key = api_key
         self.base_url = base_url
         self.model = model
@@ -43,6 +44,7 @@ class AIClient:
         self.search_api_key = search_api_key
         self.search_api_url = search_api_url
         self.video_api = video_api
+        self.silicon_api_key = silicon_api_key
 
     @staticmethod
     def clean_response(content: str) -> str:
@@ -64,7 +66,10 @@ class AIClient:
         url_base = (self.base_url or "").rstrip("/")
         if not url_base:
             raise ValueError("base_url 未配置")
-        url = f"{url_base}/chat/completions"
+        if "/chat/completions" in url_base or "/chatcompletion" in url_base:
+            url = url_base
+        else:
+            url = f"{url_base}/chat/completions"
         headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json"
@@ -77,6 +82,11 @@ class AIClient:
         resp = requests.post(url, json=payload, headers=headers)
         resp.raise_for_status()
         data = resp.json()
+
+        # 调试日志
+        if not data.get("choices"):
+            print(f"[DEBUG] API响应没有choices: {data}")
+
         content = ""
         try:
             content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
@@ -107,7 +117,7 @@ class AIClient:
     def silicon_chat(self, model_name: str, messages):
         url = "https://api.siliconflow.cn/v1/chat/completions"
         headers = {
-            "Authorization": f"Bearer {self.api_key}",
+            "Authorization": f"Bearer {self.silicon_api_key}",
             "Content-Type": "application/json"
         }
         payload = {
@@ -276,10 +286,13 @@ class AIClient:
                 ]
             }
         ]
-        response = self.silicon_chat("Qwen/Qwen2.5-7B-Instruct", messages)
         try:
-            return int(self.clean_response(response.json()["choices"][0]["message"]["content"])) == 1
-        except Exception:
+            response = self.silicon_chat("Qwen/Qwen2.5-7B-Instruct", messages)
+            result = response.json()
+            print(f"[DEBUG] should_search API响应: {result}")
+            return int(self.clean_response(result["choices"][0]["message"]["content"])) == 1
+        except Exception as e:
+            print(f"[DEBUG] should_search 错误: {e}")
             return False
 
     def should_reply(self, content: str) -> float:
@@ -362,6 +375,7 @@ ai_client = AIClient(
     search_api_key=search_api_key,
     search_api_url=search_api_url,
     video_api=video_api,
+    silicon_api_key=silicon_api_key,
 )
 
 
@@ -574,7 +588,10 @@ def chat(content="", user_id=None, group_id=None, group_user_id=None,image=False
         stream=False
     )
     assistant_response = response.choices[0].message.content
-    
+
+    if not assistant_response:
+        print("[DEBUG] API返回内容为空")
+
     # 处理 markdown 代码块包裹的情况
     temp_content = assistant_response.strip()
     if temp_content.startswith("```json"):
@@ -790,8 +807,8 @@ def tts(content) -> MessageChain:
     speech_file_path = os.path.join(file_path , f"{name}.mp3")
 
     client = OpenAI(
-        api_key=api_key,
-        base_url="https://api.siliconflow.cn/v1"  #这也是硅基流动的模型，用同一个api
+        api_key=silicon_api_key,
+        base_url="https://api.siliconflow.cn/v1"
     )
 
     with client.audio.speech.with_streaming_response.create(
@@ -817,8 +834,7 @@ def upload_voice(file_path,name,text):
     """
     url = "https://api.siliconflow.cn/v1/uploads/audio/voice"
     headers = {
-        "Authorization": f"Bearer {api_key}"
-        # 从 https://cloud.siliconflow.cn/account/ak 获取
+        "Authorization": f"Bearer {silicon_api_key}"
     }
     files = {
         "file": open(fr"{file_path}", "rb")  # 参考音频文件
