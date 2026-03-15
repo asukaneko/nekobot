@@ -50,17 +50,17 @@ class HeartbeatCore:
         :return: next_interval (float) 下次唤醒间隔(小时)，如果为None则保持原值
         """
         user_id = str(user_id)
-        _log.info(f"[Heartbeat] 开始处理用户 {user_id} 的心跳请求，间隔: {interval}小时")
-        
+        _log.debug(f"[Heartbeat] 开始处理用户 {user_id} 的心跳请求，间隔: {interval}小时")
+
         # 1. 获取上下文
         history = user_messages.get(user_id, [])
         if not history:
-            _log.info(f"用户 {user_id} 无历史记录，跳过主动聊天")
+            _log.debug(f"用户 {user_id} 无历史记录，跳过主动聊天")
             return None
 
         # 获取用户画像
         profile = self.load_user_profile(user_id)
-        _log.info(f"[Heartbeat] 用户 {user_id} 历史记录数: {len(history)}")
+        _log.debug(f"[Heartbeat] 用户 {user_id} 历史记录数: {len(history)}")
         
         # 截取最近聊天记录 (最近 20 条，避免 token 过多)
         recent_msgs = history[-20:]
@@ -109,17 +109,17 @@ class HeartbeatCore:
 """
         
         # 3. 调用 LLM
-        _log.info(f"[Heartbeat] 正在调用 LLM 为用户 {user_id} 进行心跳思考...")
+        _log.debug(f"[Heartbeat] 正在调用 LLM 为用户 {user_id} 进行心跳思考...")
         try:
             messages_payload = [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": f"当前时间：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n最近聊天记录：\n{history_text}\n\n请开始你的思考："}
             ]
-            
+
             response = ai_client.chat_completion(messages_payload, model=ai_client.model)
             content = response.choices[0].message.content
             content = ai_client.clean_response(content)
-            _log.info(f"[Heartbeat] 用户 {user_id} LLM 返回原始内容: {content[:200]}...")
+            _log.debug(f"[Heartbeat] 用户 {user_id} LLM 返回原始内容: {content[:200]}...")
             
             # 尝试修复 JSON
             try:
@@ -137,7 +137,7 @@ class HeartbeatCore:
             new_profile = result.get("update_profile")
             next_interval = result.get("next_interval")
             
-            _log.info(f"[Heartbeat] 用户 {user_id} 决策结果 - should_chat: {should_chat}, thought: {thought}, messages: {msgs}, next_interval: {next_interval}")
+            _log.info(f"[Heartbeat] 用户 {user_id} 决策结果 - should_chat: {should_chat}, next_interval: {next_interval}")
 
             if next_interval is not None:
                 try:
@@ -146,7 +146,7 @@ class HeartbeatCore:
                 except ValueError:
                     next_interval = None
 
-            _log.info(f"[Heartbeat] User: {user_id}, Chat: {should_chat}, Next: {next_interval}h, Thought: {thought}")
+            _log.debug(f"[Heartbeat] User: {user_id}, Chat: {should_chat}, Next: {next_interval}h, Thought: {thought}")
             
             # 更新画像
             if new_profile and isinstance(new_profile, dict):

@@ -2413,22 +2413,22 @@ async def auto_active_chat_task():
             _log.debug(f"主动聊天定时任务检查中... 当前时间: {now.strftime('%Y-%m-%d %H:%M:%S')}")
             if 8 <= now.hour < 24:
                 current_time = time.time()
-                _log.info(f"[主动聊天] 正在检查 {len(running)} 个用户的主动聊天状态")
+                _log.debug(f"[主动聊天] 正在检查 {len(running)} 个用户的主动聊天状态")
                 for user_id, info in list(running.items()):
                     if not info.get("active", False):
                         continue
                     interval = float(info.get("interval", 1.0))
                     last_time = normalize_timestamp(info.get("last_time", 0))
-                    _log.info(f"[主动聊天] 用户 {user_id} - interval: {interval}h, last_time: {last_time}, current_time: {current_time}")
+                    _log.debug(f"[主动聊天] 用户 {user_id} - interval: {interval}h, last_time: {last_time}, current_time: {current_time}")
                     if last_time == 0:
                         running[user_id]["last_time"] = current_time
                         write_running()
-                        _log.info(f"[主动聊天] 用户 {user_id} 初始化 last_time")
+                        _log.debug(f"[主动聊天] 用户 {user_id} 初始化 last_time")
                         continue
                     time_diff_hours = (current_time - last_time) / 3600
-                    _log.info(f"[主动聊天] 用户 {user_id} 距离上次互动: {time_diff_hours:.2f} 小时")
+                    _log.debug(f"[主动聊天] 用户 {user_id} 距离上次互动: {time_diff_hours:.2f} 小时")
                     if current_time - last_time >= 60 * 60 * interval:
-                        _log.info(f"[主动聊天] 用户 {user_id} 达到触发条件，准备调用 heartbeat")
+                        _log.debug(f"[主动聊天] 用户 {user_id} 达到触发条件，准备调用 heartbeat")
                         try:
                             next_interval = await heartbeat_core.process_user(int(user_id), interval)
                             if next_interval is not None:
@@ -2438,7 +2438,7 @@ async def auto_active_chat_task():
                         except Exception as e:
                             _log.error(f"主动聊天用户 {user_id} 发送失败: {e}")
                     else:
-                        _log.info(f"[主动聊天] 用户 {user_id} 未达到触发条件 (需要 {60 * 60 * interval}秒，已过 {current_time - last_time}秒)")
+                        _log.debug(f"[主动聊天] 用户 {user_id} 未达到触发条件 (需要 {60 * 60 * interval}秒，已过 {current_time - last_time}秒)")
             else:
                 _log.debug(f"[主动聊天] 当前时间 {now.hour} 点，不在 8-24 点主动聊天时段，跳过")
             await asyncio.sleep(60)
