@@ -1,0 +1,18 @@
+version: "3.9"
+
+services:
+  tgbot:
+    image: python:latest
+    container_name: tgbot
+    working_dir: /app
+    volumes:
+      # 宿主机代码路径 -> 容器内 /app
+      - /vol1/1000/docker/python/tgbot:/app
+    command: >
+      sh -c "pip config set global.index-url https://mirrors.aliyun.com/pypi/simple &&
+             pip install -r requirements.txt &&
+             python telegram_bot.py"
+    environment:
+      - PYTHONUNBUFFERED=1
+      - TZ=Asia/Shanghai
+    restart: unless-stopped

@@ -15,3 +15,14 @@ __pycache__/chat.cpython-312.pyc
 __pycache__/config.cpython-312.pyc
 .gitignore
 find.json
+config.ini
+edgedriver_win64
+wenku8_cookie.txt
+saved_message
+cache
+admin.txt
+data
+switches.json
+__pycache__
+config.copy.ini
+todo
