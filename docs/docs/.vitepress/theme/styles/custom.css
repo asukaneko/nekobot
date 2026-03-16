@@ -1,0 +1,51 @@
+:root {
+  /* hero标题渐变色 
+  --vp-home-hero-name-color: transparent;
+  --vp-home-hero-name-background: -webkit-linear-gradient(120deg, #bd34fe, #41d1ff);
+  */
+  
+   /* brand按钮 */
+  --vp-button-brand-bg: #CE9FFC;
+
+  --vp-button-brand-hover-border: #F6CEEC;
+  --vp-button-brand-hover-text: #fff;
+  --vp-button-brand-hover-bg: #d879d1e4;
+
+  --vp-button-brand-active-border: #F6CEEC;
+  --vp-badge-tip-border: transparent;
+  
+}
+
+.dark {
+  --vp-c-brand-1: #E2B0FF;
+  --vp-c-brand-2: #E2B0FF;
+  --vp-c-brand-3: #E2B0FF;
+}
+
+.VPDoc h1 {
+  background: -webkit-linear-gradient(10deg, #CE9FFC 5%, #7367F0 15%);
+  background-clip: text;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+.vp-doc a {
+    text-decoration: none;
+}
+
+
+/* VPFeatures 页卡悬浮效果 */
+.VPFeatures .items .item {
+  transition: transform 0.3s;
+}
+
+.VPFeatures .items .item:hover {
+  transform: translateY(-5px);
+}
+
+.medium-zoom-overlay {
+  z-index: 30;
+}
+
+.medium-zoom-image {
+  z-index: 9999 !important;/* 给的值是21，但是实测盖不住，直接999 */
+}
