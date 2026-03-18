@@ -23,6 +23,34 @@ except ImportError:
 _log = logging.getLogger(__name__)
 
 
+class WebMessageAdapter:
+    """Web 消息适配器，用于兼容 QQ 命令处理"""
+    def __init__(self, content: str, user_id: str, session_id: str, server: 'WebChatServer'):
+        self.raw_message = content
+        self.user_id = user_id
+        self.group_id = None  # Web 端没有群聊概念
+        self.session_id = session_id
+        self.server = server
+        self._reply_text = None
+        self._reply_image = None
+
+    async def reply(self, text: str = None, image: str = None):
+        """模拟 QQ 消息的 reply 方法"""
+        if text:
+            self._reply_text = text
+            # 通过 WebSocket 发送回复
+            self.server.socketio.emit('new_message', {
+                'id': str(uuid.uuid4()),
+                'role': 'assistant',
+                'content': text,
+                'timestamp': datetime.now().isoformat(),
+                'sender': 'AI',
+                'source': 'web'
+            }, room=self.session_id)
+        if image:
+            self._reply_image = image
+
+
 class WebChatServer:
     """Web 聊天服务器"""
 
@@ -193,7 +221,8 @@ class WebChatServer:
             "month": 0,
             "avg_per_chat": 0,
             "estimated_cost": "0.00",
-            "history": []
+            "history": [],
+            "sessions": {}
         }
         
         # 默认系统日志
@@ -474,7 +503,26 @@ class WebChatServer:
             token_stats_file = os.path.join(self.data_dir, 'token_stats.json')
             if os.path.exists(token_stats_file):
                 with open(token_stats_file, 'r', encoding='utf-8') as f:
-                    self.token_stats = json.load(f)
+                    saved_stats = json.load(f)
+                    # 检查是否是今天的数据
+                    today_str = datetime.now().strftime('%Y-%m-%d')
+                    history = saved_stats.get('history', [])
+                    if history:
+                        last_date = history[-1].get('date', '')
+                        if last_date != today_str:
+                            # 新的一天，将昨天的数据保存到历史，重置 today
+                            yesterday_total = saved_stats.get('today', 0)
+                            if yesterday_total > 0 and last_date:
+                                saved_stats['history'].append({
+                                    'date': last_date,
+                                    'input': yesterday_total // 2,
+                                    'output': yesterday_total // 2,
+                                    'total': yesterday_total,
+                                    'cost': 0.0,
+                                    'message_count': 0
+                                })
+                            saved_stats['today'] = 0
+                    self.token_stats = saved_stats
             
             # 加载设置
             settings_file = os.path.join(self.data_dir, 'settings.json')
@@ -1022,41 +1070,16 @@ class WebChatServer:
             _log.error(f"AI response error: {e}", exc_info=True)
             return f"AI 服务出错: {str(e)}"
 
-    def _get_ai_response_with_images(self, messages: List[Dict], image_urls: List[str]) -> str:
+    def _get_ai_response_with_images(self, messages: List[Dict], image_urls: List[str], user_question: str = None) -> str:
         """获取带图片的 AI 回复（多模态）"""
         if not self.ai_client:
             _log.warning("AI client not initialized")
             return "AI 服务未配置，请在 AI 配置页面设置 API Key 和 Base URL。"
 
         try:
-            # 构建多模态消息
-            multimodal_messages = []
-            
-            # 添加系统提示
-            if messages and messages[0].get('role') == 'system':
-                multimodal_messages.append(messages[0])
-            
-            # 处理历史消息，只保留文本内容
-            for msg in messages[1:]:
-                role = msg.get('role', 'user')
-                content = msg.get('content', '')
-                multimodal_messages.append({'role': role, 'content': content})
-            
-            # 添加用户消息和图片
-            user_content = []
-            for img_url in image_urls:
-                user_content.append({'type': 'image_url', 'image_url': {'url': img_url}})
-            
-            # 添加文本询问
-            user_text = "请描述这些图片的内容。"
-            user_content.append({'type': 'text', 'text': user_text})
-            
-            multimodal_messages.append({'role': 'user', 'content': user_content})
-            
-            # 调用多模态AI - 使用 ai_client 中配置的 pic_model
+            # 获取图片模型
             pic_model = getattr(self.ai_client, 'pic_model', None)
             if not pic_model:
-                # 从配置文件读取
                 try:
                     import configparser
                     config = configparser.ConfigParser()
@@ -1064,48 +1087,142 @@ class WebChatServer:
                     pic_model = config.get('pic', 'model', fallback='glm-4v-flash')
                 except:
                     pic_model = 'glm-4v-flash'
-            
-            try:
-                response = self.ai_client.chat_completion(
-                    model=pic_model,
-                    messages=multimodal_messages,
-                    stream=False
-                )
-                content = response.choices[0].message.content
-                return content.strip()
-            except Exception as api_error:
-                # 如果多模态模型不可用，回退到普通文本响应
-                _log.warning(f"多模态模型不可用: {api_error}, 回退到普通AI响应")
-                return self._get_ai_response(messages_for_ai)
+
+            # 获取 silicon API key
+            silicon_api_key = getattr(self.ai_client, 'silicon_api_key', None)
+            if not silicon_api_key:
+                try:
+                    import configparser
+                    config = configparser.ConfigParser()
+                    config.read('config.ini', encoding='utf-8')
+                    silicon_api_key = config.get('ApiKey', 'silicon_api_key', fallback='')
+                except:
+                    silicon_api_key = ''
+
+            if not silicon_api_key:
+                _log.warning("Silicon API key not configured")
+                return "图片处理服务未配置 Silicon API Key。"
+
+            # 构建多模态消息
+            multimodal_messages = []
+
+            # 添加系统提示
+            if messages and messages[0].get('role') == 'system':
+                multimodal_messages.append(messages[0])
+
+            # 处理历史消息，只保留文本内容
+            for msg in messages[1:]:
+                role = msg.get('role', 'user')
+                content = msg.get('content', '')
+                multimodal_messages.append({'role': role, 'content': content})
+
+            # 构建用户内容（图片 + 文本）
+            user_content = []
+            for img_url in image_urls:
+                user_content.append({'type': 'image_url', 'image_url': {'url': img_url}})
+
+            # 添加用户的原始问题
+            if user_question:
+                user_text = user_question
+            else:
+                user_text = "请描述这些图片的内容并回答我的问题。"
+            user_content.append({'type': 'text', 'text': user_text})
+
+            multimodal_messages.append({'role': 'user', 'content': user_content})
+
+            # 使用 Silicon API 调用多模态模型
+            import requests
+            url = "https://api.siliconflow.cn/v1/chat/completions"
+            headers = {
+                "Authorization": f"Bearer {silicon_api_key}",
+                "Content-Type": "application/json"
+            }
+            payload = {
+                "model": pic_model,
+                "messages": multimodal_messages,
+                "stream": False
+            }
+
+            response = requests.post(url, json=payload, headers=headers, timeout=120)
+            response.raise_for_status()
+            data = response.json()
+
+            if not data.get("choices"):
+                return "图片处理返回结果为空。"
+
+            content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+            return content.strip() if content else "图片处理完成，但未返回内容。"
+
+        except ImportError:
+            _log.error("requests library not available")
+            return "图片处理失败：缺少 requests 库。"
         except Exception as e:
             _log.error(f"AI multimodal response error: {e}", exc_info=True)
             # 回退到普通响应
-            return self._get_ai_response(messages_for_ai)
+            if user_question:
+                temp_messages = messages.copy()
+                temp_messages.append({'role': 'user', 'content': user_question})
+                return self._get_ai_response(temp_messages)
+            return f"处理图片时出错: {str(e)}"
 
-    def _get_ai_response_with_tools(self, messages: List[Dict], tools: List[Dict]) -> Dict:
+    def _get_ai_response_with_tools(self, messages: List[Dict], tools: List[Dict], use_silicon: bool = True) -> Dict:
         """调用 AI 并支持工具"""
         try:
             if not self.ai_client:
                 return {'content': 'AI 服务未配置'}
 
-            # 检查 AI 客户端是否支持工具调用
-            url_base = (self.ai_base_url or "").rstrip("/")
-            url = f"{url_base}/chat/completions"
-
-            headers = {
-                "Authorization": f"Bearer {self.ai_api_key}",
-                "Content-Type": "application/json"
-            }
-
-            payload = {
-                "model": self.ai_model,
-                "messages": messages,
-                "tools": tools,
-                "tool_choice": "auto"
-            }
-
             import requests
-            resp = requests.post(url, json=payload, headers=headers)
+
+            if use_silicon:
+                # 使用 Silicon API（支持更多模型）
+                silicon_api_key = getattr(self.ai_client, 'silicon_api_key', None)
+                if not silicon_api_key:
+                    try:
+                        import configparser
+                        config = configparser.ConfigParser()
+                        config.read('config.ini', encoding='utf-8')
+                        silicon_api_key = config.get('ApiKey', 'silicon_api_key', fallback='')
+                    except:
+                        silicon_api_key = ''
+
+                if not silicon_api_key:
+                    _log.warning("Silicon API key not available, falling back to main API")
+                    use_silicon = False
+
+            if use_silicon:
+                # Silicon API 调用
+                url = "https://api.siliconflow.cn/v1/chat/completions"
+                headers = {
+                    "Authorization": f"Bearer {silicon_api_key}",
+                    "Content-Type": "application/json"
+                }
+                # Silicon 支持的工具调用模型
+                model = "Qwen/Qwen2.5-72B-Instruct"
+                payload = {
+                    "model": model,
+                    "messages": messages,
+                    "tools": tools,
+                    "tool_choice": "auto"
+                }
+                resp = requests.post(url, json=payload, headers=headers, timeout=60)
+            else:
+                # 使用主 API
+                url_base = (self.ai_base_url or "").rstrip("/")
+                url = f"{url_base}/chat/completions"
+
+                headers = {
+                    "Authorization": f"Bearer {self.ai_api_key}",
+                    "Content-Type": "application/json"
+                }
+
+                payload = {
+                    "model": self.ai_model,
+                    "messages": messages,
+                    "tools": tools,
+                    "tool_choice": "auto"
+                }
+                resp = requests.post(url, json=payload, headers=headers)
+
             resp.raise_for_status()
             data = resp.json()
 
@@ -1383,8 +1500,39 @@ class WebChatServer:
                     
                     # 更新 Token 统计（估算）
                     estimated_tokens = len(user_content) + len(assistant_content)
-                    self.token_stats['today'] += estimated_tokens
-                    self.token_stats['month'] += estimated_tokens
+                    input_tokens = len(user_content)
+                    output_tokens = len(assistant_content)
+                    self.token_stats['today'] = self.token_stats.get('today', 0) + estimated_tokens
+                    self.token_stats['month'] = self.token_stats.get('month', 0) + estimated_tokens
+                    
+                    # 更新历史记录
+                    today_str = datetime.now().strftime('%Y-%m-%d')
+                    history = self.token_stats.get('history', [])
+                    if not history or history[-1].get('date') != today_str:
+                        history.append({
+                            'date': today_str,
+                            'input': input_tokens,
+                            'output': output_tokens,
+                            'total': estimated_tokens,
+                            'cost': 0.0,
+                            'message_count': 1
+                        })
+                    else:
+                        history[-1]['input'] = history[-1].get('input', 0) + input_tokens
+                        history[-1]['output'] = history[-1].get('output', 0) + output_tokens
+                        history[-1]['total'] = history[-1].get('total', 0) + estimated_tokens
+                        history[-1]['message_count'] = history[-1].get('message_count', 0) + 1
+                    self.token_stats['history'] = history[-30:]  # 只保留最近30天
+                    
+                    # 更新会话统计
+                    if session_id:
+                        sessions_stats = self.token_stats.get('sessions', {})
+                        if session_id not in sessions_stats:
+                            sessions_stats[session_id] = {'input': 0, 'output': 0, 'total': 0}
+                        sessions_stats[session_id]['input'] = sessions_stats[session_id].get('input', 0) + input_tokens
+                        sessions_stats[session_id]['output'] = sessions_stats[session_id].get('output', 0) + output_tokens
+                        sessions_stats[session_id]['total'] = sessions_stats[session_id].get('total', 0) + estimated_tokens
+                        self.token_stats['sessions'] = sessions_stats
                     
                     # 通过 WebSocket 发送回复
                     self.socketio.emit('ai_response', {
@@ -1976,7 +2124,13 @@ class WebChatServer:
             for workflow in self.workflows:
                 if workflow['id'] == workflow_id:
                     data = request.json or {}
-                    trigger_data = data.get('trigger_data', {'source': 'manual', 'time': datetime.now().isoformat()})
+                    # 提取用户输入的内容
+                    user_content = data.get('content', '')
+                    trigger_data = {
+                        'source': 'manual',
+                        'content': user_content,
+                        'time': datetime.now().isoformat()
+                    }
                     self._execute_workflow(workflow_id, trigger_data)
                     return jsonify({'success': True, 'message': 'Workflow execution started'})
             return jsonify({'error': 'Workflow not found'}), 404
@@ -2899,17 +3053,38 @@ class WebChatServer:
                 self.socketio.emit('error', {'message': 'Session not found'}, room=request.sid)
                 return
 
-            # 构建完整内容（包含附件信息）
-            full_content = content + attachment_info
-            
+            # 检查是否是命令（以 / 开头）
+            if content and content.startswith('/'):
+                try:
+                    # 导入命令处理模块
+                    from nbot.commands import command_handlers
+                    import asyncio
+                    
+                    # 检查是否匹配任何命令
+                    for commands, handler in command_handlers.items():
+                        for cmd in commands:
+                            if content.startswith(cmd):
+                                # 创建 Web 消息适配器
+                                msg_adapter = WebMessageAdapter(content, sender, session_id, self)
+                                # 异步执行命令处理
+                                asyncio.create_task(handler(msg_adapter, is_group=False))
+                                return
+                except ImportError as e:
+                    _log.warning(f"无法导入命令处理模块: {e}")
+                except Exception as e:
+                    _log.error(f"命令处理错误: {e}")
+
+            # 构建消息（保留原始内容和附件信息）
+            temp_id = data.get('tempId')  # 获取前端发送的临时ID
             message = {
                 'id': str(uuid.uuid4()),
                 'role': 'user',
-                'content': full_content,
+                'content': content,  # 只保留原始文本内容
                 'timestamp': datetime.now().isoformat(),
                 'sender': sender,
                 'source': 'web',
-                'attachments': attachments
+                'attachments': attachments,
+                'tempId': temp_id  # 保留临时ID以便前端替换
             }
 
             self.sessions[session_id]['messages'].append(message)
@@ -2920,7 +3095,15 @@ class WebChatServer:
             self._save_data('sessions')
             
             # 触发 AI 回复（传递附件信息）
-            self._trigger_ai_response(session_id, full_content, sender, attachments)
+            # 构建给 AI 的完整内容（包含附件描述）
+            ai_content = content
+            if attachments and isinstance(attachments, list):
+                for att in attachments:
+                    if isinstance(att, dict):
+                        att_name = att.get('name', 'unknown')
+                        att_type = att.get('type', '')
+                        ai_content += f'\n[附件：{att_name}, 类型：{att_type}]'
+            self._trigger_ai_response(session_id, ai_content, sender, attachments)
 
         @self.socketio.on('typing')
         def handle_typing(data):
@@ -2962,23 +3145,144 @@ class WebChatServer:
                 if len(messages_for_ai) > MAX_HISTORY:
                     messages_for_ai = [messages_for_ai[0]] + messages_for_ai[-MAX_HISTORY:]
                 
-                # 检查是否有图片附件，如果有则使用多模态AI
+                # 检查附件并处理
                 image_urls = []
+                file_contents = []
+                
+                # 支持的文本文件MIME类型
+                TEXT_MIME_TYPES = [
+                    'text/plain', 'application/json', 'application/xml', 'text/csv',
+                    'text/yaml', 'application/x-yaml', 'application/yaml',
+                    'text/x-python', 'text/x-java', 'text/x-c', 'text/x-c++',
+                    'text/html', 'text/css', 'text/javascript', 'application/javascript',
+                    'text/markdown', 'text/x-markdown',
+                    'application/x-httpd-php', 'text/x-php'
+                ]
+                
+                # 根据扩展名判断是否为文本文件
+                TEXT_EXTENSIONS = ['.txt', '.json', '.xml', '.csv', '.yaml', '.yml', 
+                                   '.py', '.java', '.c', '.cpp', '.h', '.hpp',
+                                   '.html', '.css', '.js', '.ts', '.jsx', '.tsx',
+                                   '.md', '.markdown', '.php', '.rb', '.go', '.rs',
+                                   '.sh', '.bash', '.sql', '.ini', '.cfg', '.conf',
+                                   '.log', '.env', '.properties', '.toml']
+                
                 if attachments and isinstance(attachments, list):
                     for att in attachments:
                         if isinstance(att, dict):
                             att_type = att.get('type', '')
                             att_data = att.get('data', '')
-                            if isinstance(att_type, str) and att_type.startswith('image/') and att_data:
-                                # 使用 data URL 格式
-                                image_urls.append(att_data)
+                            att_name = att.get('name', 'unknown')
+                            
+                            if isinstance(att_type, str):
+                                # 图片附件
+                                if att_type.startswith('image/') and att_data:
+                                    image_urls.append(att_data)
+                                # 文本文件 - 提取内容
+                                elif att_type in TEXT_MIME_TYPES and att_data:
+                                    try:
+                                        # 从 data URL 提取内容
+                                        if att_data.startswith('data:'):
+                                            import base64
+                                            b64_data = att_data.split(',')[1] if ',' in att_data else att_data
+                                            text_content = base64.b64decode(b64_data).decode('utf-8', errors='ignore')
+                                            file_contents.append(f"【文件 {att_name} 内容】:\n{text_content[:10000]}")
+                                    except Exception as e:
+                                        _log.warning(f"提取文本文件失败: {att_name}, {e}")
+                                # 根据扩展名判断是否为文本文件
+                                elif any(att_name.lower().endswith(ext) for ext in TEXT_EXTENSIONS) and att_data:
+                                    try:
+                                        if att_data.startswith('data:'):
+                                            import base64
+                                            b64_data = att_data.split(',')[1] if ',' in att_data else att_data
+                                            text_content = base64.b64decode(b64_data).decode('utf-8', errors='ignore')
+                                            file_contents.append(f"【文件 {att_name} 内容】:\n{text_content[:10000]}")
+                                    except Exception as e:
+                                        _log.warning(f"提取文本文件失败: {att_name}, {e}")
+                                # PDF/Word 等其他文件 - 告知AI文件类型
+                                elif att_type:
+                                    file_contents.append(f"【文件 {att_name}】类型: {att_type} (文件内容需要OCR或专门解析)")
                 
+                # 合并文件内容到用户消息
+                enhanced_content = user_content
+                if file_contents:
+                    enhanced_content = user_content + "\n\n" + "\n\n".join(file_contents)
+                
+                # 检查是否有图片附件，如果有则使用多模态AI
                 if image_urls:
-                    # 使用多模态AI处理图片
-                    assistant_content = self._get_ai_response_with_images(messages_for_ai, image_urls)
+                    # 使用多模态AI处理图片，传递用户的原始问题
+                    assistant_content = self._get_ai_response_with_images(messages_for_ai, image_urls, enhanced_content)
+                    final_content = assistant_content
                 else:
-                    # 非图片附件，只传递文本
-                    assistant_content = self._get_ai_response(messages_for_ai)
+                    # 尝试使用工具调用（多轮）
+                    try:
+                        from nbot.services.tools import TOOL_DEFINITIONS, execute_tool
+                        enabled_tools = [t for t in TOOL_DEFINITIONS if t.get('enabled', True)]
+                        if enabled_tools:
+                            # 构建多轮消息
+                            tool_messages = messages_for_ai.copy()
+                            if file_contents and tool_messages and tool_messages[-1].get('role') == 'user':
+                                tool_messages[-1]['content'] = enhanced_content
+                            
+                            max_iterations = 5
+                            final_content = None
+                            
+                            for iteration in range(max_iterations):
+                                response = self._get_ai_response_with_tools(tool_messages, enabled_tools, use_silicon=True)
+                                
+                                if 'tool_calls' in response and response['tool_calls']:
+                                    tool_calls = response['tool_calls']
+                                    
+                                    # 添加 AI 回复到消息历史
+                                    tool_messages.append({
+                                        "role": "assistant",
+                                        "content": response.get('content', ''),
+                                        "tool_calls": [
+                                            {
+                                                "id": tc.get('id', str(uuid.uuid4())),
+                                                "type": "function",
+                                                "function": {
+                                                    "name": tc['name'],
+                                                    "arguments": json.dumps(tc['arguments'])
+                                                }
+                                            } for tc in tool_calls
+                                        ]
+                                    })
+                                    
+                                    # 执行所有工具调用
+                                    for tool_call in tool_calls:
+                                        tool_name = tool_call['name']
+                                        arguments = tool_call['arguments']
+                                        tool_result = execute_tool(tool_name, arguments)
+                                        tool_messages.append({
+                                            "role": "tool",
+                                            "tool_call_id": tool_call.get('id', ''),
+                                            "content": json.dumps(tool_result, ensure_ascii=False)
+                                        })
+                                else:
+                                    # AI 没有调用工具，得到最终回复
+                                    final_content = response.get('content', '')
+                                    break
+                            
+                            if not final_content:
+                                final_content = tool_messages[-1].get('content', '处理完成')
+                        else:
+                            # 无可用工具，使用普通 AI 调用
+                            if file_contents and messages_for_ai and messages_for_ai[-1].get('role') == 'user':
+                                messages_for_ai[-1]['content'] = enhanced_content
+                            final_content = self._get_ai_response(messages_for_ai)
+                    except ImportError:
+                        # 工具模块不可用，使用普通 AI 调用
+                        if file_contents and messages_for_ai and messages_for_ai[-1].get('role') == 'user':
+                            messages_for_ai[-1]['content'] = enhanced_content
+                        final_content = self._get_ai_response(messages_for_ai)
+                    except Exception as e:
+                        _log.warning(f"Tool calling error: {e}, falling back to normal AI")
+                        if file_contents and messages_for_ai and messages_for_ai[-1].get('role') == 'user':
+                            messages_for_ai[-1]['content'] = enhanced_content
+                        final_content = self._get_ai_response(messages_for_ai)
+                
+                assistant_content = final_content
                 
                 assistant_message = {
                     'id': str(uuid.uuid4()),
@@ -2992,8 +3296,39 @@ class WebChatServer:
                 
                 # 更新 Token 统计
                 estimated_tokens = len(user_content) + len(assistant_content)
-                self.token_stats['today'] += estimated_tokens
-                self.token_stats['month'] += estimated_tokens
+                input_tokens = len(user_content)
+                output_tokens = len(assistant_content)
+                self.token_stats['today'] = self.token_stats.get('today', 0) + estimated_tokens
+                self.token_stats['month'] = self.token_stats.get('month', 0) + estimated_tokens
+                
+                # 更新历史记录
+                today_str = datetime.now().strftime('%Y-%m-%d')
+                history = self.token_stats.get('history', [])
+                if not history or history[-1].get('date') != today_str:
+                    history.append({
+                        'date': today_str,
+                        'input': input_tokens,
+                        'output': output_tokens,
+                        'total': estimated_tokens,
+                        'cost': 0.0,
+                        'message_count': 1
+                    })
+                else:
+                    history[-1]['input'] = history[-1].get('input', 0) + input_tokens
+                    history[-1]['output'] = history[-1].get('output', 0) + output_tokens
+                    history[-1]['total'] = history[-1].get('total', 0) + estimated_tokens
+                    history[-1]['message_count'] = history[-1].get('message_count', 0) + 1
+                self.token_stats['history'] = history[-30:]
+                
+                # 更新会话统计
+                if session_id:
+                    sessions_stats = self.token_stats.get('sessions', {})
+                    if session_id not in sessions_stats:
+                        sessions_stats[session_id] = {'input': 0, 'output': 0, 'total': 0}
+                    sessions_stats[session_id]['input'] = sessions_stats[session_id].get('input', 0) + input_tokens
+                    sessions_stats[session_id]['output'] = sessions_stats[session_id].get('output', 0) + output_tokens
+                    sessions_stats[session_id]['total'] = sessions_stats[session_id].get('total', 0) + estimated_tokens
+                    self.token_stats['sessions'] = sessions_stats
                 
                 # 通过 WebSocket 发送回复
                 self.socketio.emit('ai_response', {

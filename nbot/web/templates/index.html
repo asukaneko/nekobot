@@ -1384,6 +1384,105 @@
 
         .message.user .message-time { color: rgba(255,255,255,0.7); }
 
+        .message-attachments {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-top: 8px;
+        }
+
+        .attachment-card {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 10px 14px;
+            background: rgba(0,0,0,0.15);
+            border-radius: 8px;
+            cursor: pointer;
+            transition: background 0.2s;
+            max-width: 280px;
+        }
+
+        .message.assistant .attachment-card {
+            background: var(--bg-hover);
+            border: 1px solid var(--border-color);
+        }
+
+        .attachment-card:hover {
+            background: rgba(0,0,0,0.25);
+        }
+
+        .message.assistant .attachment-card:hover {
+            background: var(--bg-tertiary);
+        }
+
+        .attachment-icon {
+            width: 40px;
+            height: 40px;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 18px;
+            flex-shrink: 0;
+        }
+
+        .attachment-icon.image {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        .attachment-icon.video {
+            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+            color: white;
+        }
+
+        .attachment-icon.audio {
+            background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+            color: white;
+        }
+
+        .attachment-icon.document {
+            background: linear-gradient(135deg, #fa709a 0%, #fee140 100%);
+            color: white;
+        }
+
+        .attachment-icon.default {
+            background: linear-gradient(135deg, #a8edea 0%, #fed6e3 100%);
+            color: #666;
+        }
+
+        .attachment-info {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .attachment-name {
+            font-size: 13px;
+            font-weight: 500;
+            color: inherit;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .attachment-meta {
+            font-size: 11px;
+            color: rgba(255,255,255,0.6);
+            margin-top: 2px;
+        }
+
+        .message.assistant .attachment-meta {
+            color: var(--text-muted);
+        }
+
+        .attachment-preview {
+            width: 120px;
+            height: 80px;
+            object-fit: cover;
+            border-radius: 6px;
+        }
+
         .chat-input-area {
             padding: 16px 20px;
             border-top: 1px solid var(--border-color);
@@ -2614,13 +2713,25 @@
                                     </div>
                                 </div>
 
-                                <div class="messages-container" ref="messagesContainer">
+                                <div class="messages-container" ref="messagesContainer" @scroll="handleMessagesScroll">
                                     <div v-for="msg in currentMessages" :key="msg.id" class="message" :class="msg.role">
                                         <div class="message-avatar">
                                             <i :class="msg.role === 'user' ? 'fas fa-user' : 'fas fa-robot'"></i>
                                         </div>
                                         <div class="message-content">
-                                            <div>{{ parseMessageContent(msg.content) }}</div>
+                                            <div v-if="msg.content">{{ parseMessageContent(msg.content, msg) }}</div>
+                                            <div v-if="msg.attachments && msg.attachments.length > 0" class="message-attachments">
+                                                <div v-for="(att, idx) in msg.attachments" :key="idx" class="attachment-card" @click="previewAttachment(att)">
+                                                    <img v-if="att.type && att.type.startsWith('image/')" :src="att.url || att.data" class="attachment-preview">
+                                                    <div v-else class="attachment-icon" :class="getAttachmentIconClass(att.type)">
+                                                        <i :class="getAttachmentIcon(att.type)"></i>
+                                                    </div>
+                                                    <div class="attachment-info">
+                                                        <div class="attachment-name">{{ att.name || '未知文件' }}</div>
+                                                        <div class="attachment-meta">{{ formatFileSize(att.size) }} · {{ att.type || '未知类型' }}</div>
+                                                    </div>
+                                                </div>
+                                            </div>
                                             <div class="message-time">
                                                 {{ formatFullTime(msg.timestamp) }}
                                                 <span v-if="msg.source === 'qq'"> · <i class="fab fa-qq"></i> QQ</span>
@@ -4903,6 +5014,7 @@
                 return {
                     isLoggedIn: false,
                     isLoading: false,
+                    isUserScrolling: false,
                     username: sessionStorage.getItem('username') || '',
                     password: '',
                     currentPage: 'dashboard',
@@ -6551,22 +6663,20 @@
                     const files = this.uploadedFiles;
                     this.uploadedFiles = [];
                     
-                    // 先在本地显示用户消息（包含文件信息）
-                    let fullContent = content;
-                    if (files.length > 0) {
-                        const fileInfo = files.map(f => `[文件: ${f.name}]`).join(' ');
-                        fullContent = content ? `${content}\n${fileInfo}` : fileInfo;
-                    }
+                    // 生成本地临时ID
+                    const tempId = 'local_' + Date.now();
                     
+                    // 本地显示用户消息（content只显示原始文本，附件卡片单独显示）
                     const userMessage = {
-                        id: 'local_' + Date.now(),
+                        id: tempId,
                         role: 'user',
-                        content: fullContent,
+                        content: content,
                         timestamp: new Date().toISOString(),
                         source: 'web',
                         attachments: files.map(f => ({
                             name: f.name,
                             type: f.type,
+                            size: f.size,
                             data: f.data
                         }))
                     };
@@ -6580,13 +6690,14 @@
                         // 通过 WebSocket 发送消息，触发 AI 回复（包含文件数据）
                         socket.emit('send_message', {
                             session_id: this.currentSession.id,
-                            content: fullContent,
+                            content: content,
                             sender: this.username,
                             attachments: files.map(f => ({
                                 name: f.name,
                                 type: f.type,
                                 data: f.data
-                            }))
+                            })),
+                            tempId: tempId  // 发送临时ID以便后端返回
                         });
                         
                     } catch (e) {
@@ -6804,15 +6915,15 @@
                 async executeWorkflow(workflow) {
                     this.isLoading = true;
                     try {
-                        // 使用工作流描述作为任务内容
-                        const triggerData = {
-                            source: 'manual',
-                            time: new Date().toISOString(),
-                            content: workflow.description || '请执行工作流任务'
-                        };
+                        // 提示用户输入任务内容
+                        const userContent = prompt('请输入工作流任务内容（可选）：', workflow.description || '');
+                        if (userContent === null) {
+                            this.isLoading = false;
+                            return;
+                        }
                         
                         await api.post(`/api/workflows/${workflow.id}/execute`, {
-                            trigger_data: triggerData
+                            content: userContent || workflow.description || '请执行工作流任务'
                         });
                         
                         this.showToast('工作流执行已启动', 'success');
@@ -7613,7 +7724,22 @@
                     socket.on('new_message', (msg) => {
                         console.log('Received new_message:', msg);
                         if (this.currentSession) {
-                            // 避免重复添加用户消息
+                            // 检查是否有临时ID（用户自己发送的消息）
+                            if (msg.tempId) {
+                                // 用服务器返回的消息替换本地临时消息
+                                const localIdx = this.currentMessages.findIndex(m => m.id === msg.tempId);
+                                if (localIdx !== -1) {
+                                    // 替换为服务器返回的消息（保留本地附件数据以防服务器没有）
+                                    const localMsg = this.currentMessages[localIdx];
+                                    this.currentMessages.splice(localIdx, 1, {
+                                        ...msg,
+                                        attachments: msg.attachments?.length ? msg.attachments : localMsg.attachments
+                                    });
+                                    return;
+                                }
+                            }
+                            
+                            // 检查是否已存在
                             const exists = this.currentMessages.find(m => m.id === msg.id);
                             if (!exists) {
                                 this.currentMessages.push(msg);
@@ -7648,7 +7774,21 @@
                 
                 scrollToBottom() {
                     const container = this.$refs.messagesContainer;
-                    if (container) container.scrollTop = container.scrollHeight;
+                    if (container && !this.isUserScrolling) {
+                        container.scrollTop = container.scrollHeight;
+                    }
+                },
+                
+                handleMessagesScroll() {
+                    const container = this.$refs.messagesContainer;
+                    if (!container) return;
+                    
+                    const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
+                    if (distanceFromBottom > 50) {
+                        this.isUserScrolling = true;
+                    } else {
+                        this.isUserScrolling = false;
+                    }
                 },
                 
                 formatTime(timestamp) {
@@ -7663,9 +7803,42 @@
                     return date.toLocaleString('zh-CN');
                 },
 
-                parseMessageContent(content) {
+                parseMessageContent(content, msg) {
                     if (!content) return '';
-                    // 如果内容是 JSON 字符串，尝试解析并提取 msg
+
+                    // 处理 markdown 代码块中的 JSON
+                    const codeBlockMatch = content.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
+                    if (codeBlockMatch) {
+                        const codeContent = codeBlockMatch[1].trim();
+                        if (codeContent.startsWith('{')) {
+                            try {
+                                const parsed = JSON.parse(codeContent);
+                                if (parsed && parsed.msg) {
+                                    return parsed.msg;
+                                }
+                            } catch (e) {
+                                // 解析失败，返回代码块内容
+                                return codeContent;
+                            }
+                        }
+                    }
+
+                    // 尝试提取文本中的 JSON 对象
+                    const jsonMatches = content.match(/\{[\s\S]*?"msg"[\s\S]*?\}/g);
+                    if (jsonMatches) {
+                        for (const jsonStr of jsonMatches) {
+                            try {
+                                const parsed = JSON.parse(jsonStr);
+                                if (parsed && parsed.msg) {
+                                    return parsed.msg;
+                                }
+                            } catch (e) {
+                                continue;
+                            }
+                        }
+                    }
+
+                    // 原始逻辑：检查是否以 { 开头
                     if (content.trim().startsWith('{')) {
                         try {
                             const parsed = JSON.parse(content);
@@ -7673,7 +7846,6 @@
                                 return parsed.msg;
                             }
                         } catch (e) {
-                            // 解析失败，尝试替换中文引号
                             try {
                                 const fixed = content.replace(/"/g, '"').replace(/"/g, '"');
                                 const parsed = JSON.parse(fixed);
@@ -7681,11 +7853,50 @@
                                     return parsed.msg;
                                 }
                             } catch (e2) {
-                                // 仍然失败，返回原始内容
                             }
                         }
                     }
                     return content;
+                },
+                
+                getAttachmentIcon(type) {
+                    if (!type) return 'fas fa-file';
+                    if (type.startsWith('image/')) return 'fas fa-image';
+                    if (type.startsWith('video/')) return 'fas fa-video';
+                    if (type.startsWith('audio/')) return 'fas fa-music';
+                    if (type.includes('pdf')) return 'fas fa-file-pdf';
+                    if (type.includes('word') || type.includes('document')) return 'fas fa-file-word';
+                    if (type.includes('excel') || type.includes('spreadsheet')) return 'fas fa-file-excel';
+                    if (type.includes('powerpoint') || type.includes('presentation')) return 'fas fa-file-powerpoint';
+                    if (type.includes('zip') || type.includes('rar') || type.includes('archive')) return 'fas fa-file-archive';
+                    if (type.includes('text/')) return 'fas fa-file-alt';
+                    return 'fas fa-file';
+                },
+                
+                getAttachmentIconClass(type) {
+                    if (!type) return 'default';
+                    if (type.startsWith('image/')) return 'image';
+                    if (type.startsWith('video/')) return 'video';
+                    if (type.startsWith('audio/')) return 'audio';
+                    if (type.includes('pdf') || type.includes('word') || type.includes('excel')) return 'document';
+                    return 'default';
+                },
+                
+                formatFileSize(size) {
+                    if (!size) return '';
+                    if (size < 1024) return size + ' B';
+                    if (size < 1024 * 1024) return (size / 1024).toFixed(1) + ' KB';
+                    if (size < 1024 * 1024 * 1024) return (size / (1024 * 1024)).toFixed(1) + ' MB';
+                    return (size / (1024 * 1024 * 1024)).toFixed(1) + ' GB';
+                },
+                
+                previewAttachment(att) {
+                    if (att.url) {
+                        window.open(att.url, '_blank');
+                    } else if (att.data && att.type && att.type.startsWith('image/')) {
+                        const win = window.open('', '_blank');
+                        win.document.write('<img src="' + att.data + '" style="max-width:100%;max-height:100vh;margin:auto;display:block;">');
+                    }
                 },
                 
                 formatNumber(num) {
