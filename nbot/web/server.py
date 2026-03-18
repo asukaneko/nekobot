@@ -1710,6 +1710,10 @@ class WebChatServer:
                 system_msg = session['messages'][0]
             
             session['messages'] = [system_msg] if system_msg else []
+            
+            # 保存到文件
+            self._save_data('sessions')
+            
             return jsonify({'success': True})
 
         @self.app.route('/api/sessions/<session_id>/chat', methods=['POST'])

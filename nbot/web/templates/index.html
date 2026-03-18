@@ -1398,6 +1398,7 @@
             overflow-wrap: break-word;
             word-wrap: break-word;
             hyphens: auto;
+            white-space: pre-wrap;
         }
 
         .message.user .message-content {
@@ -2818,7 +2819,7 @@
                                 </div>
 
                                 <!-- 滚动到底部按钮 -->
-                                <button v-if="showScrollToBottom" class="scroll-to-bottom-btn" @click="scrollToBottom" title="滚动到底部">
+                                <button v-if="showScrollToBottom" class="scroll-to-bottom-btn" @click="scrollToBottom(true)" title="滚动到底部">
                                     <i class="fas fa-arrow-down"></i>
                                 </button>
 
@@ -6714,22 +6715,46 @@
                 },
                 
                 async createNewSession() {
-                    this.isLoading = true;
+                    // 生成临时会话ID
+                    const tempId = 'temp_' + Date.now();
+                    const newSession = {
+                        id: tempId,
+                        name: `会话 ${new Date().toLocaleTimeString()}`,
+                        type: 'web',
+                        user_id: this.username,
+                        created_at: new Date().toISOString(),
+                        messages: [{ role: 'system', content: '你是一个AI助手' }]
+                    };
+                    
+                    // 前端立即添加会话到列表末尾
+                    this.sessions.push(newSession);
+                    this.showToast('会话创建成功', 'success');
+                    
+                    // 如果在聊天页面，立即切换到新会话
+                    if (this.currentPage === 'chat') {
+                        await this.selectSession(newSession);
+                    }
+                    
+                    // 后台同步到服务器
                     try {
                         const res = await api.post('/api/sessions', {
-                            name: `会话 ${new Date().toLocaleTimeString()}`,
+                            name: newSession.name,
                             type: 'web',
                             user_id: this.username
                         });
-                        await this.loadSessions();
-                        if (this.currentPage === 'chat') {
-                            await this.selectSession(res.data.session);
+                        // 更新为服务器返回的真实ID
+                        const serverSession = res.data.session;
+                        const idx = this.sessions.findIndex(s => s.id === tempId);
+                        if (idx !== -1) {
+                            this.sessions[idx].id = serverSession.id;
+                            // 如果当前正在使用这个会话，更新currentSession
+                            if (this.currentSession && this.currentSession.id === tempId) {
+                                this.currentSession.id = serverSession.id;
+                            }
                         }
-                        this.showToast('会话创建成功', 'success');
                     } catch (e) {
-                        this.showToast('创建会话失败', 'error');
-                    } finally {
-                        this.isLoading = false;
+                        console.error('同步会话到服务器失败:', e);
+                        this.showToast('会话同步失败，请刷新页面', 'warning');
                     }
                 },
                 
@@ -6831,9 +6856,15 @@
                     this.isLoading = true;
                     try {
                         await api.delete(`/api/sessions/${this.currentSession.id}/messages`);
-                        await this.loadMessages();
+                        // 手动清空当前消息列表（只保留系统消息）
+                        if (this.currentMessages.length > 0 && this.currentMessages[0].role === 'system') {
+                            this.currentMessages = [this.currentMessages[0]];
+                        } else {
+                            this.currentMessages = [];
+                        }
                         this.showToast('会话已清空', 'success');
                     } catch (e) {
+                        console.error('清空会话失败:', e);
                         this.showToast('清空失败', 'error');
                     } finally {
                         this.isLoading = false;
@@ -6842,17 +6873,26 @@
                 
                 async deleteSession() {
                     if (!confirm('确定要删除这个会话吗？')) return;
-                    this.isLoading = true;
+                    
+                    const sessionId = this.currentSession.id;
+                    const sessionIndex = this.sessions.findIndex(s => s.id === sessionId);
+                    
+                    // 前端立即删除
+                    this.sessions = this.sessions.filter(s => s.id !== sessionId);
+                    this.currentSession = null;
+                    this.currentMessages = [];
+                    this.showToast('会话已删除', 'success');
+                    
+                    // 后台同步删除
                     try {
-                        await api.delete(`/api/sessions/${this.currentSession.id}`);
-                        this.currentSession = null;
-                        this.currentMessages = [];
-                        await this.loadSessions();
-                        this.showToast('会话已删除', 'success');
+                        await api.delete(`/api/sessions/${sessionId}`);
                     } catch (e) {
-                        this.showToast('删除失败', 'error');
-                    } finally {
-                        this.isLoading = false;
+                        console.error('同步删除会话失败:', e);
+                        // 如果删除失败，恢复会话
+                        if (sessionIndex !== -1) {
+                            this.sessions.splice(sessionIndex, 0, { id: sessionId, name: '已删除的会话' });
+                        }
+                        this.showToast('删除同步失败，请刷新页面', 'warning');
                     }
                 },
                 
@@ -7859,10 +7899,17 @@
                     });
                 },
                 
-                scrollToBottom() {
+                scrollToBottom(force = false) {
                     const container = this.$refs.messagesContainer;
-                    if (container && !this.isUserScrolling) {
-                        container.scrollTop = container.scrollHeight;
+                    if (container) {
+                        // 强制滚动或用户没有手动滚动时才滚动
+                        if (force || !this.isUserScrolling) {
+                            // 使用平滑滚动动画
+                            container.scrollTo({
+                                top: container.scrollHeight,
+                                behavior: 'smooth'
+                            });
+                        }
                     }
                 },
                 
