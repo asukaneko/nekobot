@@ -33,22 +33,224 @@ class WebMessageAdapter:
         self.server = server
         self._reply_text = None
         self._reply_image = None
+        
+        # Web 端用户默认拥有 admin 权限
+        # 将 Web 端用户添加到 admin 列表
+        try:
+            from nbot.commands import admin
+            if str(user_id) not in admin:
+                admin.append(str(user_id))
+        except ImportError:
+            pass
+        
+        # 创建模拟的 QQ API 对象
+        self.api = self._create_mock_api()
+        
+        # 创建模拟的 bot 对象，用于兼容直接使用 bot.api 的命令
+        from types import SimpleNamespace
+        self.bot = SimpleNamespace(api=self.api)
 
-    async def reply(self, text: str = None, image: str = None):
-        """模拟 QQ 消息的 reply 方法"""
+    def _create_mock_api(self):
+        """创建模拟的 QQ API 对象，用于兼容 QQ 命令"""
+        adapter = self
+        
+        class MockAPI:
+            async def post_group_file(self, group_id, file=None, **kwargs):
+                """模拟发送群文件"""
+                if file:
+                    return await adapter.send_file(file)
+                return True
+            
+            async def upload_private_file(self, user_id, file=None, name=None, **kwargs):
+                """模拟发送私聊文件"""
+                if file:
+                    return await adapter.send_file(file, name)
+                return True
+            
+            async def post_private_msg(self, user_id, text=None, rtf=None, **kwargs):
+                """模拟发送私聊消息"""
+                if rtf:
+                    # 处理 MessageChain
+                    content = str(rtf) if hasattr(rtf, '__str__') else str(rtf)
+                elif text:
+                    content = text
+                else:
+                    content = ""
+                return await adapter.reply(text=content)
+            
+            async def post_group_msg(self, group_id, text=None, rtf=None, **kwargs):
+                """模拟发送群消息"""
+                return await self.post_private_msg(None, text=text, rtf=rtf)
+        
+        return MockAPI()
+    
+    async def reply(self, text: str = None, image: str = None, rtf=None):
+        """模拟 QQ 消息的 reply 方法
+        
+        Args:
+            text: 纯文本消息
+            image: 图片 URL 或 base64
+            rtf: MessageChain 对象（包含文本和图片）
+        """
+        # 处理 rtf (MessageChain)
+        if rtf is not None:
+            # 尝试从 MessageChain 提取文本和图片
+            content_text = ""
+            has_image = False
+            
+            # MessageChain 可能是列表或对象
+            if isinstance(rtf, list):
+                for item in rtf:
+                    if isinstance(item, str):
+                        content_text += item
+                    elif hasattr(item, 'text'):
+                        content_text += item.text
+                    elif hasattr(item, 'url') or hasattr(item, 'data'):
+                        has_image = True
+            elif hasattr(rtf, 'text'):
+                content_text = rtf.text
+            elif hasattr(rtf, '__str__'):
+                content_text = str(rtf)
+            
+            # 使用提取的文本
+            if content_text:
+                text = content_text
+        
         if text:
             self._reply_text = text
-            # 通过 WebSocket 发送回复
-            self.server.socketio.emit('new_message', {
+            # 构建助手消息
+            message = {
                 'id': str(uuid.uuid4()),
                 'role': 'assistant',
                 'content': text,
                 'timestamp': datetime.now().isoformat(),
                 'sender': 'AI',
                 'source': 'web'
-            }, room=self.session_id)
+            }
+            # 保存到 session
+            if self.session_id in self.server.sessions:
+                self.server.sessions[self.session_id]['messages'].append(message)
+                self.server._save_data('sessions')
+            # 通过 WebSocket 发送回复
+            self.server.socketio.emit('new_message', message, room=self.session_id)
         if image:
             self._reply_image = image
+
+    async def send_file(self, file_path: str, file_name: str = None):
+        """发送文件到 Web 端，支持下载
+
+        支持类型：
+        - 图片：png, jpg, jpeg, webp, ico, gif
+        - 文本：txt, json, yaml, xml, csv
+        - 文档：pdf, doc, docx, ppt, pptx
+        - 媒体：mp4, mp3, wav, ogg
+        """
+        import base64
+        import mimetypes
+        import os
+        import shutil
+
+        if not os.path.exists(file_path):
+            _log.error(f"文件不存在: {file_path}")
+            return False
+
+        if not file_name:
+            file_name = os.path.basename(file_path)
+
+        # 获取文件类型
+        mime_type, _ = mimetypes.guess_type(file_path)
+        if not mime_type:
+            mime_type = 'application/octet-stream'
+
+        # 获取文件扩展名
+        ext = os.path.splitext(file_path)[1].lower()
+
+        # 读取文件内容
+        try:
+            file_size = os.path.getsize(file_path)
+        except Exception as e:
+            _log.error(f"获取文件大小失败: {file_path}, 错误: {e}")
+            return False
+
+        # 判断文件类型
+        is_image = mime_type and mime_type.startswith('image/')
+        is_text = mime_type and (mime_type.startswith('text/') or
+                                 mime_type in ['application/json', 'application/xml', 'application/yaml'])
+        is_video = mime_type and mime_type.startswith('video/')
+        is_audio = mime_type and mime_type.startswith('audio/')
+
+        # 创建文件存储目录
+        files_dir = os.path.join(self.server.static_folder, 'files')
+        os.makedirs(files_dir, exist_ok=True)
+
+        # 生成唯一文件名
+        import hashlib
+        import time
+        file_hash = hashlib.md5(f"{file_path}{time.time()}".encode()).hexdigest()[:8]
+        safe_name = f"{file_hash}_{file_name}"
+        dest_path = os.path.join(files_dir, safe_name)
+
+        # 复制文件到静态目录
+        try:
+            shutil.copy2(file_path, dest_path)
+            _log.info(f"文件已复制到: {dest_path}")
+        except Exception as e:
+            _log.error(f"复制文件失败: {e}")
+            return False
+
+        # 生成下载 URL
+        download_url = f"/static/files/{safe_name}"
+
+        # 构建文件消息
+        file_info = {
+            'id': str(uuid.uuid4()),
+            'role': 'assistant',
+            'content': f'[文件: {file_name}]',
+            'timestamp': datetime.now().isoformat(),
+            'sender': 'AI',
+            'source': 'web',
+            'file': {
+                'name': file_name,
+                'type': mime_type,
+                'size': file_size,
+                'is_image': is_image,
+                'is_text': is_text,
+                'is_video': is_video,
+                'is_audio': is_audio,
+                'extension': ext,
+                'download_url': download_url  # 下载链接
+            }
+        }
+
+        # 对于图片，同时嵌入 base64 数据用于预览
+        if is_image and file_size < 5 * 1024 * 1024:  # 小于 5MB 的图片嵌入 base64
+            try:
+                with open(file_path, 'rb') as f:
+                    file_data = f.read()
+                b64_data = base64.b64encode(file_data).decode('utf-8')
+                file_info['file']['data'] = f'data:{mime_type};base64,{b64_data}'
+                file_info['file']['preview_url'] = file_info['file']['data']
+            except Exception as e:
+                _log.error(f"图片转base64失败: {e}")
+
+        # 对于文本文件，读取内容用于预览
+        elif is_text and file_size < 102400:  # 限制 100KB
+            try:
+                with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                    text_content = f.read()
+                file_info['file']['content'] = text_content[:5000]  # 限制预览长度
+            except Exception as e:
+                _log.warning(f"读取文本内容失败: {e}")
+
+        # 保存到 session
+        if self.session_id in self.server.sessions:
+            self.server.sessions[self.session_id]['messages'].append(file_info)
+            self.server._save_data('sessions')
+
+        # 发送文件消息
+        self.server.socketio.emit('new_message', file_info, room=self.session_id)
+        _log.info(f"发送文件: {file_name} ({mime_type}, {file_size} bytes), 下载链接: {download_url}")
+        return True
 
 
 class WebChatServer:
@@ -3054,25 +3256,35 @@ class WebChatServer:
                 return
 
             # 检查是否是命令（以 / 开头）
+            is_command = False
+            matched_handler = None
             if content and content.startswith('/'):
                 try:
-                    # 导入命令处理模块
+                    # 导入命令处理模块（确保所有命令已注册）
+                    import nbot.commands
                     from nbot.commands import command_handlers
                     import asyncio
+                    
+                    _log.info(f"检查命令: {content}, 可用命令数: {len(command_handlers)}, 命令列表: {list(command_handlers.keys())[:10]}...")
                     
                     # 检查是否匹配任何命令
                     for commands, handler in command_handlers.items():
                         for cmd in commands:
                             if content.startswith(cmd):
-                                # 创建 Web 消息适配器
-                                msg_adapter = WebMessageAdapter(content, sender, session_id, self)
-                                # 异步执行命令处理
-                                asyncio.create_task(handler(msg_adapter, is_group=False))
-                                return
+                                _log.info(f"匹配到命令: {cmd}")
+                                is_command = True
+                                matched_handler = handler
+                                break
+                        if is_command:
+                            break
+                    
+                    if not is_command:
+                        _log.warning(f"未匹配到任何命令: {content}")
+                        
                 except ImportError as e:
                     _log.warning(f"无法导入命令处理模块: {e}")
                 except Exception as e:
-                    _log.error(f"命令处理错误: {e}")
+                    _log.error(f"命令处理错误: {e}", exc_info=True)
 
             # 构建消息（保留原始内容和附件信息）
             temp_id = data.get('tempId')  # 获取前端发送的临时ID
@@ -3094,16 +3306,43 @@ class WebChatServer:
             # 保存会话到磁盘
             self._save_data('sessions')
             
-            # 触发 AI 回复（传递附件信息）
-            # 构建给 AI 的完整内容（包含附件描述）
-            ai_content = content
-            if attachments and isinstance(attachments, list):
-                for att in attachments:
-                    if isinstance(att, dict):
-                        att_name = att.get('name', 'unknown')
-                        att_type = att.get('type', '')
-                        ai_content += f'\n[附件：{att_name}, 类型：{att_type}]'
-            self._trigger_ai_response(session_id, ai_content, sender, attachments)
+            # 如果是命令，执行命令处理
+            if is_command and matched_handler:
+                # 创建 Web 消息适配器，使用 session_id 作为 user_id（确保唯一性）
+                web_user_id = f"web_{session_id[:8]}"
+                msg_adapter = WebMessageAdapter(content, web_user_id, session_id, self)
+                # 使用 socketio 的 background task 执行命令
+                # 注意：Web 端始终使用 is_group=True，这样命令会使用 msg.reply() 而不是 bot.api.post_private_msg
+                def run_command():
+                    import asyncio
+                    # 临时替换全局的 bot 变量，让命令中的 bot.api 调用生效
+                    try:
+                        import nbot.commands as cmd_module
+                        original_bot = getattr(cmd_module, 'bot', None)
+                        # 使用 msg_adapter 的模拟 bot
+                        cmd_module.bot = msg_adapter.bot
+                        _log.info(f"临时替换 bot 变量为 Web 模拟对象")
+                        
+                        asyncio.run(matched_handler(msg_adapter, is_group=True))
+                    except Exception as e:
+                        _log.error(f"命令执行错误: {e}", exc_info=True)
+                    finally:
+                        # 恢复原始的 bot 变量
+                        if original_bot:
+                            cmd_module.bot = original_bot
+                            _log.info(f"恢复原始 bot 变量")
+                self.socketio.start_background_task(run_command)
+            else:
+                # 触发 AI 回复（传递附件信息）
+                # 构建给 AI 的完整内容（包含附件描述）
+                ai_content = content
+                if attachments and isinstance(attachments, list):
+                    for att in attachments:
+                        if isinstance(att, dict):
+                            att_name = att.get('name', 'unknown')
+                            att_type = att.get('type', '')
+                            ai_content += f'\n[附件：{att_name}, 类型：{att_type}]'
+                self._trigger_ai_response(session_id, ai_content, sender, attachments)
 
         @self.socketio.on('typing')
         def handle_typing(data):
@@ -3631,5 +3870,12 @@ def create_web_app(config: Dict[str, Any] = None) -> tuple[Flask, SocketIO]:
     socketio = SocketIO(app, cors_allowed_origins="*")
 
     server = WebChatServer(app, socketio)
+
+    # 添加静态文件服务路由
+    @app.route('/static/files/<path:filename>')
+    def serve_file(filename):
+        """提供文件下载服务"""
+        files_dir = os.path.join(server.static_folder, 'files')
+        return send_from_directory(files_dir, filename, as_attachment=True)
 
     return app, socketio, server

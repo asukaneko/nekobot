@@ -1364,16 +1364,38 @@
 
         .message-content {
             max-width: 70%;
+            min-width: 0;
             background: var(--bg-tertiary);
             padding: 12px 16px;
             border-radius: 12px;
             font-size: 14px;
             line-height: 1.6;
+            word-break: break-word;
+            overflow-wrap: break-word;
+            word-wrap: break-word;
+            hyphens: auto;
         }
 
         .message.user .message-content {
             background: var(--accent-primary);
             color: white;
+        }
+
+        /* 小屏幕适配：限制消息宽度防止溢出 */
+        @media (max-width: 768px) {
+            .message-content {
+                max-width: 85%;
+                padding: 10px 12px;
+                font-size: 13px;
+            }
+        }
+
+        @media (max-width: 480px) {
+            .message-content {
+                max-width: 90%;
+                padding: 8px 10px;
+                font-size: 12px;
+            }
         }
 
         .message-time {
@@ -2720,6 +2742,7 @@
                                         </div>
                                         <div class="message-content">
                                             <div v-if="msg.content">{{ parseMessageContent(msg.content, msg) }}</div>
+                                            <!-- 用户上传的附件 -->
                                             <div v-if="msg.attachments && msg.attachments.length > 0" class="message-attachments">
                                                 <div v-for="(att, idx) in msg.attachments" :key="idx" class="attachment-card" @click="previewAttachment(att)">
                                                     <img v-if="att.type && att.type.startsWith('image/')" :src="att.url || att.data" class="attachment-preview">
@@ -2729,6 +2752,26 @@
                                                     <div class="attachment-info">
                                                         <div class="attachment-name">{{ att.name || '未知文件' }}</div>
                                                         <div class="attachment-meta">{{ formatFileSize(att.size) }} · {{ att.type || '未知类型' }}</div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            <!-- 机器人发送的文件 -->
+                                            <div v-if="msg.file" class="message-attachments">
+                                                <div class="attachment-card" @click="downloadFile(msg.file)">
+                                                    <!-- 图片直接显示 -->
+                                                    <img v-if="msg.file.is_image" :src="msg.file.data || msg.file.url" class="attachment-preview" style="max-width: 200px; max-height: 150px; object-fit: cover;">
+                                                    <!-- 文本文件显示预览 -->
+                                                    <div v-else-if="msg.file.is_text && msg.file.content" class="text-file-preview" style="max-width: 300px; max-height: 150px; overflow: auto; background: rgba(0,0,0,0.1); padding: 8px; border-radius: 4px; font-family: monospace; font-size: 12px;">
+                                                        <pre style="margin: 0; white-space: pre-wrap;">{{ msg.file.content }}</pre>
+                                                    </div>
+                                                    <!-- 其他文件显示图标 -->
+                                                    <div v-else class="attachment-icon" :class="getAttachmentIconClass(msg.file.type)">
+                                                        <i :class="getAttachmentIcon(msg.file.type)"></i>
+                                                    </div>
+                                                    <!-- 文件信息 -->
+                                                    <div v-if="!msg.file.is_image" class="attachment-info">
+                                                        <div class="attachment-name">{{ msg.file.name || '未知文件' }}</div>
+                                                        <div class="attachment-meta">{{ formatFileSize(msg.file.size) }} · {{ msg.file.type || '未知类型' }}</div>
                                                     </div>
                                                 </div>
                                             </div>
@@ -7745,6 +7788,12 @@
                                 this.currentMessages.push(msg);
                                 this.$nextTick(() => this.scrollToBottom());
                             }
+                            
+                            // 如果是助手消息，取消正在思考动画
+                            if (msg.role === 'assistant') {
+                                this.isTyping = false;
+                                this.isLoading = false;
+                            }
                         }
                     });
                     
@@ -7898,7 +7947,59 @@
                         win.document.write('<img src="' + att.data + '" style="max-width:100%;max-height:100vh;margin:auto;display:block;">');
                     }
                 },
-                
+
+                async downloadFile(file) {
+                    // 处理机器人发送的文件下载
+                    if (file.download_url) {
+                        // 使用 fetch 获取文件并强制下载到本地
+                        try {
+                            this.showToast('正在下载文件...', 'info');
+                            const response = await fetch(file.download_url);
+                            if (!response.ok) throw new Error('下载失败');
+                            
+                            const blob = await response.blob();
+                            const url = window.URL.createObjectURL(blob);
+                            
+                            const link = document.createElement('a');
+                            link.href = url;
+                            link.download = file.name || 'download';
+                            document.body.appendChild(link);
+                            link.click();
+                            document.body.removeChild(link);
+                            
+                            window.URL.revokeObjectURL(url);
+                            this.showToast('下载完成', 'success');
+                        } catch (error) {
+                            console.error('下载失败:', error);
+                            // 降级方案：直接打开链接
+                            const link = document.createElement('a');
+                            link.href = file.download_url;
+                            link.download = file.name || 'download';
+                            link.target = '_blank';
+                            document.body.appendChild(link);
+                            link.click();
+                            document.body.removeChild(link);
+                        }
+                    } else if (file.is_image && file.data) {
+                        // 图片在新窗口打开
+                        const win = window.open('', '_blank');
+                        win.document.write('<img src="' + file.data + '" style="max-width:100%;max-height:100vh;margin:auto;display:block;">');
+                    } else if (file.content) {
+                        // 文本文件创建 Blob 下载
+                        const blob = new Blob([file.content], { type: 'text/plain;charset=utf-8' });
+                        const url = window.URL.createObjectURL(blob);
+                        const link = document.createElement('a');
+                        link.href = url;
+                        link.download = file.name || 'download.txt';
+                        document.body.appendChild(link);
+                        link.click();
+                        document.body.removeChild(link);
+                        window.URL.revokeObjectURL(url);
+                    } else {
+                        this.showToast('文件下载链接不可用', 'error');
+                    }
+                },
+
                 formatNumber(num) {
                     if (num === undefined || num === null) return '0';
                     return num.toLocaleString('zh-CN');

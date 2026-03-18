@@ -176,39 +176,6 @@ def load_address(): # 加载配置文件，返回图片保存地址
         pdf_dir = os.path.normpath(pdf_dir)
         return os.path.dirname(pdf_dir)  # 返回pdf目录的父目录
 
-pending_jm_path = os.path.join(load_address(), "pending_jm_command.json")
-
-def save_pending_jm_command(msg, is_group: bool):
-    data = {
-        "raw_message": msg.raw_message,
-        "user_id": str(msg.user_id),
-        "is_group": bool(is_group)
-    }
-    if is_group:
-        data["group_id"] = str(msg.group_id)
-    try:
-        with open(pending_jm_path, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False)
-    except Exception as e:
-        _log.error(f"保存待执行jm命令失败: {e}")
-
-def load_pending_jm_command():
-    try:
-        with open(pending_jm_path, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except FileNotFoundError:
-        return None
-    except Exception as e:
-        _log.error(f"读取待执行jm命令失败: {e}")
-        return None
-
-def clear_pending_jm_command():
-    try:
-        if os.path.exists(pending_jm_path):
-            os.remove(pending_jm_path)
-    except Exception as e:
-        _log.error(f"清理待执行jm命令失败: {e}")
-
 def load_favorites():
     """加载收藏夹数据"""
     cache_dir = os.path.join(load_address(),"list")
@@ -802,11 +769,7 @@ async def handle_get_fav(msg, is_group=True):
         await bot.api.upload_private_file(msg.user_id, os.path.join(cache_dir , f"{name}.md"), f"{username}.md")
 
 @register_command("/jm",help_text = "/jm <漫画ID> -> 下载漫画",category = "1")
-async def handle_jmcomic(msg, is_group=True, from_pending_restart=False):
-    if not from_pending_restart:
-        if str(msg.user_id) in admin:
-            save_pending_jm_command(msg, is_group)
-            os.execv(sys.executable, [sys.executable] + sys.argv)
+async def handle_jmcomic(msg, is_group=True):
     match = re.match(r'^/jm\s+(\d+)$', msg.raw_message)
     if match:
         comic_id = match.group(1)
@@ -2199,7 +2162,12 @@ async def handle_show_chat(msg, is_group=True):
         return
     # 使用标准化路径，避免Windows路径问题
     cache_dir = normalize_file_path(os.path.join(load_address(),"聊天记录.txt"))
-    if is_group:
+    
+    # 判断是否为Web端（group_id为None且没有QQ相关属性）
+    is_web = msg.group_id is None and not hasattr(msg, 'message_type')
+    
+    if is_group and not is_web:
+        # QQ群聊
         with open("saved_message/group_messages.json","r",encoding="utf-8") as f:
             group_messages = json.load(f)
         try:
@@ -2211,6 +2179,7 @@ async def handle_show_chat(msg, is_group=True):
         await bot.api.post_group_file(msg.group_id, file=cache_dir)
 
     else:
+        # 私聊或Web端
         with open("saved_message/user_messages.json","r",encoding="utf-8") as f:
             user_messages = json.load(f)
         try:
@@ -2219,7 +2188,13 @@ async def handle_show_chat(msg, is_group=True):
             text = "你没有聊天记录喵~"
         with open(cache_dir,"w",encoding="utf-8") as f:
             f.write(text)
-        await bot.api.upload_private_file(msg.user_id, file=cache_dir,name="聊天记录.txt")
+        
+        # Web端使用send_file方法
+        if is_web and hasattr(msg, 'send_file'):
+            await msg.send_file(cache_dir, "聊天记录.txt")
+        else:
+            # QQ私聊
+            await bot.api.upload_private_file(msg.user_id, file=cache_dir,name="聊天记录.txt")
 
     os.remove(cache_dir)    
 
@@ -2589,6 +2564,15 @@ def save_wenku8_cookie(cookie):
     with open("wenku8_cookie.txt", "w", encoding="utf-8") as f:
         f.write(cookie)
 
+def check_wenku8_cookie() -> str:
+    """
+    检查 WENKU8_COOKIE 是否已设置
+    :return: 如果未设置返回提示消息，否则返回 None
+    """
+    if not WENKU8_COOKIE:
+        return "❌ Cookie 未设置喵！\n请管理员使用 `/set_wenku_cookie <Cookie>` 命令设置 Cookie 喵~\n或者去 www.wenku8.net 登录后获取 Cookie"
+    return None
+
 load_wenku8_cookie()
 
 NOVEL_API_BASE_URLS = [
@@ -2619,6 +2603,15 @@ def get_novel_api_base_url():
 
 @register_command("/findbook","/fb",help_text="/findbook 或者 /fb <书名> -> 搜索并选择下载轻小说",category = "6")
 async def handle_find_book(msg, is_group=True):
+    # 检查 Cookie
+    cookie_check = check_wenku8_cookie()
+    if cookie_check:
+        if is_group:
+            await msg.reply(text=cookie_check)
+        else:
+            await bot.api.post_private_msg(msg.user_id, text=cookie_check)
+        return
+    
     search_term = ""
     if msg.raw_message.startswith("/findbook"):
         search_term = msg.raw_message[len("/findbook"):].strip()
@@ -2662,6 +2655,15 @@ async def handle_find_book(msg, is_group=True):
 
 @register_command("/fa",help_text="/fa <作者> -> 搜索作者",category = "6")
 async def handle_find_author(msg, is_group=True):
+    # 检查 Cookie
+    cookie_check = check_wenku8_cookie()
+    if cookie_check:
+        if is_group:
+            await msg.reply(text=cookie_check)
+        else:
+            await bot.api.post_private_msg(msg.user_id, text=cookie_check)
+        return
+    
     search_term = msg.raw_message[len("/fa"):].strip()
     if not search_term:
         reply = "请输入要搜索的作者喵~"
@@ -2695,22 +2697,37 @@ async def handle_find_author(msg, is_group=True):
 def search_wenku8_books(search_term: str, search_type: str) -> list:
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+        "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+        "Accept-Encoding": "gzip, deflate, br",
+        "Connection": "keep-alive",
+        "Referer": "https://www.wenku8.net/",
         "Cookie": WENKU8_COOKIE
     }
+    _log.info(f"使用Cookie: {WENKU8_COOKIE[:50]}...")
     import urllib.parse
     try:
         encoded_key = urllib.parse.quote(search_term.encode("gbk"))
-    except Exception:
+    except Exception as e:
+        _log.error(f"搜索关键词编码失败: {search_term}, 错误: {e}")
         return []
     url = f"https://www.wenku8.net/modules/article/search.php?searchtype={search_type}&searchkey={encoded_key}"
+    _log.info(f"搜索URL: {url}")
     try:
         response = requests.get(url, headers=headers, timeout=10)
-    except Exception:
+        _log.info(f"搜索响应状态码: {response.status_code}")
+    except Exception as e:
+        _log.error(f"搜索请求失败: {e}")
         return []
     response.encoding = "gbk"
     content = response.text
+    # 检查是否需要登录
+    if "出现错误" in content or "登录" in content:
+        _log.warning("搜索需要登录，Cookie可能已失效")
+        return []
     pattern = r'<div style="width:373px;height:136px;float:left;margin:5px 0px 5px 5px;">(.*?)</div>\s*</div>'
     page_matches = re.findall(pattern, content, re.DOTALL)
+    _log.info(f"搜索结果数量: {len(page_matches)}")
     results = []
     for match in page_matches:
         title_url_match = re.search(r'<b><a style="font-size:13px;" href="([^"]+)" title="([^"]+)" target="_blank">', match)
@@ -2751,6 +2768,86 @@ def search_wenku8_books(search_term: str, search_type: str) -> list:
         }
         results.append((author, title, download_url))
     return results
+
+def get_book_detail_by_url(book_url: str) -> dict:
+    """
+    通过URL获取小说详情（类似/hotnovel的实现）
+    :param book_url: 小说详情页面URL，如 https://www.wenku8.net/book/1234.htm
+    :return: 包含小说详细信息的字典
+    """
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+        "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+        "Accept-Encoding": "gzip, deflate, br",
+        "Connection": "keep-alive",
+        "Referer": "https://www.wenku8.net/",
+        "Cookie": WENKU8_COOKIE
+    }
+
+    _log.info(f"获取小说详情: {book_url}")
+    try:
+        response = requests.get(book_url, headers=headers, timeout=10)
+        _log.info(f"详情页响应状态码: {response.status_code}")
+        response.encoding = "gbk"
+        content = response.text
+        
+        # 解析书籍ID
+        book_id_match = re.search(r'/book/(\d+)\.htm', book_url)
+        book_id = book_id_match.group(1) if book_id_match else "0"
+        node = int(book_id) // 1000 if book_id.isdigit() else 0
+        
+        # 解析标题
+        title_match = re.search(r'<span property="v:itemreviewed">([^<]+)</span>', content)
+        title = title_match.group(1).strip() if title_match else "未知"
+        
+        # 解析作者
+        author_match = re.search(r'作者：\s*<a[^>]*>([^<]+)</a>', content)
+        author = author_match.group(1).strip() if author_match else "未知"
+        
+        # 解析分类
+        category_match = re.search(r'类别：\s*<a[^>]*>([^<]+)</a>', content)
+        category = category_match.group(1).strip() if category_match else "未知"
+        
+        # 解析状态
+        status_match = re.search(r'状态：\s*<font[^>]*>([^<]+)</font>', content)
+        is_serialize = status_match.group(1).strip() if status_match else "未知"
+        
+        # 解析字数
+        word_count_match = re.search(r'字数：\s*([\d,]+)', content)
+        word_count = word_count_match.group(1).replace(',', '') if word_count_match else "未知"
+        
+        # 解析更新时间
+        update_match = re.search(r'更新时间：\s*([\d-]+)', content)
+        last_date = update_match.group(1) if update_match else "未知"
+        
+        # 解析简介
+        intro_match = re.search(r'<span class="hottext">内容简介：</span>\s*<br\s*/?>\s*([^<]+)', content, re.DOTALL)
+        introduction = intro_match.group(1).strip() if intro_match else "暂无简介"
+        
+        # 解析封面
+        cover_match = re.search(r'<img src="([^"]+)"[^>]*alt="[^"]*封面"', content)
+        cover_url = cover_match.group(1) if cover_match else f"https://img.wenku8.com/image/{node}/{book_id}/{book_id}s.jpg"
+        
+        # 构建下载链接
+        download_url = f"https://dl.wenku8.com/down.php?type=txt&node={node}&id={book_id}"
+        
+        return {
+            "title": title,
+            "author": author,
+            "category": category,
+            "word_count": word_count,
+            "is_serialize": is_serialize,
+            "last_date": last_date,
+            "introduction": introduction,
+            "cover_url": cover_url,
+            "download_url": download_url,
+            "page": book_url,
+            "hot": "URL获取"
+        }
+    except Exception as e:
+        _log.error(f"获取小说详情失败: {book_url}, 错误: {e}")
+        return None
 
 def find_book_from_api(search_term: str) -> list:
     """
@@ -2903,6 +3000,15 @@ async def handle_select_book(msg, is_group=True):
 
 @register_command("/info",help_text="/info <书名> -> 获取轻小说信息",category = "6")
 async def handle_info(msg, is_group=True):
+    # 检查 Cookie
+    cookie_check = check_wenku8_cookie()
+    if cookie_check:
+        if is_group:
+            await msg.reply(text=cookie_check)
+        else:
+            await bot.api.post_private_msg(msg.user_id, text=cookie_check)
+        return
+    
     if (msg.user_id not in temp_selections) and (msg.user_id not in api_book):
         reply = "没有找到您的搜索记录喵~请先使用/findbook搜索喵~"
         if is_group:
@@ -2918,7 +3024,34 @@ async def handle_info(msg, is_group=True):
         if 0 <= selection < len(matches) or (selection >= len(matches) and selection < len(matches) + len(api_books)):
             if selection < len(matches):
                 author,title, url = matches[selection]
-                info = books[title]
+                # 从下载链接提取book_id，构建详情页面URL
+                book_id_match = re.search(r'id=(\d+)', url)
+                if book_id_match:
+                    book_id = book_id_match.group(1)
+                    book_url = f"https://www.wenku8.net/book/{book_id}.htm"
+                    info = get_book_detail_by_url(book_url)
+                else:
+                    info = None
+                
+                if info is None:
+                    # 如果URL获取失败，先尝试从JSON/内存字典获取
+                    info = books.get(title)
+                    if info is None:
+                        # 如果JSON也没有，使用搜索时的基本信息
+                        info = {
+                            'author': author,
+                            'category': '未知',
+                            'word_count': '未知',
+                            'is_serialize': '未知',
+                            'hot': '搜索结果',
+                            'introduction': '暂无简介',
+                            'last_date': '未知',
+                            'page': book_url if 'book_url' in locals() else url,
+                            'cover_url': f"https://img.wenku8.com/image/{int(book_id)//1000 if 'book_id' in locals() else 0}/{book_id if 'book_id' in locals() else 0}/{book_id if 'book_id' in locals() else 0}s.jpg"
+                        }
+                    else:
+                        _log.info(f"从JSON/内存字典获取到《{title}》的信息")
+                
                 try:
                     introduction = info['introduction']
                 except Exception:
@@ -2959,14 +3092,109 @@ async def handle_info(msg, is_group=True):
         else:
             await bot.api.post_private_msg(msg.user_id, text=reply)
 
+def get_random_book_from_hotlist() -> tuple:
+    """
+    从今日热门榜单获取随机小说
+    :return: (title, book_info_dict) 或 (None, None)
+    """
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+        "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+        "Accept-Encoding": "gzip, deflate, br",
+        "Connection": "keep-alive",
+        "Referer": "https://www.wenku8.net/",
+        "Cookie": WENKU8_COOKIE
+    }
+    url = "https://www.wenku8.net/modules/article/toplist.php?sort=dayvisit&page=1"
+    
+    _log.info(f"获取热门榜单: {url}")
+    try:
+        response = requests.get(url, headers=headers, timeout=10)
+        _log.info(f"热门榜单响应状态码: {response.status_code}")
+        response.encoding = 'gbk'
+        content = response.text
+        
+        pattern = r'<div style="width:373px;height:136px;float:left;margin:5px 0px 5px 5px;">(.*?)</div>\s*</div>'
+        page_matches = re.findall(pattern, content, re.DOTALL)
+        
+        if not page_matches:
+            return None, None
+        
+        # 随机选择一本
+        match = random.choice(page_matches)
+        
+        # 解析标题和URL
+        title_url_match = re.search(r'<b><a style="font-size:13px;" href="([^"]+)" title="([^"]+)" target="_blank">', match)
+        if not title_url_match:
+            return None, None
+        
+        book_url = title_url_match.group(1)
+        title = title_url_match.group(2)
+        
+        # 获取详细信息
+        info = get_book_detail_by_url(book_url)
+        if info is None:
+            # 如果详情获取失败，使用基本信息
+            book_id_match = re.search(r'/book/(\d+)\.htm', book_url)
+            book_id = book_id_match.group(1) if book_id_match else "0"
+            node = int(book_id) // 1000 if book_id.isdigit() else 0
+            
+            author_cat_match = re.search(r'<p>作者:([^/]+)/分类:([^<]+)</p>', match)
+            author = author_cat_match.group(1) if author_cat_match else "未知"
+            
+            info = {
+                'author': author,
+                'category': '未知',
+                'word_count': '未知',
+                'is_serialize': '未知',
+                'last_date': '未知',
+                'introduction': '暂无简介',
+                'cover_url': f"https://img.wenku8.com/image/{node}/{book_id}/{book_id}s.jpg",
+                'download_url': f"https://dl.wenku8.com/down.php?type=txt&node={node}&id={book_id}",
+                'page': book_url,
+                'hot': '今日热门'
+            }
+        
+        return title, info
+    except Exception as e:
+        _log.error(f"获取随机小说失败: {e}")
+        return None, None
+
 @register_command("/random_novel","/rn",help_text = "/random_novel 或者 /rn -> 发送随机小说",category = "6")
 async def handle_random_novel(msg, is_group=True):
-    novel = random.choice(list(books.keys()))
-    url = books[novel]["download_url"]
-    hot = books[novel].get('hot', '未知')
+    # 检查 Cookie
+    cookie_check = check_wenku8_cookie()
+    if cookie_check:
+        if is_group:
+            await msg.reply(text=cookie_check)
+        else:
+            await bot.api.post_private_msg(msg.user_id, text=cookie_check)
+        return
+    
+    # 从今日热门榜单获取随机小说
+    novel, info = get_random_book_from_hotlist()
+    
+    # 如果URL获取失败，回退到JSON/内存字典
+    if novel is None:
+        _log.info("热门榜单获取失败，回退到JSON/内存字典")
+        if books:
+            novel = random.choice(list(books.keys()))
+            info = books[novel]
+            _log.info(f"从JSON/内存字典随机选择:《{novel}》")
+        else:
+            reply = "获取随机小说失败喵~请稍后再试~"
+            if is_group:
+                await msg.reply(text=reply)
+            else:
+                await bot.api.post_private_msg(msg.user_id, text=reply)
+            return
+    
+    url = info["download_url"]
+    hot = info.get('hot', '未知')
     reply = f"抽选到了《{novel}》喵~\n"
-    reply += f"简介如下喵~\n作者：{books[novel]['author']}\n字数：{books[novel]['word_count']}\n状态：{books[novel]['is_serialize']}\n热度：{hot}\n最新更新：{books[novel]['last_date']}\n简介：{books[novel]['introduction']}\n下载链接：{url}"
-    cover = books[novel]['cover_url']
+    reply += f"简介如下喵~\n作者：{info['author']}\n字数：{info['word_count']}\n状态：{info['is_serialize']}\n热度：{hot}\n最新更新：{info['last_date']}\n简介：{info['introduction']}\n下载链接：{url}"
+    cover = info['cover_url']
     reply =  MessageChain(
         reply,
         Image(f"{cover}")
@@ -2980,6 +3208,15 @@ async def handle_random_novel(msg, is_group=True):
 
 @register_command("/hotnovel", help_text="/hotnovel <day|month> [数量] -> 获取今日/本月热门轻小说(支持翻页)", category="6")
 async def handle_hotnovel(msg, is_group=True):
+    # 检查 Cookie
+    cookie_check = check_wenku8_cookie()
+    if cookie_check:
+        if is_group:
+            await msg.reply(text=cookie_check)
+        else:
+            await bot.api.post_private_msg(msg.user_id, text=cookie_check)
+        return
+    
     parts = msg.raw_message.split()
     if len(parts) < 2:
         reply = "请输入查询类型喵~ 例如：/hotnovel day 或 /hotnovel month"
@@ -3018,12 +3255,17 @@ async def handle_hotnovel(msg, is_group=True):
 
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+        "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+        "Accept-Encoding": "gzip, deflate, br",
+        "Connection": "keep-alive",
+        "Referer": "https://www.wenku8.net/",
         "Cookie": WENKU8_COOKIE
     }
 
     all_matches = []
     current_page = 1
-    
+
     try:
         while len(all_matches) < requested_count:
             url = f"{base_url}&page={current_page}"
