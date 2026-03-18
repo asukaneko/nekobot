@@ -2163,8 +2163,8 @@ async def handle_show_chat(msg, is_group=True):
     # 使用标准化路径，避免Windows路径问题
     cache_dir = normalize_file_path(os.path.join(load_address(),"聊天记录.txt"))
     
-    # 判断是否为Web端（group_id为None且没有QQ相关属性）
-    is_web = msg.group_id is None and not hasattr(msg, 'message_type')
+    # 判断是否为Web端（没有group_id且有send_file方法）
+    is_web = hasattr(msg, 'send_file') and not hasattr(msg, 'message_type')
     
     if is_group and not is_web:
         # QQ群聊

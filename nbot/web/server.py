@@ -20,6 +20,15 @@ try:
 except ImportError:
     APSCHEDULER_AVAILABLE = False
 
+# 导入 Memory 系统
+try:
+    from nbot.core.memory import MemoryStore, MemoryType
+    MEMORY_AVAILABLE = True
+except ImportError:
+    MEMORY_AVAILABLE = False
+    _log = logging.getLogger(__name__)
+    _log.warning("Memory system not available")
+
 _log = logging.getLogger(__name__)
 
 
@@ -49,6 +58,43 @@ class WebMessageAdapter:
         # 创建模拟的 bot 对象，用于兼容直接使用 bot.api 的命令
         from types import SimpleNamespace
         self.bot = SimpleNamespace(api=self.api)
+
+    def _load_memories_for_context(self, user_id: str) -> str:
+        """加载记忆用于 AI 上下文（与 QQ 端一致）"""
+        if not user_id:
+            return ""
+        
+        memories = []
+        now = datetime.now()
+        
+        for mem in self.memories:
+            # 检查记忆是否关联到当前用户
+            mem_target = mem.get('target_id', '')
+            if mem_target and mem_target != user_id:
+                continue
+            
+            mem_type = mem.get('type', 'long')
+            
+            if mem_type == 'long':
+                # 长期记忆直接加入
+                memories.append(f"[{mem.get('key', '')}]: {mem.get('value', '')}")
+            elif mem_type == 'short':
+                # 短期记忆检查是否过期
+                created_at = mem.get('created_at', '')
+                expire_days = mem.get('expire_days', 7)
+                
+                if created_at:
+                    try:
+                        created = datetime.fromisoformat(created_at)
+                        diff_days = (now - created).days
+                        if diff_days <= expire_days:
+                            memories.append(f"[{mem.get('key', '')}]: {mem.get('value', '')}")
+                    except:
+                        memories.append(f"[{mem.get('key', '')}]: {mem.get('value', '')}")
+        
+        if memories:
+            return "\n".join(["【重要记忆】"] + memories)
+        return ""
 
     def _create_mock_api(self):
         """创建模拟的 QQ API 对象，用于兼容 QQ 命令"""
@@ -125,7 +171,8 @@ class WebMessageAdapter:
                 'content': text,
                 'timestamp': datetime.now().isoformat(),
                 'sender': 'AI',
-                'source': 'web'
+                'source': 'web',
+                'session_id': self.session_id  # 添加会话ID以便前端识别
             }
             # 保存到 session
             if self.session_id in self.server.sessions:
@@ -209,6 +256,7 @@ class WebMessageAdapter:
             'timestamp': datetime.now().isoformat(),
             'sender': 'AI',
             'source': 'web',
+            'session_id': self.session_id,  # 添加会话ID以便前端识别
             'file': {
                 'name': file_name,
                 'type': mime_type,
@@ -324,10 +372,19 @@ class WebChatServer:
         
         # QQ Bot 引用（用于发送消息到QQ）
         self.qq_bot = None
-        
+
         # 登录密码
         self.web_password = None
-        
+
+        # 初始化 Memory 存储
+        self.memory_store = None
+        if MEMORY_AVAILABLE:
+            try:
+                self.memory_store = MemoryStore()
+                _log.info("Memory store initialized")
+            except Exception as e:
+                _log.error(f"Failed to initialize memory store: {e}")
+
         self._load_ai_config()
         self._load_web_config()
         self._register_routes()
@@ -438,6 +495,7 @@ class WebChatServer:
             "ws_uri": "ws://127.0.0.1:3001",
             "master_id": "",
             "bot_id": "",
+            "max_context_length": 20,
             "features": {
                 "ai": True,
                 "memory": True,
@@ -1679,12 +1737,31 @@ class WebChatServer:
             
             # 获取 AI 回复
             messages_for_ai = session['messages'].copy()
-            
-            # 限制历史长度
-            MAX_HISTORY = 20
-            if len(messages_for_ai) > MAX_HISTORY:
-                messages_for_ai = [messages_for_ai[0]] + messages_for_ai[-MAX_HISTORY:]
-            
+
+            # 限制历史长度（使用设置中的值）
+            max_context_length = self.settings.get('max_context_length', 20)
+            if len(messages_for_ai) > max_context_length:
+                messages_for_ai = [messages_for_ai[0]] + messages_for_ai[-max_context_length:]
+
+            # 检索相关记忆并添加到上下文（使用旧的记忆系统）
+            if session.get('type') == 'web':
+                try:
+                    user_id = session.get('id', '')
+                    _log.info(f"Retrieving memories for web user: {user_id}")
+                    
+                    # 从旧的记忆系统加载（与QQ端一致）
+                    memories_text = self._load_memories_for_context(user_id)
+                    if memories_text:
+                        # 在系统提示词后插入记忆
+                        if messages_for_ai and messages_for_ai[0].get('role') == 'system':
+                            messages_for_ai.insert(1, {
+                                'role': 'system',
+                                'content': memories_text
+                            })
+                        _log.info(f"Added memories to context for user {user_id}")
+                except Exception as e:
+                    _log.error(f"Failed to retrieve memories: {e}", exc_info=True)
+
             # 异步获取 AI 回复
             def get_response():
                 try:
@@ -3296,7 +3373,8 @@ class WebChatServer:
                 'sender': sender,
                 'source': 'web',
                 'attachments': attachments,
-                'tempId': temp_id  # 保留临时ID以便前端替换
+                'tempId': temp_id,  # 保留临时ID以便前端替换
+                'session_id': session_id  # 添加会话ID以便前端识别
             }
 
             self.sessions[session_id]['messages'].append(message)

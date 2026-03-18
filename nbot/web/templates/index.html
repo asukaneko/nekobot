@@ -1340,6 +1340,30 @@
             padding: 20px;
         }
 
+        .scroll-to-bottom-btn {
+            position: absolute;
+            bottom: 100px;
+            right: 30px;
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            background: var(--accent-primary);
+            color: white;
+            border: none;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+            transition: all 0.2s ease;
+            z-index: 100;
+        }
+
+        .scroll-to-bottom-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+        }
+
         .message {
             display: flex;
             gap: 12px;
@@ -2793,6 +2817,11 @@
                                     </div>
                                 </div>
 
+                                <!-- 滚动到底部按钮 -->
+                                <button v-if="showScrollToBottom" class="scroll-to-bottom-btn" @click="scrollToBottom" title="滚动到底部">
+                                    <i class="fas fa-arrow-down"></i>
+                                </button>
+
                                 <div class="chat-input-area">
                                     <!-- 已上传的文件预览 -->
                                     <div v-if="uploadedFiles.length > 0" class="uploaded-files-preview">
@@ -4096,6 +4125,11 @@
                                     </div>
                                 </div>
                                 <div class="form-group" style="margin-top: 20px;">
+                                    <label class="form-label">上下文长度 (条)</label>
+                                    <input v-model.number="settings.max_context_length" type="number" min="5" max="50" class="form-input" placeholder="20">
+                                    <small style="color: var(--text-secondary);">AI 对话时保留的历史消息数量 (5-50)</small>
+                                </div>
+                                <div class="form-group" style="margin-top: 20px;">
                                     <label class="form-label">功能开关</label>
                                     <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px;">
                                         <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
@@ -5121,7 +5155,10 @@
                     inputMessage: '',
                     uploadedFiles: [],
                     isTyping: false,
+                    isUserScrolling: false,
+                    showScrollToBottom: false,
                     sessionSearch: '',
+                    maxContextLength: 20,
                     
                     // Workflows
                     workflows: [],
@@ -7766,7 +7803,8 @@
                     
                     socket.on('new_message', (msg) => {
                         console.log('Received new_message:', msg);
-                        if (this.currentSession) {
+                        // 检查消息是否属于当前会话
+                        if (this.currentSession && msg.session_id === this.currentSession.id) {
                             // 检查是否有临时ID（用户自己发送的消息）
                             if (msg.tempId) {
                                 // 用服务器返回的消息替换本地临时消息
@@ -7781,14 +7819,14 @@
                                     return;
                                 }
                             }
-                            
+
                             // 检查是否已存在
                             const exists = this.currentMessages.find(m => m.id === msg.id);
                             if (!exists) {
                                 this.currentMessages.push(msg);
                                 this.$nextTick(() => this.scrollToBottom());
                             }
-                            
+
                             // 如果是助手消息，取消正在思考动画
                             if (msg.role === 'assistant') {
                                 this.isTyping = false;
@@ -7833,10 +7871,12 @@
                     if (!container) return;
                     
                     const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
-                    if (distanceFromBottom > 50) {
+                    if (distanceFromBottom > 100) {
                         this.isUserScrolling = true;
+                        this.showScrollToBottom = true;
                     } else {
                         this.isUserScrolling = false;
+                        this.showScrollToBottom = false;
                     }
                 },
                 
