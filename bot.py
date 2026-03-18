@@ -1,7 +1,6 @@
 from ncatbot.utils.logger import get_log
 import nbot.commands
 from nbot.chat import chat,tts,chat_video,chat_image,chat_webpage,chat_json,record_assistant_message,record_user_message,log_to_group_full_file,judge_reply,load_prompt,chat_gif
-from nbot.commands import *
 import os
 import json
 import datetime

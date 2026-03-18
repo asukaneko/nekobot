@@ -40,6 +40,13 @@ if_tts = False #判断是否开启TTS
 
 _log = get_log()
 
+def normalize_file_path(path: str) -> str:
+    """
+    标准化文件路径，将Windows反斜杠转换为正斜杠，
+    并使用绝对路径，确保ncatbot能正确识别
+    """
+    return os.path.abspath(path).replace("\\", "/")
+
 bot_id,admin_id = load_config() # 加载配置,返回机器人qq号
 
 bot = BotClient()
@@ -50,35 +57,39 @@ heartbeat_core = HeartbeatCore(bot.api)
 # ----------------------
 # 记录机器人发送的所有消息到历史记录中
 # 通过直接补丁 BotAPI 和消息类，确保所有发送方式都能被记录
-original_post_private_msg = BotAPI.post_private_msg
-original_post_group_msg = BotAPI.post_group_msg
-original_group_reply = GroupMessage.reply
-original_private_reply = PrivateMessage.reply
 
-async def wrapped_post_private_msg(self, user_id, **kwargs):
-    content = kwargs.get('text', '')
-    if content and isinstance(content, str):
-        try:
-            from chat import record_assistant_message
-            record_assistant_message(content, user_id=user_id)
-        except Exception:
-            pass
-    return await original_post_private_msg(self, user_id, **kwargs)
+# 防止重复应用补丁
+if not hasattr(BotAPI, '_nbot_patched'):
+    original_post_private_msg = BotAPI.post_private_msg
+    original_post_group_msg = BotAPI.post_group_msg
+    original_group_reply = GroupMessage.reply
+    original_private_reply = PrivateMessage.reply
 
-async def wrapped_post_group_msg(self, group_id, **kwargs):
-    content = kwargs.get('text', '')
-    if content and isinstance(content, str):
-        try:
-            from chat import record_assistant_message, log_to_group_full_file
-            record_assistant_message(content, group_id=group_id)
-            log_to_group_full_file(group_id, bot_id, "机器人", content)
-        except Exception:
-            pass
-    return await original_post_group_msg(self, group_id, **kwargs)
+    async def wrapped_post_private_msg(self, user_id, **kwargs):
+        content = kwargs.get('text', '')
+        if content and isinstance(content, str):
+            try:
+                from chat import record_assistant_message
+                record_assistant_message(content, user_id=user_id)
+            except Exception:
+                pass
+        return await original_post_private_msg(self, user_id, **kwargs)
 
-# 应用补丁到类级别
-BotAPI.post_private_msg = wrapped_post_private_msg
-BotAPI.post_group_msg = wrapped_post_group_msg
+    async def wrapped_post_group_msg(self, group_id, **kwargs):
+        content = kwargs.get('text', '')
+        if content and isinstance(content, str):
+            try:
+                from chat import record_assistant_message, log_to_group_full_file
+                record_assistant_message(content, group_id=group_id)
+                log_to_group_full_file(group_id, bot_id, "机器人", content)
+            except Exception:
+                pass
+        return await original_post_group_msg(self, group_id, **kwargs)
+
+    # 应用补丁到类级别
+    BotAPI.post_private_msg = wrapped_post_private_msg
+    BotAPI.post_group_msg = wrapped_post_group_msg
+    BotAPI._nbot_patched = True
 # ----------------------
 
 command_handlers = {}
@@ -820,22 +831,23 @@ async def handle_jmcomic(msg, is_group=True, from_pending_restart=False):
                 await bot.api.post_private_msg(msg.user_id, text=error_msg)
                 return
 
-        if os.path.exists(os.path.join(load_address(),f"pdf/{comic_id}.pdf")):
-            file_size = os.path.getsize(os.path.join(load_address(),f"pdf/{comic_id}.pdf"))
+        pdf_path = normalize_file_path(os.path.join(load_address(),f"pdf/{comic_id}.pdf"))
+        if os.path.exists(pdf_path):
+            file_size = os.path.getsize(pdf_path)
             if is_group:
                 if switch.get_switch_state('jm_send', group_id=str(msg.group_id)):
                     if switch.get_switch_state('jm_send_user', group_id=str(msg.group_id)):
                         await bot.api.post_private_msg(msg.user_id,text=f"该漫画已存在喵~,文件大小：{file_size:.2f} MB，正在发送喵~")
-                        await bot.api.upload_private_file(msg.user_id, os.path.join(load_address(),f"pdf/{comic_id}.pdf"), f"{comic_id}.pdf")
+                        await bot.api.upload_private_file(msg.user_id, pdf_path, f"{comic_id}.pdf")
                     else:
                         await msg.reply(text=f"该漫画已存在喵~,文件大小：{file_size:.2f} MB，正在发送到群组喵~")
-                        await bot.api.post_group_file(msg.group_id, file=os.path.join(load_address(),f"pdf/{comic_id}.pdf"))
+                        await bot.api.post_group_file(msg.group_id, file=pdf_path)
                 else:
                     await msg.reply(text=f"群组发送漫画已关闭喵~")
             else:
                 if switch.get_switch_state('jm_send', user_id=str(msg.user_id)):
                     await bot.api.post_private_msg(msg.user_id,text=f"该漫画已存在喵~,文件大小：{file_size:.2f} MB，正在发送喵~")
-                    await bot.api.upload_private_file(msg.user_id, os.path.join(load_address(),f"pdf/{comic_id}.pdf"), f"{comic_id}.pdf")
+                    await bot.api.upload_private_file(msg.user_id, pdf_path, f"{comic_id}.pdf")
                 else:
                     await msg.reply(text=f"该漫画已下载，但用户私信发送漫画已关闭喵~")
             return
@@ -904,7 +916,7 @@ async def download_and_send_comic(comic_id, msg, is_group):
             )
         )
 
-        file_path = os.path.join(load_address(), f"pdf/{comic_id}.pdf")
+        file_path = normalize_file_path(os.path.join(load_address(), f"pdf/{comic_id}.pdf"))
 
         # 检查文件是否真正生成
         if not os.path.exists(file_path):
@@ -967,7 +979,7 @@ async def download_and_send_comic(comic_id, msg, is_group):
             await bot.api.post_private_msg(msg.user_id, text=success_text)
 
     except Exception as e:
-        file_path = os.path.join(load_address(), f"pdf/{comic_id}.pdf")
+        file_path = normalize_file_path(os.path.join(load_address(), f"pdf/{comic_id}.pdf"))
         error_msg = f"下载失败喵~: {str(e)}"
         if is_group:
             await msg.reply(text=error_msg)
@@ -2180,13 +2192,14 @@ async def handle_del_group_admin(msg, is_group=True):
     await bot.api.set_group_admin(msg.group_id, msgs,False)
     await msg.reply(text="取消成功喵~")
 
-@register_command("/show_chat","/sc",help_text = "/show_chat 或 /sc -> 发送完整聊天记录(仅群admin)",category = "2")    
+@register_command("/show_chat","/sc",help_text = "/show_chat 或 /sc -> 发送完整聊天记录(仅群admin)",category = "2")
 async def handle_show_chat(msg, is_group=True):
     if (str(msg.user_id) not in admin) and is_group:
         await msg.reply(text="你没有权限发送聊天记录喵~")
         return
-    cache_dir = os.path.join(load_address(),"聊天记录.txt")
-    if is_group:  
+    # 使用标准化路径，避免Windows路径问题
+    cache_dir = normalize_file_path(os.path.join(load_address(),"聊天记录.txt"))
+    if is_group:
         with open("saved_message/group_messages.json","r",encoding="utf-8") as f:
             group_messages = json.load(f)
         try:
@@ -3716,5 +3729,8 @@ async def dispatch_message(msg, is_group: bool):
             _log.error(traceback.format_exc())
 
 
-bot.add_group_event_handler(handle_group_message)
-bot.add_private_event_handler(handle_private_message)
+# 防止重复注册事件处理器
+if not hasattr(bot, '_nbot_handlers_registered'):
+    bot.add_group_event_handler(handle_group_message)
+    bot.add_private_event_handler(handle_private_message)
+    bot._nbot_handlers_registered = True
