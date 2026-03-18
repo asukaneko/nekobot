@@ -3301,130 +3301,153 @@ class WebChatServer:
 
         @self.socketio.on('send_message')
         def handle_send_message(data):
-            session_id = data.get('session_id')
-            content = data.get('content', '')
-            sender = data.get('sender', 'web_user')
-            attachments = data.get('attachments', [])
+            try:
+                session_id = data.get('session_id')
+                content = data.get('content', '')
+                sender = data.get('sender', 'web_user')
+                attachments = data.get('attachments', [])
 
-            # 处理附件信息
-            attachment_info = ''
-            if attachments and isinstance(attachments, list):
-                for att in attachments:
-                    if isinstance(att, dict):
-                        att_name = att.get('name', 'unknown')
-                        att_type = att.get('type', '')
-                        attachment_info += f'\n[附件: {att_name}, 类型: {att_type}]'
-            
-            # 记录日志
-            preview = content[:50] if content else ''
-            self.log_message('info', f'收到Web消息 from {sender}: {preview}... {len(attachments)}个附件')
-
-            # 先从文件加载会话
-            sessions_file = os.path.join(self.data_dir, 'sessions.json')
-            if os.path.exists(sessions_file):
-                try:
-                    with open(sessions_file, 'r', encoding='utf-8') as f:
-                        file_sessions = json.load(f)
-                    # 合并到内存
-                    for sid, sess in file_sessions.items():
-                        if sid not in self.sessions:
-                            self.sessions[sid] = sess
-                except:
-                    pass
-
-            if session_id not in self.sessions:
-                self.socketio.emit('error', {'message': 'Session not found'}, room=request.sid)
-                return
-
-            # 检查是否是命令（以 / 开头）
-            is_command = False
-            matched_handler = None
-            if content and content.startswith('/'):
-                try:
-                    # 导入命令处理模块（确保所有命令已注册）
-                    import nbot.commands
-                    from nbot.commands import command_handlers
-                    import asyncio
-                    
-                    _log.info(f"检查命令: {content}, 可用命令数: {len(command_handlers)}, 命令列表: {list(command_handlers.keys())[:10]}...")
-                    
-                    # 检查是否匹配任何命令
-                    for commands, handler in command_handlers.items():
-                        for cmd in commands:
-                            if content.startswith(cmd):
-                                _log.info(f"匹配到命令: {cmd}")
-                                is_command = True
-                                matched_handler = handler
-                                break
-                        if is_command:
-                            break
-                    
-                    if not is_command:
-                        _log.warning(f"未匹配到任何命令: {content}")
-                        
-                except ImportError as e:
-                    _log.warning(f"无法导入命令处理模块: {e}")
-                except Exception as e:
-                    _log.error(f"命令处理错误: {e}", exc_info=True)
-
-            # 构建消息（保留原始内容和附件信息）
-            temp_id = data.get('tempId')  # 获取前端发送的临时ID
-            message = {
-                'id': str(uuid.uuid4()),
-                'role': 'user',
-                'content': content,  # 只保留原始文本内容
-                'timestamp': datetime.now().isoformat(),
-                'sender': sender,
-                'source': 'web',
-                'attachments': attachments,
-                'tempId': temp_id,  # 保留临时ID以便前端替换
-                'session_id': session_id  # 添加会话ID以便前端识别
-            }
-
-            self.sessions[session_id]['messages'].append(message)
-            # 使用 socketio.emit 替代 emit，确保广播到 room
-            self.socketio.emit('new_message', message, room=session_id)
-            
-            # 保存会话到磁盘
-            self._save_data('sessions')
-            
-            # 如果是命令，执行命令处理
-            if is_command and matched_handler:
-                # 创建 Web 消息适配器，使用 session_id 作为 user_id（确保唯一性）
-                web_user_id = f"web_{session_id[:8]}"
-                msg_adapter = WebMessageAdapter(content, web_user_id, session_id, self)
-                # 使用 socketio 的 background task 执行命令
-                # 注意：Web 端始终使用 is_group=True，这样命令会使用 msg.reply() 而不是 bot.api.post_private_msg
-                def run_command():
-                    import asyncio
-                    # 临时替换全局的 bot 变量，让命令中的 bot.api 调用生效
-                    try:
-                        import nbot.commands as cmd_module
-                        original_bot = getattr(cmd_module, 'bot', None)
-                        # 使用 msg_adapter 的模拟 bot
-                        cmd_module.bot = msg_adapter.bot
-                        _log.info(f"临时替换 bot 变量为 Web 模拟对象")
-                        
-                        asyncio.run(matched_handler(msg_adapter, is_group=True))
-                    except Exception as e:
-                        _log.error(f"命令执行错误: {e}", exc_info=True)
-                    finally:
-                        # 恢复原始的 bot 变量
-                        if original_bot:
-                            cmd_module.bot = original_bot
-                            _log.info(f"恢复原始 bot 变量")
-                self.socketio.start_background_task(run_command)
-            else:
-                # 触发 AI 回复（传递附件信息）
-                # 构建给 AI 的完整内容（包含附件描述）
-                ai_content = content
+                # 处理附件信息
+                attachment_info = ''
                 if attachments and isinstance(attachments, list):
                     for att in attachments:
                         if isinstance(att, dict):
                             att_name = att.get('name', 'unknown')
                             att_type = att.get('type', '')
-                            ai_content += f'\n[附件：{att_name}, 类型：{att_type}]'
-                self._trigger_ai_response(session_id, ai_content, sender, attachments)
+                            attachment_info += f'\n[附件: {att_name}, 类型: {att_type}]'
+                
+                # 记录日志
+                preview = content[:50] if content else ''
+                self.log_message('info', f'收到Web消息 from {sender}: {preview}... {len(attachments)}个附件')
+                _log.info(f'收到Web消息: session={session_id}, sender={sender}, attachments={len(attachments)}')
+
+                # 先从文件加载会话
+                sessions_file = os.path.join(self.data_dir, 'sessions.json')
+                if os.path.exists(sessions_file):
+                    try:
+                        with open(sessions_file, 'r', encoding='utf-8') as f:
+                            file_sessions = json.load(f)
+                        # 合并到内存
+                        for sid, sess in file_sessions.items():
+                            if sid not in self.sessions:
+                                self.sessions[sid] = sess
+                    except:
+                        pass
+
+                if session_id not in self.sessions:
+                    self.socketio.emit('error', {'message': 'Session not found'}, room=request.sid)
+                    return
+
+                # 检查是否是命令（以 / 开头）
+                is_command = False
+                matched_handler = None
+                if content and content.startswith('/'):
+                    try:
+                        # 导入命令处理模块（确保所有命令已注册）
+                        import nbot.commands
+                        from nbot.commands import command_handlers
+                        import asyncio
+                        
+                        _log.info(f"检查命令: {content}, 可用命令数: {len(command_handlers)}, 命令列表: {list(command_handlers.keys())[:10]}...")
+                        
+                        # 检查是否匹配任何命令
+                        for commands, handler in command_handlers.items():
+                            for cmd in commands:
+                                if content.startswith(cmd):
+                                    _log.info(f"匹配到命令: {cmd}")
+                                    is_command = True
+                                    matched_handler = handler
+                                    break
+                            if is_command:
+                                break
+                        
+                        if not is_command:
+                            _log.warning(f"未匹配到任何命令: {content}")
+                            
+                    except ImportError as e:
+                        _log.warning(f"无法导入命令处理模块: {e}")
+                    except Exception as e:
+                        _log.error(f"命令处理错误: {e}", exc_info=True)
+
+                # 构建消息（保留原始内容和附件元数据，不保存文件内容）
+                temp_id = data.get('tempId')  # 获取前端发送的临时ID
+                
+                # 处理附件：只保留元数据，不保存文件内容（data字段）
+                processed_attachments = []
+                if attachments and isinstance(attachments, list):
+                    for att in attachments:
+                        if isinstance(att, dict):
+                            # 只保留元数据，排除data字段（文件内容）
+                            processed_att = {
+                                'name': att.get('name', 'unknown'),
+                                'type': att.get('type', ''),
+                                'size': att.get('size', 0),
+                                'preview': att.get('preview') if att.get('type', '').startswith('image/') else None
+                            }
+                            processed_attachments.append(processed_att)
+                
+                message = {
+                    'id': str(uuid.uuid4()),
+                    'role': 'user',
+                    'content': content,  # 只保留原始文本内容
+                    'timestamp': datetime.now().isoformat(),
+                    'sender': sender,
+                    'source': 'web',
+                    'attachments': processed_attachments,
+                    'tempId': temp_id,  # 保留临时ID以便前端替换
+                    'session_id': session_id  # 添加会话ID以便前端识别
+                }
+
+                self.sessions[session_id]['messages'].append(message)
+                # 使用 socketio.emit 替代 emit，确保广播到 room
+                self.socketio.emit('new_message', message, room=session_id)
+                
+                # 保存会话到磁盘
+                self._save_data('sessions')
+                
+                # 如果是命令，执行命令处理
+                if is_command and matched_handler:
+                    # 创建 Web 消息适配器，使用纯数字 user_id（确保唯一性）
+                    import hashlib
+                    web_user_id = str(int(hashlib.md5(session_id.encode()).hexdigest(), 16))[:10]
+                    msg_adapter = WebMessageAdapter(content, web_user_id, session_id, self)
+                    # 使用 socketio 的 background task 执行命令
+                    # 注意：Web 端始终使用 is_group=True，这样命令会使用 msg.reply() 而不是 bot.api.post_private_msg
+                    def run_command():
+                        import asyncio
+                        # 临时替换全局的 bot 变量，让命令中的 bot.api 调用生效
+                        try:
+                            import nbot.commands as cmd_module
+                            original_bot = getattr(cmd_module, 'bot', None)
+                            # 使用 msg_adapter 的模拟 bot
+                            cmd_module.bot = msg_adapter.bot
+                            _log.info(f"临时替换 bot 变量为 Web 模拟对象")
+                            
+                            asyncio.run(matched_handler(msg_adapter, is_group=True))
+                        except Exception as e:
+                            _log.error(f"命令执行错误: {e}", exc_info=True)
+                            # 发送错误消息给用户
+                            error_msg = f"❌ 命令执行出错: {str(e)}"
+                            try:
+                                asyncio.run(msg_adapter.reply(text=error_msg))
+                            except Exception as reply_error:
+                                _log.error(f"发送错误消息失败: {reply_error}")
+                        finally:
+                            # 恢复原始的 bot 变量
+                            if original_bot:
+                                cmd_module.bot = original_bot
+                                _log.info(f"恢复原始 bot 变量")
+                    self.socketio.start_background_task(run_command)
+                else:
+                    # 触发 AI 回复（传递附件信息）
+                    # 只使用原始内容，附件信息通过卡片显示
+                    ai_content = content
+                    self._trigger_ai_response(session_id, ai_content, sender, attachments)
+            
+            except Exception as e:
+                _log.error(f"处理消息时出错: {e}", exc_info=True)
+                # 发送错误消息给客户端
+                self.socketio.emit('error', {'message': f'消息处理失败: {str(e)}'}, room=request.sid)
 
         @self.socketio.on('typing')
         def handle_typing(data):
@@ -3459,7 +3482,9 @@ class WebChatServer:
         
         def get_response():
             try:
-                messages_for_ai = session['messages'].copy()
+                # 使用深拷贝避免修改原始消息
+                import copy
+                messages_for_ai = copy.deepcopy(session['messages'])
                 
                 # 限制历史长度
                 MAX_HISTORY = 20
@@ -3540,8 +3565,8 @@ class WebChatServer:
                         from nbot.services.tools import TOOL_DEFINITIONS, execute_tool
                         enabled_tools = [t for t in TOOL_DEFINITIONS if t.get('enabled', True)]
                         if enabled_tools:
-                            # 构建多轮消息
-                            tool_messages = messages_for_ai.copy()
+                            # 构建多轮消息（使用深拷贝）
+                            tool_messages = copy.deepcopy(messages_for_ai)
                             if file_contents and tool_messages and tool_messages[-1].get('role') == 'user':
                                 tool_messages[-1]['content'] = enhanced_content
                             
@@ -3959,5 +3984,64 @@ def create_web_app(config: Dict[str, Any] = None) -> tuple[Flask, SocketIO]:
         """提供文件下载服务"""
         files_dir = os.path.join(server.static_folder, 'files')
         return send_from_directory(files_dir, filename, as_attachment=True)
+
+    # 添加通用静态文件服务
+    @app.route('/static/<path:filename>')
+    def serve_static(filename):
+        """提供静态文件服务"""
+        return send_from_directory(server.static_folder, filename)
+
+    # 添加文件上传 API
+    @app.route('/api/upload', methods=['POST'])
+    def upload_file():
+        """上传文件并返回文件信息"""
+        try:
+            if 'file' not in request.files:
+                return jsonify({'error': 'No file provided'}), 400
+
+            file = request.files['file']
+            if file.filename == '':
+                return jsonify({'error': 'No file selected'}), 400
+
+            # 生成唯一文件名
+            import hashlib
+            file_ext = os.path.splitext(file.filename)[1]
+            unique_name = hashlib.md5(f"{file.filename}{time.time()}".encode()).hexdigest()[:16] + file_ext
+
+            # 保存文件
+            upload_dir = os.path.join(server.static_folder, 'uploads')
+            os.makedirs(upload_dir, exist_ok=True)
+            file_path = os.path.join(upload_dir, unique_name)
+            file.save(file_path)
+
+            # 读取文件内容（文本文件）
+            content = None
+            try:
+                if file_ext.lower() in ['.txt', '.md', '.json', '.xml', '.csv']:
+                    with open(file_path, 'r', encoding='utf-8') as f:
+                        content = f.read()
+                elif file_ext.lower() in ['.docx']:
+                    # 尝试读取 docx 内容
+                    try:
+                        import docx
+                        doc = docx.Document(file_path)
+                        content = '\n'.join([para.text for para in doc.paragraphs])
+                    except ImportError:
+                        content = None
+            except Exception as e:
+                _log.warning(f"无法读取文件内容: {e}")
+
+            return jsonify({
+                'success': True,
+                'filename': file.filename,
+                'unique_name': unique_name,
+                'path': f'/static/uploads/{unique_name}',
+                'size': os.path.getsize(file_path),
+                'content': content  # 文本内容（如果有）
+            })
+
+        except Exception as e:
+            _log.error(f"文件上传失败: {e}", exc_info=True)
+            return jsonify({'error': str(e)}), 500
 
     return app, socketio, server

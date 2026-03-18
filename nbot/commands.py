@@ -646,7 +646,7 @@ async def handle_jmrank(msg, is_group=True):
     else:
         await bot.api.upload_private_file(msg.user_id, os.path.join(cache_dir , f"{select}_{name}.md"), f"{select}_{name}.md")
 
-@register_command("/search",help_text = "/search <内容> -> 搜索漫画",category = "1")
+@register_command("/jm_search",help_text = "/jm_search <内容> -> 搜索漫画",category = "1")
 async def handle_search(msg, is_group=True):
     if is_group:
         await msg.reply(text="正在搜索喵~")
@@ -656,7 +656,7 @@ async def handle_search(msg, is_group=True):
     cache_dir = os.path.join(load_address(),"search")
     os.makedirs(cache_dir,exist_ok = True)
     client = JmOption.default().new_jm_client()
-    content = msg.raw_message[len("/search"):].strip()
+    content = msg.raw_message[len("/jm_search"):].strip()
     
     if not content or content == " ":
         if is_group:

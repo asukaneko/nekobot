@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>NekoBot Dashboard</title>
+    <link rel="icon" type="image/png" href="/static/neko.png">
     <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
     <script src="https://unpkg.com/vue-router@4/dist/vue-router.global.prod.js"></script>
     <script src="https://unpkg.com/axios/dist/axios.min.js"></script>
@@ -94,6 +95,93 @@
             border-right: 1px solid var(--border-color);
             display: flex;
             flex-direction: column;
+            transition: width 0.3s ease, transform 0.3s ease;
+            position: relative;
+        }
+
+        .sidebar.collapsed {
+            width: 60px;
+        }
+
+        .sidebar.collapsed .sidebar-title,
+        .sidebar.collapsed .sidebar-version,
+        .sidebar.collapsed .nav-text,
+        .sidebar.collapsed .sidebar-footer {
+            display: none;
+        }
+
+        .sidebar.collapsed .sidebar-logo {
+            margin: 0 auto;
+        }
+
+        .sidebar.collapsed .sidebar-header {
+            justify-content: center;
+            padding: 16px 8px;
+        }
+
+        .sidebar.collapsed .sidebar-nav {
+            padding: 12px 4px;
+        }
+
+        .sidebar.collapsed .nav-item {
+            justify-content: center;
+            padding: 10px;
+        }
+
+        .sidebar.collapsed .nav-icon {
+            margin: 0;
+            font-size: 18px;
+        }
+
+        /* Sidebar Toggle Button */
+        .sidebar-toggle {
+            position: absolute;
+            right: -12px;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 24px;
+            height: 48px;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 0 8px 8px 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            z-index: 100;
+            transition: all 0.2s ease;
+        }
+
+        .sidebar-toggle:hover {
+            background: var(--bg-hover);
+        }
+
+        .sidebar.collapsed .sidebar-toggle {
+            right: -12px;
+        }
+
+        .sidebar-toggle i {
+            transition: transform 0.3s ease;
+        }
+
+        .sidebar.collapsed .sidebar-toggle i {
+            transform: rotate(180deg);
+        }
+
+        /* Mobile Sidebar Overlay */
+        .sidebar-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.5);
+            z-index: 998;
+        }
+
+        .sidebar-overlay.active {
+            display: block;
         }
 
         .sidebar-header {
@@ -1423,6 +1511,80 @@
             }
         }
 
+        /* Mobile Sidebar Styles */
+        @media (max-width: 768px) {
+            .sidebar {
+                position: fixed;
+                left: 0;
+                top: 0;
+                bottom: 0;
+                z-index: 999;
+                transform: translateX(-100%);
+            }
+
+            .sidebar.mobile-open {
+                transform: translateX(0);
+            }
+
+            .sidebar.collapsed {
+                width: 240px;
+            }
+
+            .sidebar.collapsed .sidebar-title,
+            .sidebar.collapsed .sidebar-version,
+            .sidebar.collapsed .nav-text,
+            .sidebar.collapsed .sidebar-footer {
+                display: block;
+            }
+
+            .sidebar.collapsed .sidebar-header {
+                justify-content: flex-start;
+                padding: 16px;
+            }
+
+            .sidebar.collapsed .sidebar-nav {
+                padding: 12px 8px;
+            }
+
+            .sidebar.collapsed .nav-item {
+                justify-content: flex-start;
+                padding: 10px 12px;
+            }
+
+            .sidebar.collapsed .nav-icon {
+                margin-right: 12px;
+                font-size: 16px;
+            }
+
+            .sidebar-toggle {
+                display: none;
+            }
+
+            /* Mobile Menu Button */
+            .mobile-menu-btn {
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                width: 40px;
+                height: 40px;
+                background: transparent;
+                border: none;
+                color: var(--text-primary);
+                font-size: 20px;
+                cursor: pointer;
+            }
+
+            .main-content {
+                margin-left: 0 !important;
+            }
+        }
+
+        @media (min-width: 769px) {
+            .mobile-menu-btn {
+                display: none;
+            }
+        }
+
         .message-time {
             font-size: 11px;
             color: var(--text-muted);
@@ -2455,7 +2617,9 @@
         <!-- Login -->
         <div v-if="!isLoggedIn" class="login-container">
             <div class="login-box">
-                <div class="login-logo">🤖</div>
+                <div class="login-logo">
+                    <img src="/static/neko.png" alt="NekoBot" style="width: 80px; height: 80px; object-fit: cover; border-radius: 16px;">
+                </div>
                 <h1 class="login-title">NekoBot Dashboard</h1>
                 <p class="login-subtitle">智能 QQ 机器人管理后台</p>
                 <div class="form-group">
@@ -2485,10 +2649,20 @@
 
         <!-- Main App -->
         <div v-else class="app-container">
+            <!-- Sidebar Overlay (Mobile) -->
+            <div class="sidebar-overlay" :class="{ active: isMobileMenuOpen }" @click="isMobileMenuOpen = false"></div>
+
             <!-- Sidebar -->
-            <aside class="sidebar">
+            <aside class="sidebar" :class="{ collapsed: isSidebarCollapsed, 'mobile-open': isMobileMenuOpen }">
+                <!-- Sidebar Toggle Button (Desktop) -->
+                <button class="sidebar-toggle" @click="toggleSidebar" title="收起/展开">
+                    <i class="fas fa-chevron-left"></i>
+                </button>
+
                 <div class="sidebar-header">
-                    <div class="sidebar-logo">🤖</div>
+                    <div class="sidebar-logo">
+                        <img src="/static/neko.png" alt="NekoBot" style="width: 100%; height: 100%; object-fit: cover; border-radius: 10px;">
+                    </div>
                     <div>
                         <div class="sidebar-title">NekoBot</div>
                         <div class="sidebar-version">v2.0.0</div>
@@ -2505,8 +2679,8 @@
                             :class="{ active: currentPage === item.id }"
                             @click="navigateTo(item.id)"
                         >
-                            <i :class="item.icon"></i>
-                            <span>{{ item.label }}</span>
+                            <i :class="item.icon" class="nav-icon"></i>
+                            <span class="nav-text">{{ item.label }}</span>
                         </div>
                     </div>
 
@@ -2519,8 +2693,8 @@
                             :class="{ active: currentPage === item.id }"
                             @click="navigateTo(item.id)"
                         >
-                            <i :class="item.icon"></i>
-                            <span>{{ item.label }}</span>
+                            <i :class="item.icon" class="nav-icon"></i>
+                            <span class="nav-text">{{ item.label }}</span>
                         </div>
                     </div>
 
@@ -2533,8 +2707,8 @@
                             :class="{ active: currentPage === item.id }"
                             @click="navigateTo(item.id)"
                         >
-                            <i :class="item.icon"></i>
-                            <span>{{ item.label }}</span>
+                            <i :class="item.icon" class="nav-icon"></i>
+                            <span class="nav-text">{{ item.label }}</span>
                         </div>
                     </div>
 
@@ -2547,8 +2721,8 @@
                             :class="{ active: currentPage === item.id }"
                             @click="navigateTo(item.id)"
                         >
-                            <i :class="item.icon"></i>
-                            <span>{{ item.label }}</span>
+                            <i :class="item.icon" class="nav-icon"></i>
+                            <span class="nav-text">{{ item.label }}</span>
                         </div>
                     </div>
                 </nav>
@@ -2740,6 +2914,10 @@
                             <template v-else>
                                 <div class="chat-header">
                                     <div class="chat-header-info">
+                                        <!-- Mobile Menu Button -->
+                                        <button class="mobile-menu-btn" @click="isMobileMenuOpen = true">
+                                            <i class="fas fa-bars"></i>
+                                        </button>
                                         <div class="session-icon" :style="{ background: currentSession.type === 'qq' ? 'var(--info)' : 'var(--accent-primary)' }">
                                             <i :class="currentSession.type === 'qq' ? 'fab fa-qq' : 'fas fa-comment'" style="color: white;"></i>
                                         </div>
@@ -5093,6 +5271,8 @@
                     isLoggedIn: false,
                     isLoading: false,
                     isUserScrolling: false,
+                    isSidebarCollapsed: false,
+                    isMobileMenuOpen: false,
                     username: sessionStorage.getItem('username') || '',
                     password: '',
                     currentPage: 'dashboard',
@@ -5408,8 +5588,8 @@
                     // Theme Settings
                     themeSettings: {
                         mode: 'dark',
-                        primaryColor: '#ec4899',
-                        bgImage: '',
+                        primaryColor: '#3b82f6',
+                        bgImage: 'https://images.unsplash.com/photo-1506905925346-21bda4d32df4?w=1920&q=80',
                         bgOpacity: 85,
                         cardOpacity: 90
                     },
@@ -5642,7 +5822,12 @@
                 
                 navigateTo(page) {
                     this.currentPage = page;
+                    this.isMobileMenuOpen = false;
                     this.loadPageData(page);
+                },
+
+                toggleSidebar() {
+                    this.isSidebarCollapsed = !this.isSidebarCollapsed;
                 },
                 
                 async loadAllData() {
@@ -6771,43 +6956,94 @@
                     // 生成本地临时ID
                     const tempId = 'local_' + Date.now();
                     
-                    // 本地显示用户消息（content只显示原始文本，附件卡片单独显示）
+                    // 先上传文件到服务器（如果有文件）
+                    this.isLoading = true;
+                    let uploadedFilesInfo = [];
+                    
+                    if (files.length > 0) {
+                        try {
+                            for (const file of files) {
+                                // 将 base64 转换为 Blob
+                                const base64Data = file.data.split(',')[1];
+                                const byteCharacters = atob(base64Data);
+                                const byteNumbers = new Array(byteCharacters.length);
+                                for (let i = 0; i < byteCharacters.length; i++) {
+                                    byteNumbers[i] = byteCharacters.charCodeAt(i);
+                                }
+                                const byteArray = new Uint8Array(byteNumbers);
+                                const blob = new Blob([byteArray], { type: file.type });
+                                
+                                // 创建 FormData
+                                const formData = new FormData();
+                                formData.append('file', blob, file.name);
+                                
+                                // 上传文件
+                                const res = await api.post('/api/upload', formData, {
+                                    headers: { 'Content-Type': 'multipart/form-data' }
+                                });
+                                
+                                if (res.data.success) {
+                                    uploadedFilesInfo.push({
+                                        name: res.data.filename,
+                                        type: file.type,
+                                        size: res.data.size,
+                                        path: res.data.path,
+                                        content: res.data.content,  // 文件文本内容
+                                        preview: file.preview
+                                    });
+                                }
+                            }
+                        } catch (e) {
+                            console.error('文件上传失败:', e);
+                            this.showToast('文件上传失败', 'error');
+                            this.isLoading = false;
+                            return;
+                        }
+                    }
+                    
+                    // 本地显示用户消息
                     const userMessage = {
                         id: tempId,
                         role: 'user',
                         content: content,
                         timestamp: new Date().toISOString(),
                         source: 'web',
-                        attachments: files.map(f => ({
+                        attachments: uploadedFilesInfo.map(f => ({
                             name: f.name,
                             type: f.type,
                             size: f.size,
-                            data: f.data
+                            path: f.path,
+                            preview: f.preview
                         }))
                     };
                     this.currentMessages.push(userMessage);
                     this.$nextTick(() => this.scrollToBottom());
                     
-                    // 设置加载动画（在当前会话显示）
+                    // 设置加载动画
                     this.isTyping = true;
+                    this.isLoading = false;
                     
                     try {
-                        // 通过 WebSocket 发送消息，触发 AI 回复（包含文件数据）
+                        // 通过 WebSocket 发送消息
+                        // 只发送原始内容，文件内容通过后端读取并传递给AI
                         socket.emit('send_message', {
                             session_id: this.currentSession.id,
-                            content: content,
+                            content: content,  // 只发送原始内容
                             sender: this.username,
-                            attachments: files.map(f => ({
+                            attachments: uploadedFilesInfo.map(f => ({
                                 name: f.name,
                                 type: f.type,
-                                data: f.data
+                                size: f.size,
+                                path: f.path,
+                                preview: f.preview
                             })),
-                            tempId: tempId  // 发送临时ID以便后端返回
+                            tempId: tempId
                         });
                         
                     } catch (e) {
                         this.isTyping = false;
                         this.showToast('发送失败', 'error');
+                        console.error('发送消息失败:', e);
                     }
                 },
                 
