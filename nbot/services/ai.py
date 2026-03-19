@@ -131,6 +131,7 @@ class AIClient:
         return requests.post(url, json=payload, headers=headers)
 
     def describe_image(self, image_url: str, text: str) -> str:
+        print(f"[图片识别] 开始识别图片, URL: {image_url}")
         messages = [
             {
                 "role": "user",
@@ -150,8 +151,11 @@ class AIClient:
         ]
         response = self.silicon_chat(self.pic_model, messages)
         try:
-            return self.clean_response(response.json()["choices"][0]["message"]["content"])
-        except Exception:
+            result = self.clean_response(response.json()["choices"][0]["message"]["content"])
+            print(f"[图片识别] 识别成功, 结果: {result[:100]}...")
+            return result
+        except Exception as e:
+            print(f"[图片识别] 识别失败, 错误: {e}, 响应: {response.text}")
             return "链接失效"
 
     def gif_to_mp4_data_url(self, image_url: str, fps: int = 10) -> str:

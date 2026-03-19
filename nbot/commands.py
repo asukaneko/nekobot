@@ -3918,6 +3918,26 @@ async def dispatch_message(msg, is_group: bool):
     if not raw_msg:
         return
 
+    # 获取图片 URL - 优先使用 msg.message[0].data.url
+    image_url = None
+    try:
+        if hasattr(msg, 'message') and msg.message:
+            first_elem = msg.message[0]
+            if hasattr(first_elem, 'type') and first_elem.type == 'image':
+                image_url = first_elem.data.get('url')
+                if image_url:
+                    _log.info(f"从 message[0].data.url 获取图片 URL: {image_url[:50]}...")
+    except Exception as e:
+        _log.warning(f"无法从 message 获取图片 URL: {e}")
+
+    # 如果上面获取失败，尝试解析 CQ 码
+    if not image_url:
+        import re
+        image_match = re.search(r'\[CQ:image[^,]*url=(https?://[^,\]]+)', raw_msg)
+        if image_match:
+            image_url = image_match.group(1)
+            _log.info(f"从 CQ 码解析图片 URL: {image_url[:50]}...")
+
     # 检查是否是命令
     for commands, handler in command_handlers.items():
         for cmd in commands:
@@ -3942,8 +3962,8 @@ async def dispatch_message(msg, is_group: bool):
             content = raw_msg
             group_id = str(msg.group_id) if hasattr(msg, 'group_id') else None
             user_id = str(msg.user_id) if hasattr(msg, 'user_id') else None
-            _log.info(f"Processing group message (at bot) from {user_id} in {group_id}: {content[:50]}...")
-            response = await loop.run_in_executor(None, do_chat, content, user_id, group_id, None, False, None, None)
+            _log.info(f"Processing group message (at bot) from {user_id} in {group_id}: {content[:50]}..., image: {bool(image_url)}")
+            response = await loop.run_in_executor(None, do_chat, content, user_id, group_id, None, bool(image_url), image_url, None)
             if response:
                 _log.info(f"Sending group reply: {response[:50]}...")
                 await msg.reply(text=response)
@@ -3958,8 +3978,8 @@ async def dispatch_message(msg, is_group: bool):
         try:
             content = raw_msg
             user_id = str(msg.user_id) if hasattr(msg, 'user_id') else None
-            _log.info(f"Processing private message from {user_id}: {content[:50]}...")
-            response = await loop.run_in_executor(None, do_chat, content, user_id, None, None, False, None, None)
+            _log.info(f"Processing private message from {user_id}: {content[:50]}..., image: {bool(image_url)}")
+            response = await loop.run_in_executor(None, do_chat, content, user_id, None, None, bool(image_url), image_url, None)
             if response:
                 _log.info(f"Sending private reply: {response[:50]}...")
                 await msg.reply(text=response)

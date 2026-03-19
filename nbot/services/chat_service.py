@@ -3,6 +3,8 @@ from nbot.services.ai import (
     ai_client, user_messages, group_messages, MAX_HISTORY_LENGTH,
     model, api_key, base_url
 )
+from nbot.core import prompt_manager, message_manager
+from nbot.core.message import create_message
 
 last_log_entry = {}
 
@@ -18,116 +20,17 @@ def remove_brackets_content(text: str) -> str:
 
 
 def load_memories(user_id=None, group_id=None):
-    """加载长期和短期记忆"""
-    memories = []
-    target_id = user_id or group_id
-    
-    if not target_id:
-        return ""
-    
-    target_id = str(target_id)
-    data_dir = os.path.join(os.path.dirname(__file__), '..', '..', 'data', 'web')
-    memory_file = os.path.join(data_dir, "memories.json")
-    
-    if not os.path.exists(memory_file):
-        return ""
-    
-    try:
-        with open(memory_file, 'r', encoding='utf-8') as f:
-            all_memories = json.load(f)
-    except:
-        return ""
-    
-    now = datetime.datetime.now()
-    
-    for mem in all_memories:
-        # 检查记忆是否关联到当前用户/群
-        mem_target = mem.get('target_id', '')
-        if mem_target and mem_target != target_id:
-            continue
-            
-        mem_type = mem.get('type', 'long')
-        
-        if mem_type == 'long':
-            # 长期记忆直接加入
-            memories.append(f"[{mem.get('key', '')}]: {mem.get('value', '')}")
-        elif mem_type == 'short':
-            # 短期记忆检查是否过期
-            created_at = mem.get('created_at', '')
-            expire_days = mem.get('expire_days', 7)
-            
-            if created_at:
-                try:
-                    created = datetime.datetime.fromisoformat(created_at)
-                    diff_days = (now - created).days
-                    if diff_days <= expire_days:
-                        memories.append(f"[{mem.get('key', '')}]: {mem.get('value', '')}")
-                except:
-                    memories.append(f"[{mem.get('key', '')}]: {mem.get('value', '')}")
-    
-    if memories:
-        return "\n".join(["【重要记忆】"] + memories)
-    return ""
+    """加载长期和短期记忆（兼容旧接口，使用新模块）"""
+    return prompt_manager.load_memories(user_id, group_id)
 
 
 def load_prompt(user_id=None, group_id=None, include_skills: bool = True):
-    prompt_file = None
-    prompt = ""
-
-    if user_id:
-        user_id = str(user_id)
-        prompt_file = f"resources/prompts/user/user_{user_id}.txt"
-    elif group_id:
-        group_id = str(group_id)
-        prompt_file = f"resources/prompts/group/group_{group_id}.txt"
-
-    if prompt_file:
-        try:
-            with open(prompt_file, "r", encoding="utf-8") as file:
-                prompt = file.read()
-        except FileNotFoundError:
-            pass
-
-    if not prompt:
-        try:
-            with open("resources/prompts/neko.txt", "r", encoding="utf-8") as file:
-                prompt = file.read()
-        except FileNotFoundError:
-            prompt = ""
-
-    # 加载记忆并添加到提示词
-    memories_text = load_memories(user_id, group_id)
-    if memories_text:
-        if prompt:
-            prompt = prompt + "\n\n" + memories_text
-        else:
-            prompt = memories_text
-
-    # 添加可用工具列表到提示词（从web配置读取启用的工具）
-    try:
-        from nbot.services.tools import get_enabled_tools
-        enabled_tools = get_enabled_tools()
-        if enabled_tools:
-            tools_text = "## 可用工具 (Tools)\n"
-            tools_text += "你可以使用以下工具来帮助用户：\n\n"
-            for tool in enabled_tools:
-                if tool.get("type") == "function" and "function" in tool:
-                    func = tool["function"]
-                    name = func.get("name", "")
-                    desc = func.get("description", "")
-                    if name and desc:
-                        tools_text += f"- **{name}**: {desc}\n"
-            tools_text += "\n**使用规则：**\n"
-            tools_text += "1. 当用户请求需要使用工具时，你可以调用对应的工具\n"
-            tools_text += "2. 工具调用会被系统自动处理\n"
-            if tools_text:
-                if prompt:
-                    prompt = prompt + "\n\n" + tools_text
-                else:
-                    prompt = tools_text
-    except Exception:
-        pass
-
+    """加载提示词（兼容旧接口，使用新模块 + 技能列表）"""
+    user_id = str(user_id) if user_id else None
+    group_id = str(group_id) if group_id else None
+    
+    prompt = prompt_manager.load_prompt(user_id, group_id, include_memories=True, include_tools=True)
+    
     if include_skills:
         try:
             from nbot.plugins import get_plugin_manager
@@ -151,7 +54,10 @@ def online_search(content: str) -> str:
 
 
 def chat_image(iurl: str) -> str:
-    return ai_client.describe_image(iurl, "请描述这个图片的内容，仅作描述，不要分析内容")
+    print(f"[图片识别] chat_image 收到请求, URL: {iurl}")
+    result = ai_client.describe_image(iurl, "请描述这个图片的内容，仅作描述，不要分析内容")
+    print(f"[图片识别] chat_image 返回结果: {result[:50] if result else '空'}...")
+    return result
 
 
 def chat_gif(iurl: str) -> str:
@@ -243,7 +149,9 @@ def chat(content: str = "", user_id=None, group_id=None, group_user_id=None,
         search_res = ""
 
     if image:
+        print(f"[图片识别] chat 函数收到图片请求, URL: {url}")
         response = chat_image(url)
+        print(f"[图片识别] chat 函数获取到图片描述: {response[:80] if response else '空'}...")
         messages.append({"role": "user", "content": f"(当前时间：{now_time})"})
         if search_status == 1:
             messages.append({"role": "user", "content": f"{pre_text}用户发送了一张图片，这是图片的描述：{response} 这是联网搜索的结果：{search_res}这是用户说的话：{content}"})
@@ -269,6 +177,9 @@ def chat(content: str = "", user_id=None, group_id=None, group_user_id=None,
             tot += 1
             des += f"第{tot}个链接{match}的描述：" + chat_webpage(match) + "\n"
         messages.append({"role": "user", "content": f"{pre_text}{des}"})
+
+    # 记录用户消息到新消息模块
+    record_user_message(content, user_id, group_id, group_user_id)
 
     if len(messages) > MAX_HISTORY_LENGTH:
         messages = [messages[0]] + messages[-MAX_HISTORY_LENGTH:]
@@ -298,9 +209,8 @@ def chat(content: str = "", user_id=None, group_id=None, group_user_id=None,
     # 更新 token 统计（使用真实数据）
     _update_token_stats(user_id, group_id, prompt_tokens, completion_tokens, total_tokens)
 
-    # 同步用户消息和 AI 回复到 Web 会话（群聊时每个用户独立会话）
-    _sync_to_web_session('user', content, user_id, group_id, group_user_id)
-    _sync_to_web_session('assistant', assistant_response, user_id, group_id, group_user_id)
+    # 注意：QQ 消息已通过新模块 message_manager 统一管理，存储在 data/qq/ 目录
+    # 不再同步到 data/web/sessions.json
 
     temp_content = assistant_response.strip()
     if temp_content.startswith("```json"):
@@ -320,18 +230,13 @@ def chat(content: str = "", user_id=None, group_id=None, group_user_id=None,
     display_response = assistant_response
     if assistant_response and assistant_response.strip().startswith('{'):
         try:
-            parsed = json.loads(assistant_response)
+            # 先替换中文引号和冒号为英文
+            fixed = assistant_response.replace(chr(8220), '"').replace(chr(8221), '"').replace(chr(65306), ':')
+            parsed = json.loads(fixed)
             if isinstance(parsed, dict) and 'msg' in parsed:
                 display_response = parsed['msg']
         except:
-            # 尝试替换中文引号
-            try:
-                fixed = assistant_response.replace('"', '"').replace('"', '"')
-                parsed = json.loads(fixed)
-                if isinstance(parsed, dict) and 'msg' in parsed:
-                    display_response = parsed['msg']
-            except:
-                pass
+            pass
 
     try:
         with open("saved_message/user_messages.json", "w", encoding='utf-8') as f:
@@ -534,13 +439,28 @@ def _sync_to_web_session(role, content, user_id=None, group_id=None, group_user_
         print(f"同步到 Web 会话失败: {e}")
 
 
-def _record_message(role, content, user_id=None, group_id=None):
+def _record_message(role, content, user_id=None, group_id=None, group_user_id=None):
+    """记录消息到内存和文件（兼容旧接口，同时使用新模块）"""
     if not content:
         return
 
     now_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     if role == "user" and "(当前时间：" not in content:
         record_content = f"(当前时间：{now_time})\n{content}"
+    elif role == "assistant":
+        # 解析 JSON 内容，提取 msg
+        display_content = content
+        if content and content.strip().startswith('{'):
+            try:
+                # 替换中文引号和冒号为英文
+                # 8220=" 8221=" 65306=:
+                fixed_content = content.replace(chr(8220), '"').replace(chr(8221), '"').replace(chr(65306), ':')
+                parsed = json.loads(fixed_content)
+                if isinstance(parsed, dict) and 'msg' in parsed:
+                    display_content = parsed['msg']
+            except Exception as e:
+                print(f"[DEBUG] JSON parse failed: {e}, content: {content[:100]}")
+        record_content = display_content
     else:
         record_content = content
 
@@ -558,20 +478,36 @@ def _record_message(role, content, user_id=None, group_id=None):
         user_messages[user_id].append({"role": role, "content": record_content})
         if len(user_messages[user_id]) > MAX_HISTORY_LENGTH:
             user_messages[user_id] = [user_messages[user_id][0]] + user_messages[user_id][-MAX_HISTORY_LENGTH:]
+        
+        # 同时记录到新消息模块
+        message_manager.add_qq_private_message(user_id, 
+            create_message(role, record_content, sender=user_id, source="qq_private"))
+    
     elif group_id:
         group_id = str(group_id)
         prompt = load_prompt(group_id=group_id)
-        if group_id not in group_messages:
-            group_messages[group_id] = [{"role": "system", "content": prompt}]
+        
+        # 群聊中每个用户有独立的会话（与 chat 函数保持一致）
+        if group_user_id:
+            session_key = f"{group_id}_{group_user_id}"
         else:
-            if group_messages[group_id] and group_messages[group_id][0].get("role") == "system":
-                group_messages[group_id][0]["content"] = prompt
+            session_key = group_id
+        
+        if session_key not in group_messages:
+            group_messages[session_key] = [{"role": "system", "content": prompt}]
+        else:
+            if group_messages[session_key] and group_messages[session_key][0].get("role") == "system":
+                group_messages[session_key][0]["content"] = prompt
             else:
-                group_messages[group_id].insert(0, {"role": "system", "content": prompt})
+                group_messages[session_key].insert(0, {"role": "system", "content": prompt})
 
-        group_messages[group_id].append({"role": role, "content": record_content})
-        if len(group_messages[group_id]) > MAX_HISTORY_LENGTH:
-            group_messages[group_id] = [group_messages[group_id][0]] + group_messages[group_id][-MAX_HISTORY_LENGTH:]
+        group_messages[session_key].append({"role": role, "content": record_content})
+        if len(group_messages[session_key]) > MAX_HISTORY_LENGTH:
+            group_messages[session_key] = [group_messages[session_key][0]] + group_messages[session_key][-MAX_HISTORY_LENGTH:]
+        
+        # 同时记录到新消息模块（使用 group_id 作为文件标识）
+        message_manager.add_qq_group_message(group_id,
+            create_message(role, record_content, source="qq_group"))
 
     try:
         with open("saved_message/user_messages.json", "w", encoding="utf-8") as f:
@@ -620,12 +556,12 @@ def log_to_group_full_file(group_id, user_id, nickname, content, timestamp=None)
         print(f"写入群聊日志失败: {e}")
 
 
-def record_assistant_message(content, user_id=None, group_id=None):
-    _record_message("assistant", content, user_id, group_id)
+def record_assistant_message(content, user_id=None, group_id=None, group_user_id=None):
+    _record_message("assistant", content, user_id, group_id, group_user_id)
 
 
-def record_user_message(content, user_id=None, group_id=None):
-    _record_message("user", content, user_id, group_id)
+def record_user_message(content, user_id=None, group_id=None, group_user_id=None):
+    _record_message("user", content, user_id, group_id, group_user_id)
 
 
 def summarize_group_text(text: str) -> str:

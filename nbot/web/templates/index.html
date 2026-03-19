@@ -1351,6 +1351,87 @@
 
         .search-box input::placeholder { color: var(--text-muted); }
 
+        /* 聊天标签页 */
+        .chat-tabs {
+            display: flex;
+            gap: 4px;
+            padding: 8px;
+            border-bottom: 1px solid var(--border-color);
+        }
+        .chat-tab {
+            flex: 1;
+            padding: 8px 4px;
+            border: none;
+            background: transparent;
+            color: var(--text-muted);
+            font-size: 12px;
+            cursor: pointer;
+            border-radius: 6px;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 4px;
+        }
+        .chat-tab:hover { background: var(--bg-tertiary); }
+        .chat-tab.active { 
+            background: var(--accent-primary); 
+            color: white;
+        }
+        .chat-tab i { font-size: 12px; }
+
+        /* QQ 会话列表 */
+        :root {
+            --qq-private: #12B7F5;
+            --qq-group: #FF6B00;
+        }
+        .qq-list .session-item { border-left: 3px solid transparent; }
+        .qq-list .session-item:hover { border-left-color: var(--qq-private); }
+        .qq-list .session-item.active { 
+            background: rgba(18, 183, 245, 0.15); 
+            border-left-color: var(--qq-private);
+        }
+        .qq-list .session-preview {
+            font-size: 11px;
+            color: var(--text-muted);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            margin-top: 2px;
+        }
+        .empty-hint {
+            text-align: center;
+            color: var(--text-muted);
+            font-size: 12px;
+            padding: 20px;
+        }
+
+        /* QQ 消息样式 */
+        /* QQ 消息样式 - 已移除左侧边框 */
+        .qq-badge {
+            display: inline-block;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 10px;
+            margin-left: 8px;
+        }
+        .qq-badge.private { background: var(--qq-private); color: white; }
+        .qq-badge.group { background: var(--qq-group); color: white; }
+        .qq-chat-footer {
+            padding: 12px;
+            border-top: 1px solid var(--border-color);
+            background: var(--bg-secondary);
+        }
+        .qq-notice {
+            text-align: center;
+            color: var(--text-muted);
+            font-size: 12px;
+            padding: 8px;
+            background: var(--bg-tertiary);
+            border-radius: 6px;
+        }
+        .qq-notice i { margin-right: 6px; }
+
         .session-list {
             flex: 1;
             overflow-y: auto;
@@ -2875,7 +2956,32 @@
                     <!-- Chat -->
                     <div v-if="currentPage === 'chat'" class="chat-layout fade-in">
                         <div class="chat-sidebar">
-                            <div class="chat-sidebar-header">
+                            <!-- 标签页切换 -->
+                            <div class="chat-tabs">
+                                <button 
+                                    class="chat-tab" 
+                                    :class="{ active: chatTab === 'web' }"
+                                    @click="switchChatTab('web')"
+                                >
+                                    <i class="fas fa-globe"></i> Web
+                                </button>
+                                <button 
+                                    class="chat-tab" 
+                                    :class="{ active: chatTab === 'qq_private' }"
+                                    @click="switchChatTab('qq_private')"
+                                >
+                                    <i class="fab fa-qq"></i> QQ私聊
+                                </button>
+                                <button 
+                                    class="chat-tab" 
+                                    :class="{ active: chatTab === 'qq_group' }"
+                                    @click="switchChatTab('qq_group')"
+                                >
+                                    <i class="fas fa-users"></i> QQ群聊
+                                </button>
+                            </div>
+                            
+                            <div class="chat-sidebar-header" v-if="chatTab === 'web'">
                                 <button class="btn btn-primary" style="width: 100%;" @click="createNewSession" :disabled="isLoading">
                                     <i class="fas fa-plus"></i> 新建会话
                                 </button>
@@ -2884,7 +2990,9 @@
                                     <input v-model="sessionSearch" type="text" placeholder="搜索会话...">
                                 </div>
                             </div>
-                            <div class="session-list">
+                            
+                            <!-- Web 会话列表 -->
+                            <div class="session-list" v-if="chatTab === 'web'">
                                 <div 
                                     v-for="session in filteredSessions" 
                                     :key="session.id"
@@ -2902,16 +3010,124 @@
                                         </div>
                                     </div>
                                 </div>
+                                <div v-if="filteredSessions.length === 0" class="empty-hint">
+                                    暂无会话，点击上方按钮创建
+                                </div>
+                            </div>
+                            
+                            <!-- QQ 私聊列表 -->
+                            <div class="session-list qq-list" v-if="chatTab === 'qq_private'">
+                                <div 
+                                    v-for="user in qqPrivateUsers" 
+                                    :key="user.user_id"
+                                    class="session-item qq-session"
+                                    :class="{ active: currentQqId === user.user_id && chatTab === 'qq_private' }"
+                                    @click="selectQqChat('private', user.user_id)"
+                                >
+                                    <div class="session-icon" style="background: var(--qq-private);">
+                                        <i class="fab fa-qq" style="color: white;"></i>
+                                    </div>
+                                    <div class="session-info">
+                                        <div class="session-name">{{ user.user_id }}</div>
+                                        <div class="session-meta">
+                                            {{ user.message_count }} 条消息 · {{ formatTime(user.last_time) }}
+                                        </div>
+                                        <div class="session-preview">{{ user.last_message }}</div>
+                                    </div>
+                                </div>
+                                <div v-if="qqPrivateUsers.length === 0" class="empty-hint">
+                                    暂无 QQ 私聊记录
+                                </div>
+                            </div>
+                            
+                            <!-- QQ 群聊列表 -->
+                            <div class="session-list qq-list" v-if="chatTab === 'qq_group'">
+                                <div 
+                                    v-for="group in qqGroups" 
+                                    :key="group.group_id"
+                                    class="session-item qq-session"
+                                    :class="{ active: currentQqId === group.group_id && chatTab === 'qq_group' }"
+                                    @click="selectQqChat('group', group.group_id)"
+                                >
+                                    <div class="session-icon" style="background: var(--qq-group);">
+                                        <i class="fas fa-users" style="color: white;"></i>
+                                    </div>
+                                    <div class="session-info">
+                                        <div class="session-name">群 {{ group.group_id }}</div>
+                                        <div class="session-meta">
+                                            {{ group.message_count }} 条消息 · {{ formatTime(group.last_time) }}
+                                        </div>
+                                        <div class="session-preview">{{ group.last_message }}</div>
+                                    </div>
+                                </div>
+                                <div v-if="qqGroups.length === 0" class="empty-hint">
+                                    暂无 QQ 群聊记录
+                                </div>
                             </div>
                         </div>
 
                         <div class="chat-main">
-                            <div v-if="!currentSession" class="empty-state">
+                            <!-- Web 会话为空 -->
+                            <div v-if="chatTab === 'web' && !currentSession" class="empty-state">
                                 <div class="empty-state-icon">💬</div>
                                 <div class="empty-state-title">选择一个会话开始聊天</div>
                                 <div class="empty-state-desc">或创建一个新的会话</div>
                             </div>
-                            <template v-else>
+                            
+                            <!-- QQ 会话为空 -->
+                            <div v-if="(chatTab === 'qq_private' || chatTab === 'qq_group') && !currentQqId" class="empty-state">
+                                <div class="empty-state-icon" v-if="chatTab === 'qq_private'">💬</div>
+                                <div class="empty-state-icon" v-else>👥</div>
+                                <div class="empty-state-title">选择一个 QQ {{ chatTab === 'qq_private' ? '私聊' : '群聊' }}</div>
+                                <div class="empty-state-desc">点击左侧列表查看消息记录</div>
+                            </div>
+                            
+                            <!-- QQ 消息视图 -->
+                            <template v-if="currentQqId && (chatTab === 'qq_private' || chatTab === 'qq_group')">
+                                <div class="chat-header">
+                                    <div class="chat-header-info">
+                                        <button class="mobile-menu-btn" @click="isMobileMenuOpen = true">
+                                            <i class="fas fa-bars"></i>
+                                        </button>
+                                        <div class="session-icon" :style="{ background: chatTab === 'qq_private' ? 'var(--qq-private)' : 'var(--qq-group)' }">
+                                            <i :class="chatTab === 'qq_private' ? 'fab fa-qq' : 'fas fa-users'" style="color: white;"></i>
+                                        </div>
+                                        <div>
+                                            <div class="chat-header-title">
+                                                {{ chatTab === 'qq_private' ? 'QQ 私聊' : 'QQ 群聊' }} {{ currentQqId }}
+                                                <span class="qq-badge" :class="chatTab === 'qq_private' ? 'private' : 'group'">
+                                                    {{ chatTab === 'qq_private' ? 'QQ私聊' : 'QQ群聊' }}
+                                                </span>
+                                            </div>
+                                            <div class="chat-header-subtitle">
+                                                {{ currentQqMessages.length }} 条消息
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div class="messages-container" ref="qqMessagesContainer">
+                                    <div v-for="msg in currentQqMessages" :key="msg.id" class="message" :class="[msg.role, chatTab === 'qq_private' ? 'message-qq' : 'message-qq-group']">
+                                        <div class="message-avatar">
+                                            <i :class="msg.role === 'user' ? 'fas fa-user' : 'fas fa-robot'"></i>
+                                        </div>
+                                        <div class="message-content">
+                                            <div v-if="msg.content">{{ parseMessageContent(msg.content, msg) }}</div>
+                                            <div class="message-time">{{ formatTime(msg.timestamp) }}</div>
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                <div class="chat-footer qq-chat-footer">
+                                    <div class="qq-notice">
+                                        <i class="fas fa-info-circle"></i>
+                                        QQ 消息仅供查看，无法回复
+                                    </div>
+                                </div>
+                            </template>
+                            
+                            <!-- Web 会话视图 -->
+                            <template v-else-if="currentSession">
                                 <div class="chat-header">
                                     <div class="chat-header-info">
                                         <!-- Mobile Menu Button -->
@@ -2948,7 +3164,7 @@
                                             <!-- 用户上传的附件 -->
                                             <div v-if="msg.attachments && msg.attachments.length > 0" class="message-attachments">
                                                 <div v-for="(att, idx) in msg.attachments" :key="idx" class="attachment-card" @click="previewAttachment(att)">
-                                                    <img v-if="att.type && att.type.startsWith('image/')" :src="att.url || att.data" class="attachment-preview">
+                                                    <img v-if="att.type && att.type.startsWith('image/')" :src="att.url || att.data || att.preview" class="attachment-preview">
                                                     <div v-else class="attachment-icon" :class="getAttachmentIconClass(att.type)">
                                                         <i :class="getAttachmentIcon(att.type)"></i>
                                                     </div>
@@ -2962,7 +3178,7 @@
                                             <div v-if="msg.file" class="message-attachments">
                                                 <div class="attachment-card" @click="downloadFile(msg.file)">
                                                     <!-- 图片直接显示 -->
-                                                    <img v-if="msg.file.is_image" :src="msg.file.data || msg.file.url" class="attachment-preview" style="max-width: 200px; max-height: 150px; object-fit: cover;">
+                                                    <img v-if="msg.file.is_image" :src="msg.file.data || msg.file.url || msg.file.preview" class="attachment-preview" style="max-width: 200px; max-height: 150px; object-fit: cover;">
                                                     <!-- 文本文件显示预览 -->
                                                     <div v-else-if="msg.file.is_text && msg.file.content" class="text-file-preview" style="max-width: 300px; max-height: 150px; overflow: auto; background: rgba(0,0,0,0.1); padding: 8px; border-radius: 4px; font-family: monospace; font-size: 12px;">
                                                         <pre style="margin: 0; white-space: pre-wrap;">{{ msg.file.content }}</pre>
@@ -5339,6 +5555,13 @@
                     isUserScrolling: false,
                     showScrollToBottom: false,
                     sessionSearch: '',
+                    
+                    // QQ Chat
+                    chatTab: 'web',  // web, qq_private, qq_group
+                    qqPrivateUsers: [],
+                    qqGroups: [],
+                    currentQqId: null,
+                    currentQqMessages: [],
                     maxContextLength: 20,
                     
                     // Workflows
@@ -6867,6 +7090,8 @@
                 // Chat Functions
                 async selectSession(session) {
                     this.currentSession = session;
+                    this.currentQqId = null;
+                    this.currentQqMessages = [];
                     // 切换会话时清除加载状态，确保其他会话没有动画
                     this.isTyping = false;
                     this.isLoading = false;
@@ -6884,6 +7109,67 @@
                     this.messageRefreshTimer = setInterval(() => {
                         if (this.currentSession && this.currentPage === 'chat') {
                             this.loadMessages();
+                        }
+                    }, 2000);
+                },
+                
+                async switchChatTab(tab) {
+                    this.chatTab = tab;
+                    this.currentSession = null;
+                    this.currentQqId = null;
+                    this.currentQqMessages = [];
+                    
+                    if (tab === 'qq_private') {
+                        await this.loadQqPrivateUsers();
+                    } else if (tab === 'qq_group') {
+                        await this.loadQqGroups();
+                    }
+                    
+                    // 清除之前的消息刷新定时器
+                    if (this.messageRefreshTimer) {
+                        clearInterval(this.messageRefreshTimer);
+                    }
+                },
+                
+                async loadQqPrivateUsers() {
+                    try {
+                        const res = await api.get('/api/qq/users');
+                        this.qqPrivateUsers = res.data.users || [];
+                    } catch (e) {
+                        console.error('Failed to load QQ users:', e);
+                    }
+                },
+                
+                async loadQqGroups() {
+                    try {
+                        const res = await api.get('/api/qq/groups');
+                        this.qqGroups = res.data.groups || [];
+                    } catch (e) {
+                        console.error('Failed to load QQ groups:', e);
+                    }
+                },
+                
+                async selectQqChat(type, id) {
+                    this.currentQqId = id;
+                    this.currentQqMessages = [];
+                    
+                    try {
+                        const res = await api.get(`/api/qq/messages/${type}/${id}`);
+                        this.currentQqMessages = res.data.messages || [];
+                    } catch (e) {
+                        console.error('Failed to load QQ messages:', e);
+                    }
+                    
+                    // 设置刷新定时器
+                    if (this.messageRefreshTimer) {
+                        clearInterval(this.messageRefreshTimer);
+                    }
+                    this.messageRefreshTimer = setInterval(async () => {
+                        if (this.currentQqId && this.currentPage === 'chat') {
+                            try {
+                                const res = await api.get(`/api/qq/messages/${type}/${id}`);
+                                this.currentQqMessages = res.data.messages || [];
+                            } catch (e) {}
                         }
                     }, 2000);
                 },
@@ -6963,39 +7249,51 @@
                     if (files.length > 0) {
                         try {
                             for (const file of files) {
-                                // 将 base64 转换为 Blob
-                                const base64Data = file.data.split(',')[1];
-                                const byteCharacters = atob(base64Data);
-                                const byteNumbers = new Array(byteCharacters.length);
-                                for (let i = 0; i < byteCharacters.length; i++) {
-                                    byteNumbers[i] = byteCharacters.charCodeAt(i);
+                                let uploadFile;
+                                
+                                // 优先使用原始 File 对象（更高效）
+                                if (file._file) {
+                                    uploadFile = file._file;
+                                } else if (file.data) {
+                                    // 如果没有 _file，从 base64 转换
+                                    const base64Data = file.data.split(',')[1];
+                                    const byteCharacters = atob(base64Data);
+                                    const byteNumbers = new Array(byteCharacters.length);
+                                    for (let i = 0; i < byteCharacters.length; i++) {
+                                        byteNumbers[i] = byteCharacters.charCodeAt(i);
+                                    }
+                                    const byteArray = new Uint8Array(byteNumbers);
+                                    uploadFile = new Blob([byteArray], { type: file.type });
+                                } else {
+                                    this.showToast('文件数据丢失，请重新选择', 'error');
+                                    continue;
                                 }
-                                const byteArray = new Uint8Array(byteNumbers);
-                                const blob = new Blob([byteArray], { type: file.type });
                                 
                                 // 创建 FormData
                                 const formData = new FormData();
-                                formData.append('file', blob, file.name);
+                                formData.append('file', uploadFile, file.name);
                                 
                                 // 上传文件
                                 const res = await api.post('/api/upload', formData, {
                                     headers: { 'Content-Type': 'multipart/form-data' }
                                 });
                                 
-                                if (res.data.success) {
-                                    uploadedFilesInfo.push({
-                                        name: res.data.filename,
-                                        type: file.type,
-                                        size: res.data.size,
-                                        path: res.data.path,
-                                        content: res.data.content,  // 文件文本内容
-                                        preview: file.preview
-                                    });
+                                if (!res.data.success) {
+                                    throw new Error(res.data.error || '上传失败');
                                 }
+                                
+                                uploadedFilesInfo.push({
+                                    name: res.data.filename,
+                                    type: file.type,
+                                    size: res.data.size,
+                                    path: res.data.path,
+                                    content: res.data.content,  // 文件文本内容
+                                    preview: file.preview || res.data.path  // 使用服务器路径作为预览
+                                });
                             }
                         } catch (e) {
                             console.error('文件上传失败:', e);
-                            this.showToast('文件上传失败', 'error');
+                            this.showToast('文件上传失败: ' + e.message, 'error');
                             this.isLoading = false;
                             return;
                         }
@@ -7057,17 +7355,28 @@
                             continue;
                         }
                         
-                        const reader = new FileReader();
-                        reader.onload = (e) => {
+                        // 对于图片，创建本地预览 URL
+                        if (file.type.startsWith('image/')) {
+                            const localUrl = URL.createObjectURL(file);
                             this.uploadedFiles.push({
                                 name: file.name,
                                 type: file.type,
                                 size: file.size,
-                                data: e.target.result,
-                                preview: file.type.startsWith('image/') ? e.target.result : null
+                                data: null,
+                                preview: localUrl,  // 使用本地 URL 预览
+                                _file: file  // 保存原始 File 对象用于上传
                             });
-                        };
-                        reader.readAsDataURL(file);
+                        } else {
+                            // 非图片文件：不生成预览
+                            this.uploadedFiles.push({
+                                name: file.name,
+                                type: file.type,
+                                size: file.size,
+                                data: null,
+                                preview: null,
+                                _file: file  // 保存原始 File 对象用于上传
+                            });
+                        }
                     }
                     
                     // 清空文件输入框，以便重复选择同一文件
@@ -7075,6 +7384,11 @@
                 },
                 
                 removeFile(index) {
+                    const file = this.uploadedFiles[index];
+                    // 释放本地 URL（如果是 blob URL）
+                    if (file && file.preview && file.preview.startsWith('blob:')) {
+                        URL.revokeObjectURL(file.preview);
+                    }
                     this.uploadedFiles.splice(index, 1);
                 },
                 
@@ -8263,11 +8577,12 @@
                 },
                 
                 previewAttachment(att) {
+                    const imageUrl = att.url || att.data || att.preview;
                     if (att.url) {
                         window.open(att.url, '_blank');
-                    } else if (att.data && att.type && att.type.startsWith('image/')) {
+                    } else if (imageUrl && att.type && att.type.startsWith('image/')) {
                         const win = window.open('', '_blank');
-                        win.document.write('<img src="' + att.data + '" style="max-width:100%;max-height:100vh;margin:auto;display:block;">');
+                        win.document.write('<img src="' + imageUrl + '" style="max-width:100%;max-height:100vh;margin:auto;display:block;">');
                     }
                 },
 

@@ -29,6 +29,16 @@ except ImportError:
     _log = logging.getLogger(__name__)
     _log.warning("Memory system not available")
 
+# 导入统一消息模块
+try:
+    from nbot.core import message_manager, create_message
+    MESSAGE_MODULE_AVAILABLE = True
+except ImportError:
+    MESSAGE_MODULE_AVAILABLE = False
+    message_manager = None
+    create_message = None
+    _log.warning("Message module not available")
+
 _log = logging.getLogger(__name__)
 
 
@@ -308,6 +318,7 @@ class WebChatServer:
         self.app = app
         self.socketio = socketio
         self.static_folder = os.path.join(os.path.dirname(__file__), 'static')
+        self.base_dir = os.path.join(os.path.dirname(__file__), '..', '..')
 
         self.sessions: Dict[str, Dict[str, Any]] = {}
         self.web_users: Dict[str, str] = {}
@@ -1114,6 +1125,11 @@ class WebChatServer:
             }
             if session_id in self.sessions:
                 self.sessions[session_id]['messages'].append(user_message)
+                # 同时记录到新消息模块
+                if MESSAGE_MODULE_AVAILABLE and message_manager:
+                    message_manager.add_web_message(session_id,
+                        create_message('user', trigger_msg, sender='user', source='web', 
+                                     session_id=session_id, metadata={'workflow_id': workflow_id}))
         else:
             messages.append({"role": "user", "content": "[定时触发] 请执行工作流任务"})
 
@@ -1192,6 +1208,11 @@ class WebChatServer:
                 if session_id in self.sessions:
                     self.sessions[session_id]['messages'].append(assistant_message)
                     self._save_data('sessions')
+                    # 同时记录到新消息模块
+                    if MESSAGE_MODULE_AVAILABLE and message_manager:
+                        message_manager.add_web_message(session_id,
+                            create_message('assistant', final_response, sender='AI', source='web',
+                                         session_id=session_id, metadata={'workflow_id': workflow_id}))
 
                 # 发送结果到目标
                 self._send_workflow_result(workflow, final_response)
@@ -1623,6 +1644,96 @@ class WebChatServer:
                 return jsonify({'error': 'Session not found'}), 404
             return jsonify(session)
 
+        # QQ 消息相关 API
+        @self.app.route('/api/qq/users')
+        def get_qq_users():
+            """获取所有 QQ 私聊用户列表"""
+            try:
+                users = []
+                qq_private_dir = os.path.join(self.base_dir, 'data', 'qq', 'private')
+                _log.info(f"QQ private dir: {qq_private_dir}")
+                _log.info(f"Dir exists: {os.path.exists(qq_private_dir)}")
+                if os.path.exists(qq_private_dir):
+                    for filename in os.listdir(qq_private_dir):
+                        if filename.endswith('.json'):
+                            user_id = filename.replace('.json', '')
+                            file_path = os.path.join(qq_private_dir, filename)
+                            try:
+                                with open(file_path, 'r', encoding='utf-8') as f:
+                                    messages = json.load(f)
+                                    last_msg = messages[-1] if messages else None
+                                    users.append({
+                                        'user_id': user_id,
+                                        'last_message': last_msg.get('content', '')[:50] if last_msg else '',
+                                        'last_time': last_msg.get('timestamp', '') if last_msg else '',
+                                        'message_count': len(messages)
+                                    })
+                            except Exception as e:
+                                _log.error(f"Error reading {file_path}: {e}")
+                return jsonify({'users': sorted(users, key=lambda x: x['last_time'], reverse=True)})
+            except Exception as e:
+                _log.error(f"Error in get_qq_users: {e}")
+                return jsonify({'error': str(e)}), 500
+
+        @self.app.route('/api/qq/groups')
+        def get_qq_groups():
+            """获取所有 QQ 群聊列表"""
+            try:
+                groups = []
+                qq_group_dir = os.path.join(self.base_dir, 'data', 'qq', 'group')
+                _log.info(f"QQ group dir: {qq_group_dir}")
+                if os.path.exists(qq_group_dir):
+                    for filename in os.listdir(qq_group_dir):
+                        if filename.endswith('.json'):
+                            group_id = filename.replace('.json', '')
+                            file_path = os.path.join(qq_group_dir, filename)
+                            try:
+                                with open(file_path, 'r', encoding='utf-8') as f:
+                                    messages = json.load(f)
+                                    last_msg = messages[-1] if messages else None
+                                    groups.append({
+                                        'group_id': group_id,
+                                        'last_message': last_msg.get('content', '')[:50] if last_msg else '',
+                                        'last_time': last_msg.get('timestamp', '') if last_msg else '',
+                                        'message_count': len(messages)
+                                    })
+                            except Exception as e:
+                                _log.error(f"Error reading {file_path}: {e}")
+                return jsonify({'groups': sorted(groups, key=lambda x: x['last_time'], reverse=True)})
+            except Exception as e:
+                _log.error(f"Error in get_qq_groups: {e}")
+                return jsonify({'error': str(e)}), 500
+
+        @self.app.route('/api/qq/messages/<qq_type>/<qq_id>')
+        def get_qq_messages(qq_type, qq_id):
+            """获取 QQ 消息
+            
+            Args:
+                qq_type: private 或 group
+                qq_id: 用户 ID 或群 ID
+            """
+            if qq_type == 'private':
+                file_path = os.path.join(self.base_dir, 'data', 'qq', 'private', f'{qq_id}.json')
+            elif qq_type == 'group':
+                file_path = os.path.join(self.base_dir, 'data', 'qq', 'group', f'{qq_id}.json')
+            else:
+                return jsonify({'error': 'Invalid type'}), 400
+            
+            if not os.path.exists(file_path):
+                return jsonify({'messages': []})
+            
+            try:
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    messages = json.load(f)
+                    # 添加 source 标记用于前端区分显示
+                    for msg in messages:
+                        msg['source_type'] = 'qq'
+                        msg['qq_type'] = qq_type
+                        msg['qq_id'] = qq_id
+                    return jsonify({'messages': messages})
+            except Exception as e:
+                return jsonify({'error': str(e)}), 500
+
         @self.app.route('/api/sessions/<session_id>', methods=['PUT'])
         def update_session(session_id):
             if session_id not in self.sessions:
@@ -1750,7 +1861,7 @@ class WebChatServer:
             # 检索相关记忆并添加到上下文（使用旧的记忆系统）
             if session.get('type') == 'web':
                 try:
-                    user_id = session.get('id', '')
+                    user_id = session.get('user_id', session.get('id', ''))
                     _log.info(f"Retrieving memories for web user: {user_id}")
                     
                     # 从旧的记忆系统加载（与QQ端一致）
@@ -2482,26 +2593,23 @@ class WebChatServer:
         @self.app.route('/api/memory', methods=['POST'])
         def add_memory():
             data = request.json
-            memory = {
-                'id': str(uuid.uuid4()),
-                'type': data.get('type', 'long'),
-                'key': data.get('key', ''),
-                'value': data.get('value', ''),
-                'target_id': data.get('target_id', ''),
-                'priority': data.get('priority', 'normal'),
-                'expire_days': data.get('expire_days', 7),
-                'created_at': data.get('created_at', datetime.now().isoformat()),
-                'updated_at': data.get('updated_at', datetime.now().isoformat())
-            }
-            self.memories.append(memory)
-            self._save_data('memories')
-            return jsonify({'success': True, 'memory': memory})
+            target_id = data.get('target_id', '')
+            key = data.get('key', '')
+            value = data.get('value', '')
+            mem_type = data.get('type', 'long')
+            expire_days = data.get('expire_days', 7)
+            
+            success = prompt_manager.add_memory(key, value, target_id, mem_type, expire_days)
+            if success:
+                memories = prompt_manager.get_memories(target_id)
+                return jsonify({'success': True, 'memories': memories})
+            return jsonify({'success': False, 'error': 'Failed to add memory'}), 500
 
         @self.app.route('/api/memory/<memory_id>', methods=['PUT'])
         def update_memory(memory_id):
+            data = request.json
             for mem in self.memories:
                 if mem.get('id') == memory_id:
-                    data = request.json
                     mem['type'] = data.get('type', mem.get('type', 'long'))
                     mem['key'] = data.get('key', mem['key'])
                     mem['value'] = data.get('value', mem['value'])
@@ -2515,15 +2623,18 @@ class WebChatServer:
 
         @self.app.route('/api/memory/<memory_id>', methods=['DELETE'])
         def delete_memory(memory_id):
-            self.memories = [m for m in self.memories if m.get('id') != memory_id]
-            self._save_data('memories')
-            return jsonify({'success': True})
+            success = prompt_manager.delete_memory(memory_id)
+            if success:
+                return jsonify({'success': True})
+            return jsonify({'success': False, 'error': 'Failed to delete memory'}), 500
 
         @self.app.route('/api/memory', methods=['DELETE'])
         def clear_all_memory():
-            self.memories = []
-            self._save_data('memories')
-            return jsonify({'success': True})
+            target_id = request.args.get('target_id')
+            success = prompt_manager.clear_memories(target_id)
+            if success:
+                return jsonify({'success': True})
+            return jsonify({'success': False, 'error': 'Failed to clear memories'}), 500
 
         @self.app.route('/api/memory/export')
         def export_memory():
@@ -3399,6 +3510,13 @@ class WebChatServer:
                 }
 
                 self.sessions[session_id]['messages'].append(message)
+                # 同时记录到新消息模块
+                if MESSAGE_MODULE_AVAILABLE and message_manager:
+                    message_manager.add_web_message(session_id,
+                        create_message('user', content, sender=sender, source='web',
+                                     session_id=session_id, attachments=processed_attachments,
+                                     metadata={'tempId': temp_id}))
+                
                 # 使用 socketio.emit 替代 emit，确保广播到 room
                 self.socketio.emit('new_message', message, room=session_id)
                 
@@ -3518,36 +3636,125 @@ class WebChatServer:
                         if isinstance(att, dict):
                             att_type = att.get('type', '')
                             att_data = att.get('data', '')
+                            att_path = att.get('path', '')
                             att_name = att.get('name', 'unknown')
                             
                             if isinstance(att_type, str):
-                                # 图片附件
-                                if att_type.startswith('image/') and att_data:
-                                    image_urls.append(att_data)
-                                # 文本文件 - 提取内容
-                                elif att_type in TEXT_MIME_TYPES and att_data:
-                                    try:
-                                        # 从 data URL 提取内容
-                                        if att_data.startswith('data:'):
+                                # 图片附件 - 优先使用 data URL，其次使用文件路径
+                                if att_type.startswith('image/'):
+                                    if att_data:
+                                        image_urls.append(att_data)
+                                    elif att_path:
+                                        # 尝试读取服务器上的图片文件
+                                        try:
+                                            import os
+                                            file_path = os.path.join(self.static_folder, att_path.replace('/static/', ''))
+                                            if os.path.exists(file_path):
+                                                with open(file_path, 'rb') as f:
+                                                    import base64
+                                                    b64_data = base64.b64encode(f.read()).decode('utf-8')
+                                                    image_urls.append(f"data:{att_type};base64,{b64_data}")
+                                        except Exception as e:
+                                            _log.warning(f"读取图片文件失败: {att_name}, {e}")
+                                
+                                # 文本文件 - 优先使用 data URL，其次使用文件路径
+                                elif att_type in TEXT_MIME_TYPES:
+                                    text_content = None
+                                    # 从 data URL 提取内容
+                                    if att_data and att_data.startswith('data:'):
+                                        try:
                                             import base64
                                             b64_data = att_data.split(',')[1] if ',' in att_data else att_data
                                             text_content = base64.b64decode(b64_data).decode('utf-8', errors='ignore')
-                                            file_contents.append(f"【文件 {att_name} 内容】:\n{text_content[:10000]}")
-                                    except Exception as e:
-                                        _log.warning(f"提取文本文件失败: {att_name}, {e}")
+                                        except Exception as e:
+                                            _log.warning(f"提取文本文件失败: {att_name}, {e}")
+                                    # 从文件路径读取内容
+                                    elif att_path:
+                                        try:
+                                            import os
+                                            file_path = os.path.join(self.static_folder, att_path.replace('/static/', ''))
+                                            if os.path.exists(file_path):
+                                                with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                                                    text_content = f.read()
+                                        except Exception as e:
+                                            _log.warning(f"读取文件失败: {att_name}, {e}")
+                                    
+                                    if text_content:
+                                        file_contents.append(f"【文件 {att_name} 内容】:\n{text_content[:10000]}")
+                                
                                 # 根据扩展名判断是否为文本文件
-                                elif any(att_name.lower().endswith(ext) for ext in TEXT_EXTENSIONS) and att_data:
-                                    try:
-                                        if att_data.startswith('data:'):
+                                elif any(att_name.lower().endswith(ext) for ext in TEXT_EXTENSIONS):
+                                    text_content = None
+                                    # 从 data URL 提取内容
+                                    if att_data and att_data.startswith('data:'):
+                                        try:
                                             import base64
                                             b64_data = att_data.split(',')[1] if ',' in att_data else att_data
                                             text_content = base64.b64decode(b64_data).decode('utf-8', errors='ignore')
+                                        except Exception as e:
+                                            _log.warning(f"提取文本文件失败: {att_name}, {e}")
+                                    # 从文件路径读取内容
+                                    elif att_path:
+                                        try:
+                                            import os
+                                            file_path = os.path.join(self.static_folder, att_path.replace('/static/', ''))
+                                            if os.path.exists(file_path):
+                                                with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                                                    text_content = f.read()
+                                        except Exception as e:
+                                            _log.warning(f"读取文件失败: {att_name}, {e}")
+                                    
+                                    if text_content:
+                                        file_contents.append(f"【文件 {att_name} 内容】:\n{text_content[:10000]}")
+                                
+                                # 使用 MinerU API 解析的文件类型
+                                elif any(att_name.lower().endswith(ext) for ext in ['.pdf', '.doc', '.docx', '.ppt', '.pptx', '.xls', '.xlsx']) and att_path:
+                                    try:
+                                        import os
+                                        import configparser
+                                        file_abs_path = os.path.join(self.static_folder, att_path.replace('/static/', ''))
+                                        if os.path.exists(file_abs_path):
+                                            # 读取 PDF API Key
+                                            try:
+                                                config = configparser.ConfigParser()
+                                                config.read('config.ini', encoding='utf-8')
+                                                pdf_api_key = config.get('pdf', 'api_key', fallback='')
+                                            except:
+                                                pdf_api_key = ''
+                                            
+                                            if pdf_api_key:
+                                                _log.info(f"使用 MinerU API 解析文件: {att_name}")
+                                                # 生成文件访问 URL
+                                                file_url = f"/static/uploads/{os.path.basename(file_abs_path)}"
+                                                text_content = parse_document_with_mineru(file_abs_path, pdf_api_key, file_url)
+                                                if text_content:
+                                                    file_contents.append(f"【文件 {att_name} 内容】:\n{text_content[:10000]}")
+                                                else:
+                                                    file_contents.append(f"【文件 {att_name}】类型: {att_type} (MinerU API 解析失败)")
+                                            else:
+                                                _log.warning(f"未配置 MinerU API Key")
+                                                file_contents.append(f"【文件 {att_name}】类型: {att_type} (未配置 PDF 解析 API)")
+                                        else:
+                                            file_contents.append(f"【文件 {att_name}】类型: {att_type} (文件不存在)")
+                                    except Exception as e:
+                                        _log.warning(f"解析文件失败: {att_name}, {e}")
+                                        file_contents.append(f"【文件 {att_name}】类型: {att_type} (解析失败: {str(e)[:50]})")
+                                # docx 文件 - 从文件路径读取（备用方案）
+                                elif att_name.lower().endswith('.docx') and att_path:
+                                    try:
+                                        import os
+                                        file_path = os.path.join(self.static_folder, att_path.replace('/static/', ''))
+                                        if os.path.exists(file_path):
+                                            import docx
+                                            doc = docx.Document(file_path)
+                                            text_content = '\n'.join([para.text for para in doc.paragraphs])
                                             file_contents.append(f"【文件 {att_name} 内容】:\n{text_content[:10000]}")
                                     except Exception as e:
-                                        _log.warning(f"提取文本文件失败: {att_name}, {e}")
-                                # PDF/Word 等其他文件 - 告知AI文件类型
+                                        _log.warning(f"读取 docx 文件失败: {att_name}, {e}")
+                                        file_contents.append(f"【文件 {att_name}】类型: {att_type} (文件内容读取失败)")
+                                # 其他文件 - 告知AI文件类型
                                 elif att_type:
-                                    file_contents.append(f"【文件 {att_name}】类型: {att_type} (文件内容需要OCR或专门解析)")
+                                    file_contents.append(f"【文件 {att_name}】类型: {att_type} (暂不支持解析)")
                 
                 # 合并文件内容到用户消息
                 enhanced_content = user_content
@@ -3968,13 +4175,77 @@ class WebChatServer:
         return session_id
 
 
+def parse_document_with_mineru(file_path: str, api_key: str, file_relative_url: str = None) -> str:
+    """使用 MinerU API 解析文档（PDF、DOC、PPT等）
+    
+    Args:
+        file_path: 本地文件路径
+        api_key: MinerU API Key
+        file_relative_url: 文件相对 URL（可选，如 /static/uploads/xxx.pdf）
+    """
+    import requests
+    import os
+    
+    url = "https://mineru.net/api/v4/extract/task"
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {api_key}"
+    }
+    
+    try:
+        _log.info(f"开始使用 MinerU API 解析文件: {file_path}")
+        
+        # 获取服务器地址用于生成完整 URL
+        # 注意：实际部署时需要根据实际情况配置
+        server_host = os.environ.get('SERVER_HOST', 'http://127.0.0.1:5000')
+        file_url = f"{server_host}{file_relative_url}"
+        
+        _log.info(f"文件访问 URL: {file_url}")
+        
+        data = {
+            "url": file_url,
+            "model_version": "vlm"
+        }
+        
+        response = requests.post(url, headers=headers, json=data, timeout=120)
+        
+        if response.status_code == 200:
+            result = response.json()
+            _log.info(f"MinerU API 返回结果: {str(result)[:200]}...")
+            
+            # 提取文本内容
+            if 'data' in result:
+                content = result['data']
+                if isinstance(content, str):
+                    _log.info(f"MinerU 提取到 {len(content)} 字符内容")
+                    return content
+                elif isinstance(content, dict) and 'content' in content:
+                    _log.info(f"MinerU 提取到 {len(content['content'])} 字符内容")
+                    return content['content']
+            elif 'content' in result:
+                content = result['content']
+                _log.info(f"MinerU 提取到 {len(content)} 字符内容")
+                return content
+            else:
+                _log.warning(f"MinerU API 返回格式未知: {result}")
+                return None
+        else:
+            _log.error(f"MinerU API 请求失败: {response.status_code} - {response.text}")
+            return None
+            
+    except Exception as e:
+        _log.error(f"MinerU API 调用失败: {e}")
+        return None
+
+
 def create_web_app(config: Dict[str, Any] = None) -> tuple[Flask, SocketIO]:
     """创建 Flask 应用"""
     app = Flask(__name__, static_folder=None)
     app.config['SECRET_KEY'] = 'nbot-secret-key'
     app.config.update(config or {})
 
-    socketio = SocketIO(app, cors_allowed_origins="*")
+    # 增加 SocketIO 消息大小限制到 100MB
+    socketio = SocketIO(app, cors_allowed_origins="*", max_http_buffer_size=100*1024*1024)
 
     server = WebChatServer(app, socketio)
 
@@ -3992,6 +4263,11 @@ def create_web_app(config: Dict[str, Any] = None) -> tuple[Flask, SocketIO]:
         return send_from_directory(server.static_folder, filename)
 
     # 添加文件上传 API
+    # 文件大小限制：10MB
+    MAX_FILE_SIZE = 10 * 1024 * 1024
+    # 文本内容限制：100KB（足够大多数文本文件）
+    MAX_TEXT_CONTENT_SIZE = 100 * 1024
+
     @app.route('/api/upload', methods=['POST'])
     def upload_file():
         """上传文件并返回文件信息"""
@@ -4002,6 +4278,14 @@ def create_web_app(config: Dict[str, Any] = None) -> tuple[Flask, SocketIO]:
             file = request.files['file']
             if file.filename == '':
                 return jsonify({'error': 'No file selected'}), 400
+
+            # 检查文件大小
+            file.seek(0, 2)  # 跳到文件末尾
+            file_size = file.tell()
+            file.seek(0)  # 重置文件指针
+            
+            if file_size > MAX_FILE_SIZE:
+                return jsonify({'error': f'文件过大，最大支持 {MAX_FILE_SIZE // (1024*1024)}MB'}), 400
 
             # 生成唯一文件名
             import hashlib
@@ -4020,12 +4304,18 @@ def create_web_app(config: Dict[str, Any] = None) -> tuple[Flask, SocketIO]:
                 if file_ext.lower() in ['.txt', '.md', '.json', '.xml', '.csv']:
                     with open(file_path, 'r', encoding='utf-8') as f:
                         content = f.read()
+                        # 限制文本内容大小
+                        if len(content.encode('utf-8')) > MAX_TEXT_CONTENT_SIZE:
+                            content = content[:MAX_TEXT_CONTENT_SIZE]
                 elif file_ext.lower() in ['.docx']:
                     # 尝试读取 docx 内容
                     try:
                         import docx
                         doc = docx.Document(file_path)
                         content = '\n'.join([para.text for para in doc.paragraphs])
+                        # 限制文本内容大小
+                        if len(content.encode('utf-8')) > MAX_TEXT_CONTENT_SIZE:
+                            content = content[:MAX_TEXT_CONTENT_SIZE]
                     except ImportError:
                         content = None
             except Exception as e:
