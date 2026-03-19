@@ -13,6 +13,14 @@ from typing import Dict, Any, Optional, List
 from flask import Flask, request, jsonify, send_from_directory
 from flask_socketio import SocketIO, emit, join_room, leave_room
 
+# 固定的核心指令 - 这些功能不会因为用户修改提示词而丢失
+CORE_INSTRUCTIONS = """【重要】你必须严格遵循以下要求：
+
+1. 直接回复用户的问题，不要使用任何特殊格式
+2. 你的回答应该是自然的对话形式
+3. 如果需要执行操作（如搜索新闻、查询天气等），请使用可用的工具
+现在你可以开始与用户对话了。"""
+
 try:
     from apscheduler.schedulers.background import BackgroundScheduler
     from apscheduler.triggers.cron import CronTrigger
@@ -38,6 +46,15 @@ except ImportError:
     message_manager = None
     create_message = None
     _log.warning("Message module not available")
+
+# 导入 Prompt 管理器
+try:
+    from nbot.core.prompt import prompt_manager
+    PROMPT_MANAGER_AVAILABLE = True
+except ImportError:
+    PROMPT_MANAGER_AVAILABLE = False
+    prompt_manager = None
+    _log.warning("Prompt manager not available")
 
 _log = logging.getLogger(__name__)
 
@@ -74,6 +91,20 @@ class WebMessageAdapter:
         if not user_id:
             return ""
         
+        # 优先使用 prompt_manager（如果可用）
+        if PROMPT_MANAGER_AVAILABLE and prompt_manager:
+            try:
+                memories = prompt_manager.get_memories(user_id)
+                if memories:
+                    memory_texts = []
+                    for mem in memories:
+                        memory_texts.append(f"[{mem.get('key', '')}]: {mem.get('value', '')}")
+                    if memory_texts:
+                        return "\n".join(["【重要记忆】"] + memory_texts)
+            except Exception as e:
+                _log.error(f"Failed to load memories from prompt_manager: {e}")
+        
+        # 回退到使用 self.memories
         memories = []
         now = datetime.now()
         
@@ -756,6 +787,23 @@ class WebChatServer:
             if os.path.exists(memories_file):
                 with open(memories_file, 'r', encoding='utf-8') as f:
                     self.memories = json.load(f)
+            
+            # 如果 prompt_manager 可用，同步记忆数据
+            if PROMPT_MANAGER_AVAILABLE and prompt_manager:
+                try:
+                    # prompt_manager 会自动从自己的文件加载，这里确保 self.memories 也同步
+                    prompt_memories = prompt_manager.get_memories()
+                    if prompt_memories and not self.memories:
+                        # 如果 prompt_manager 有数据但 self.memories 为空，使用 prompt_manager 的数据
+                        self.memories = prompt_memories
+                    elif self.memories and not prompt_memories:
+                        # 如果 self.memories 有数据但 prompt_manager 为空，同步到 prompt_manager
+                        for mem in self.memories:
+                            prompt_manager.add_memory(mem.get('key', ''), mem.get('value', ''), 
+                                                    mem.get('target_id', ''), mem.get('type', 'long'),
+                                                    mem.get('expire_days', 7))
+                except Exception as e:
+                    _log.error(f"Failed to sync memories with prompt_manager: {e}")
             
             # 加载知识库
             knowledge_file = os.path.join(self.data_dir, 'knowledge.json')
@@ -1641,7 +1689,23 @@ class WebChatServer:
         def get_session(session_id):
             session = self.sessions.get(session_id)
             if not session:
+                # 尝试从文件读取
+                sessions_file = os.path.join(self.data_dir, 'sessions.json')
+                if os.path.exists(sessions_file):
+                    try:
+                        with open(sessions_file, 'r', encoding='utf-8') as f:
+                            sessions_data = json.load(f)
+                            session = sessions_data.get(session_id)
+                            if session:
+                                # 添加 message_count
+                                session['message_count'] = len(session.get('messages', []))
+                                return jsonify(session)
+                    except:
+                        pass
                 return jsonify({'error': 'Session not found'}), 404
+            
+            # 添加 message_count
+            session['message_count'] = len(session.get('messages', []))
             return jsonify(session)
 
         # QQ 消息相关 API
@@ -1858,6 +1922,23 @@ class WebChatServer:
             if len(messages_for_ai) > max_context_length:
                 messages_for_ai = [messages_for_ai[0]] + messages_for_ai[-max_context_length:]
 
+            # 在系统提示词后添加核心指令（确保JSON输出功能不丢失）
+            if messages_for_ai and messages_for_ai[0].get('role') == 'system':
+                system_prompt = messages_for_ai[0].get('content', '')
+                messages_for_ai[0]['content'] = f"{system_prompt}\n\n{CORE_INSTRUCTIONS}"
+            elif messages_for_ai and messages_for_ai[0].get('role') != 'system':
+                # 如果第一条不是系统消息，插入核心指令
+                messages_for_ai.insert(0, {
+                    'role': 'system',
+                    'content': CORE_INSTRUCTIONS
+                })
+            else:
+                # 没有任何消息，添加系统消息和核心指令
+                messages_for_ai.insert(0, {
+                    'role': 'system',
+                    'content': CORE_INSTRUCTIONS
+                })
+
             # 检索相关记忆并添加到上下文（使用旧的记忆系统）
             if session.get('type') == 'web':
                 try:
@@ -1880,7 +1961,90 @@ class WebChatServer:
             # 异步获取 AI 回复
             def get_response():
                 try:
-                    assistant_content = self._get_ai_response(messages_for_ai)
+                    # 导入工具定义
+                    try:
+                        from nbot.services.tools import TOOL_DEFINITIONS, execute_tool
+                        use_tools = True
+                        available_tools = [tool.get('function', {}).get('name', 'unknown') for tool in TOOL_DEFINITIONS]
+                        _log.info(f"[Tools] 加载了 {len(TOOL_DEFINITIONS)} 个工具: {available_tools}")
+                    except ImportError as e:
+                        _log.warning(f"[Tools] 工具模块不可用: {e}")
+                        use_tools = False
+                        TOOL_DEFINITIONS = []
+                        available_tools = []
+                    
+                    # 调用 AI（支持工具调用）
+                    if use_tools:
+                        _log.info(f"[Tools] 发送请求到 AI，消息数量: {len(messages_for_ai)}")
+                        response = self._get_ai_response_with_tools(messages_for_ai, TOOL_DEFINITIONS)
+                        
+                        # 检查是否有工具调用
+                        if 'tool_calls' in response and response['tool_calls']:
+                            tool_calls = response['tool_calls']
+                            _log.info(f"[Tools] 🤖 AI 请求调用 {len(tool_calls)} 个工具:")
+                            for i, tc in enumerate(tool_calls, 1):
+                                _log.info(f"[Tools]   [{i}] 工具名: {tc.get('name', 'unknown')}")
+                                _log.info(f"[Tools]   [{i}] 参数: {tc.get('arguments', {})}")
+                            
+                            # 添加 AI 的初始回复
+                            initial_content = response.get('content', '')
+                            if initial_content:
+                                _log.info(f"[Tools] 💬 AI 初始回复: {initial_content[:200]}...")
+                            
+                            messages_for_ai.append({
+                                "role": "assistant",
+                                "content": initial_content,
+                                "tool_calls": [
+                                    {
+                                        "id": tc['id'],
+                                        "type": "function",
+                                        "function": {
+                                            "name": tc['name'],
+                                            "arguments": json.dumps(tc['arguments'])
+                                        }
+                                    } for tc in tool_calls
+                                ]
+                            })
+                            
+                            # 执行工具调用
+                            _log.info(f"[Tools] 开始执行 {len(tool_calls)} 个工具调用...")
+                            for tool_call in tool_calls:
+                                tool_name = tool_call['name']
+                                tool_args = tool_call['arguments']
+                                _log.info(f"[Tools] ➜ 执行工具: {tool_name}")
+                                _log.info(f"[Tools] ➜ 参数详情: {json.dumps(tool_args, ensure_ascii=False)}")
+                                
+                                start_time = time.time()
+                                try:
+                                    tool_result = execute_tool(tool_name, **tool_args)
+                                    tool_result_str = json.dumps(tool_result, ensure_ascii=False)
+                                    elapsed = (time.time() - start_time) * 1000
+                                    _log.info(f"[Tools] ✓ 工具执行成功 ({elapsed:.0f}ms): {tool_name}")
+                                    _log.info(f"[Tools] ✓ 结果预览: {tool_result_str[:500]}{'...' if len(tool_result_str) > 500 else ''}")
+                                except Exception as te:
+                                    tool_result_str = f"工具执行出错: {str(te)}"
+                                    _log.error(f"[Tools] ✗ 工具执行失败: {tool_name} - {str(te)}")
+                                
+                                # 添加工具结果到消息
+                                messages_for_ai.append({
+                                    "role": "tool",
+                                    "tool_call_id": tool_call['id'],
+                                    "content": tool_result_str
+                                })
+                            
+                            _log.info(f"[Tools] 所有工具执行完成，开始第二次 AI 调用获取最终回复...")
+                            # 再次调用 AI，获取最终回复（不传递 tools，避免无限循环）
+                            response = self._get_ai_response_with_tools(messages_for_ai, [])
+                        else:
+                            # 没有工具调用，直接使用响应内容
+                            pass
+                        
+                        assistant_content = response.get('content', '抱歉，暂时无法处理您的请求。')
+                        _log.info(f"[Tools] ✓ AI 最终回复: {assistant_content[:300]}{'...' if len(assistant_content) > 300 else ''}")
+                    else:
+                        # 如果工具不可用，回退到普通 AI 调用
+                        _log.info("[Tools] 工具不可用，使用普通 AI 调用")
+                        assistant_content = self._get_ai_response(messages_for_ai)
                     
                     assistant_message = {
                         'id': str(uuid.uuid4()),
@@ -2602,6 +2766,10 @@ class WebChatServer:
             success = prompt_manager.add_memory(key, value, target_id, mem_type, expire_days)
             if success:
                 memories = prompt_manager.get_memories(target_id)
+                if memories:
+                    latest_memory = memories[-1]
+                    self.memories.append(latest_memory)
+                    self._save_data('memories')
                 return jsonify({'success': True, 'memories': memories})
             return jsonify({'success': False, 'error': 'Failed to add memory'}), 500
 
@@ -2625,6 +2793,8 @@ class WebChatServer:
         def delete_memory(memory_id):
             success = prompt_manager.delete_memory(memory_id)
             if success:
+                self.memories = [m for m in self.memories if m.get('id') != memory_id]
+                self._save_data('memories')
                 return jsonify({'success': True})
             return jsonify({'success': False, 'error': 'Failed to delete memory'}), 500
 
@@ -2633,6 +2803,11 @@ class WebChatServer:
             target_id = request.args.get('target_id')
             success = prompt_manager.clear_memories(target_id)
             if success:
+                if target_id:
+                    self.memories = [m for m in self.memories if m.get('target_id') != target_id]
+                else:
+                    self.memories = []
+                self._save_data('memories')
                 return jsonify({'success': True})
             return jsonify({'success': False, 'error': 'Failed to clear memories'}), 500
 
@@ -2741,6 +2916,88 @@ class WebChatServer:
             self._save_data('ai_config')
 
             return jsonify({'success': True})
+
+        @self.app.route('/api/ai-config/test', methods=['POST'])
+        def test_ai_config():
+            """测试 AI 配置的连接"""
+            data = request.json
+            
+            provider = data.get('provider', 'custom')
+            api_key = data.get('api_key', '')
+            base_url = data.get('base_url', '')
+            model = data.get('model', '')
+            
+            # 验证必要参数
+            if not api_key:
+                return jsonify({'success': False, 'message': 'API Key 不能为空'})
+            
+            if not base_url:
+                return jsonify({'success': False, 'message': 'Base URL 不能为空'})
+            
+            if not model:
+                return jsonify({'success': False, 'message': '模型名称不能为空'})
+            
+            try:
+                import requests
+                
+                # 清理 base_url
+                url_base = base_url.rstrip("/")
+                
+                # 构建 API URL
+                if "/chat/completions" in url_base or "/chatcompletion" in url_base:
+                    url = url_base
+                else:
+                    url = f"{url_base}/chat/completions"
+                
+                # 构建请求头
+                headers = {
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json"
+                }
+                
+                # 构建测试请求
+                payload = {
+                    "model": model,
+                    "messages": [{"role": "user", "content": "Hello"}],
+                    "max_tokens": 10
+                }
+                
+                # 发送测试请求
+                resp = requests.post(url, json=payload, headers=headers, timeout=30)
+                resp.raise_for_status()
+                
+                return jsonify({
+                    'success': True, 
+                    'message': '连接测试成功'
+                })
+                
+            except requests.exceptions.Timeout:
+                return jsonify({
+                    'success': False, 
+                    'message': '连接超时，请检查 Base URL 是否正确'
+                })
+            except requests.exceptions.ConnectionError:
+                return jsonify({
+                    'success': False, 
+                    'message': '无法连接到服务器，请检查 Base URL 是否正确'
+                })
+            except requests.exceptions.HTTPError as e:
+                error_msg = f'HTTP错误: {e.response.status_code}'
+                try:
+                    error_data = e.response.json()
+                    if 'error' in error_data:
+                        error_msg += f' - {error_data["error"].get("message", "未知错误")}'
+                except:
+                    pass
+                return jsonify({
+                    'success': False, 
+                    'message': error_msg
+                })
+            except Exception as e:
+                return jsonify({
+                    'success': False, 
+                    'message': f'测试失败: {str(e)}'
+                })
 
         # ==================== 多模型配置管理 API ====================
         @self.app.route('/api/ai-models')
@@ -2871,35 +3128,75 @@ class WebChatServer:
             """测试AI模型配置"""
             for model in self.ai_models:
                 if model['id'] == model_id:
+                    api_key = model.get('api_key', '')
+                    base_url = model.get('base_url', '')
+                    model_name = model.get('model', '')
+                    
+                    # 验证必要参数
+                    if not api_key:
+                        return jsonify({'success': False, 'message': 'API Key 不能为空'})
+                    
+                    if not base_url:
+                        return jsonify({'success': False, 'message': 'Base URL 不能为空'})
+                    
+                    if not model_name:
+                        return jsonify({'success': False, 'message': '模型名称不能为空'})
+                    
                     try:
                         import requests
-                        url_base = (model.get('base_url') or "").rstrip("/")
-                        if not url_base:
-                            return jsonify({'success': False, 'message': 'Base URL is required'})
+                        
+                        url_base = base_url.rstrip("/")
                         if "/chat/completions" in url_base or "/chatcompletion" in url_base:
                             url = url_base
                         else:
                             url = f"{url_base}/chat/completions"
 
                         headers = {
-                            "Authorization": f"Bearer {model.get('api_key', '')}",
+                            "Authorization": f"Bearer {api_key}",
                             "Content-Type": "application/json"
                         }
                         payload = {
-                            "model": model.get('model', ''),
+                            "model": model_name,
                             "messages": [{"role": "user", "content": "Hello"}],
                             "max_tokens": 10
                         }
                         resp = requests.post(url, json=payload, headers=headers, timeout=30)
                         resp.raise_for_status()
-                        return jsonify({'success': True, 'message': 'Connection successful'})
+                        return jsonify({'success': True, 'message': '连接测试成功'})
+                    except requests.exceptions.Timeout:
+                        return jsonify({
+                            'success': False, 
+                            'message': '连接超时，请检查 Base URL 是否正确'
+                        })
+                    except requests.exceptions.ConnectionError:
+                        return jsonify({
+                            'success': False, 
+                            'message': '无法连接到服务器，请检查 Base URL 是否正确'
+                        })
+                    except requests.exceptions.HTTPError as e:
+                        error_msg = f'HTTP错误: {e.response.status_code}'
+                        try:
+                            error_data = e.response.json()
+                            if 'error' in error_data:
+                                error_msg += f' - {error_data["error"].get("message", "未知错误")}'
+                        except:
+                            pass
+                        return jsonify({
+                            'success': False, 
+                            'message': error_msg
+                        })
                     except Exception as e:
-                        return jsonify({'success': False, 'message': str(e)})
+                        return jsonify({
+                            'success': False, 
+                            'message': f'测试失败: {str(e)}'
+                        })
             return jsonify({'error': 'Model not found'}), 404
 
         # ==================== Token 统计 API ====================
         @self.app.route('/api/tokens')
         def get_token_stats():
+            date_range = request.args.get('dateRange', 'today')
+            
             # 从文件加载真实的 token 统计
             token_stats_file = os.path.join(self.data_dir, 'token_stats.json')
             real_stats = {}
@@ -2912,48 +3209,73 @@ class WebChatServer:
             
             stats_data = {**self.token_stats, **real_stats}
             
-            today_total = stats_data.get('today', 0)
-            today_input = 0
-            today_output = 0
-            
             history = stats_data.get('history', [])
             today_str = datetime.now().strftime('%Y-%m-%d')
+            
+            # 根据 dateRange 筛选历史数据
+            if date_range == 'today':
+                history = [h for h in history if h.get('date') == today_str]
+            elif date_range == '7d':
+                # 最近7天
+                cutoff = (datetime.now() - timedelta(days=7)).strftime('%Y-%m-%d')
+                history = [h for h in history if h.get('date', '') >= cutoff]
+            elif date_range == '30d':
+                # 最近30天
+                cutoff = (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d')
+                history = [h for h in history if h.get('date', '') >= cutoff]
+            # 'all' 不做筛选，使用全部数据
+            
+            # 计算筛选后的统计
+            today_input = 0
+            today_output = 0
             for entry in history:
                 if entry.get('date') == today_str:
                     today_input = entry.get('input', 0)
                     today_output = entry.get('output', 0)
                     break
             
-            if today_input == 0 and today_output == 0 and today_total > 0:
-                today_input = today_total // 2
-                today_output = today_total // 2
+            # 计算所选时间范围的总计
+            if date_range == 'today':
+                period_total = today_input + today_output
+                period_input = today_input
+                period_output = today_output
+            else:
+                period_total = sum((h.get('input', 0) + h.get('output', 0)) for h in history)
+                period_input = sum(h.get('input', 0) for h in history)
+                period_output = sum(h.get('output', 0) for h in history)
             
-            estimated_cost = round(today_input * 0.000001 + today_output * 0.000008, 4)
+            if today_input == 0 and today_output == 0 and stats_data.get('today', 0) > 0:
+                today_input = stats_data.get('today', 0) // 2
+                today_output = stats_data.get('today', 0) // 2
+            
+            estimated_cost = round(period_input * 0.000001 + period_output * 0.000008, 4)
             
             message_count = sum(len(s.get('messages', [])) for s in self.sessions.values())
             active_sessions = len([s for s in self.sessions.values() if len(s.get('messages', [])) > 0])
-            avg_tokens_per_msg = round(today_total / message_count, 2) if message_count > 0 else 0
+            avg_tokens_per_msg = round(period_total / max(message_count, 1), 2)
             
-            history = sorted(history, key=lambda x: x.get('date', ''))[-30:]
+            # 只返回所选时间范围的历史数据
+            if date_range != 'all':
+                history = sorted(history, key=lambda x: x.get('date', ''))[-30:] if date_range != 'today' else history
             
             if len(history) >= 2:
-                prev_entry = history[-2]
-                prev_total = prev_entry.get('input', 0) + prev_entry.get('output', 0)
-                token_change_val = today_total - prev_total
+                prev_entry = history[-2] if date_range == 'today' else history[0] if len(history) == 1 else history[-2]
+                prev_total = prev_entry.get('input', 0) + prev_entry.get('output', 0) if prev_entry else 0
+                token_change_val = (today_input + today_output) - prev_total if date_range == 'today' else period_total - prev_total * (len(history) - 1 if len(history) > 1 else 1)
                 token_change = f"+{token_change_val}" if token_change_val >= 0 else f"{token_change_val}"
             else:
                 token_change = "+0"
             
             stats = {
-                'today': today_total,
-                'today_input': today_input,
-                'today_output': today_output,
+                'today': period_total,
+                'today_input': period_input,
+                'today_output': period_output,
                 'month': stats_data.get('month', 0),
                 'avg_per_chat': stats_data.get('avg_per_chat', 0),
                 'estimated_cost': f"{estimated_cost:.4f}",
                 'history': history,
                 'message_count': message_count,
-                'total_tokens': today_total,
+                'total_tokens': period_total,
                 'avg_tokens_per_msg': avg_tokens_per_msg,
                 'avg_response_time': 1.5,
                 'active_sessions': active_sessions,

@@ -374,6 +374,22 @@
 
         .btn-secondary:hover { background: var(--bg-hover); }
 
+        .btn-danger {
+            background: var(--error);
+            color: white;
+            border: 1px solid var(--error);
+        }
+
+        .btn-danger:hover {
+            background: #dc2626;
+            border-color: #dc2626;
+        }
+
+        .btn-danger:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
         .btn-icon {
             width: 36px;
             height: 36px;
@@ -388,6 +404,150 @@
         .btn-icon:hover {
             background: var(--bg-tertiary);
             color: var(--text-primary);
+        }
+
+        .btn-icon-small {
+            width: 28px;
+            height: 28px;
+            padding: 0;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 4px;
+            background: transparent;
+            color: var(--text-muted);
+            border: none;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .btn-icon-small:hover {
+            background: var(--bg-tertiary);
+            color: var(--text-primary);
+        }
+
+        .session-actions {
+            display: none;
+            gap: 4px;
+            margin-left: auto;
+            padding-left: 8px;
+        }
+
+        .session-item:hover .session-actions {
+            display: flex;
+        }
+
+        .detail-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 16px;
+            margin-bottom: 20px;
+        }
+
+        .detail-item {
+            background: var(--bg-tertiary);
+            padding: 12px;
+            border-radius: 6px;
+        }
+
+        .detail-item label {
+            display: block;
+            font-size: 12px;
+            color: var(--text-muted);
+            margin-bottom: 6px;
+            text-transform: uppercase;
+        }
+
+        .detail-item code {
+            display: block;
+            font-size: 13px;
+            color: var(--text-primary);
+            word-break: break-all;
+        }
+
+        .detail-item span {
+            display: block;
+            font-size: 13px;
+            color: var(--text-primary);
+        }
+
+        .code-block {
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            padding: 12px;
+            margin-top: 8px;
+            overflow-x: auto;
+        }
+
+        .code-block pre {
+            margin: 0;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            color: var(--text-secondary);
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
+
+        .btn-small {
+            padding: 4px 12px;
+            font-size: 12px;
+        }
+
+        .chat-header-actions {
+            display: flex;
+            gap: 8px;
+            margin-left: auto;
+            align-items: center;
+        }
+
+        .chat-header-actions .btn {
+            padding: 8px 12px;
+            font-size: 14px;
+        }
+
+        .scroll-to-bottom-btn {
+            position: absolute;
+            bottom: 70px;
+            right: 20px;
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            background: var(--accent);
+            color: white;
+            border: none;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+            transition: all 0.3s;
+            z-index: 100;
+        }
+
+        .scroll-to-bottom-btn:hover {
+            transform: scale(1.1);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+        }
+
+        .scroll-to-bottom-btn i {
+            font-size: 18px;
+        }
+
+        .session-name-input {
+            width: 100%;
+            padding: 4px 8px;
+            border: 1px solid var(--accent);
+            border-radius: 4px;
+            background: var(--bg-tertiary);
+            color: var(--text-primary);
+            font-size: inherit;
+            outline: none;
+        }
+
+        .session-name-input:focus {
+            border-color: var(--accent);
+            box-shadow: 0 0 0 2px rgba(var(--accent-rgb), 0.2);
         }
 
         .content-area {
@@ -2999,15 +3159,44 @@
                                     class="session-item"
                                     :class="{ active: currentSession?.id === session.id }"
                                     @click="selectSession(session)"
+                                    @dblclick="editSession(session)"
                                 >
                                     <div class="session-icon">
                                         <i :class="session.type === 'qq' ? 'fab fa-qq' : 'fas fa-comment'"></i>
                                     </div>
                                     <div class="session-info">
-                                        <div class="session-name">{{ session.name }}</div>
+                                        <input 
+                                            v-if="editingSessionId === session.id"
+                                            v-model="editingSessionName"
+                                            class="session-name-input"
+                                            @click.stop
+                                            @keyup.enter="saveSessionName(session)"
+                                            @keyup.escape="cancelEditSessionName"
+                                            @blur="saveSessionName(session)"
+                                            ref="sessionNameInput"
+                                        >
+                                        <div 
+                                            v-else
+                                            class="session-name"
+                                            @dblclick.stop="startEditSessionName(session)"
+                                            @click.stop
+                                        >
+                                            {{ session.name }}
+                                        </div>
                                         <div class="session-meta">
                                             {{ session.message_count }} 条消息 · {{ formatTime(session.created_at) }}
                                         </div>
+                                    </div>
+                                    <div class="session-actions" @click.stop>
+                                        <button class="btn-icon-small" @click="viewSessionDetails(session)" title="查看详情">
+                                            <i class="fas fa-info-circle"></i>
+                                        </button>
+                                        <button class="btn-icon-small" @click="startEditSessionName(session)" title="编辑名称">
+                                            <i class="fas fa-edit"></i>
+                                        </button>
+                                        <button class="btn-icon-small" @click="confirmDeleteSession(session)" title="删除">
+                                            <i class="fas fa-trash"></i>
+                                        </button>
                                     </div>
                                 </div>
                                 <div v-if="filteredSessions.length === 0" class="empty-hint">
@@ -3034,6 +3223,14 @@
                                         </div>
                                         <div class="session-preview">{{ user.last_message }}</div>
                                     </div>
+                                    <div class="session-actions" @click.stop>
+                                        <button class="btn-icon-small" @click="viewQqSessionDetails('private', user)" title="查看详情">
+                                            <i class="fas fa-info-circle"></i>
+                                        </button>
+                                        <button class="btn-icon-small" @click="confirmDeleteQqSession('private', user)" title="删除">
+                                            <i class="fas fa-trash"></i>
+                                        </button>
+                                    </div>
                                 </div>
                                 <div v-if="qqPrivateUsers.length === 0" class="empty-hint">
                                     暂无 QQ 私聊记录
@@ -3058,6 +3255,14 @@
                                             {{ group.message_count }} 条消息 · {{ formatTime(group.last_time) }}
                                         </div>
                                         <div class="session-preview">{{ group.last_message }}</div>
+                                    </div>
+                                    <div class="session-actions" @click.stop>
+                                        <button class="btn-icon-small" @click="viewQqSessionDetails('group', group)" title="查看详情">
+                                            <i class="fas fa-info-circle"></i>
+                                        </button>
+                                        <button class="btn-icon-small" @click="confirmDeleteQqSession('group', group)" title="删除">
+                                            <i class="fas fa-trash"></i>
+                                        </button>
                                     </div>
                                 </div>
                                 <div v-if="qqGroups.length === 0" class="empty-hint">
@@ -3103,10 +3308,18 @@
                                                 {{ currentQqMessages.length }} 条消息
                                             </div>
                                         </div>
+                                        <div class="chat-header-actions">
+                                            <button class="btn btn-secondary" @click="viewQqSessionDetails('current')" title="会话详情">
+                                                <i class="fas fa-info-circle"></i>
+                                            </button>
+                                            <button class="btn btn-secondary" @click="confirmDeleteQqSession('current')" title="删除会话">
+                                                <i class="fas fa-trash"></i>
+                                            </button>
+                                        </div>
                                     </div>
                                 </div>
 
-                                <div class="messages-container" ref="qqMessagesContainer">
+                                <div class="messages-container" ref="qqMessagesContainer" @scroll="handleQqMessagesScroll">
                                     <div v-for="msg in currentQqMessages" :key="msg.id" class="message" :class="[msg.role, chatTab === 'qq_private' ? 'message-qq' : 'message-qq-group']">
                                         <div class="message-avatar">
                                             <i :class="msg.role === 'user' ? 'fas fa-user' : 'fas fa-robot'"></i>
@@ -3117,6 +3330,11 @@
                                         </div>
                                     </div>
                                 </div>
+                                
+                                <!-- 滑到底部按钮 -->
+                                <button v-if="showQqScrollButton" class="scroll-to-bottom-btn" @click="scrollQqToBottom" title="滑到底部">
+                                    <i class="fas fa-chevron-down"></i>
+                                </button>
                                 
                                 <div class="chat-footer qq-chat-footer">
                                     <div class="qq-notice">
@@ -3301,6 +3519,9 @@
                                             <td>
                                                 <button class="btn btn-secondary" style="padding: 6px 12px; font-size: 12px;" @click="openSession(session)" :disabled="isLoading">
                                                     打开
+                                                </button>
+                                                <button class="btn btn-secondary" style="padding: 6px 12px; font-size: 12px; margin-left: 8px;" @click="viewSessionDetails(session)" :disabled="isLoading">
+                                                    详情
                                                 </button>
                                                 <button class="btn btn-secondary" style="padding: 6px 12px; font-size: 12px; margin-left: 8px;" @click="editSession(session)" :disabled="isLoading">
                                                     编辑
@@ -4985,11 +5206,111 @@
             </div>
         </div>
 
+        <!-- Confirm Modal -->
+        <div v-if="showConfirmModal" class="modal-overlay" @click.self="cancelConfirm">
+            <div class="modal" style="max-width: 400px;">
+                <div class="modal-header">
+                    <span class="modal-title">
+                        <i class="fas" :class="confirmModalConfig.icon || 'fa-exclamation-circle'" :style="{ color: confirmModalConfig.iconColor || 'var(--warning)' }"></i>
+                        {{ confirmModalConfig.title || '确认操作' }}
+                    </span>
+                    <button class="modal-close" @click="cancelConfirm">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <p style="margin: 0; color: var(--text-secondary); line-height: 1.6;">
+                        {{ confirmModalConfig.message || '确定要执行这个操作吗？' }}
+                    </p>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary" @click="cancelConfirm">取消</button>
+                    <button 
+                        class="btn" 
+                        :class="confirmModalConfig.danger ? 'btn-danger' : 'btn-primary'"
+                        @click="confirmAction"
+                        :disabled="isLoading"
+                    >
+                        <span v-if="isLoading"><div class="spinner" style="display: inline-block; margin-right: 8px;"></div>处理中...</span>
+                        <span v-else>{{ confirmModalConfig.confirmText || '确认' }}</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+
         <!-- Toast Container -->
         <div class="toast-container">
             <div v-for="toast in toasts" :key="toast.id" class="toast" :class="toast.type">
                 <i :class="toast.icon"></i>
                 <span>{{ toast.message }}</span>
+            </div>
+        </div>
+
+        <!-- Session Details Modal -->
+        <div v-if="showSessionDetailsModal" class="modal-overlay" @click.self="showSessionDetailsModal = false">
+            <div class="modal" style="max-width: 800px; max-height: 90vh; overflow-y: auto;">
+                <div class="modal-header">
+                    <span class="modal-title">
+                        <i class="fas fa-database"></i> 会话详情
+                    </span>
+                    <button class="modal-close" @click="showSessionDetailsModal = false">&times;</button>
+                </div>
+                <div class="modal-body" v-if="viewingSession">
+                    <!-- 基本信息 -->
+                    <div class="form-section">
+                        <div class="form-section-title">基本信息</div>
+                        <div class="detail-grid">
+                            <div class="detail-item">
+                                <label>会话ID</label>
+                                <code>{{ viewingSession.id }}</code>
+                            </div>
+                            <div class="detail-item">
+                                <label>会话名称</label>
+                                <span>{{ viewingSession.name }}</span>
+                            </div>
+                            <div class="detail-item">
+                                <label>会话类型</label>
+                                <span class="badge" :class="viewingSession.type?.startsWith('qq') ? 'badge-info' : 'badge-success'">
+                                    {{ viewingSession.type?.startsWith('qq') ? (viewingSession.type === 'qq_private' ? 'QQ私聊' : 'QQ群聊') : 'Web' }}
+                                </span>
+                            </div>
+                            <div class="detail-item">
+                                <label>用户ID</label>
+                                <code>{{ viewingSession.user_id || '无' }}</code>
+                            </div>
+                            <div class="detail-item">
+                                <label>创建时间</label>
+                                <span>{{ formatFullTime(viewingSession.created_at) }}</span>
+                            </div>
+                            <div class="detail-item">
+                                <label>消息数量</label>
+                                <span>{{ viewingSession.message_count || 0 }} 条</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 系统提示词 -->
+                    <div class="form-section" v-if="viewingSession.system_prompt">
+                        <div class="form-section-title">系统提示词</div>
+                        <div class="code-block">
+                            <pre>{{ viewingSession.system_prompt }}</pre>
+                        </div>
+                    </div>
+
+                    <!-- 原始数据 -->
+                    <div class="form-section">
+                        <div class="form-section-title">
+                            原始数据
+                            <button class="btn btn-secondary btn-small" style="margin-left: 12px;" @click="copySessionRawData">
+                                <i class="fas fa-copy"></i> 复制
+                            </button>
+                        </div>
+                        <div class="code-block">
+                            <pre>{{ JSON.stringify(viewingSession, null, 2) }}</pre>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary" @click="showSessionDetailsModal = false">关闭</button>
+                </div>
             </div>
         </div>
 
@@ -5806,7 +6127,23 @@
                     toasts: [],
                     showEditSessionModal: false,
                     editingSession: {},
+                    editingSessionName: '',
+                    editingSessionId: null,
+                    showSessionDetailsModal: false,
+                    viewingSession: null,
+                    showConfirmModal: false,
+                    confirmModalConfig: {
+                        title: '确认操作',
+                        message: '确定要执行这个操作吗？',
+                        confirmText: '确认',
+                        icon: 'fa-exclamation-circle',
+                        iconColor: 'var(--warning)',
+                        danger: false,
+                        action: null,
+                        data: null
+                    },
                     showThemePanel: false,
+                    showQqScrollButton: false,
                     
                     // Theme Settings
                     themeSettings: {
@@ -6710,18 +7047,27 @@
                 },
 
                 async deleteSkill(id) {
-                    if (!confirm('确定要删除这个 Skill 吗？')) return;
-
-                    this.isLoading = true;
-                    try {
-                        await api.delete(`/api/skills/${id}`);
-                        await this.loadSkills();
-                        this.showToast('Skill 已删除', 'success');
-                    } catch (e) {
-                        this.showToast('删除失败', 'error');
-                    } finally {
-                        this.isLoading = false;
-                    }
+                    this.showConfirm({
+                        title: '删除 Skill',
+                        message: '确定要删除这个 Skill 吗？此操作不可恢复。',
+                        confirmText: '删除',
+                        icon: 'fa-trash',
+                        iconColor: 'var(--error)',
+                        danger: true,
+                        action: async () => {
+                            this.isLoading = true;
+                            try {
+                                await api.delete(`/api/skills/${id}`);
+                                await this.loadSkills();
+                                this.showToast('Skill 已删除', 'success');
+                            } catch (e) {
+                                console.error('删除 Skill 失败:', e);
+                                this.showToast('删除失败: ' + (e.response?.data?.error || e.message), 'error');
+                            } finally {
+                                this.isLoading = false;
+                            }
+                        }
+                    });
                 },
 
                 async toggleSkill(skill) {
@@ -6846,18 +7192,27 @@
                 },
 
                 async deleteTool(id) {
-                    if (!confirm('确定要删除这个 Tool 吗？')) return;
-
-                    this.isLoading = true;
-                    try {
-                        await api.delete(`/api/tools/${id}`);
-                        await this.loadTools();
-                        this.showToast('Tool 已删除', 'success');
-                    } catch (e) {
-                        this.showToast('删除失败', 'error');
-                    } finally {
-                        this.isLoading = false;
-                    }
+                    this.showConfirm({
+                        title: '删除 Tool',
+                        message: '确定要删除这个 Tool 吗？此操作不可恢复。',
+                        confirmText: '删除',
+                        icon: 'fa-trash',
+                        iconColor: 'var(--error)',
+                        danger: true,
+                        action: async () => {
+                            this.isLoading = true;
+                            try {
+                                await api.delete(`/api/tools/${id}`);
+                                await this.loadTools();
+                                this.showToast('Tool 已删除', 'success');
+                            } catch (e) {
+                                console.error('删除 Tool 失败:', e);
+                                this.showToast('删除失败: ' + (e.response?.data?.error || e.message), 'error');
+                            } finally {
+                                this.isLoading = false;
+                            }
+                        }
+                    });
                 },
 
                 async toggleTool(tool) {
@@ -6914,7 +7269,9 @@
 
                 async loadTokenStats() {
                     try {
-                        const res = await api.get('/api/tokens');
+                        const params = new URLSearchParams();
+                        params.append('dateRange', this.tokenFilter.dateRange);
+                        const res = await api.get(`/api/tokens?${params.toString()}`);
                         this.tokenStats = { ...this.tokenStats, ...res.data };
                         this.tokenHistory = res.data.history || [];
                         await this.loadTokenRankings();
@@ -7089,10 +7446,15 @@
                 
                 // Chat Functions
                 async selectSession(session) {
+                    const previousSessionId = this.currentSession?.id;
+                    
+                    // 切换到新会话，清除所有状态
                     this.currentSession = session;
                     this.currentQqId = null;
                     this.currentQqMessages = [];
-                    // 切换会话时清除加载状态，确保其他会话没有动画
+                    this.currentMessages = [];
+                    
+                    // 清除所有加载/生成状态
                     this.isTyping = false;
                     this.isLoading = false;
                     
@@ -7186,46 +7548,32 @@
                 },
                 
                 async createNewSession() {
-                    // 生成临时会话ID
-                    const tempId = 'temp_' + Date.now();
-                    const newSession = {
-                        id: tempId,
-                        name: `会话 ${new Date().toLocaleTimeString()}`,
-                        type: 'web',
-                        user_id: this.username,
-                        created_at: new Date().toISOString(),
-                        messages: [{ role: 'system', content: '你是一个AI助手' }]
-                    };
+                    // 显示加载状态
+                    this.isLoading = true;
                     
-                    // 前端立即添加会话到列表末尾
-                    this.sessions.push(newSession);
-                    this.showToast('会话创建成功', 'success');
-                    
-                    // 如果在聊天页面，立即切换到新会话
-                    if (this.currentPage === 'chat') {
-                        await this.selectSession(newSession);
-                    }
-                    
-                    // 后台同步到服务器
                     try {
+                        // 先调用后端API创建真实会话
                         const res = await api.post('/api/sessions', {
-                            name: newSession.name,
+                            name: `会话 ${new Date().toLocaleTimeString()}`,
                             type: 'web',
                             user_id: this.username
                         });
-                        // 更新为服务器返回的真实ID
+                        
+                        // 使用服务器返回的真实session
                         const serverSession = res.data.session;
-                        const idx = this.sessions.findIndex(s => s.id === tempId);
-                        if (idx !== -1) {
-                            this.sessions[idx].id = serverSession.id;
-                            // 如果当前正在使用这个会话，更新currentSession
-                            if (this.currentSession && this.currentSession.id === tempId) {
-                                this.currentSession.id = serverSession.id;
-                            }
-                        }
+                        
+                        // 前端添加到会话列表
+                        this.sessions.push(serverSession);
+                        this.showToast('会话创建成功', 'success');
+                        
+                        // 切换到新会话
+                        await this.selectSession(serverSession);
+                        
                     } catch (e) {
-                        console.error('同步会话到服务器失败:', e);
-                        this.showToast('会话同步失败，请刷新页面', 'warning');
+                        console.error('创建会话失败:', e);
+                        this.showToast('创建会话失败: ' + (e.response?.data?.error || e.message), 'error');
+                    } finally {
+                        this.isLoading = false;
                     }
                 },
                 
@@ -7402,48 +7750,246 @@
                 },
                 
                 async clearSession() {
-                    if (!confirm('确定要清空当前会话的所有消息吗？')) return;
-                    this.isLoading = true;
-                    try {
-                        await api.delete(`/api/sessions/${this.currentSession.id}/messages`);
-                        // 手动清空当前消息列表（只保留系统消息）
-                        if (this.currentMessages.length > 0 && this.currentMessages[0].role === 'system') {
-                            this.currentMessages = [this.currentMessages[0]];
-                        } else {
-                            this.currentMessages = [];
+                    this.showConfirm({
+                        title: '清空会话',
+                        message: '确定要清空当前会话的所有消息吗？此操作不可恢复。',
+                        confirmText: '清空',
+                        icon: 'fa-trash-alt',
+                        iconColor: 'var(--error)',
+                        danger: true,
+                        action: async () => {
+                            this.isLoading = true;
+                            try {
+                                await api.delete(`/api/sessions/${this.currentSession.id}/messages`);
+                                if (this.currentMessages.length > 0 && this.currentMessages[0].role === 'system') {
+                                    this.currentMessages = [this.currentMessages[0]];
+                                } else {
+                                    this.currentMessages = [];
+                                }
+                                this.showToast('会话已清空', 'success');
+                            } catch (e) {
+                                console.error('清空会话失败:', e);
+                                this.showToast('清空失败', 'error');
+                            } finally {
+                                this.isLoading = false;
+                            }
                         }
-                        this.showToast('会话已清空', 'success');
-                    } catch (e) {
-                        console.error('清空会话失败:', e);
-                        this.showToast('清空失败', 'error');
-                    } finally {
-                        this.isLoading = false;
-                    }
+                    });
                 },
                 
                 async deleteSession() {
-                    if (!confirm('确定要删除这个会话吗？')) return;
+                    if (!this.currentSession) return;
                     
-                    const sessionId = this.currentSession.id;
-                    const sessionIndex = this.sessions.findIndex(s => s.id === sessionId);
-                    
-                    // 前端立即删除
-                    this.sessions = this.sessions.filter(s => s.id !== sessionId);
-                    this.currentSession = null;
-                    this.currentMessages = [];
-                    this.showToast('会话已删除', 'success');
-                    
-                    // 后台同步删除
-                    try {
-                        await api.delete(`/api/sessions/${sessionId}`);
-                    } catch (e) {
-                        console.error('同步删除会话失败:', e);
-                        // 如果删除失败，恢复会话
-                        if (sessionIndex !== -1) {
-                            this.sessions.splice(sessionIndex, 0, { id: sessionId, name: '已删除的会话' });
+                    this.showConfirm({
+                        title: '删除会话',
+                        message: '确定要删除这个会话吗？此操作不可恢复。',
+                        confirmText: '删除',
+                        icon: 'fa-trash',
+                        iconColor: 'var(--error)',
+                        danger: true,
+                        action: async () => {
+                            const sessionId = this.currentSession.id;
+                            const sessionIndex = this.sessions.findIndex(s => s.id === sessionId);
+                            
+                            this.sessions = this.sessions.filter(s => s.id !== sessionId);
+                            this.currentSession = null;
+                            this.currentMessages = [];
+                            this.showToast('会话已删除', 'success');
+                            
+                            try {
+                                await api.delete(`/api/sessions/${sessionId}`);
+                            } catch (e) {
+                                console.error('同步删除会话失败:', e);
+                                if (sessionIndex !== -1) {
+                                    this.sessions.splice(sessionIndex, 0, { id: sessionId, name: '已删除的会话' });
+                                }
+                                this.showToast('删除同步失败，请刷新页面', 'warning');
+                            }
                         }
-                        this.showToast('删除同步失败，请刷新页面', 'warning');
+                    });
+                },
+                
+                // QQ 会话管理方法
+                async viewQqSessionDetails(type, session) {
+                    try {
+                        let targetSession;
+                        let sessionId;
+                        let sessionType;
+                        
+                        if (type === 'current') {
+                            if (!this.currentQqId) {
+                                this.showToast('请先选择一个会话', 'warning');
+                                return;
+                            }
+                            targetSession = this.chatTab === 'qq_private' 
+                                ? this.qqPrivateUsers.find(u => u.user_id === this.currentQqId)
+                                : this.qqGroups.find(g => g.group_id === this.currentQqId);
+                            sessionId = this.currentQqId;
+                            sessionType = this.chatTab;
+                        } else {
+                            targetSession = session;
+                            sessionId = session.user_id || session.group_id;
+                            sessionType = type === 'private' ? 'qq_private' : 'qq_group';
+                        }
+                        
+                        if (!targetSession) {
+                            this.showToast('会话不存在', 'error');
+                            return;
+                        }
+                        
+                        // 构建会话详情对象
+                        this.viewingSession = {
+                            id: sessionId,
+                            name: targetSession.name || `QQ${sessionType === 'qq_private' ? '私聊' : '群聊'}`,
+                            type: sessionType,
+                            user_id: sessionType === 'qq_private' ? sessionId : null,
+                            group_id: sessionType === 'qq_group' ? sessionId : null,
+                            message_count: targetSession.message_count || 0,
+                            created_at: targetSession.created_at || targetSession.last_time || new Date().toISOString(),
+                            last_time: targetSession.last_time || targetSession.created_at || new Date().toISOString(),
+                            last_message: targetSession.last_message || '无'
+                        };
+                        
+                        // 如果是QQ会话，加载完整的消息历史
+                        if (sessionType === 'qq_private' || sessionType === 'qq_group') {
+                            try {
+                                const qqType = sessionType === 'qq_private' ? 'private' : 'group';
+                                const res = await api.get(`/api/qq/messages/${qqType}/${sessionId}`);
+                                if (res.data && Array.isArray(res.data)) {
+                                    this.viewingSession.messages = res.data;
+                                }
+                            } catch (e) {
+                                console.error('加载QQ消息历史失败:', e);
+                            }
+                        }
+                        
+                        this.showSessionDetailsModal = true;
+                    } catch (e) {
+                        console.error('获取QQ会话详情失败:', e);
+                        this.showToast('获取会话详情失败', 'error');
                     }
+                },
+                
+                async confirmDeleteQqSession(type, session) {
+                    let targetSession;
+                    let sessionId;
+                    
+                    if (type === 'current') {
+                        if (!this.currentQqId) {
+                            this.showToast('请先选择一个会话', 'warning');
+                            return;
+                        }
+                        targetSession = this.chatTab === 'qq_private'
+                            ? this.qqPrivateUsers.find(u => u.user_id === this.currentQqId)
+                            : this.qqGroups.find(g => g.group_id === this.currentQqId);
+                        sessionId = this.currentQqId;
+                    } else {
+                        targetSession = session;
+                        sessionId = session.user_id || session.group_id;
+                    }
+                    
+                    if (!targetSession) {
+                        this.showToast('会话不存在', 'error');
+                        return;
+                    }
+                    
+                    const sessionName = type === 'current' 
+                        ? `当前${this.chatTab === 'qq_private' ? 'QQ私聊' : 'QQ群聊'} (${sessionId})`
+                        : targetSession.name || `QQ${type === 'private' ? '私聊' : '群聊'} (${sessionId})`;
+                    
+                    this.showConfirm({
+                        title: '删除 QQ 会话',
+                        message: `确定要删除 ${sessionName} 的所有消息记录吗？此操作不可恢复。`,
+                        confirmText: '删除',
+                        icon: 'fa-trash',
+                        iconColor: 'var(--error)',
+                        danger: true,
+                        action: async () => {
+                            try {
+                                // 删除后端数据
+                                const endpoint = type === 'private' ? 'private' : 'group';
+                                await api.delete(`/api/messages/${endpoint}/${sessionId}`);
+                                
+                                // 从列表中移除
+                                if (type === 'private') {
+                                    this.qqPrivateUsers = this.qqPrivateUsers.filter(u => u.user_id !== sessionId);
+                                } else {
+                                    this.qqGroups = this.qqGroups.filter(g => g.group_id !== sessionId);
+                                }
+                                
+                                // 如果删除的是当前会话，清空视图
+                                if (type === 'current' || sessionId === this.currentQqId) {
+                                    this.currentQqId = null;
+                                    this.currentQqMessages = [];
+                                }
+                                
+                                this.showToast('会话已删除', 'success');
+                            } catch (e) {
+                                console.error('删除QQ会话失败:', e);
+                                this.showToast('删除失败: ' + (e.response?.data?.error || e.message), 'error');
+                            }
+                        }
+                    });
+                },
+                
+                handleQqMessagesScroll() {
+                    const container = this.$refs.qqMessagesContainer;
+                    if (!container) return;
+                    
+                    const scrollTop = container.scrollTop;
+                    const scrollHeight = container.scrollHeight;
+                    const clientHeight = container.clientHeight;
+                    
+                    // 当滚动距离底部超过100px时，显示滑到底部按钮
+                    const distanceFromBottom = scrollHeight - scrollTop - clientHeight;
+                    this.showQqScrollButton = distanceFromBottom > 100;
+                },
+                
+                scrollQqToBottom() {
+                    const container = this.$refs.qqMessagesContainer;
+                    if (!container) return;
+                    
+                    container.scrollTo({
+                        top: container.scrollHeight,
+                        behavior: 'smooth'
+                    });
+                    
+                    // 滚动后隐藏按钮
+                    this.showQqScrollButton = false;
+                },
+                
+                confirmDeleteSession(session) {
+                    this.showConfirm({
+                        title: '删除会话',
+                        message: `确定要删除会话"${session.name}"吗？此操作不可恢复。`,
+                        confirmText: '删除',
+                        icon: 'fa-trash',
+                        iconColor: 'var(--error)',
+                        danger: true,
+                        action: async () => {
+                            const sessionId = session.id;
+                            const sessionIndex = this.sessions.findIndex(s => s.id === sessionId);
+                            
+                            this.sessions = this.sessions.filter(s => s.id !== sessionId);
+                            
+                            if (this.currentSession && this.currentSession.id === sessionId) {
+                                this.currentSession = null;
+                                this.currentMessages = [];
+                            }
+                            
+                            this.showToast('会话已删除', 'success');
+                            
+                            try {
+                                await api.delete(`/api/sessions/${sessionId}`);
+                            } catch (e) {
+                                console.error('同步删除会话失败:', e);
+                                if (sessionIndex !== -1) {
+                                    this.sessions.splice(sessionIndex, 0, { id: sessionId, name: '已删除的会话' });
+                                }
+                                this.showToast('删除同步失败，请刷新页面', 'warning');
+                            }
+                        }
+                    });
                 },
                 
                 openSession(session) {
@@ -7454,6 +8000,73 @@
                 editSession(session) {
                     this.editingSession = { ...session };
                     this.showEditSessionModal = true;
+                },
+                
+                async viewSessionDetails(session) {
+                    try {
+                        const res = await api.get(`/api/sessions/${session.id}`);
+                        this.viewingSession = res.data;
+                        this.showSessionDetailsModal = true;
+                    } catch (e) {
+                        console.error('获取会话详情失败:', e);
+                        this.showToast('获取会话详情失败', 'error');
+                    }
+                },
+                
+                copySessionRawData() {
+                    if (!this.viewingSession) return;
+                    
+                    const data = JSON.stringify(this.viewingSession, null, 2);
+                    navigator.clipboard.writeText(data).then(() => {
+                        this.showToast('原始数据已复制到剪贴板', 'success');
+                    }).catch(err => {
+                        console.error('复制失败:', err);
+                        this.showToast('复制失败', 'error');
+                    });
+                },
+                
+                startEditSessionName(session) {
+                    this.editingSessionId = session.id;
+                    this.editingSessionName = session.name;
+                    this.$nextTick(() => {
+                        const inputs = this.$refs.sessionNameInput;
+                        if (inputs) {
+                            const input = Array.isArray(inputs) ? inputs[0] : inputs;
+                            if (input) {
+                                input.focus();
+                                input.select();
+                            }
+                        }
+                    });
+                },
+                
+                async saveSessionName(session) {
+                    if (!this.editingSessionName.trim()) {
+                        this.cancelEditSessionName();
+                        return;
+                    }
+                    
+                    const newName = this.editingSessionName.trim();
+                    if (newName === session.name) {
+                        this.cancelEditSessionName();
+                        return;
+                    }
+                    
+                    try {
+                        await api.put(`/api/sessions/${session.id}`, { name: newName });
+                        session.name = newName;
+                        this.showToast('会话名称已更新', 'success');
+                    } catch (e) {
+                        console.error('更新会话名称失败:', e);
+                        this.showToast('更新失败', 'error');
+                    } finally {
+                        this.cancelEditSessionName();
+                    }
+                },
+                
+                cancelEditSessionName() {
+                    this.editingSessionId = null;
+                    this.editingSessionName = '';
                 },
                 
                 async saveSessionEdit() {
@@ -7468,6 +8081,32 @@
                     } finally {
                         this.isLoading = false;
                     }
+                },
+                
+                // Confirm Modal Functions
+                showConfirm(config) {
+                    this.confirmModalConfig = {
+                        title: config.title || '确认操作',
+                        message: config.message || '确定要执行这个操作吗？',
+                        confirmText: config.confirmText || '确认',
+                        icon: config.icon || 'fa-exclamation-circle',
+                        iconColor: config.iconColor || 'var(--warning)',
+                        danger: config.danger || false,
+                        action: config.action,
+                        data: config.data || null
+                    };
+                    this.showConfirmModal = true;
+                },
+                
+                confirmAction() {
+                    if (this.confirmModalConfig.action) {
+                        this.confirmModalConfig.action(this.confirmModalConfig.data);
+                    }
+                    this.showConfirmModal = false;
+                },
+                
+                cancelConfirm() {
+                    this.showConfirmModal = false;
                 },
                 
                 // Workflow Functions
@@ -7554,19 +8193,28 @@
                 },
                 
                 async deleteWorkflow(id) {
-                    if (!confirm('确定要删除这个工作流吗？')) return;
-                    
-                    this.isLoading = true;
-                    try {
-                        await api.delete(`/api/workflows/${id}`);
-                        this.showWorkflowModal = false;
-                        await this.loadWorkflows();
-                        this.showToast('工作流已删除', 'success');
-                    } catch (e) {
-                        this.showToast('删除失败', 'error');
-                    } finally {
-                        this.isLoading = false;
-                    }
+                    this.showConfirm({
+                        title: '删除工作流',
+                        message: '确定要删除这个工作流吗？此操作不可恢复。',
+                        confirmText: '删除',
+                        icon: 'fa-trash',
+                        iconColor: 'var(--error)',
+                        danger: true,
+                        action: async () => {
+                            this.isLoading = true;
+                            try {
+                                await api.delete(`/api/workflows/${id}`);
+                                this.showWorkflowModal = false;
+                                await this.loadWorkflows();
+                                this.showToast('工作流已删除', 'success');
+                            } catch (e) {
+                                console.error('删除工作流失败:', e);
+                                this.showToast('删除失败: ' + (e.response?.data?.error || e.message), 'error');
+                            } finally {
+                                this.isLoading = false;
+                            }
+                        }
+                    });
                 },
                 
                 async toggleWorkflow(workflow) {
@@ -7689,31 +8337,51 @@
                 },
                 
                 async clearAllMemory() {
-                    if (!confirm('确定要清空所有记忆吗？此操作不可恢复。')) return;
-                    this.isLoading = true;
-                    try {
-                        await api.delete('/api/memory');
-                        await this.loadMemory();
-                        this.showToast('记忆已清空', 'success');
-                    } catch (e) {
-                        this.showToast('清空失败', 'error');
-                    } finally {
-                        this.isLoading = false;
-                    }
+                    this.showConfirm({
+                        title: '清空所有记忆',
+                        message: '确定要清空所有记忆吗？此操作不可恢复。',
+                        confirmText: '清空',
+                        icon: 'fa-trash-alt',
+                        iconColor: 'var(--error)',
+                        danger: true,
+                        action: async () => {
+                            this.isLoading = true;
+                            try {
+                                await api.delete('/api/memory');
+                                await this.loadMemory();
+                                this.showToast('记忆已清空', 'success');
+                            } catch (e) {
+                                console.error('清空记忆失败:', e);
+                                this.showToast('清空失败: ' + (e.response?.data?.error || e.message), 'error');
+                            } finally {
+                                this.isLoading = false;
+                            }
+                        }
+                    });
                 },
                 
                 async deleteMemory(id) {
-                    if (!confirm('确定要删除这条记忆吗？')) return;
-                    this.isLoading = true;
-                    try {
-                        await api.delete(`/api/memory/${id}`);
-                        await this.loadMemory();
-                        this.showToast('记忆已删除', 'success');
-                    } catch (e) {
-                        this.showToast('删除失败', 'error');
-                    } finally {
-                        this.isLoading = false;
-                    }
+                    this.showConfirm({
+                        title: '删除记忆',
+                        message: '确定要删除这条记忆吗？此操作不可恢复。',
+                        confirmText: '删除',
+                        icon: 'fa-trash',
+                        iconColor: 'var(--error)',
+                        danger: true,
+                        action: async () => {
+                            this.isLoading = true;
+                            try {
+                                await api.delete(`/api/memory/${id}`);
+                                await this.loadMemory();
+                                this.showToast('记忆已删除', 'success');
+                            } catch (e) {
+                                console.error('删除记忆失败:', e);
+                                this.showToast('删除失败: ' + (e.response?.data?.error || e.message), 'error');
+                            } finally {
+                                this.isLoading = false;
+                            }
+                        }
+                    });
                 },
 
                 toggleMemoryExpand(id) {
@@ -7800,22 +8468,32 @@
                 },
 
                 async promoteToLongTerm(mem) {
-                    if (!confirm('确定要将这条短期记忆转为长期记忆吗？')) return;
-                    this.isLoading = true;
-                    try {
-                        await api.put(`/api/memory/${mem.id}`, {
-                            ...mem,
-                            type: 'long',
-                            priority: 'normal',
-                            updated_at: new Date().toISOString()
-                        });
-                        await this.loadMemory();
-                        this.showToast('已转为长期记忆', 'success');
-                    } catch (e) {
-                        this.showToast('转换失败', 'error');
-                    } finally {
-                        this.isLoading = false;
-                    }
+                    this.showConfirm({
+                        title: '转换为长期记忆',
+                        message: '确定要将这条短期记忆转为长期记忆吗？',
+                        confirmText: '转换',
+                        icon: 'fa-arrow-up',
+                        iconColor: 'var(--accent)',
+                        danger: false,
+                        action: async () => {
+                            this.isLoading = true;
+                            try {
+                                await api.put(`/api/memory/${mem.id}`, {
+                                    ...mem,
+                                    type: 'long',
+                                    priority: 'normal',
+                                    updated_at: new Date().toISOString()
+                                });
+                                await this.loadMemory();
+                                this.showToast('已转为长期记忆', 'success');
+                            } catch (e) {
+                                console.error('转换失败:', e);
+                                this.showToast('转换失败: ' + (e.response?.data?.error || e.message), 'error');
+                            } finally {
+                                this.isLoading = false;
+                            }
+                        }
+                    });
                 },
                 
                 // Knowledge Functions
@@ -7923,18 +8601,28 @@
                 },
 
                 async deleteKnowledge(doc) {
-                    if (!confirm(`确定要删除 ${doc.name} 吗？`)) return;
-                    this.isLoading = true;
-                    try {
-                        await api.delete(`/api/knowledge/${doc.id}`);
-                        this.activeDocDropdown = null;
-                        await this.loadKnowledge();
-                        this.showToast('文档已删除', 'success');
-                    } catch (e) {
-                        this.showToast('删除失败', 'error');
-                    } finally {
-                        this.isLoading = false;
-                    }
+                    this.showConfirm({
+                        title: '删除文档',
+                        message: `确定要删除文档"${doc.name}"吗？此操作不可恢复。`,
+                        confirmText: '删除',
+                        icon: 'fa-trash',
+                        iconColor: 'var(--error)',
+                        danger: true,
+                        action: async () => {
+                            this.isLoading = true;
+                            try {
+                                await api.delete(`/api/knowledge/${doc.id}`);
+                                this.activeDocDropdown = null;
+                                await this.loadKnowledge();
+                                this.showToast('文档已删除', 'success');
+                            } catch (e) {
+                                console.error('删除文档失败:', e);
+                                this.showToast('删除失败: ' + (e.response?.data?.error || e.message), 'error');
+                            } finally {
+                                this.isLoading = false;
+                            }
+                        }
+                    });
                 },
 
                 formatTimeAgo(timestamp) {
@@ -8127,17 +8815,27 @@
                 },
 
                 async deleteModel(model) {
-                    if (!confirm(`确定要删除模型配置 "${model.name}" 吗？`)) return;
-                    this.isLoading = true;
-                    try {
-                        await api.delete(`/api/ai-models/${model.id}`);
-                        await this.loadAIModels();
-                        this.showToast('模型配置已删除', 'success');
-                    } catch (e) {
-                        this.showToast('删除失败: ' + (e.response?.data?.error || e.message), 'error');
-                    } finally {
-                        this.isLoading = false;
-                    }
+                    this.showConfirm({
+                        title: '删除模型配置',
+                        message: `确定要删除模型配置"${model.name}"吗？此操作不可恢复。`,
+                        confirmText: '删除',
+                        icon: 'fa-trash',
+                        iconColor: 'var(--error)',
+                        danger: true,
+                        action: async () => {
+                            this.isLoading = true;
+                            try {
+                                await api.delete(`/api/ai-models/${model.id}`);
+                                await this.loadAIModels();
+                                this.showToast('模型配置已删除', 'success');
+                            } catch (e) {
+                                console.error('删除模型配置失败:', e);
+                                this.showToast('删除失败: ' + (e.response?.data?.error || e.message), 'error');
+                            } finally {
+                                this.isLoading = false;
+                            }
+                        }
+                    });
                 },
 
                 async cloneModel(model) {
@@ -8352,16 +9050,26 @@
                 },
 
                 async clearAllCache() {
-                    if (!confirm('确定要清除所有缓存吗？')) return;
-                    this.isLoading = true;
-                    try {
-                        await api.post('/api/system/clear-cache');
-                        this.showToast('缓存已清除', 'success');
-                    } catch (e) {
-                        this.showToast('清除失败', 'error');
-                    } finally {
-                        this.isLoading = false;
-                    }
+                    this.showConfirm({
+                        title: '清除缓存',
+                        message: '确定要清除所有缓存吗？',
+                        confirmText: '清除',
+                        icon: 'fa-broom',
+                        iconColor: 'var(--warning)',
+                        danger: true,
+                        action: async () => {
+                            this.isLoading = true;
+                            try {
+                                await api.post('/api/system/clear-cache');
+                                this.showToast('缓存已清除', 'success');
+                            } catch (e) {
+                                console.error('清除缓存失败:', e);
+                                this.showToast('清除失败: ' + (e.response?.data?.error || e.message), 'error');
+                            } finally {
+                                this.isLoading = false;
+                            }
+                        }
+                    });
                 },
 
                 async reloadConfig() {
@@ -8492,56 +9200,93 @@
                 parseMessageContent(content, msg) {
                     if (!content) return '';
 
-                    // 处理 markdown 代码块中的 JSON
+                    // 辅助函数：尝试解析JSON并提取msg字段
+                    const tryParseJson = (str) => {
+                        if (!str || typeof str !== 'string') return null;
+                        
+                        try {
+                            const parsed = JSON.parse(str);
+                            // 如果是双重编码，继续解析
+                            if (typeof parsed === 'string') {
+                                try {
+                                    const inner = JSON.parse(parsed);
+                                    return inner;
+                                } catch {
+                                    return parsed;
+                                }
+                            }
+                            return parsed;
+                        } catch (e) {
+                            return null;
+                        }
+                    };
+
+                    // 方法1：处理双重编码的JSON（如 "content": "{\"msg\":\"...\"}"）
+                    const extractFromDoubleEncoded = (str) => {
+                        // 匹配类似 {"msg":"..."} 的模式，即使被转义
+                        const doubleEncodedMatch = str.match(/\\?"{\\?"msg\\?"[:][\s\S]*?\\?}"?/);
+                        if (doubleEncodedMatch) {
+                            const jsonStr = doubleEncodedMatch[0]
+                                .replace(/\\"/g, '"')
+                                .replace(/^"|"$/g, '');
+                            return tryParseJson(jsonStr);
+                        }
+                        return null;
+                    };
+
+                    // 方法2：处理 markdown 代码块
                     const codeBlockMatch = content.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
                     if (codeBlockMatch) {
                         const codeContent = codeBlockMatch[1].trim();
-                        if (codeContent.startsWith('{')) {
-                            try {
-                                const parsed = JSON.parse(codeContent);
-                                if (parsed && parsed.msg) {
-                                    return parsed.msg;
-                                }
-                            } catch (e) {
-                                // 解析失败，返回代码块内容
-                                return codeContent;
-                            }
+                        const parsed = tryParseJson(codeContent);
+                        if (parsed && parsed.msg) {
+                            return parsed.msg;
+                        }
+                        // 如果不是JSON，直接返回代码内容
+                        if (!codeContent.startsWith('{') && !codeContent.startsWith('[')) {
+                            return codeContent;
                         }
                     }
 
-                    // 尝试提取文本中的 JSON 对象
-                    const jsonMatches = content.match(/\{[\s\S]*?"msg"[\s\S]*?\}/g);
-                    if (jsonMatches) {
-                        for (const jsonStr of jsonMatches) {
-                            try {
-                                const parsed = JSON.parse(jsonStr);
-                                if (parsed && parsed.msg) {
-                                    return parsed.msg;
-                                }
-                            } catch (e) {
-                                continue;
-                            }
+                    // 方法3：尝试直接解析整个内容
+                    let parsed = tryParseJson(content);
+                    if (parsed && parsed.msg) {
+                        return parsed.msg;
+                    }
+
+                    // 方法4：从双重编码中提取
+                    parsed = extractFromDoubleEncoded(content);
+                    if (parsed && parsed.msg) {
+                        return parsed.msg;
+                    }
+
+                    // 方法5：查找所有JSON对象并尝试解析
+                    const jsonMatch = content.match(/\{[\s\S]*?"msg"[\s\S]*?\}/);
+                    if (jsonMatch) {
+                        parsed = tryParseJson(jsonMatch[0]);
+                        if (parsed && parsed.msg) {
+                            return parsed.msg;
                         }
                     }
 
-                    // 原始逻辑：检查是否以 { 开头
-                    if (content.trim().startsWith('{')) {
+                    // 方法6：查找原始msg字段（处理转义的情况）
+                    const rawMsgMatch = content.match(/"msg"\s*:\s*"([\s\S]*?)"(?:\s*,|\s*\})/);
+                    if (rawMsgMatch) {
+                        // 尝试解码转义字符
                         try {
-                            const parsed = JSON.parse(content);
-                            if (parsed && parsed.msg) {
-                                return parsed.msg;
-                            }
-                        } catch (e) {
-                            try {
-                                const fixed = content.replace(/"/g, '"').replace(/"/g, '"');
-                                const parsed = JSON.parse(fixed);
-                                if (parsed && parsed.msg) {
-                                    return parsed.msg;
-                                }
-                            } catch (e2) {
-                            }
+                            const decoded = rawMsgMatch[1]
+                                .replace(/\\n/g, '\n')
+                                .replace(/\\t/g, '\t')
+                                .replace(/\\r/g, '\r')
+                                .replace(/\\"/g, '"')
+                                .replace(/\\\\/g, '\\');
+                            return decoded;
+                        } catch {
+                            return rawMsgMatch[1];
                         }
                     }
+
+                    // 如果都不是JSON，返回原始内容
                     return content;
                 },
                 

@@ -2,7 +2,7 @@ from ncatbot.core import BotClient, GroupMessage, PrivateMessage, BotAPI
 from ncatbot.utils.logger import get_log
 from nbot.core.heartbeat import HeartbeatCore
 
-from nbot.utils.config_loader import load_config
+from nbot.web.utils.config_loader import load_config
 from nbot.services.chat_service import group_messages, user_messages, chat, generate_today_summary, summarize_group_text
 from nbot.services.ai import ai_client
 from nbot.services.tts import tts

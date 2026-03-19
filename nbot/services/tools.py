@@ -18,8 +18,13 @@ config_parser.read('config.ini', encoding='utf-8')
 
 # 读取MiniMax API配置（用于web search）
 MINIMAX_API_KEY = config_parser.get('ApiKey', 'api_key', fallback="")
-MINIMAX_BASE_URL = config_parser.get('ApiKey', 'base_url', fallback="https://api.minimaxi.com/v1/text/chatcompletion_v2")
+MINIMAX_BASE_URL = config_parser.get('ApiKey', 'base_url', fallback="https://api.minimaxi.com/v1")
 MINIMAX_MODEL = config_parser.get('ApiKey', 'model', fallback="MiniMax-Text-01")
+
+# 固定搜索 API URL
+MINIMAX_SEARCH_URL = "https://api.minimaxi.com/v1/coding_plan/search"
+# 固定图片理解 API URL
+MINIMAX_VLM_URL = "https://api.minimaxi.com/v1/coding_plan/vlm"
 
 # Web 配置数据目录
 WEB_DATA_DIR = os.path.join(os.path.dirname(__file__), '..', '..', 'data', 'web')
@@ -35,6 +40,34 @@ def load_tools_config() -> List[Dict]:
         except Exception as e:
             _log.error(f"Failed to load tools config: {e}")
     return []
+
+
+def process_image_url(image_source: str) -> str:
+    """
+    处理图片源 - 转换本地文件为 base64 或直接使用 URL
+    
+    Args:
+        image_source: 图片URL或本地文件路径
+        
+    Returns:
+        处理后的图片URL或 base64 编码
+    """
+    # 如果是 HTTP/HTTPS URL，直接返回
+    if image_source.startswith("http://") or image_source.startswith("https://"):
+        return image_source
+    
+    # 移除 @ 前缀
+    if image_source.startswith("@"):
+        image_source = image_source[1:]
+    
+    # 读取本地文件并转换为 base64
+    try:
+        import base64
+        with open(image_source, "rb") as f:
+            image_data = base64.b64encode(f.read()).decode("utf-8")
+            return f"data:image/jpeg;base64,{image_data}"
+    except Exception as e:
+        raise ValueError(f"无法读取图片文件: {e}")
 
 
 def get_enabled_tools() -> List[Dict]:
@@ -163,7 +196,7 @@ class ToolExecutor:
     def search_web(query: str, num_results: int = 3) -> Dict[str, Any]:
         """
         网页搜索
-        使用 MiniMax API 的 web_search 工具进行搜索
+        使用 MiniMax API 的直接搜索端点
         """
         try:
             # 检查配置是否完整
@@ -175,112 +208,82 @@ class ToolExecutor:
                     "query": query
                 }
 
-            # 构建请求
+            # 使用 MiniMax 专门的搜索 API（固定URL）
             headers = {
                 "Content-Type": "application/json",
                 "Authorization": f"Bearer {MINIMAX_API_KEY}"
             }
             
-            # 构建消息
-            messages = [
-                {
-                    "role": "system",
-                    "content": "你是一个 helpful assistant，可以使用网络搜索工具来获取最新信息。"
-                },
-                {
-                    "role": "user",
-                    "content": query
-                }
-            ]
+            payload = {"q": query}
             
-            # 构建payload，启用web_search工具
-            payload = {
-                "model": MINIMAX_MODEL,
-                "messages": messages,
-                "tools": [
-                    {
-                        "type": "web_search"
-                    }
-                ],
-                "max_tokens": 4096
-            }
-
+            _log.info(f"[Search] 发送搜索请求: {query}")
+            _log.info(f"[Search] API URL: {MINIMAX_SEARCH_URL}")
+            
             # 发送请求
             import requests
-            url = MINIMAX_BASE_URL
-            response = requests.post(url, headers=headers, json=payload, timeout=30)
+            response = requests.post(MINIMAX_SEARCH_URL, headers=headers, json=payload, timeout=30)
             response.raise_for_status()
-
+            
             # 解析响应
             result = response.json()
             
-            # 检查是否有搜索结果
-            choices = result.get("choices", [])
-            if not choices:
-                return {
-                    "success": False,
-                    "error": "API返回结果为空",
-                    "query": query
-                }
-            
-            # 获取消息列表
-            messages_list = choices[0].get("messages", [])
-            
-            # 查找tool结果和最终回复
-            search_content = ""
-            final_content = ""
-            
-            for msg in messages_list:
-                if msg.get("role") == "tool":
-                    search_content = msg.get("content", "")
-                elif msg.get("role") == "assistant" and not msg.get("tool_calls"):
-                    final_content = msg.get("content", "")
-            
-            # 如果没有找到结构化结果，尝试直接获取content
-            if not final_content and choices[0].get("message"):
-                final_content = choices[0].get("message", {}).get("content", "")
+            _log.info(f"[Search] API响应: {json.dumps(result, ensure_ascii=False)[:500]}")
             
             # 解析搜索结果
+            # MiniMax 搜索 API 返回格式可能是:
+            # {"content": "搜索结果内容", ...} 或 {"results": [...], ...}
             formatted_results = []
-            if search_content:
-                # 尝试从搜索结果中提取网页信息
-                # MiniMax返回的格式通常包含参考资料
+            answer = ""
+            
+            # 方式1: 直接从 content 字段获取
+            if "content" in result:
+                answer = result.get("content", "")
+                # 尝试提取 URL
                 import re
-                
-                # 提取URL和标题（如果有的话）
-                url_pattern = r'https?://[^\s\]]+'
-                urls = re.findall(url_pattern, search_content)
-                
-                if urls:
-                    for i, url in enumerate(urls[:num_results]):
-                        formatted_results.append({
-                            "title": f"搜索结果 {i+1}",
-                            "snippet": search_content[:300] if i == 0 else "",
-                            "url": url
-                        })
-                else:
+                urls = re.findall(r'https?://[^\s\)\"\'\]]+', answer)
+                for i, url in enumerate(urls[:num_results]):
                     formatted_results.append({
-                        "title": "搜索结果",
-                        "snippet": search_content[:500],
-                        "url": ""
+                        "title": f"搜索结果 {i+1}",
+                        "snippet": answer[max(0, answer.find(url)-50):answer.find(url)+200] if url in answer else answer[:300],
+                        "url": url
                     })
+            
+            # 方式2: 从 results 字段获取
+            elif "results" in result:
+                results_list = result.get("results", [])
+                for i, item in enumerate(results_list[:num_results]):
+                    formatted_results.append({
+                        "title": item.get("title", f"结果 {i+1}"),
+                        "snippet": item.get("snippet", item.get("content", ""))[:300],
+                        "url": item.get("url", "")
+                    })
+                answer = "\n".join([f"{r['title']}: {r['url']}" for r in formatted_results])
+            
+            # 方式3: 原始返回
+            else:
+                answer = json.dumps(result, ensure_ascii=False, indent=2)
+                formatted_results.append({
+                    "title": "搜索结果",
+                    "snippet": answer[:500],
+                    "url": ""
+                })
             
             return {
                 "success": True,
                 "query": query,
                 "results": formatted_results,
-                "answer": final_content
+                "answer": answer if answer else "未找到相关结果"
             }
 
         except requests.exceptions.RequestException as e:
-            _log.error(f"Web search request error: {e}")
+            _log.error(f"[Search] 请求错误: {e}")
             return {
                 "success": False,
                 "error": f"搜索请求失败: {str(e)}",
                 "query": query
             }
         except Exception as e:
-            _log.error(f"Web search error: {e}")
+            _log.error(f"[Search] 搜索错误: {e}")
             return {
                 "success": False,
                 "error": str(e),
@@ -299,6 +302,81 @@ class ToolExecutor:
             "weekday_cn": ["周一", "周二", "周三", "周四", "周五", "周六", "周日"][now.weekday()],
             "timestamp": now.isoformat()
         }
+
+    @staticmethod
+    def understand_image(prompt: str, image_source: str) -> Dict[str, Any]:
+        """
+        图片理解（使用 MiniMax VLM API）
+        
+        Args:
+            prompt: 询问图片的问题
+            image_source: 图片URL或本地文件路径
+        """
+        try:
+            # 检查配置
+            if not MINIMAX_API_KEY:
+                _log.error("MiniMax API密钥未配置")
+                return {
+                    "success": False,
+                    "error": "MiniMax API密钥未配置"
+                }
+            
+            # 处理图片源
+            processed_image_url = process_image_url(image_source)
+            
+            # 构建请求
+            headers = {
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {MINIMAX_API_KEY}"
+            }
+            
+            payload = {
+                "prompt": prompt,
+                "image_url": processed_image_url
+            }
+            
+            _log.info(f"[VLM] 发送图片理解请求")
+            _log.info(f"[VLM] Prompt: {prompt[:100]}{'...' if len(prompt) > 100 else ''}")
+            _log.info(f"[VLM] Image: {image_source[:100]}{'...' if len(image_source) > 100 else ''}")
+            
+            # 发送请求
+            import requests
+            response = requests.post(MINIMAX_VLM_URL, headers=headers, json=payload, timeout=60)
+            response.raise_for_status()
+            
+            # 解析响应
+            result = response.json()
+            
+            _log.info(f"[VLM] API响应: {json.dumps(result, ensure_ascii=False)[:300]}")
+            
+            # 提取理解结果
+            content = result.get("content", "")
+            
+            if not content:
+                return {
+                    "success": False,
+                    "error": "图片理解返回结果为空"
+                }
+            
+            return {
+                "success": True,
+                "content": content,
+                "image_source": image_source,
+                "prompt": prompt
+            }
+            
+        except requests.exceptions.RequestException as e:
+            _log.error(f"[VLM] 请求错误: {e}")
+            return {
+                "success": False,
+                "error": f"图片理解请求失败: {str(e)}"
+            }
+        except Exception as e:
+            _log.error(f"[VLM] 图片理解错误: {e}")
+            return {
+                "success": False,
+                "error": str(e)
+            }
 
     @staticmethod
     def http_get(url: str) -> Dict[str, Any]:
@@ -417,6 +495,27 @@ TOOL_DEFINITIONS = [
                 "required": ["url"]
             }
         }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "understand_image",
+            "description": "图片理解工具。当用户发送图片并询问相关内容时使用此工具，可以分析图片内容、识别物体、描述场景等。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "prompt": {
+                        "type": "string",
+                        "description": "询问图片的问题，如'这张图片里有什么'、'描述一下这个场景'等"
+                    },
+                    "image_source": {
+                        "type": "string",
+                        "description": "图片的URL地址或本地文件路径"
+                    }
+                },
+                "required": ["prompt", "image_source"]
+            }
+        }
     }
 ]
 
@@ -458,6 +557,7 @@ def execute_tool(tool_name: str, arguments: Dict[str, Any], context: Dict = None
         "search_web": executor.search_web,
         "get_date_time": executor.get_date_time,
         "http_get": executor.http_get,
+        "understand_image": executor.understand_image,
     }
 
     if tool_name not in tool_map:
