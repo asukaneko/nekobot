@@ -2124,6 +2124,141 @@
             color: var(--color-danger);
         }
 
+        /* Context Length Indicator */
+        .context-indicator {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 48px;
+            height: 48px;
+            position: relative;
+            cursor: pointer;
+            flex-shrink: 0;
+        }
+
+        .context-indicator svg {
+            width: 40px;
+            height: 40px;
+            transform: rotate(-90deg);
+        }
+
+        .context-indicator .progress-ring-circle {
+            fill: none;
+            stroke-width: 4;
+            stroke-linecap: round;
+            transition: stroke-dashoffset 0.3s ease;
+        }
+
+        .context-indicator .progress-ring-bg {
+            stroke: var(--border-color);
+        }
+
+        .context-indicator .progress-ring-fill {
+            stroke: var(--accent-primary);
+        }
+
+        .context-indicator .progress-ring-fill.warning {
+            stroke: var(--color-warning);
+        }
+
+        .context-indicator .progress-ring-fill.danger {
+            stroke: var(--color-danger);
+        }
+
+        .context-indicator .percentage {
+            position: absolute;
+            font-size: 10px;
+            font-weight: 600;
+            color: var(--text-secondary);
+        }
+
+        .context-indicator:hover {
+            transform: scale(1.1);
+        }
+
+        /* Context Info Tooltip */
+        .context-tooltip {
+            position: absolute;
+            bottom: 100%;
+            left: 50%;
+            transform: translateX(-50%);
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 12px;
+            min-width: 220px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+            z-index: 1000;
+            opacity: 0;
+            visibility: hidden;
+            transition: opacity 0.2s, visibility 0.2s;
+            margin-bottom: 8px;
+        }
+
+        .context-indicator:hover .context-tooltip,
+        .context-indicator:focus .context-tooltip {
+            opacity: 1;
+            visibility: visible;
+        }
+
+        .context-tooltip h4 {
+            margin: 0 0 8px 0;
+            font-size: 13px;
+            color: var(--text-primary);
+        }
+
+        .context-tooltip p {
+            margin: 4px 0;
+            font-size: 12px;
+            color: var(--text-secondary);
+        }
+
+        .context-tooltip .context-stats {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+            margin-top: 8px;
+        }
+
+        .context-tooltip .stat-item {
+            background: var(--bg-tertiary);
+            padding: 6px 8px;
+            border-radius: 4px;
+        }
+
+        .context-tooltip .stat-label {
+            font-size: 10px;
+            color: var(--text-muted);
+        }
+
+        .context-tooltip .stat-value {
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+
+        .context-tooltip .compress-btn {
+            width: 100%;
+            margin-top: 8px;
+            padding: 6px 12px;
+            background: var(--accent-primary);
+            color: white;
+            border: none;
+            border-radius: 4px;
+            font-size: 12px;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        .context-tooltip .compress-btn:hover {
+            background: var(--accent-hover);
+        }
+
+        .context-tooltip .compress-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
         /* Tables */
         .data-table {
             width: 100%;
@@ -3579,6 +3714,48 @@
                                         </div>
                                     </div>
                                     <div class="chat-input-wrapper">
+                                        <!-- Context Length Indicator -->
+                                        <div v-if="currentSession" class="context-indicator" tabindex="0">
+                                            <svg>
+                                                <circle class="progress-ring-circle progress-ring-bg" 
+                                                        :cx="20" :cy="20" :r="16"></circle>
+                                                <circle class="progress-ring-circle progress-ring-fill"
+                                                        :class="{ warning: contextUsage > 70, danger: contextUsage > 90 }"
+                                                        :cx="20" :cy="20" :r="16"
+                                                        :stroke-dasharray="circumference"
+                                                        :stroke-dashoffset="circumference - (contextUsage / 100 * circumference)"></circle>
+                                            </svg>
+                                            <span class="percentage">{{ Math.round(contextUsage) }}%</span>
+                                            
+                                            <!-- Tooltip -->
+                                            <div class="context-tooltip">
+                                                <h4>上下文使用情况</h4>
+                                                <p>当前会话的消息统计</p>
+                                                <div class="context-stats">
+                                                    <div class="stat-item">
+                                                        <div class="stat-label">消息数</div>
+                                                        <div class="stat-value">{{ currentMessages.length }}</div>
+                                                    </div>
+                                                    <div class="stat-item">
+                                                        <div class="stat-label">总字符数</div>
+                                                        <div class="stat-value">{{ formatNumber(contextCharCount) }}</div>
+                                                    </div>
+                                                    <div class="stat-item">
+                                                        <div class="stat-label">预估Token</div>
+                                                        <div class="stat-value">{{ formatNumber(contextTokenEstimate) }}</div>
+                                                    </div>
+                                                    <div class="stat-item">
+                                                        <div class="stat-label">限制条数</div>
+                                                        <div class="stat-value">{{ settings.max_context_length || 50 }}</div>
+                                                    </div>
+                                                </div>
+                                                <button class="compress-btn" 
+                                                        @click="compressContext" 
+                                                        :disabled="isCompressing">
+                                                    {{ isCompressing ? '压缩中...' : '压缩上下文' }}
+                                                </button>
+                                            </div>
+                                        </div>
                                         <textarea 
                                             v-model="inputMessage" 
                                             class="chat-input" 
@@ -4873,8 +5050,8 @@
                                 </div>
                                 <div class="form-group" style="margin-top: 20px;">
                                     <label class="form-label">上下文长度 (条)</label>
-                                    <input v-model.number="settings.max_context_length" type="number" min="5" max="50" class="form-input" placeholder="20">
-                                    <small style="color: var(--text-secondary);">AI 对话时保留的历史消息数量 (5-50)</small>
+                                    <input v-model.number="settings.max_context_length" type="number" min="5" max="500" class="form-input" placeholder="50">
+                                    <small style="color: var(--text-secondary);">AI 对话时保留的历史消息数量 (5-500)</small>
                                 </div>
                                 <div class="form-group" style="margin-top: 20px;">
                                     <label class="form-label">功能开关</label>
@@ -6020,7 +6197,14 @@
                     qqGroups: [],
                     currentQqId: null,
                     currentQqMessages: [],
-                    maxContextLength: 20,
+                    maxContextLength: 50,
+                    
+                    // Context Indicator
+                    circumference: 2 * Math.PI * 16,  // 圆圈周长 (2πr, r=16)
+                    contextCharCount: 0,  // 当前上下文总字符数
+                    contextTokenEstimate: 0,  // 预估token数
+                    contextUsage: 0,  // 使用百分比
+                    isCompressing: false,  // 是否正在压缩上下文
                     
                     // Workflows
                     workflows: [],
@@ -6493,6 +6677,62 @@
             },
             
             methods: {
+                // Context Indicator Methods
+                updateContextStats() {
+                    if (!this.currentSession || !this.currentMessages.length) {
+                        this.contextCharCount = 0;
+                        this.contextTokenEstimate = 0;
+                        this.contextUsage = 0;
+                        return;
+                    }
+                    
+                    // 计算总字符数
+                    this.contextCharCount = this.currentMessages.reduce((total, msg) => {
+                        const content = typeof msg.content === 'string' ? msg.content : '';
+                        const role = msg.role || '';
+                        return total + role.length + content.length;
+                    }, 0);
+                    
+                    // 粗略估算token数 (中文字符约2个token，英文约0.75个)
+                    this.contextTokenEstimate = Math.ceil(
+                        this.currentMessages.reduce((total, msg) => {
+                            const content = typeof msg.content === 'string' ? msg.content : '';
+                            // 简单估算：每4个字符约等于1个token
+                            return total + Math.ceil(content.length / 4);
+                        }, 0)
+                    );
+                    
+                    // 计算使用百分比（基于消息数量，max_context_length是消息数量限制）
+                    const maxLength = this.settings.max_context_length || 50;
+                    this.contextUsage = Math.min(100, 
+                        (this.currentMessages.length / maxLength) * 100
+                    );
+                },
+                
+                async compressContext() {
+                    if (this.isCompressing || !this.currentSession) return;
+                    
+                    this.isCompressing = true;
+                    try {
+                        // 调用后端API压缩上下文
+                        const res = await api.post(`/api/sessions/${this.currentSession.id}/compress`, {});
+                        
+                        if (res.data.success) {
+                            // 重新加载会话消息
+                            await this.loadMessages();
+                            this.updateContextStats();
+                            this.showToast('上下文压缩成功', 'success');
+                        } else {
+                            this.showToast(res.data.error || '压缩失败', 'error');
+                        }
+                    } catch (e) {
+                        console.error('Compress context error:', e);
+                        this.showToast('压缩上下文失败: ' + (e.response?.data?.error || e.message), 'error');
+                    } finally {
+                        this.isCompressing = false;
+                    }
+                },
+                
                 async login() {
                     if (!this.username || !this.password) return;
                     this.isLoading = true;
@@ -7585,6 +7825,10 @@
                     try {
                         const res = await api.get('/api/settings');
                         this.settings = res.data;
+                        // 同步上下文长度设置
+                        if (this.settings.max_context_length) {
+                            this.maxContextLength = this.settings.max_context_length;
+                        }
                     } catch (e) {
                         console.error('Failed to load settings:', e);
                     }
@@ -7610,6 +7854,7 @@
                     socket.emit('leave_session');
                     socket.emit('join_session', { session_id: session.id });
                     await this.loadMessages();
+                    this.updateContextStats();
                     
                     // 清除之前的消息刷新定时器
                     if (this.messageRefreshTimer) {
@@ -7701,6 +7946,7 @@
                         
                         this.currentMessages = newMessages;
                         this.$nextTick(() => this.scrollToBottom());
+                        this.updateContextStats();
                     } catch (e) {
                         console.error('Failed to load messages:', e);
                     }
@@ -9119,6 +9365,8 @@
                     this.isLoading = true;
                     try {
                         await api.put('/api/settings', this.settings);
+                        // 同步上下文长度设置
+                        this.maxContextLength = this.settings.max_context_length || 50;
                         this.showToast('设置已保存', 'success');
                     } catch (e) {
                         this.showToast('保存失败', 'error');

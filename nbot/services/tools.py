@@ -559,13 +559,29 @@ WORKSPACE_TOOL_DEFINITIONS = [
         "type": "function",
         "function": {
             "name": "workspace_read_file",
-            "description": "读取当前会话工作区中的文件内容。用于查看用户上传的文件或之前创建的文件。",
+            "description": "读取当前会话工作区中的文件内容。用于查看用户上传的文件或之前创建的文件。支持按行范围或字符范围读取。",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "filename": {
                         "type": "string",
                         "description": "要读取的文件名"
+                    },
+                    "start_line": {
+                        "type": "integer",
+                        "description": "开始行号（从1开始），与 end_line 配合使用可读取指定行范围。例如：start_line=10, end_line=20 表示读取第10到20行。"
+                    },
+                    "end_line": {
+                        "type": "integer",
+                        "description": "结束行号（包含），需要与 start_line 配合使用。例如：start_line=10, end_line=20 表示读取第10到20行。"
+                    },
+                    "char_count": {
+                        "type": "integer",
+                        "description": "读取的字符数量，从文件开头或 start_char 指定位置开始。与 start_char 配合可从任意位置读取指定长度。"
+                    },
+                    "start_char": {
+                        "type": "integer",
+                        "description": "从第几个字符开始读取（从0开始）。需要与 char_count 配合使用。例如：start_char=100, char_count=200 表示从第100个字符开始读取200个字符。"
                     }
                 },
                 "required": ["filename"]
@@ -742,7 +758,14 @@ def _execute_workspace_tool(tool_name: str, arguments: Dict[str, Any],
         elif tool_name == "workspace_read_file":
             if not filename:
                 return {"success": False, "error": "缺少文件名参数 (filename 或 file_path)"}
-            return workspace_manager.read_file(session_id, filename)
+            return workspace_manager.read_file(
+                session_id, 
+                filename,
+                start_line=arguments.get('start_line'),
+                end_line=arguments.get('end_line'),
+                char_count=arguments.get('char_count'),
+                start_char=arguments.get('start_char')
+            )
 
         elif tool_name == "workspace_edit_file":
             if not filename:

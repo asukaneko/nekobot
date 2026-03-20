@@ -283,13 +283,19 @@ class WorkspaceManager:
         except Exception as e:
             return {'success': False, 'error': str(e)}
 
-    def read_file(self, session_id: str, filename: str) -> Dict[str, Any]:
+    def read_file(self, session_id: str, filename: str, 
+                  start_line: int = None, end_line: int = None,
+                  char_count: int = None, start_char: int = None) -> Dict[str, Any]:
         """
         读取工作区中的文件内容（供 AI 工具调用）
 
         Args:
             session_id: 会话ID
             filename: 文件名
+            start_line: 开始行号（从1开始），与 char_count/start_char 二选一
+            end_line: 结束行号（包含），需要与 start_line 配合使用
+            char_count: 读取的字符数量（从文件开头或 start_char 指定的位置）
+            start_char: 从第几个字符开始（从0开始），需要与 char_count 配合使用
 
         Returns:
             文件内容或错误信息
@@ -320,9 +326,32 @@ class WorkspaceManager:
             try:
                 with open(file_path, 'r', encoding='utf-8', errors='replace') as f:
                     content = f.read()
-                # 限制返回大小
-                if len(content) > 50000:
-                    content = content[:50000] + "\n...(内容过长，已截断)"
+                
+                # 应用字符范围参数
+                if char_count is not None:
+                    start_pos = start_char if start_char is not None else 0
+                    if start_pos < len(content):
+                        content = content[start_pos:start_pos + char_count]
+                    else:
+                        content = ""
+                
+                # 应用行范围参数
+                if start_line is not None or end_line is not None:
+                    lines = content.split('\n')
+                    start = max(0, (start_line - 1) if start_line else 0)
+                    end = min(len(lines), end_line if end_line else len(lines))
+                    if start < end:
+                        content = '\n'.join(lines[start:end])
+                        if end_line and end < len(lines):
+                            content += '\n...'
+                    else:
+                        content = ""
+                
+                # 限制返回大小（如果没有指定具体范围）
+                if not any([char_count, start_char, start_line, end_line]):
+                    if len(content) > 50000:
+                        content = content[:50000] + "\n...(内容过长，已截断)"
+                
                 return {
                     'success': True,
                     'filename': filename,

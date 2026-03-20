@@ -638,7 +638,7 @@ class WebChatServer:
             "ws_uri": "ws://127.0.0.1:3001",
             "master_id": "",
             "bot_id": "",
-            "max_context_length": 20,
+            "max_context_length": 50,
             "features": {
                 "ai": True,
                 "memory": True,
@@ -2097,6 +2097,118 @@ class WebChatServer:
             self._save_data('sessions')
             
             return jsonify({'success': True})
+
+        @self.app.route('/api/sessions/<session_id>/compress', methods=['POST'])
+        def compress_context(session_id):
+            """压缩会话上下文 - 使用AI总结早期对话"""
+            session = self.sessions.get(session_id)
+            if not session:
+                return jsonify({'error': 'Session not found'}), 404
+            
+            messages = session.get('messages', [])
+            if len(messages) < 10:
+                return jsonify({
+                    'success': False,
+                    'error': '消息数量不足，无需压缩'
+                }), 400
+            
+            # 获取系统提示
+            system_msg = None
+            if messages and messages[0].get('role') == 'system':
+                system_msg = messages[0]
+            
+            # 保留系统消息和最近的对话
+            keep_count = min(5, len(messages) - 2)  # 至少保留2条
+            recent_messages = messages[-keep_count:] if not system_msg else messages[-keep_count:]
+            
+            # 计算需要压缩的消息
+            compress_start = 1 if system_msg else 0  # 跳过系统消息
+            compress_end = len(messages) - keep_count
+            
+            if compress_end <= compress_start:
+                return jsonify({
+                    'success': False,
+                    'error': '没有足够的早期消息需要压缩'
+                }), 400
+            
+            messages_to_compress = messages[compress_start:compress_end]
+            
+            if not messages_to_compress:
+                return jsonify({
+                    'success': False,
+                    'error': '没有消息需要压缩'
+                }), 400
+            
+            # 构建总结提示
+            conversation_text = '\n'.join([
+                f"[{msg.get('role', 'user')}]: {msg.get('content', '')[:500]}"
+                for msg in messages_to_compress
+                if msg.get('content')
+            ])
+            
+            summary_prompt = f"""请简洁地总结以下对话的主要内容，保留关键信息和结论：
+
+{conversation_text}
+
+请用50-100字总结："""
+            
+            try:
+                # 检查AI客户端
+                if not self.ai_client:
+                    return jsonify({
+                        'success': False,
+                        'error': 'AI服务不可用，请先配置AI'
+                    }), 503
+                
+                _log.info(f"[Compress] 开始压缩会话 {session_id[:8]}... 的上下文")
+                
+                # 调用AI进行总结
+                response = self.ai_client.chat_completion(
+                    model=self.ai_model,
+                    messages=[{"role": "user", "content": summary_prompt}],
+                    stream=False
+                )
+                
+                summary = response.choices[0].message.content.strip()
+                
+                # 构建新的消息列表
+                if system_msg:
+                    new_messages = [system_msg]
+                else:
+                    new_messages = []
+                
+                # 添加总结消息
+                summary_msg = {
+                    'id': f"summary_{int(time.time())}",
+                    'role': 'system',
+                    'content': f"【对话总结】{summary}",
+                    'timestamp': time.time()
+                }
+                new_messages.append(summary_msg)
+                
+                # 添加最近的对话
+                new_messages.extend(recent_messages)
+                
+                # 更新会话
+                session['messages'] = new_messages
+                
+                # 保存到文件
+                self._save_data('sessions')
+                
+                _log.info(f"[Compress] 上下文压缩完成: {session_id[:8]}... ({len(messages_to_compress)} 条消息被压缩)")
+                
+                return jsonify({
+                    'success': True,
+                    'compressed_count': len(messages_to_compress),
+                    'summary': summary[:200]
+                })
+                    
+            except Exception as e:
+                _log.error(f"[Compress] 压缩上下文失败: {e}", exc_info=True)
+                return jsonify({
+                    'success': False,
+                    'error': f'压缩失败: {str(e)}'
+                }), 500
 
         # ==================== 工作区 API ====================
         @self.app.route('/api/sessions/<session_id>/workspace/files', methods=['GET'])
@@ -3705,6 +3817,7 @@ class WebChatServer:
         def update_settings():
             data = request.json
             self.settings.update(data)
+            self._save_data('settings')
             return jsonify({'success': True, 'settings': self.settings})
 
         # ==================== 统计数据 API ====================
@@ -3725,8 +3838,17 @@ class WebChatServer:
                 total_messages += msg_count
                 # 只检查最近的消息是否在今天
                 for msg in messages[-100:]:  # 只检查最近100条
-                    if today_str in msg.get('timestamp', ''):
-                        today_messages += 1
+                    timestamp = msg.get('timestamp')
+                    if timestamp:
+                        # timestamp 可能是浮点数(时间戳)或字符串
+                        if isinstance(timestamp, (int, float)):
+                            # 浮点数时间戳，转换为日期字符串
+                            msg_date = datetime.fromtimestamp(timestamp).strftime("%Y-%m-%d")
+                            if msg_date == today_str:
+                                today_messages += 1
+                        elif isinstance(timestamp, str) and today_str in timestamp:
+                            # 字符串时间戳
+                            today_messages += 1
             
             # 计算运行时间
             uptime_seconds = int(time.time() - self.start_time)
