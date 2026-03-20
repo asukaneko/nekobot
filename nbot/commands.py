@@ -4011,6 +4011,7 @@ def is_at_bot(msg) -> bool:
 def _save_incoming_files_to_workspace(msg, is_group: bool):
     """检测消息中的文件并保存到工作区"""
     if not WORKSPACE_AVAILABLE:
+        _log.debug("[文件保存] 工作区不可用")
         return
     from nbot.core.workspace import workspace_manager
 
@@ -4021,25 +4022,127 @@ def _save_incoming_files_to_workspace(msg, is_group: bool):
         session_id = get_qq_session_id(user_id=str(msg.user_id))
         session_type = "qq_private"
 
-    if not hasattr(msg, 'message') or not msg.message:
-        return
+    _log.info(f"[文件保存] 开始检查消息，session_id={session_id}, type={session_type}")
 
-    for elem in msg.message:
-        if not hasattr(elem, 'type'):
-            continue
-        # 处理文件类型消息
-        if elem.type == 'file':
-            file_url = elem.data.get('url', '')
-            file_name = elem.data.get('name', 'unknown_file')
-            if file_url:
-                try:
-                    resp = requests.get(file_url, timeout=30)
-                    if resp.status_code == 200:
-                        workspace_manager.save_uploaded_file(
-                            session_id, resp.content, file_name, session_type)
-                        _log.info(f"文件已保存到工作区: {file_name}")
-                except Exception as e:
-                    _log.warning(f"下载文件到工作区失败: {file_name}, {e}")
+    # 方法1: 检查 msg.message 中的文件元素
+    if hasattr(msg, 'message') and msg.message:
+        _log.info(f"[文件保存] 消息元素数量: {len(msg.message)}")
+
+        for elem in msg.message:
+            if not hasattr(elem, 'type'):
+                _log.debug(f"[文件保存] 元素没有type属性: {elem}")
+                continue
+            
+            _log.info(f"[文件保存] 检查元素类型: {elem.type}")
+            
+            # 处理文件类型消息
+            if elem.type == 'file':
+                file_url = elem.data.get('url', '') if hasattr(elem, 'data') else ''
+                file_name = elem.data.get('name', 'unknown_file') if hasattr(elem, 'data') else 'unknown_file'
+                _log.info(f"[文件保存] 发现文件: {file_name}, URL: {file_url[:50] if file_url else '空'}...")
+                if file_url:
+                    try:
+                        resp = requests.get(file_url, timeout=30)
+                        _log.info(f"[文件保存] 下载响应: {resp.status_code}")
+                        if resp.status_code == 200:
+                            result = workspace_manager.save_uploaded_file(
+                                session_id, resp.content, file_name, session_type)
+                            _log.info(f"[文件保存] 保存成功: {result}")
+                        else:
+                            _log.warning(f"[文件保存] 下载失败，状态码: {resp.status_code}")
+                    except Exception as e:
+                        _log.warning(f"[文件保存] 保存失败: {file_name}, {e}", exc_info=True)
+            else:
+                _log.debug(f"[文件保存] 非文件类型元素: {elem.type}")
+    
+    # 方法2: 从 raw_message 解析 CQ 码格式的文件
+    if hasattr(msg, 'raw_message') and msg.raw_message:
+        raw_msg = msg.raw_message
+        _log.info(f"[文件保存] 检查 raw_message: {raw_msg[:100]}...")
+        
+        # 匹配 [CQ:file,file=文件名,file_id=xxx,url=xxx] 格式
+        file_cq_pattern = r'\[CQ:file[^,]*,file=([^,\]]+)(?:[^,]*,file_id=([^,\]]+))?(?:[^,]*,url=([^,\]]+))?[^\]]*\]'
+        file_matches = re.findall(file_cq_pattern, raw_msg)
+        
+        if file_matches:
+            _log.info(f"[文件保存] 从 CQ 码发现 {len(file_matches)} 个文件")
+            for match in file_matches:
+                file_name = match[0] if match[0] else 'unknown_file'
+                file_id = match[1] if len(match) > 1 and match[1] else None
+                file_url = match[2] if len(match) > 2 and match[2] else None
+                
+                _log.info(f"[文件保存] CQ码文件: {file_name}, file_id={file_id}, url={file_url[:50] if file_url else '无'}...")
+                
+                # 如果没有 URL，尝试从 file_id 获取文件下载链接
+                if not file_url and file_id:
+                    # 使用 OneBot HTTP API 获取文件下载链接
+                    try:
+                        import aiohttp
+                        # 构造 OneBot API 请求
+                        # 参考: https://github.com/botuniverse/onebot-11/blob/master/api/public.md#get_file-
+                        api_url = "http://127.0.0.1:3000"  # 默认 OneBot HTTP 地址
+                        if is_group:
+                            endpoint = f"{api_url}/get_group_file_url"
+                            params = {"group_id": msg.group_id, "file_id": file_id}
+                        else:
+                            endpoint = f"{api_url}/get_private_file_url"
+                            params = {"user_id": msg.user_id, "file_id": file_id}
+                        
+                        _log.info(f"[文件保存] 尝试获取文件URL: {endpoint}")
+                        
+                        # 尝试使用 bot.api 的底层方法
+                        if hasattr(bot.api, '_request') or hasattr(bot.api, 'request'):
+                            # 尝试调用 OneBot API
+                            request_method = getattr(bot.api, '_request', getattr(bot.api, 'request', None))
+                            if request_method:
+                                file_info = request_method(endpoint, params=params)
+                                if file_info and 'data' in file_info and 'url' in file_info['data']:
+                                    file_url = file_info['data']['url']
+                                    _log.info(f"[文件保存] 通过API获取到文件URL: {file_url[:50]}...")
+                    except Exception as e:
+                        _log.warning(f"[文件保存] 获取文件下载链接失败: {e}")
+                    
+                    # 如果上面的方法失败，尝试直接通过 file_id 下载
+                    if not file_url:
+                        _log.info(f"[文件保存] 尝试直接使用 file_id 下载")
+                        # 某些协议支持直接通过 file_id 下载
+                        try:
+                            # 尝试从 ncatbot 配置中获取基础 URL
+                            from nbot.services.ai import base_url
+                            if base_url:
+                                # 构造可能的下载链接
+                                possible_urls = [
+                                    f"{base_url}/download_file?file_id={file_id}",
+                                    f"{base_url}/get_file?file_id={file_id}",
+                                ]
+                                for url in possible_urls:
+                                    try:
+                                        resp = requests.head(url, timeout=5)
+                                        if resp.status_code == 200:
+                                            file_url = url
+                                            _log.info(f"[文件保存] 找到可用下载链接: {file_url[:50]}...")
+                                            break
+                                    except:
+                                        continue
+                        except Exception as e:
+                            _log.debug(f"[文件保存] 尝试直接下载失败: {e}")
+                
+                if file_url:
+                    try:
+                        resp = requests.get(file_url, timeout=30)
+                        _log.info(f"[文件保存] 下载响应: {resp.status_code}")
+                        if resp.status_code == 200:
+                            result = workspace_manager.save_uploaded_file(
+                                session_id, resp.content, file_name, session_type)
+                            _log.info(f"[文件保存] 保存成功: {result}")
+                        else:
+                            _log.warning(f"[文件保存] 下载失败，状态码: {resp.status_code}")
+                    except Exception as e:
+                        _log.warning(f"[文件保存] 保存失败: {file_name}, {e}", exc_info=True)
+                else:
+                    _log.warning(f"[文件保存] 无法获取文件下载链接: {file_name}")
+        else:
+            _log.debug("[文件保存] raw_message 中没有 CQ:file 码")
 
 
 async def dispatch_message(msg, is_group: bool):

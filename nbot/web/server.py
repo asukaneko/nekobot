@@ -65,6 +65,15 @@ except ImportError:
     WORKSPACE_AVAILABLE = False
     workspace_manager = None
 
+# 导入进度卡片管理器
+try:
+    from nbot.core.progress_card import progress_card_manager, ProgressCard, StepType
+    PROGRESS_CARD_AVAILABLE = True
+except ImportError:
+    PROGRESS_CARD_AVAILABLE = False
+    progress_card_manager = None
+    _log.warning("Progress card manager not available")
+
 
 class WebMessageAdapter:
     """Web 消息适配器，用于兼容 QQ 命令处理"""
@@ -436,8 +445,14 @@ class WebChatServer:
         self.socketio = socketio
         self.static_folder = os.path.join(os.path.dirname(__file__), 'static')
         self.base_dir = os.path.join(os.path.dirname(__file__), '..', '..')
-
+        
         self.sessions: Dict[str, Dict[str, Any]] = {}
+        
+        # 初始化进度卡片管理器
+        if PROGRESS_CARD_AVAILABLE and progress_card_manager:
+            progress_card_manager.set_socketio(socketio)
+            progress_card_manager.set_sessions(self.sessions)
+            _log.info("[ProgressCard] 进度卡片管理器已初始化")
         self.web_users: Dict[str, str] = {}
         self.active_connections: Dict[str, str] = {}
         
@@ -861,6 +876,10 @@ class WebChatServer:
             if os.path.exists(sessions_file):
                 with open(sessions_file, 'r', encoding='utf-8') as f:
                     self.sessions = json.load(f)
+                # 重新设置 sessions 到 ProgressCardManager
+                if PROGRESS_CARD_AVAILABLE and progress_card_manager:
+                    progress_card_manager.set_sessions(self.sessions)
+                    _log.info("[ProgressCard] 重新设置 sessions 到 ProgressCardManager")
             
             # 加载工作流
             workflows_file = os.path.join(self.data_dir, 'workflows.json')
@@ -4285,7 +4304,26 @@ class WebChatServer:
                                    '.sh', '.bash', '.sql', '.ini', '.cfg', '.conf',
                                    '.log', '.env', '.properties', '.toml']
                 
-                if attachments and isinstance(attachments, list):
+                # 创建进度卡片（所有消息都创建，立即显示"AI 正在思考..."）
+                progress_card = None
+                has_attachments = attachments and isinstance(attachments, list) and len(attachments) > 0
+                
+                if PROGRESS_CARD_AVAILABLE and progress_card_manager and self.socketio:
+                    progress_card = progress_card_manager.create_card(
+                        session_id=session_id,
+                        parent_message_id=parent_message_id,
+                        max_iterations=30
+                    )
+                    _log.info(f"[ProgressCard] 创建进度卡片: {progress_card.card_id}")
+                    # 立即显示"AI 正在思考..."
+                    from nbot.core.progress_card import StepType
+                    progress_card.update(StepType.THINKING, "AI 正在思考...")
+                
+                if has_attachments:
+                    # 更新进度：开始处理附件
+                    if progress_card:
+                        progress_card.update(StepType.UPLOAD, f"正在处理 {len(attachments)} 个附件...")
+                    
                     for att in attachments:
                         if isinstance(att, dict):
                             att_type = att.get('type', '')
@@ -4296,8 +4334,14 @@ class WebChatServer:
                             if isinstance(att_type, str):
                                 # 图片附件 - 优先使用 data URL，其次使用文件路径
                                 if att_type.startswith('image/'):
+                                    # 更新进度：正在识别图片
+                                    if progress_card:
+                                        progress_card.update(StepType.IMAGE, f"正在识别图片: {att_name}")
+                                    
+                                    image_loaded = False
                                     if att_data:
                                         image_urls.append(att_data)
+                                        image_loaded = True
                                     elif att_path:
                                         # 尝试读取服务器上的图片文件
                                         try:
@@ -4308,11 +4352,27 @@ class WebChatServer:
                                                     import base64
                                                     b64_data = base64.b64encode(f.read()).decode('utf-8')
                                                     image_urls.append(f"data:{att_type};base64,{b64_data}")
+                                                    image_loaded = True
+                                            else:
+                                                _log.warning(f"图片文件不存在: {file_path}")
                                         except Exception as e:
                                             _log.warning(f"读取图片文件失败: {att_name}, {e}")
+                                    
+                                    # 无论成功还是失败，都更新完成状态
+                                    if progress_card:
+                                        _log.info(f"[ProgressCard] 准备更新 IMAGE_DONE，图片: {att_name}, 成功: {image_loaded}")
+                                        if image_loaded:
+                                            progress_card.update(StepType.IMAGE_DONE, f"图片已加载: {att_name}", True)
+                                        else:
+                                            progress_card.update(StepType.IMAGE_DONE, f"图片加载失败: {att_name}", False)
+                                        _log.info(f"[ProgressCard] IMAGE_DONE 更新完成")
                                 
                                 # 文本文件 - 优先使用 data URL，其次使用文件路径
                                 elif att_type in TEXT_MIME_TYPES:
+                                    # 更新进度：正在读取文件
+                                    if progress_card:
+                                        progress_card.update(StepType.FILE, f"正在读取文件: {att_name}")
+                                    
                                     text_content = None
                                     # 从 data URL 提取内容
                                     if att_data and att_data.startswith('data:'):
@@ -4335,16 +4395,30 @@ class WebChatServer:
                                     
                                     if text_content:
                                         file_contents.append(f"【文件 {att_name} 内容】:\n{text_content[:10000]}")
+                                        # 文件处理完成
+                                        if progress_card:
+                                            progress_card.update(StepType.FILE_DONE, f"文件已读取: {att_name}", True)
+                                    else:
+                                        # 文件处理失败
+                                        if progress_card:
+                                            progress_card.update(StepType.FILE_DONE, f"文件读取失败: {att_name}", False)
                                 
                                 # 根据扩展名判断是否为文本文件
                                 elif any(att_name.lower().endswith(ext) for ext in TEXT_EXTENSIONS):
+                                    # 更新进度：正在读取文件
+                                    if progress_card:
+                                        progress_card.update(StepType.FILE, f"正在读取文件: {att_name}")
+                                    
                                     text_content = None
+                                    file_read_success = False
+                                    
                                     # 从 data URL 提取内容
                                     if att_data and att_data.startswith('data:'):
                                         try:
                                             import base64
                                             b64_data = att_data.split(',')[1] if ',' in att_data else att_data
                                             text_content = base64.b64decode(b64_data).decode('utf-8', errors='ignore')
+                                            file_read_success = True
                                         except Exception as e:
                                             _log.warning(f"提取文本文件失败: {att_name}, {e}")
                                     # 从文件路径读取内容
@@ -4355,11 +4429,19 @@ class WebChatServer:
                                             if os.path.exists(file_path):
                                                 with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
                                                     text_content = f.read()
+                                                    file_read_success = True
                                         except Exception as e:
                                             _log.warning(f"读取文件失败: {att_name}, {e}")
                                     
                                     if text_content:
                                         file_contents.append(f"【文件 {att_name} 内容】:\n{text_content[:10000]}")
+                                    
+                                    # 更新完成状态
+                                    if progress_card:
+                                        if file_read_success:
+                                            progress_card.update(StepType.FILE_DONE, f"文件已读取: {att_name}", True)
+                                        else:
+                                            progress_card.update(StepType.FILE_DONE, f"文件读取失败: {att_name}", False)
                                 
                                 # 使用 MinerU API 解析的文件类型
                                 elif any(att_name.lower().endswith(ext) for ext in ['.pdf', '.doc', '.docx', '.ppt', '.pptx', '.xls', '.xlsx']) and att_path:
@@ -4410,16 +4492,35 @@ class WebChatServer:
                                 elif att_type:
                                     file_contents.append(f"【文件 {att_name}】类型: {att_type} (暂不支持解析)")
                 
+                # 附件处理完成，更新进度
+                if progress_card:
+                    _log.info(f"[ProgressCard] 准备更新 UPLOAD_DONE，当前步骤数: {len(progress_card.steps)}")
+                    progress_card.update(StepType.UPLOAD_DONE, f"附件处理完成 ({len(attachments)} 个文件)", True)
+                    _log.info(f"[ProgressCard] UPLOAD_DONE 更新完成，步骤数: {len(progress_card.steps)}")
+                
                 # 合并文件内容到用户消息
                 enhanced_content = user_content
                 if file_contents:
                     enhanced_content = user_content + "\n\n" + "\n\n".join(file_contents)
+                
+                # 定义默认的完成函数（用于多模态AI分支）
+                def complete_thinking_card():
+                    """将进度卡片标记为完成状态"""
+                    if progress_card:
+                        try:
+                            from nbot.core.progress_card import StepType
+                            progress_card.update(StepType.DONE, "✅ 处理完成", True)
+                            progress_card.complete()
+                        except Exception as e:
+                            _log.warning(f"[ThinkingCard] 标记完成失败: {e}")
                 
                 # 检查是否有图片附件，如果有则使用多模态AI
                 if image_urls:
                     # 使用多模态AI处理图片，传递用户的原始问题
                     assistant_content = self._get_ai_response_with_images(messages_for_ai, image_urls, enhanced_content)
                     final_content = assistant_content
+                    # 完成进度卡片
+                    complete_thinking_card()
                 else:
                     # 尝试使用工具调用（多轮）
                     try:
@@ -4441,133 +4542,39 @@ class WebChatServer:
                             max_iterations = 30
                             final_content = None
                             
-                            # 创建进度卡片
-                            thinking_card_id = str(uuid.uuid4())
-                            thinking_steps = []
-                            current_iteration = [0]  # 使用列表包装以便在闭包中修改
+                            _log.info(f"[ThinkingCard] 使用 ProgressCard 系统, session_id={session_id}, card_id={progress_card.card_id if progress_card else 'None'}")
                             
-                            _log.info(f"[ThinkingCard] 创建进度卡片, session_id={session_id}, card_id={thinking_card_id}")
-                            
-                            def update_thinking_card(step_type, step_name, step_detail=None):
-                                """更新进度卡片"""
-                                if step_type == 'start':
-                                    thinking_steps.append({
-                                        'type': 'thinking',
-                                        'name': step_name,
-                                        'status': 'active',
-                                        'detail': step_detail
-                                    })
-                                elif step_type == 'tool':
-                                    thinking_steps.append({
-                                        'type': 'tool',
-                                        'name': step_name,
-                                        'status': 'running',
-                                        'detail': step_detail
-                                    })
-                                elif step_type == 'tool_done':
-                                    for step in reversed(thinking_steps):
-                                        if step['type'] == 'tool' and step['name'] == step_name:
-                                            step['status'] = 'done' if step_detail else 'error'
-                                            if step_detail:
-                                                step['result'] = step_detail[:100]
-                                            break
-                                elif step_type == 'thinking':
-                                    thinking_steps.append({
-                                        'type': 'thinking',
-                                        'name': step_name,
-                                        'status': 'active',
-                                        'detail': step_detail
-                                    })
-                                
-                                # 发送进度卡片到 Web 端
-                                card_message = {
-                                    'id': thinking_card_id,
-                                    'session_id': session_id,  # 添加 session_id
-                                    'parent_message_id': parent_message_id,  # 关联到用户消息
-                                    'role': 'system',
-                                    'type': 'thinking_card',
-                                    'content': f'🔄 AI 正在处理... ({current_iteration[0] + 1}/{max_iterations})',
-                                    'steps': thinking_steps.copy(),  # 复制一份，避免引用问题
-                                    'timestamp': datetime.now().isoformat()
-                                }
-                                try:
-                                    _log.info(f"[ThinkingCard] 发送进度卡片, socketio={'已设置' if self.socketio else 'None'}, session_id={session_id}")
-                                    _log.info(f"[ThinkingCard] 卡片内容: {json.dumps(card_message, ensure_ascii=False)[:200]}")
-                                    self.socketio.emit('new_message', card_message, room=session_id)
-                                    # 让出控制权，确保消息能够立即发送
-                                    self.socketio.sleep(0)
-                                    _log.info(f"[ThinkingCard] ✓ 发送成功")
+                            def update_thinking_card(step_type, step_name, step_detail=None, step_result=None):
+                                """更新进度卡片 - 使用新的 ProgressCard 系统"""
+                                if not progress_card:
+                                    return
                                     
-                                    # 将卡片保存到对应的消息中（持久化）
-                                    if parent_message_id and session_id in self.sessions:
-                                        session = self.sessions[session_id]
-                                        for msg in session.get('messages', []):
-                                            if msg.get('id') == parent_message_id:
-                                                if 'thinking_cards' not in msg:
-                                                    msg['thinking_cards'] = []
-                                                # 查找是否已存在该卡片
-                                                existing_idx = None
-                                                for i, card in enumerate(msg['thinking_cards']):
-                                                    if card.get('id') == thinking_card_id:
-                                                        existing_idx = i
-                                                        break
-                                                if existing_idx is not None:
-                                                    msg['thinking_cards'][existing_idx] = card_message
-                                                else:
-                                                    msg['thinking_cards'].append(card_message)
-                                                _log.info(f"[ThinkingCard] 卡片已保存到消息 {parent_message_id}")
-                                                break
-                                except Exception as e:
-                                    _log.error(f"[ThinkingCard] ✗ 发送失败: {e}")
-                            
-                            def complete_thinking_card():
-                                """将进度卡片标记为完成状态"""
-                                # 添加一个完成步骤
-                                thinking_steps.append({
-                                    'type': 'done',
-                                    'name': '✅ 处理完成',
-                                    'status': 'done'
-                                })
-                                
-                                complete_message = {
-                                    'id': thinking_card_id,
-                                    'session_id': session_id,
-                                    'parent_message_id': parent_message_id,  # 关联到用户消息
-                                    'role': 'system',
-                                    'type': 'thinking_card',
-                                    'content': '✅ 处理完成',
-                                    'steps': thinking_steps,
-                                    'is_complete': True,  # 标记为完成
-                                    'timestamp': datetime.now().isoformat()
-                                }
                                 try:
-                                    self.socketio.emit('new_message', complete_message, room=session_id)
-                                    _log.info(f"[ThinkingCard] ✓ 标记为完成")
-                                    
-                                    # 将完成的卡片保存到对应的消息中（持久化）
-                                    if parent_message_id and session_id in self.sessions:
-                                        session = self.sessions[session_id]
-                                        for msg in session.get('messages', []):
-                                            if msg.get('id') == parent_message_id:
-                                                if 'thinking_cards' not in msg:
-                                                    msg['thinking_cards'] = []
-                                                # 查找是否已存在该卡片
-                                                existing_idx = None
-                                                for i, card in enumerate(msg['thinking_cards']):
-                                                    if card.get('id') == thinking_card_id:
-                                                        existing_idx = i
-                                                        break
-                                                if existing_idx is not None:
-                                                    msg['thinking_cards'][existing_idx] = complete_message
-                                                else:
-                                                    msg['thinking_cards'].append(complete_message)
-                                                _log.info(f"[ThinkingCard] 完成卡片已保存到消息 {parent_message_id}")
-                                                break
+                                    from nbot.core.progress_card import StepType
+                                    step_type_map = {
+                                        'start': StepType.START,
+                                        'thinking': StepType.THINKING,
+                                        'tool': StepType.TOOL,
+                                        'tool_done': StepType.TOOL_DONE,
+                                        'image': StepType.IMAGE,
+                                        'image_done': StepType.IMAGE_DONE,
+                                        'file': StepType.FILE,
+                                        'file_done': StepType.FILE_DONE,
+                                        'upload': StepType.UPLOAD,
+                                        'upload_done': StepType.UPLOAD_DONE,
+                                    }
+                                    step_type_enum = step_type_map.get(step_type)
+                                    if step_type_enum:
+                                        progress_card.update(step_type_enum, step_name, step_detail, step_result)
                                 except Exception as e:
-                                    _log.error(f"[ThinkingCard] ✗ 标记完成失败: {e}")
+                                    _log.warning(f"[ThinkingCard] 更新进度失败: {e}")
+                            
+                            # 注意：complete_thinking_card 函数已在前面定义
                             
                             for iteration in range(max_iterations):
-                                current_iteration[0] = iteration
+                                # 更新进度卡片迭代计数
+                                if progress_card:
+                                    progress_card.increment_iteration()
                                 response = self._get_ai_response_with_tools(tool_messages, enabled_tools)
                                 
                                 if 'tool_calls' in response and response['tool_calls']:
@@ -4652,13 +4659,16 @@ class WebChatServer:
                             
                             _log.info(f"[Tools] 最终回复长度: {len(final_content)}")
                             
-                            # 如果回复太短（少于50字），再调用一次 AI 生成完整回复
-                            if len(final_content) < 50:
-                                _log.info(f"[Tools] 回复太短，重新生成完整回复")
+                            # 如果回复太短（少于100字）或只是简单列表，再调用一次 AI 生成完整回复
+                            is_too_short = len(final_content) < 100
+                            is_simple_list = final_content.count('\n') < 3 and ('-' in final_content or '•' in final_content or '→' in final_content)
+                            
+                            if is_too_short or is_simple_list:
+                                _log.info(f"[Tools] 回复太短或太简单，重新生成完整回复 (长度={len(final_content)}, 简单列表={is_simple_list})")
                                 # 添加一个提示，要求 AI 生成符合设定的详细回复
                                 tool_messages.append({
                                     "role": "user",
-                                    "content": "请根据以上工具调用结果，用你可爱的猫娘语气给主人一个详细的回复喵~"
+                                    "content": "请根据以上工具调用结果，用你可爱的猫娘语气给主人一个详细的回复喵~要包含具体的介绍、分析和总结，不要只是简单列出条目哦~"
                                 })
                                 final_response = self._get_ai_response_with_tools(tool_messages, enabled_tools)
                                 final_content = final_response.get('content', final_content)
@@ -4671,16 +4681,22 @@ class WebChatServer:
                             if file_contents and messages_for_ai and messages_for_ai[-1].get('role') == 'user':
                                 messages_for_ai[-1]['content'] = enhanced_content
                             final_content = self._get_ai_response(messages_for_ai)
+                            # 完成进度卡片
+                            complete_thinking_card()
                     except ImportError:
                         # 工具模块不可用，使用普通 AI 调用
                         if file_contents and messages_for_ai and messages_for_ai[-1].get('role') == 'user':
                             messages_for_ai[-1]['content'] = enhanced_content
                         final_content = self._get_ai_response(messages_for_ai)
+                        # 完成进度卡片
+                        complete_thinking_card()
                     except Exception as e:
                         _log.warning(f"Tool calling error: {e}, falling back to normal AI")
                         if file_contents and messages_for_ai and messages_for_ai[-1].get('role') == 'user':
                             messages_for_ai[-1]['content'] = enhanced_content
                         final_content = self._get_ai_response(messages_for_ai)
+                        # 完成进度卡片
+                        complete_thinking_card()
                 
                 assistant_content = final_content
                 

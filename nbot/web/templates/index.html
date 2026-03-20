@@ -3593,7 +3593,7 @@
                                                 <i class="fas fa-paperclip"></i>
                                                 <input type="file" ref="fileInput" @change="handleFileSelect" multiple accept="image/*,.pdf,.doc,.docx,.txt,.json,.xml" style="display: none;">
                                             </label>
-                                            <button class="btn btn-primary" @click="sendMessage" :disabled="!inputMessage.trim() || isLoading">
+                                            <button class="btn btn-primary" @click="sendMessage" :disabled="(!inputMessage.trim() && uploadedFiles.length === 0) || isLoading">
                                                 <span v-if="isLoading"><div class="spinner"></div></span>
                                                 <i v-else class="fas fa-paper-plane"></i>
                                             </button>
@@ -7745,6 +7745,12 @@
                     // 处理文件上传
                     const files = this.uploadedFiles;
                     this.uploadedFiles = [];
+                    
+                    // 检查是否有内容或文件
+                    if (!content && files.length === 0) {
+                        this.showToast('请输入消息或选择文件', 'warning');
+                        return;
+                    }
                     
                     // 生成本地临时ID
                     const tempId = 'local_' + Date.now();
