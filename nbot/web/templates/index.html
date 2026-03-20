@@ -3382,7 +3382,7 @@
                                             <!-- 用户上传的附件 -->
                                             <div v-if="msg.attachments && msg.attachments.length > 0" class="message-attachments">
                                                 <div v-for="(att, idx) in msg.attachments" :key="idx" class="attachment-card" @click="previewAttachment(att)">
-                                                    <img v-if="att.type && att.type.startsWith('image/')" :src="att.url || att.data || att.preview" class="attachment-preview">
+                                                    <img v-if="att.type && att.type.startsWith('image/')" :src="att.url || att.data || att.preview" class="attachment-preview" @error="handleImageError">
                                                     <div v-else class="attachment-icon" :class="getAttachmentIconClass(att.type)">
                                                         <i :class="getAttachmentIcon(att.type)"></i>
                                                     </div>
@@ -3396,7 +3396,7 @@
                                             <div v-if="msg.file" class="message-attachments">
                                                 <div class="attachment-card" @click="downloadFile(msg.file)">
                                                     <!-- 图片直接显示 -->
-                                                    <img v-if="msg.file.is_image" :src="msg.file.data || msg.file.url || msg.file.preview" class="attachment-preview" style="max-width: 200px; max-height: 150px; object-fit: cover;">
+                                                    <img v-if="msg.file.is_image" :src="msg.file.data || msg.file.url || msg.file.preview" class="attachment-preview" style="max-width: 200px; max-height: 150px; object-fit: cover;" @error="handleImageError">
                                                     <!-- 文本文件显示预览 -->
                                                     <div v-else-if="msg.file.is_text && msg.file.content" class="text-file-preview" style="max-width: 300px; max-height: 150px; overflow: auto; background: rgba(0,0,0,0.1); padding: 8px; border-radius: 4px; font-family: monospace; font-size: 12px;">
                                                         <pre style="margin: 0; white-space: pre-wrap;">{{ msg.file.content }}</pre>
@@ -3439,7 +3439,7 @@
                                     <!-- 已上传的文件预览 -->
                                     <div v-if="uploadedFiles.length > 0" class="uploaded-files-preview">
                                         <div v-for="(file, index) in uploadedFiles" :key="index" class="uploaded-file-item">
-                                            <img v-if="file.type.startsWith('image/')" :src="file.preview" class="file-thumbnail">
+                                            <img v-if="file.type.startsWith('image/')" :src="file.preview" class="file-thumbnail" @error="handleImageError">
                                             <i v-else class="fas fa-file file-icon"></i>
                                             <span class="file-name">{{ file.name }}</span>
                                             <button class="file-remove" @click="removeFile(index)">
@@ -6343,6 +6343,15 @@
                 if (this.platformChart) {
                     this.platformChart.dispose();
                     this.platformChart = null;
+                }
+                // 清理所有 Blob URL
+                if (this.uploadedFiles) {
+                    this.uploadedFiles.forEach(file => {
+                        if (file.preview && file.preview.startsWith('blob:')) {
+                            URL.revokeObjectURL(file.preview);
+                        }
+                    });
+                    this.uploadedFiles = [];
                 }
             },
             
@@ -9311,6 +9320,18 @@
                     if (type.startsWith('audio/')) return 'audio';
                     if (type.includes('pdf') || type.includes('word') || type.includes('excel')) return 'document';
                     return 'default';
+                },
+                
+                handleImageError(event) {
+                    // 当图片加载失败时（通常是 Blob URL 失效），显示占位图并隐藏图片
+                    event.target.style.display = 'none';
+                    const parent = event.target.closest('.attachment-card') || event.target.closest('.uploaded-file');
+                    if (parent) {
+                        const icon = parent.querySelector('.attachment-icon, .file-icon');
+                        if (icon) {
+                            icon.style.display = 'flex';
+                        }
+                    }
                 },
                 
                 formatFileSize(size) {

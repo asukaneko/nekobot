@@ -137,6 +137,84 @@ class WebMessageAdapter:
             return "\n".join(["【重要记忆】"] + memories)
         return ""
 
+    def _retrieve_knowledge(self, query: str, max_docs: int = 3) -> str:
+        """
+        从知识库中检索相关内容
+        
+        Args:
+            query: 用户查询文本
+            max_docs: 最大返回文档数
+            
+        Returns:
+            格式化的知识内容字符串
+        """
+        if not self.knowledge_docs:
+            return ""
+        
+        if not query:
+            return ""
+        
+        # 简单的关键词匹配检索
+        query_lower = query.lower()
+        query_words = set(query_lower.replace('?', '').replace('！', '').replace('。', '').split())
+        
+        scored_docs = []
+        for doc in self.knowledge_docs:
+            content = doc.get('content', '')
+            name = doc.get('name', '')
+            
+            if not content:
+                continue
+            
+            # 计算相关性得分
+            content_lower = content.lower()
+            name_lower = name.lower()
+            
+            score = 0
+            
+            # 检查名称匹配
+            for word in query_words:
+                if word in name_lower:
+                    score += 3  # 名称匹配权重更高
+            
+            # 检查内容匹配
+            for word in query_words:
+                if word in content_lower:
+                    score += 1
+            
+            # 检查用户消息中是否包含文档名称的关键词
+            for word in name_lower.split():
+                if len(word) > 2 and word in query_lower:
+                    score += 2
+            
+            if score > 0:
+                scored_docs.append((score, doc))
+        
+        # 按得分排序
+        scored_docs.sort(key=lambda x: x[0], reverse=True)
+        
+        if not scored_docs:
+            return ""
+        
+        # 获取前 max_docs 个文档
+        selected_docs = scored_docs[:max_docs]
+        
+        knowledge_parts = ["【知识库参考】"]
+        for score, doc in selected_docs:
+            name = doc.get('name', '未命名')
+            content = doc.get('content', '')
+            
+            # 截取相关内容片段（避免过长）
+            if len(content) > 500:
+                # 尝试找到关键词所在位置，截取附近内容
+                content = content[:500] + "..."
+            
+            knowledge_parts.append(f"\n【{name}】\n{content}")
+        
+        _log.info(f"[Knowledge] 检索到 {len(selected_docs)} 个相关文档，得分: {[s[0] for s in selected_docs]}")
+        
+        return "\n".join(knowledge_parts)
+
     def _create_mock_api(self):
         """创建模拟的 QQ API 对象，用于兼容 QQ 命令"""
         adapter = self
@@ -1939,6 +2017,9 @@ class WebChatServer:
                     'content': CORE_INSTRUCTIONS
                 })
 
+            # 收集需要添加到系统提示词的内容
+            system_additions = []
+            
             # 检索相关记忆并添加到上下文（使用旧的记忆系统）
             if session.get('type') == 'web':
                 try:
@@ -1948,15 +2029,27 @@ class WebChatServer:
                     # 从旧的记忆系统加载（与QQ端一致）
                     memories_text = self._load_memories_for_context(user_id)
                     if memories_text:
-                        # 在系统提示词后插入记忆
-                        if messages_for_ai and messages_for_ai[0].get('role') == 'system':
-                            messages_for_ai.insert(1, {
-                                'role': 'system',
-                                'content': memories_text
-                            })
+                        system_additions.append(memories_text)
                         _log.info(f"Added memories to context for user {user_id}")
                 except Exception as e:
                     _log.error(f"Failed to retrieve memories: {e}", exc_info=True)
+            
+            # 检索知识库相关内容并添加到上下文
+            try:
+                if self.settings.get('knowledge', True):  # 检查知识库开关
+                    knowledge_text = self._retrieve_knowledge(user_content)
+                    if knowledge_text:
+                        system_additions.append(knowledge_text)
+                        _log.info(f"Added knowledge to context")
+            except Exception as e:
+                _log.error(f"Failed to retrieve knowledge: {e}", exc_info=True)
+            
+            # 将所有系统内容合并到第一条system消息中（确保AI能正确处理）
+            if system_additions and messages_for_ai and messages_for_ai[0].get('role') == 'system':
+                combined_content = messages_for_ai[0]['content']
+                for addition in system_additions:
+                    combined_content += f"\n\n{addition}"
+                messages_for_ai[0]['content'] = combined_content
 
             # 异步获取 AI 回复
             def get_response():
