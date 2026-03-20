@@ -137,7 +137,7 @@ class ProgressCard:
     
     def _emit_update(self):
         """发送进度更新到 Web 端，并保存到会话"""
-        if not self.socketio:
+        if not self.socketio or not self.session_id:
             return
             
         if self.is_completed:
@@ -164,29 +164,26 @@ class ProgressCard:
             
             # 保存到会话（持久化）
             sessions = self.manager.get_sessions() if self.manager else None
-            if sessions:
-                if self.session_id in sessions:
-                    session = sessions[self.session_id]
-                    if self.parent_message_id:
-                        found_msg = False
-                        for msg in session.get('messages', []):
-                            if msg.get('id') == self.parent_message_id:
-                                found_msg = True
-                                if 'thinking_cards' not in msg:
-                                    msg['thinking_cards'] = []
-                                # 查找是否已存在该卡片
-                                existing_idx = None
-                                for i, card in enumerate(msg['thinking_cards']):
-                                    if card.get('id') == self.card_id:
-                                        existing_idx = i
-                                        break
-                                if existing_idx is not None:
-                                    msg['thinking_cards'][existing_idx] = card_message
-                                else:
-                                    msg['thinking_cards'].append(card_message)
-                                break
-        except Exception as e:
-            pass  # 静默处理保存失败
+            if sessions and self.session_id in sessions:
+                session = sessions[self.session_id]
+                if self.parent_message_id:
+                    for msg in session.get('messages', []):
+                        if msg.get('id') == self.parent_message_id:
+                            if 'thinking_cards' not in msg:
+                                msg['thinking_cards'] = []
+                            # 查找是否已存在该卡片
+                            existing_idx = None
+                            for i, card in enumerate(msg['thinking_cards']):
+                                if card.get('id') == self.card_id:
+                                    existing_idx = i
+                                    break
+                            if existing_idx is not None:
+                                msg['thinking_cards'][existing_idx] = card_message
+                            else:
+                                msg['thinking_cards'].append(card_message)
+                            break
+        except Exception:
+            pass  # 静默处理错误
     
     def complete(self, final_message: str = '✅ 处理完成'):
         """标记进度为完成"""

@@ -21,6 +21,19 @@ CORE_INSTRUCTIONS = """【重要】你必须严格遵循以下要求：
 1. 直接回复用户的问题，不要使用任何特殊格式
 2. 你的回答应该是自然的对话形式
 3. 如果需要执行操作（如搜索新闻、查询天气等），请使用可用的工具
+
+【文件处理指南】
+当用户上传文件时，会显示文件元数据（类型、大小、页数等）。
+- 如果需要查看文件内容，调用 workspace_parse_file 工具
+- 工具返回结果后，用自然的语言向用户解释文件内容
+- 不要直接返回原始JSON，要格式化和总结重要信息
+
+【文件发送指南】
+当用户要求发送文件时，调用 workspace_send_file 工具。
+- 工具执行成功后，文件会自动发送给用户
+- 你不需要在回复中提及文件路径或重复文件内容
+- 只需简单告知用户文件已发送即可
+
 现在你可以开始与用户对话了。"""
 
 try:
@@ -73,6 +86,15 @@ except ImportError:
     PROGRESS_CARD_AVAILABLE = False
     progress_card_manager = None
     _log.warning("Progress card manager not available")
+
+# 导入文件解析器
+try:
+    from nbot.core.file_parser import file_parser
+    FILE_PARSER_AVAILABLE = True
+except ImportError:
+    FILE_PARSER_AVAILABLE = False
+    file_parser = None
+    _log.warning("File parser not available")
 
 
 class WebMessageAdapter:
@@ -2440,18 +2462,137 @@ class WebChatServer:
                                     _log.info(f"[Tools] ✓ 工具执行成功 ({elapsed:.0f}ms): {tool_name}")
                                     _log.info(f"[Tools] ✓ 结果预览: {tool_result_str[:500]}{'...' if len(tool_result_str) > 500 else ''}")
 
+                                    # 更新进度卡片 - 标记工具调用完成
+                                    if progress_card:
+                                        try:
+                                            from nbot.core.progress_card import StepType
+                                            # 获取工具显示名称
+                                            tool_names = {
+                                                'workspace_read_file': '读取文件',
+                                                'workspace_create_file': '创建文件',
+                                                'workspace_edit_file': '编辑文件',
+                                                'workspace_delete_file': '删除文件',
+                                                'workspace_list_files': '列出文件',
+                                                'workspace_send_file': '发送文件',
+                                                'workspace_parse_file': '解析文件',
+                                                'workspace_file_info': '文件信息',
+                                                'web_search': '网页搜索',
+                                                'generate_image': '生成图片'
+                                            }
+                                            tool_display_name = tool_names.get(tool_name, tool_name)
+                                            
+                                            # 检查工具执行结果
+                                            if tool_result.get('success'):
+                                                progress_card.update(StepType.TOOL_DONE, f"{tool_display_name}完成", True)
+                                            else:
+                                                progress_card.update(StepType.TOOL_DONE, f"{tool_display_name}失败", False)
+                                        except Exception as e:
+                                            _log.warning(f"[ProgressCard] 更新工具完成状态失败: {e}")
+
                                     # 如果是 workspace_send_file，自动发送文件到 Web 端
                                     if tool_name == 'workspace_send_file' and tool_result.get('action') == 'send_file':
                                         file_path = tool_result.get('path', '')
-                                        if file_path and session_id in self.sessions:
-                                            adapter = WebMessageAdapter('', '', session_id, self)
-                                            async def _do_send():
-                                                await adapter.send_file(file_path, tool_result.get('filename', ''))
-                                            self.socketio.start_background_task(_do_send)
+                                        filename = tool_result.get('filename', '')
+                                        _log.info(f"[SendFile] 准备发送文件: {filename}, path: {file_path}, session_id: {session_id}")
+                                        
+                                        if file_path and filename and session_id and session:
+                                            try:
+                                                # 直接构建文件消息并发送
+                                                import mimetypes
+                                                import shutil
+                                                
+                                                # 获取文件信息
+                                                if not os.path.exists(file_path):
+                                                    _log.error(f"[SendFile] 文件不存在: {file_path}")
+                                                else:
+                                                    file_size = os.path.getsize(file_path)
+                                                    mime_type, _ = mimetypes.guess_type(file_path)
+                                                    if not mime_type:
+                                                        mime_type = 'application/octet-stream'
+                                                    ext = os.path.splitext(file_path)[1].lower()
+                                                    is_image = mime_type and mime_type.startswith('image/')
+                                                    
+                                                    # 复制文件到静态目录
+                                                    files_dir = os.path.join(self.static_folder, 'files')
+                                                    os.makedirs(files_dir, exist_ok=True)
+                                                    
+                                                    import hashlib
+                                                    import time
+                                                    file_hash = hashlib.md5(f"{file_path}{time.time()}".encode()).hexdigest()[:8]
+                                                    safe_name = f"{file_hash}_{filename}"
+                                                    dest_path = os.path.join(files_dir, safe_name)
+                                                    
+                                                    shutil.copy2(file_path, dest_path)
+                                                    download_url = f"/static/files/{safe_name}"
+                                                    
+                                                    # 构建文件消息
+                                                    file_info = {
+                                                        'id': str(uuid.uuid4()),
+                                                        'role': 'assistant',
+                                                        'content': f'[文件: {filename}]',
+                                                        'timestamp': datetime.now().isoformat(),
+                                                        'sender': 'AI',
+                                                        'source': 'web',
+                                                        'session_id': session_id,
+                                                        'file': {
+                                                            'name': filename,
+                                                            'type': mime_type,
+                                                            'size': file_size,
+                                                            'is_image': is_image,
+                                                            'extension': ext,
+                                                            'download_url': download_url
+                                                        }
+                                                    }
+                                                    
+                                                    # 对于图片，嵌入 base64 数据
+                                                    if is_image and file_size < 5 * 1024 * 1024:
+                                                        try:
+                                                            import base64
+                                                            with open(file_path, 'rb') as f:
+                                                                file_data = f.read()
+                                                            b64_data = base64.b64encode(file_data).decode('utf-8')
+                                                            file_info['file']['data'] = f'data:{mime_type};base64,{b64_data}'
+                                                            file_info['file']['preview_url'] = file_info['file']['data']
+                                                        except Exception as img_err:
+                                                            _log.warning(f"[SendFile] 图片转base64失败: {img_err}")
+                                                    
+                                                    # 保存到 session
+                                                    session['messages'].append(file_info)
+                                                    self._save_data('sessions')
+                                                    
+                                                    # 发送文件消息到前端
+                                                    self.socketio.emit('new_message', file_info, room=session_id)
+                                                    _log.info(f"[SendFile] 文件已发送: {filename} ({mime_type}, {file_size} bytes)")
+                                                    
+                                            except Exception as send_err:
+                                                _log.error(f"[SendFile] 发送文件时出错: {send_err}", exc_info=True)
+                                        else:
+                                            _log.warning(f"[SendFile] 无法发送文件: file_path={file_path}, filename={filename}, session_id={session_id}, session_exists={session is not None}")
 
                                 except Exception as te:
                                     tool_result_str = f"工具执行出错: {str(te)}"
                                     _log.error(f"[Tools] ✗ 工具执行失败: {tool_name} - {str(te)}")
+                                    
+                                    # 更新进度卡片 - 标记工具调用失败
+                                    if progress_card:
+                                        try:
+                                            from nbot.core.progress_card import StepType
+                                            tool_names = {
+                                                'workspace_read_file': '读取文件',
+                                                'workspace_create_file': '创建文件',
+                                                'workspace_edit_file': '编辑文件',
+                                                'workspace_delete_file': '删除文件',
+                                                'workspace_list_files': '列出文件',
+                                                'workspace_send_file': '发送文件',
+                                                'workspace_parse_file': '解析文件',
+                                                'workspace_file_info': '文件信息',
+                                                'web_search': '网页搜索',
+                                                'generate_image': '生成图片'
+                                            }
+                                            tool_display_name = tool_names.get(tool_name, tool_name)
+                                            progress_card.update(StepType.TOOL_DONE, f"{tool_display_name}失败", False)
+                                        except Exception as e:
+                                            _log.warning(f"[ProgressCard] 更新工具失败状态失败: {e}")
                                 
                                 # 添加工具结果到消息
                                 messages_for_ai.append({
@@ -4565,51 +4706,50 @@ class WebChatServer:
                                         else:
                                             progress_card.update(StepType.FILE_DONE, f"文件读取失败: {att_name}", False)
                                 
-                                # 使用 MinerU API 解析的文件类型
+                                # 使用本地解析器解析的文件类型
                                 elif any(att_name.lower().endswith(ext) for ext in ['.pdf', '.doc', '.docx', '.ppt', '.pptx', '.xls', '.xlsx']) and att_path:
                                     try:
                                         import os
-                                        import configparser
                                         file_abs_path = os.path.join(self.static_folder, att_path.replace('/static/', ''))
                                         if os.path.exists(file_abs_path):
-                                            # 读取 PDF API Key
-                                            try:
-                                                config = configparser.ConfigParser()
-                                                config.read('config.ini', encoding='utf-8')
-                                                pdf_api_key = config.get('pdf', 'api_key', fallback='')
-                                            except:
-                                                pdf_api_key = ''
-                                            
-                                            if pdf_api_key:
-                                                _log.info(f"使用 MinerU API 解析文件: {att_name}")
-                                                # 生成文件访问 URL
-                                                file_url = f"/static/uploads/{os.path.basename(file_abs_path)}"
-                                                text_content = parse_document_with_mineru(file_abs_path, pdf_api_key, file_url)
-                                                if text_content:
-                                                    file_contents.append(f"【文件 {att_name} 内容】:\n{text_content[:10000]}")
+                                            # 使用文件解析器获取元数据
+                                            if FILE_PARSER_AVAILABLE and file_parser:
+                                                metadata = file_parser.get_file_metadata(file_abs_path, att_name)
+                                                if metadata.get('success'):
+                                                    # 构建元数据信息
+                                                    meta_parts = [f"文件: {att_name}"]
+                                                    meta_parts.append(f"类型: {metadata.get('type', 'unknown')}")
+                                                    meta_parts.append(f"大小: {metadata.get('size_str', 'unknown')}")
+                                                    
+                                                    # 添加额外信息（页数、工作表数等）
+                                                    if 'pages' in metadata:
+                                                        meta_parts.append(f"页数: {metadata['pages']}")
+                                                    if 'slides' in metadata:
+                                                        meta_parts.append(f"幻灯片数: {metadata['slides']}")
+                                                    if 'sheets' in metadata:
+                                                        meta_parts.append(f"工作表数: {metadata['sheets']}")
+                                                        if 'sheet_names' in metadata:
+                                                            sheet_names = metadata['sheet_names']
+                                                            if isinstance(sheet_names, list):
+                                                                meta_parts.append(f"工作表: {', '.join(str(s) for s in sheet_names)}")
+                                                    if 'paragraphs' in metadata:
+                                                        meta_parts.append(f"段落数: {metadata['paragraphs']}")
+                                                    if 'tables' in metadata:
+                                                        meta_parts.append(f"表格数: {metadata['tables']}")
+                                                    
+                                                    meta_parts.append("\n如需查看文件内容，请调用 workspace_parse_file 工具解析此文件。")
+                                                    
+                                                    file_contents.append("【文件元数据】\n" + '\n'.join(meta_parts))
+                                                    _log.info(f"文件元数据已提取: {att_name}")
                                                 else:
-                                                    file_contents.append(f"【文件 {att_name}】类型: {att_type} (MinerU API 解析失败)")
+                                                    file_contents.append(f"【文件 {att_name}】类型: {att_type} (无法获取元数据)")
                                             else:
-                                                _log.warning(f"未配置 MinerU API Key")
-                                                file_contents.append(f"【文件 {att_name}】类型: {att_type} (未配置 PDF 解析 API)")
+                                                file_contents.append(f"【文件 {att_name}】类型: {att_type} (文件解析器不可用)")
                                         else:
                                             file_contents.append(f"【文件 {att_name}】类型: {att_type} (文件不存在)")
                                     except Exception as e:
-                                        _log.warning(f"解析文件失败: {att_name}, {e}")
-                                        file_contents.append(f"【文件 {att_name}】类型: {att_type} (解析失败: {str(e)[:50]})")
-                                # docx 文件 - 从文件路径读取（备用方案）
-                                elif att_name.lower().endswith('.docx') and att_path:
-                                    try:
-                                        import os
-                                        file_path = os.path.join(self.static_folder, att_path.replace('/static/', ''))
-                                        if os.path.exists(file_path):
-                                            import docx
-                                            doc = docx.Document(file_path)
-                                            text_content = '\n'.join([para.text for para in doc.paragraphs])
-                                            file_contents.append(f"【文件 {att_name} 内容】:\n{text_content[:10000]}")
-                                    except Exception as e:
-                                        _log.warning(f"读取 docx 文件失败: {att_name}, {e}")
-                                        file_contents.append(f"【文件 {att_name}】类型: {att_type} (文件内容读取失败)")
+                                        _log.warning(f"获取文件元数据失败: {att_name}, {e}")
+                                        file_contents.append(f"【文件 {att_name}】类型: {att_type} (获取元数据失败)")
                                 # 其他文件 - 告知AI文件类型
                                 elif att_type:
                                     file_contents.append(f"【文件 {att_name}】类型: {att_type} (暂不支持解析)")
@@ -4770,31 +4910,98 @@ class WebChatServer:
                                             "tool_call_id": tool_call.get('id', ''),
                                             "content": json.dumps(tool_result, ensure_ascii=False)
                                         })
+                                        
+                                        # 如果是 workspace_send_file，自动发送文件到 Web 端
+                                        if tool_name == 'workspace_send_file' and tool_result.get('action') == 'send_file':
+                                            file_path = tool_result.get('path', '')
+                                            filename = tool_result.get('filename', '')
+                                            _log.info(f"[SendFile] 准备发送文件: {filename}, path: {file_path}, session_id: {session_id}")
+                                            
+                                            if file_path and filename and session_id:
+                                                try:
+                                                    # 直接构建文件消息并发送
+                                                    import os
+                                                    import mimetypes
+                                                    import shutil
+                                                    
+                                                    # 获取文件信息
+                                                    if not os.path.exists(file_path):
+                                                        _log.error(f"[SendFile] 文件不存在: {file_path}")
+                                                    else:
+                                                        file_size = os.path.getsize(file_path)
+                                                        mime_type, _ = mimetypes.guess_type(file_path)
+                                                        if not mime_type:
+                                                            mime_type = 'application/octet-stream'
+                                                        ext = os.path.splitext(file_path)[1].lower()
+                                                        is_image = mime_type and mime_type.startswith('image/')
+                                                        
+                                                        # 复制文件到静态目录
+                                                        files_dir = os.path.join(self.static_folder, 'files')
+                                                        os.makedirs(files_dir, exist_ok=True)
+                                                        
+                                                        import hashlib
+                                                        import time
+                                                        file_hash = hashlib.md5(f"{file_path}{time.time()}".encode()).hexdigest()[:8]
+                                                        safe_name = f"{file_hash}_{filename}"
+                                                        dest_path = os.path.join(files_dir, safe_name)
+                                                        
+                                                        shutil.copy2(file_path, dest_path)
+                                                        download_url = f"/static/files/{safe_name}"
+                                                        
+                                                        # 构建文件消息
+                                                        file_info = {
+                                                            'id': str(uuid.uuid4()),
+                                                            'role': 'assistant',
+                                                            'content': f'[文件: {filename}]',
+                                                            'timestamp': datetime.now().isoformat(),
+                                                            'sender': 'AI',
+                                                            'source': 'web',
+                                                            'session_id': session_id,
+                                                            'file': {
+                                                                'name': filename,
+                                                                'type': mime_type,
+                                                                'size': file_size,
+                                                                'is_image': is_image,
+                                                                'extension': ext,
+                                                                'download_url': download_url
+                                                            }
+                                                        }
+                                                        
+                                                        # 对于图片，嵌入 base64 数据
+                                                        if is_image and file_size < 5 * 1024 * 1024:
+                                                            try:
+                                                                import base64
+                                                                with open(file_path, 'rb') as f:
+                                                                    file_data = f.read()
+                                                                b64_data = base64.b64encode(file_data).decode('utf-8')
+                                                                file_info['file']['data'] = f'data:{mime_type};base64,{b64_data}'
+                                                                file_info['file']['preview_url'] = file_info['file']['data']
+                                                            except Exception as img_err:
+                                                                _log.warning(f"[SendFile] 图片转base64失败: {img_err}")
+                                                        
+                                                        # 保存到 session
+                                                        if session_id in self.sessions:
+                                                            self.sessions[session_id]['messages'].append(file_info)
+                                                            self._save_data('sessions')
+                                                        
+                                                        # 发送文件消息到前端
+                                                        self.socketio.emit('new_message', file_info, room=session_id)
+                                                        _log.info(f"[SendFile] 文件已发送: {filename} ({mime_type}, {file_size} bytes)")
+                                                        
+                                                except Exception as send_err:
+                                                    _log.error(f"[SendFile] 发送文件时出错: {send_err}", exc_info=True)
+                                            else:
+                                                _log.warning(f"[SendFile] 无法发送文件: file_path={file_path}, filename={filename}, session_id={session_id}")
                                 else:
                                     # AI 没有调用工具，得到最终回复
                                     final_content = response.get('content', '')
                                     break
                             
                             if not final_content:
-                                _log.warning(f"[Tools] AI 未生成最终回复，使用最后消息内容")
-                                final_content = tool_messages[-1].get('content', '处理完成')
+                                _log.warning(f"[Tools] AI 未生成最终回复，使用默认提示")
+                                final_content = '抱歉，处理过程中出现了问题，请稍后再试~'
                             
                             _log.info(f"[Tools] 最终回复长度: {len(final_content)}")
-                            
-                            # 如果回复太短（少于100字）或只是简单列表，再调用一次 AI 生成完整回复
-                            is_too_short = len(final_content) < 100
-                            is_simple_list = final_content.count('\n') < 3 and ('-' in final_content or '•' in final_content or '→' in final_content)
-                            
-                            if is_too_short or is_simple_list:
-                                _log.info(f"[Tools] 回复太短或太简单，重新生成完整回复 (长度={len(final_content)}, 简单列表={is_simple_list})")
-                                # 添加一个提示，要求 AI 生成符合设定的详细回复
-                                tool_messages.append({
-                                    "role": "user",
-                                    "content": "请根据以上工具调用结果，用你可爱的猫娘语气给主人一个详细的回复喵~要包含具体的介绍、分析和总结，不要只是简单列出条目哦~"
-                                })
-                                final_response = self._get_ai_response_with_tools(tool_messages, enabled_tools)
-                                final_content = final_response.get('content', final_content)
-                                _log.info(f"[Tools] 重新生成后的回复长度: {len(final_content)}")
                             
                             # 将进度卡片标记为完成（不再删除）
                             complete_thinking_card()

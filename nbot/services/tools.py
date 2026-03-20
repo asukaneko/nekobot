@@ -657,6 +657,45 @@ WORKSPACE_TOOL_DEFINITIONS = [
                 "required": ["filename"]
             }
         }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "workspace_parse_file",
+            "description": "解析工作区中的文件内容。支持 PDF、DOCX、PPT、Excel、代码文件等。自动识别文件类型并提取文本内容。适用于需要理解文档内容的场景。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "filename": {
+                        "type": "string",
+                        "description": "要解析的文件名"
+                    },
+                    "max_chars": {
+                        "type": "integer",
+                        "description": "最大提取字符数，默认为 50000。避免返回过长内容。",
+                        "default": 50000
+                    }
+                },
+                "required": ["filename"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "workspace_file_info",
+            "description": "获取工作区中文件的元数据信息（不解析内容）。返回文件类型、大小、页数/工作表数等基本信息。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "filename": {
+                        "type": "string",
+                        "description": "要查询的文件名"
+                    }
+                },
+                "required": ["filename"]
+            }
+        }
     }
 ]
 
@@ -793,9 +832,43 @@ def _execute_workspace_tool(tool_name: str, arguments: Dict[str, Any],
                     "action": "send_file",
                     "filename": filename,
                     "path": file_path,
-                    "size": os.path.getsize(file_path)
+                    "size": os.path.getsize(file_path),
+                    "message": f"文件 '{filename}' 已发送给用户，无需再次提及文件路径或内容。"
                 }
             return {"success": False, "error": f"文件不存在: {arguments['filename']}"}
+
+        elif tool_name == "workspace_parse_file":
+            if not filename:
+                return {"success": False, "error": "缺少文件名参数 (filename)"}
+            file_path = workspace_manager.get_file_path(session_id, filename)
+            if not file_path:
+                return {"success": False, "error": f"文件不存在: {filename}"}
+            
+            # 使用文件解析器解析文件
+            try:
+                from nbot.core.file_parser import file_parser
+                max_chars = arguments.get('max_chars', 50000)
+                result = file_parser.parse_file(file_path, filename, max_chars)
+                return result
+            except Exception as e:
+                _log.error(f"解析文件失败: {filename}, {e}")
+                return {"success": False, "error": f"解析文件失败: {str(e)}"}
+
+        elif tool_name == "workspace_file_info":
+            if not filename:
+                return {"success": False, "error": "缺少文件名参数 (filename)"}
+            file_path = workspace_manager.get_file_path(session_id, filename)
+            if not file_path:
+                return {"success": False, "error": f"文件不存在: {filename}"}
+            
+            # 使用文件解析器获取元数据
+            try:
+                from nbot.core.file_parser import file_parser
+                result = file_parser.get_file_metadata(file_path, filename)
+                return result
+            except Exception as e:
+                _log.error(f"获取文件元数据失败: {filename}, {e}")
+                return {"success": False, "error": f"获取文件元数据失败: {str(e)}"}
 
         else:
             return {"success": False, "error": f"未知的工作区工具: {tool_name}"}

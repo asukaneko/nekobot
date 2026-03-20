@@ -9538,8 +9538,6 @@
 
                             // 处理进度卡片（优先处理，避免被添加到消息列表）
                             if (msg.type === 'thinking_card' && this.showThinkingCard) {
-                                console.log('[ThinkingCard] 收到进度卡片:', msg);
-                                
                                 // 如果后端没发 id，前端自己生成一个，防止 Vue v-for 的 key 冲突失效
                                 if (!msg.id) {
                                     msg.id = 'tc_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5);
@@ -9547,25 +9545,27 @@
                                 
                                 // 找到关联的用户消息，将卡片存储在该消息中
                                 const parentMsgId = msg.parent_message_id;
+                                
                                 if (parentMsgId) {
                                     const parentMsg = this.currentMessages.find(m => m.id === parentMsgId);
+                                    
                                     if (parentMsg) {
-                                        // 初始化 thinking_cards 数组（与后端字段名一致）
+                                        // Vue 3 中直接赋值即可触发响应式更新
                                         if (!parentMsg.thinking_cards) {
                                             parentMsg.thinking_cards = [];
                                         }
                                         const existingIdx = parentMsg.thinking_cards.findIndex(c => c.id === msg.id);
+                                        
                                         if (existingIdx !== -1) {
-                                            parentMsg.thinking_cards.splice(existingIdx, 1, msg);
+                                            parentMsg.thinking_cards[existingIdx] = msg;
                                         } else {
                                             parentMsg.thinking_cards.push(msg);
                                         }
-                                        console.log('[ThinkingCard] 卡片已关联到消息:', parentMsgId, parentMsg.thinking_cards);
                                     } else {
                                         // 如果找不到父消息，使用全局存储（兼容旧逻辑）
                                         const existingIdx = this.thinkingCards.findIndex(c => c.id === msg.id);
                                         if (existingIdx !== -1) {
-                                            this.thinkingCards.splice(existingIdx, 1, msg);
+                                            this.thinkingCards[existingIdx] = msg;
                                         } else {
                                             this.thinkingCards.push(msg);
                                         }
@@ -9574,7 +9574,7 @@
                                     // 没有 parent_message_id，使用全局存储
                                     const existingIdx = this.thinkingCards.findIndex(c => c.id === msg.id);
                                     if (existingIdx !== -1) {
-                                        this.thinkingCards.splice(existingIdx, 1, msg);
+                                        this.thinkingCards[existingIdx] = msg;
                                     } else {
                                         this.thinkingCards.push(msg);
                                     }
