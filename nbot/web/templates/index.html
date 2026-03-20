@@ -533,7 +533,112 @@
         .scroll-to-bottom-btn i {
             font-size: 18px;
         }
-
+        
+        .thinking-cards-container {
+            padding: 10px 20px;
+            position: relative;
+            z-index: 10;
+            display: block !important;
+            visibility: visible !important;
+            opacity: 1 !important;
+        }
+        
+        .thinking-card {
+            background: var(--bg-secondary);
+            border: 1px solid var(--accent-primary);
+            border-radius: 12px;
+            padding: 12px 16px;
+            margin-bottom: 8px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+            display: block !important;
+            visibility: visible !important;
+        }
+        
+        .thinking-card-header {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            color: var(--accent-primary);
+            font-size: 14px;
+            margin-bottom: 8px;
+        }
+        
+        .thinking-card-steps {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+        
+        .thinking-step {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 13px;
+            color: var(--text-secondary);
+        }
+        
+        .thinking-step.tool.running {
+            color: var(--accent-primary);
+        }
+        
+        .thinking-step.tool.done {
+            color: #4ade80;
+        }
+        
+        .thinking-step.tool.error {
+            color: #f87171;
+        }
+        
+        .thinking-step i {
+            width: 16px;
+            text-align: center;
+        }
+        
+        .step-name {
+            font-weight: 500;
+        }
+        
+        .step-detail {
+            color: var(--text-tertiary);
+            font-size: 12px;
+            margin-left: 8px;
+        }
+        
+        /* 完成状态的进度卡片 */
+        .thinking-card.is-complete {
+            border-color: #4ade80;
+            background: linear-gradient(135deg, rgba(74, 222, 128, 0.1) 0%, var(--bg-secondary) 100%);
+        }
+        
+        .thinking-card.is-complete .thinking-card-header {
+            color: #4ade80;
+        }
+        
+        .thinking-card.is-complete .thinking-card-header i {
+            animation: none;
+        }
+        
+        /* 消息下方的进度卡片容器 */
+        .message-thinking-cards-wrapper {
+            display: flex;
+            margin-bottom: 16px;
+        }
+        
+        .message-thinking-cards-wrapper .message-thinking-cards {
+            flex: 1;
+            margin-left: 52px; /* 与消息内容对齐（头像宽度 + 间距） */
+            padding: 0;
+        }
+        
+        .message-thinking-cards .thinking-card {
+            margin-bottom: 4px;
+        }
+        
+        /* 全局进度卡片 */
+        .global-thinking-cards {
+            padding: 10px 20px;
+        }
+        
         .session-name-input {
             width: 100%;
             padding: 4px 8px;
@@ -1667,6 +1772,8 @@
             flex: 1;
             overflow-y: auto;
             padding: 20px;
+            position: relative;
+            min-height: 0;
         }
 
         .scroll-to-bottom-btn {
@@ -3373,52 +3480,75 @@
                                 </div>
 
                                 <div class="messages-container" ref="messagesContainer" @scroll="handleMessagesScroll">
-                                    <div v-for="msg in currentMessages" :key="msg.id" class="message" :class="msg.role">
-                                        <div class="message-avatar">
-                                            <i :class="msg.role === 'user' ? 'fas fa-user' : 'fas fa-robot'"></i>
-                                        </div>
-                                        <div class="message-content">
-                                            <div v-if="msg.content">{{ parseMessageContent(msg.content, msg) }}</div>
-                                            <!-- 用户上传的附件 -->
-                                            <div v-if="msg.attachments && msg.attachments.length > 0" class="message-attachments">
-                                                <div v-for="(att, idx) in msg.attachments" :key="idx" class="attachment-card" @click="previewAttachment(att)">
-                                                    <img v-if="att.type && att.type.startsWith('image/')" :src="att.url || att.data || att.preview" class="attachment-preview" @error="handleImageError">
-                                                    <div v-else class="attachment-icon" :class="getAttachmentIconClass(att.type)">
-                                                        <i :class="getAttachmentIcon(att.type)"></i>
+                                    <template v-for="msg in currentMessages" :key="msg.id">
+                                        <!-- 消息主体 -->
+                                        <div class="message" :class="msg.role">
+                                            <div class="message-avatar">
+                                                <i :class="msg.role === 'user' ? 'fas fa-user' : 'fas fa-robot'"></i>
+                                            </div>
+                                            <div class="message-content">
+                                                <div v-if="msg.content">{{ parseMessageContent(msg.content, msg) }}</div>
+                                                <!-- 用户上传的附件 -->
+                                                <div v-if="msg.attachments && msg.attachments.length > 0" class="message-attachments">
+                                                    <div v-for="(att, idx) in msg.attachments" :key="idx" class="attachment-card" @click="previewAttachment(att)">
+                                                        <img v-if="att.type && att.type.startsWith('image/')" :src="att.url || att.data || att.preview" class="attachment-preview" @error="handleImageError">
+                                                        <div v-else class="attachment-icon" :class="getAttachmentIconClass(att.type)">
+                                                            <i :class="getAttachmentIcon(att.type)"></i>
+                                                        </div>
+                                                        <div class="attachment-info">
+                                                            <div class="attachment-name">{{ att.name || '未知文件' }}</div>
+                                                            <div class="attachment-meta">{{ formatFileSize(att.size) }} · {{ att.type || '未知类型' }}</div>
+                                                        </div>
                                                     </div>
-                                                    <div class="attachment-info">
-                                                        <div class="attachment-name">{{ att.name || '未知文件' }}</div>
-                                                        <div class="attachment-meta">{{ formatFileSize(att.size) }} · {{ att.type || '未知类型' }}</div>
+                                                </div>
+                                                <!-- 机器人发送的文件 -->
+                                                <div v-if="msg.file" class="message-attachments">
+                                                    <div class="attachment-card" @click="downloadFile(msg.file)">
+                                                        <!-- 图片直接显示 -->
+                                                        <img v-if="msg.file.is_image" :src="msg.file.data || msg.file.url || msg.file.preview" class="attachment-preview" style="max-width: 200px; max-height: 150px; object-fit: cover;" @error="handleImageError">
+                                                        <!-- 文本文件显示预览 -->
+                                                        <div v-else-if="msg.file.is_text && msg.file.content" class="text-file-preview" style="max-width: 300px; max-height: 150px; overflow: auto; background: rgba(0,0,0,0.1); padding: 8px; border-radius: 4px; font-family: monospace; font-size: 12px;">
+                                                            <pre style="margin: 0; white-space: pre-wrap;">{{ msg.file.content }}</pre>
+                                                        </div>
+                                                        <!-- 其他文件显示图标 -->
+                                                        <div v-else class="attachment-icon" :class="getAttachmentIconClass(msg.file.type)">
+                                                            <i :class="getAttachmentIcon(msg.file.type)"></i>
+                                                        </div>
+                                                        <!-- 文件信息 -->
+                                                        <div v-if="!msg.file.is_image" class="attachment-info">
+                                                            <div class="attachment-name">{{ msg.file.name || '未知文件' }}</div>
+                                                            <div class="attachment-meta">{{ formatFileSize(msg.file.size) }} · {{ msg.file.type || '未知类型' }}</div>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                                <div class="message-time">
+                                                    {{ formatFullTime(msg.timestamp) }}
+                                                    <span v-if="msg.source === 'qq'"> · <i class="fab fa-qq"></i> QQ</span>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <!-- 该消息关联的进度卡片（在消息下方独立显示） -->
+                                        <div v-if="showThinkingCard && msg.thinking_cards && msg.thinking_cards.length > 0" class="message-thinking-cards-wrapper">
+                                            <div class="thinking-cards-container message-thinking-cards">
+                                                <div v-for="(card, index) in msg.thinking_cards" :key="card.id || index" class="thinking-card" :class="{ 'is-complete': card.is_complete }">
+                                                    <div class="thinking-card-header">
+                                                        <i :class="card.is_complete ? 'fas fa-check-circle' : 'fas fa-spinner fa-spin'"></i>
+                                                        <span>{{ card.content }}</span>
+                                                    </div>
+                                                    <div class="thinking-card-steps">
+                                                        <div v-for="(step, idx) in card.steps" :key="idx" class="thinking-step" :class="[step.type, step.status]">
+                                                            <i :class="step.status === 'done' ? 'fas fa-check' : (step.status === 'error' ? 'fas fa-times' : 'fas fa-cog fa-spin')"></i>
+                                                            <span class="step-name">{{ step.name }}</span>
+                                                            <span v-if="step.detail" class="step-detail">{{ step.detail }}</span>
+                                                        </div>
                                                     </div>
                                                 </div>
                                             </div>
-                                            <!-- 机器人发送的文件 -->
-                                            <div v-if="msg.file" class="message-attachments">
-                                                <div class="attachment-card" @click="downloadFile(msg.file)">
-                                                    <!-- 图片直接显示 -->
-                                                    <img v-if="msg.file.is_image" :src="msg.file.data || msg.file.url || msg.file.preview" class="attachment-preview" style="max-width: 200px; max-height: 150px; object-fit: cover;" @error="handleImageError">
-                                                    <!-- 文本文件显示预览 -->
-                                                    <div v-else-if="msg.file.is_text && msg.file.content" class="text-file-preview" style="max-width: 300px; max-height: 150px; overflow: auto; background: rgba(0,0,0,0.1); padding: 8px; border-radius: 4px; font-family: monospace; font-size: 12px;">
-                                                        <pre style="margin: 0; white-space: pre-wrap;">{{ msg.file.content }}</pre>
-                                                    </div>
-                                                    <!-- 其他文件显示图标 -->
-                                                    <div v-else class="attachment-icon" :class="getAttachmentIconClass(msg.file.type)">
-                                                        <i :class="getAttachmentIcon(msg.file.type)"></i>
-                                                    </div>
-                                                    <!-- 文件信息 -->
-                                                    <div v-if="!msg.file.is_image" class="attachment-info">
-                                                        <div class="attachment-name">{{ msg.file.name || '未知文件' }}</div>
-                                                        <div class="attachment-meta">{{ formatFileSize(msg.file.size) }} · {{ msg.file.type || '未知类型' }}</div>
-                                                    </div>
-                                                </div>
-                                            </div>
-                                            <div class="message-time">
-                                                {{ formatFullTime(msg.timestamp) }}
-                                                <span v-if="msg.source === 'qq'"> · <i class="fab fa-qq"></i> QQ</span>
-                                            </div>
                                         </div>
-                                    </div>
-                                    <div v-if="isTyping" class="message assistant">
+                                    </template>
+                                    
+                                    <!-- 机器人正在输入动画（仅在无进度卡片时显示） -->
+                                    <div v-if="isTyping && !currentMessages.some(m => m.thinking_cards && m.thinking_cards.length > 0)" class="message assistant">
                                         <div class="message-avatar"><i class="fas fa-robot"></i></div>
                                         <div class="message-content">
                                             <div class="loading">
@@ -3429,13 +3559,14 @@
                                         </div>
                                     </div>
                                 </div>
-
+                                
                                 <!-- 滚动到底部按钮 -->
                                 <button v-if="showScrollToBottom" class="scroll-to-bottom-btn" @click="scrollToBottom(true)" title="滚动到底部">
                                     <i class="fas fa-arrow-down"></i>
                                 </button>
-
-                                <div class="chat-input-area">
+                            </div>
+                            
+                            <div class="chat-input-area">
                                     <!-- 已上传的文件预览 -->
                                     <div v-if="uploadedFiles.length > 0" class="uploaded-files-preview">
                                         <div v-for="(file, index) in uploadedFiles" :key="index" class="uploaded-file-item">
@@ -4772,6 +4903,10 @@
                                             <input v-model="settings.features.web" type="checkbox">
                                             <span>Web 界面</span>
                                         </label>
+                                        <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                                            <input v-model="showThinkingCard" type="checkbox">
+                                            <span>显示进度卡片</span>
+                                        </label>
                                     </div>
                                 </div>
                             </div>
@@ -5873,6 +6008,8 @@
                     inputMessage: '',
                     uploadedFiles: [],
                     isTyping: false,
+                    thinkingCards: [],  // 进度卡片列表
+                    showThinkingCard: true,  // 是否显示进度卡片
                     isUserScrolling: false,
                     showScrollToBottom: false,
                     sessionSearch: '',
@@ -7467,6 +7604,9 @@
                     this.isTyping = false;
                     this.isLoading = false;
                     
+                    // 必须清空进度卡片，防止跨会话污染
+                    this.thinkingCards = [];
+                    
                     socket.emit('leave_session');
                     socket.emit('join_session', { session_id: session.id });
                     await this.loadMessages();
@@ -7549,7 +7689,17 @@
                     if (!this.currentSession) return;
                     try {
                         const res = await api.get(`/api/sessions/${this.currentSession.id}/messages`);
-                        this.currentMessages = res.data;
+                        const newMessages = res.data;
+                        
+                        // 保留现有的 thinking_cards 数据（避免被刷新覆盖）
+                        newMessages.forEach(newMsg => {
+                            const existingMsg = this.currentMessages.find(m => m.id === newMsg.id);
+                            if (existingMsg && existingMsg.thinking_cards) {
+                                newMsg.thinking_cards = existingMsg.thinking_cards;
+                            }
+                        });
+                        
+                        this.currentMessages = newMessages;
                         this.$nextTick(() => this.scrollToBottom());
                     } catch (e) {
                         console.error('Failed to load messages:', e);
@@ -9111,8 +9261,12 @@
                     
                     socket.on('new_message', (msg) => {
                         console.log('Received new_message:', msg);
-                        // 检查消息是否属于当前会话
-                        if (this.currentSession && msg.session_id === this.currentSession.id) {
+                        
+                        // 兼容后端进度卡片可能没有附带 session_id 的情况
+                        const isCurrentSession = this.currentSession && 
+                            (msg.session_id === this.currentSession.id || !msg.session_id);
+                        
+                        if (isCurrentSession) {
                             // 检查是否有临时ID（用户自己发送的消息）
                             if (msg.tempId) {
                                 // 用服务器返回的消息替换本地临时消息
@@ -9128,7 +9282,54 @@
                                 }
                             }
 
-                            // 检查是否已存在
+                            // 处理进度卡片（优先处理，避免被添加到消息列表）
+                            if (msg.type === 'thinking_card' && this.showThinkingCard) {
+                                console.log('[ThinkingCard] 收到进度卡片:', msg);
+                                
+                                // 如果后端没发 id，前端自己生成一个，防止 Vue v-for 的 key 冲突失效
+                                if (!msg.id) {
+                                    msg.id = 'tc_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5);
+                                }
+                                
+                                // 找到关联的用户消息，将卡片存储在该消息中
+                                const parentMsgId = msg.parent_message_id;
+                                if (parentMsgId) {
+                                    const parentMsg = this.currentMessages.find(m => m.id === parentMsgId);
+                                    if (parentMsg) {
+                                        // 初始化 thinking_cards 数组（与后端字段名一致）
+                                        if (!parentMsg.thinking_cards) {
+                                            parentMsg.thinking_cards = [];
+                                        }
+                                        const existingIdx = parentMsg.thinking_cards.findIndex(c => c.id === msg.id);
+                                        if (existingIdx !== -1) {
+                                            parentMsg.thinking_cards.splice(existingIdx, 1, msg);
+                                        } else {
+                                            parentMsg.thinking_cards.push(msg);
+                                        }
+                                        console.log('[ThinkingCard] 卡片已关联到消息:', parentMsgId, parentMsg.thinking_cards);
+                                    } else {
+                                        // 如果找不到父消息，使用全局存储（兼容旧逻辑）
+                                        const existingIdx = this.thinkingCards.findIndex(c => c.id === msg.id);
+                                        if (existingIdx !== -1) {
+                                            this.thinkingCards.splice(existingIdx, 1, msg);
+                                        } else {
+                                            this.thinkingCards.push(msg);
+                                        }
+                                    }
+                                } else {
+                                    // 没有 parent_message_id，使用全局存储
+                                    const existingIdx = this.thinkingCards.findIndex(c => c.id === msg.id);
+                                    if (existingIdx !== -1) {
+                                        this.thinkingCards.splice(existingIdx, 1, msg);
+                                    } else {
+                                        this.thinkingCards.push(msg);
+                                    }
+                                }
+                                this.$nextTick(() => this.scrollToBottom());
+                                return;  // 不添加到消息列表
+                            }
+                            
+                            // 检查是否已存在（排除 thinking_card 类型）
                             const exists = this.currentMessages.find(m => m.id === msg.id);
                             if (!exists) {
                                 this.currentMessages.push(msg);

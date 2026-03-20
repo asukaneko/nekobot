@@ -76,6 +76,7 @@ class WebMessageAdapter:
         self.server = server
         self._reply_text = None
         self._reply_image = None
+        self._thinking_card_id = None  # 进度卡片ID
         
         # Web 端用户默认拥有 admin 权限
         # 将 Web 端用户添加到 admin 列表
@@ -1633,9 +1634,20 @@ class WebChatServer:
                 }
                 # Silicon 支持的工具调用模型
                 model = "Qwen/Qwen2.5-72B-Instruct"
+                
+                # 检查消息总长度，必要时截断工具结果
+                MAX_CONTENT_LENGTH = 8000
+                processed_messages = []
+                for msg in messages:
+                    msg_copy = msg.copy()
+                    if 'content' in msg_copy and isinstance(msg_copy['content'], str):
+                        if len(msg_copy['content']) > MAX_CONTENT_LENGTH:
+                            msg_copy['content'] = msg_copy['content'][:MAX_CONTENT_LENGTH] + "\n...[内容已截断]"
+                    processed_messages.append(msg_copy)
+                
                 payload = {
                     "model": model,
-                    "messages": messages,
+                    "messages": processed_messages,
                     "tools": tools,
                     "tool_choice": "auto"
                 }
@@ -1682,9 +1694,19 @@ class WebChatServer:
                     "Content-Type": "application/json"
                 }
 
+                # 检查消息总长度，必要时截断工具结果
+                MAX_CONTENT_LENGTH = 8000  # 每个消息内容的最大长度
+                processed_messages = []
+                for msg in messages:
+                    msg_copy = msg.copy()
+                    if 'content' in msg_copy and isinstance(msg_copy['content'], str):
+                        if len(msg_copy['content']) > MAX_CONTENT_LENGTH:
+                            msg_copy['content'] = msg_copy['content'][:MAX_CONTENT_LENGTH] + "\n...[内容已截断]"
+                    processed_messages.append(msg_copy)
+                
                 payload = {
                     "model": self.ai_model,
-                    "messages": messages,
+                    "messages": processed_messages,
                     "tools": tools,
                     "tool_choice": "auto"
                 }
@@ -1998,22 +2020,20 @@ class WebChatServer:
 
         @self.app.route('/api/sessions/<session_id>/messages', methods=['GET'])
         def get_messages(session_id):
-            # 从文件读取
-            sessions_file = os.path.join(self.data_dir, 'sessions.json')
-            sessions_data = {}
-            if os.path.exists(sessions_file):
-                try:
-                    with open(sessions_file, 'r', encoding='utf-8') as f:
-                        sessions_data = json.load(f)
-                except:
-                    sessions_data = {}
+            # 优先使用内存中的会话数据（包含 thinking_cards 等实时数据）
+            session = self.sessions.get(session_id)
             
-            # 合并内存
-            for sid, session in self.sessions.items():
-                if sid not in sessions_data:
-                    sessions_data[sid] = session
+            # 如果内存中没有，从文件读取
+            if not session:
+                sessions_file = os.path.join(self.data_dir, 'sessions.json')
+                if os.path.exists(sessions_file):
+                    try:
+                        with open(sessions_file, 'r', encoding='utf-8') as f:
+                            sessions_data = json.load(f)
+                            session = sessions_data.get(session_id)
+                    except:
+                        session = None
             
-            session = sessions_data.get(session_id)
             if not session:
                 return jsonify({'error': 'Session not found'}), 404
 
@@ -4191,10 +4211,10 @@ class WebChatServer:
                                 _log.info(f"恢复原始 bot 变量")
                     self.socketio.start_background_task(run_command)
                 else:
-                    # 触发 AI 回复（传递附件信息）
+                    # 触发 AI 回复（传递附件信息和用户消息ID）
                     # 只使用原始内容，附件信息通过卡片显示
                     ai_content = content
-                    self._trigger_ai_response(session_id, ai_content, sender, attachments)
+                    self._trigger_ai_response(session_id, ai_content, sender, attachments, message['id'])
             
             except Exception as e:
                 _log.error(f"处理消息时出错: {e}", exc_info=True)
@@ -4206,7 +4226,7 @@ class WebChatServer:
             session_id = data.get('session_id')
             emit('user_typing', {'sender': self.web_users.get(request.sid)}, room=session_id)
 
-    def _trigger_ai_response(self, session_id: str, user_content: str, sender: str, attachments=None):
+    def _trigger_ai_response(self, session_id: str, user_content: str, sender: str, attachments=None, parent_message_id=None):
         """触发 AI 回复（支持附件）"""
         # 强制转换为列表
         if not attachments or not isinstance(attachments, list):
@@ -4418,10 +4438,136 @@ class WebChatServer:
                             if file_contents and tool_messages and tool_messages[-1].get('role') == 'user':
                                 tool_messages[-1]['content'] = enhanced_content
                             
-                            max_iterations = 5
+                            max_iterations = 30
                             final_content = None
                             
+                            # 创建进度卡片
+                            thinking_card_id = str(uuid.uuid4())
+                            thinking_steps = []
+                            current_iteration = [0]  # 使用列表包装以便在闭包中修改
+                            
+                            _log.info(f"[ThinkingCard] 创建进度卡片, session_id={session_id}, card_id={thinking_card_id}")
+                            
+                            def update_thinking_card(step_type, step_name, step_detail=None):
+                                """更新进度卡片"""
+                                if step_type == 'start':
+                                    thinking_steps.append({
+                                        'type': 'thinking',
+                                        'name': step_name,
+                                        'status': 'active',
+                                        'detail': step_detail
+                                    })
+                                elif step_type == 'tool':
+                                    thinking_steps.append({
+                                        'type': 'tool',
+                                        'name': step_name,
+                                        'status': 'running',
+                                        'detail': step_detail
+                                    })
+                                elif step_type == 'tool_done':
+                                    for step in reversed(thinking_steps):
+                                        if step['type'] == 'tool' and step['name'] == step_name:
+                                            step['status'] = 'done' if step_detail else 'error'
+                                            if step_detail:
+                                                step['result'] = step_detail[:100]
+                                            break
+                                elif step_type == 'thinking':
+                                    thinking_steps.append({
+                                        'type': 'thinking',
+                                        'name': step_name,
+                                        'status': 'active',
+                                        'detail': step_detail
+                                    })
+                                
+                                # 发送进度卡片到 Web 端
+                                card_message = {
+                                    'id': thinking_card_id,
+                                    'session_id': session_id,  # 添加 session_id
+                                    'parent_message_id': parent_message_id,  # 关联到用户消息
+                                    'role': 'system',
+                                    'type': 'thinking_card',
+                                    'content': f'🔄 AI 正在处理... ({current_iteration[0] + 1}/{max_iterations})',
+                                    'steps': thinking_steps.copy(),  # 复制一份，避免引用问题
+                                    'timestamp': datetime.now().isoformat()
+                                }
+                                try:
+                                    _log.info(f"[ThinkingCard] 发送进度卡片, socketio={'已设置' if self.socketio else 'None'}, session_id={session_id}")
+                                    _log.info(f"[ThinkingCard] 卡片内容: {json.dumps(card_message, ensure_ascii=False)[:200]}")
+                                    self.socketio.emit('new_message', card_message, room=session_id)
+                                    # 让出控制权，确保消息能够立即发送
+                                    self.socketio.sleep(0)
+                                    _log.info(f"[ThinkingCard] ✓ 发送成功")
+                                    
+                                    # 将卡片保存到对应的消息中（持久化）
+                                    if parent_message_id and session_id in self.sessions:
+                                        session = self.sessions[session_id]
+                                        for msg in session.get('messages', []):
+                                            if msg.get('id') == parent_message_id:
+                                                if 'thinking_cards' not in msg:
+                                                    msg['thinking_cards'] = []
+                                                # 查找是否已存在该卡片
+                                                existing_idx = None
+                                                for i, card in enumerate(msg['thinking_cards']):
+                                                    if card.get('id') == thinking_card_id:
+                                                        existing_idx = i
+                                                        break
+                                                if existing_idx is not None:
+                                                    msg['thinking_cards'][existing_idx] = card_message
+                                                else:
+                                                    msg['thinking_cards'].append(card_message)
+                                                _log.info(f"[ThinkingCard] 卡片已保存到消息 {parent_message_id}")
+                                                break
+                                except Exception as e:
+                                    _log.error(f"[ThinkingCard] ✗ 发送失败: {e}")
+                            
+                            def complete_thinking_card():
+                                """将进度卡片标记为完成状态"""
+                                # 添加一个完成步骤
+                                thinking_steps.append({
+                                    'type': 'done',
+                                    'name': '✅ 处理完成',
+                                    'status': 'done'
+                                })
+                                
+                                complete_message = {
+                                    'id': thinking_card_id,
+                                    'session_id': session_id,
+                                    'parent_message_id': parent_message_id,  # 关联到用户消息
+                                    'role': 'system',
+                                    'type': 'thinking_card',
+                                    'content': '✅ 处理完成',
+                                    'steps': thinking_steps,
+                                    'is_complete': True,  # 标记为完成
+                                    'timestamp': datetime.now().isoformat()
+                                }
+                                try:
+                                    self.socketio.emit('new_message', complete_message, room=session_id)
+                                    _log.info(f"[ThinkingCard] ✓ 标记为完成")
+                                    
+                                    # 将完成的卡片保存到对应的消息中（持久化）
+                                    if parent_message_id and session_id in self.sessions:
+                                        session = self.sessions[session_id]
+                                        for msg in session.get('messages', []):
+                                            if msg.get('id') == parent_message_id:
+                                                if 'thinking_cards' not in msg:
+                                                    msg['thinking_cards'] = []
+                                                # 查找是否已存在该卡片
+                                                existing_idx = None
+                                                for i, card in enumerate(msg['thinking_cards']):
+                                                    if card.get('id') == thinking_card_id:
+                                                        existing_idx = i
+                                                        break
+                                                if existing_idx is not None:
+                                                    msg['thinking_cards'][existing_idx] = complete_message
+                                                else:
+                                                    msg['thinking_cards'].append(complete_message)
+                                                _log.info(f"[ThinkingCard] 完成卡片已保存到消息 {parent_message_id}")
+                                                break
+                                except Exception as e:
+                                    _log.error(f"[ThinkingCard] ✗ 标记完成失败: {e}")
+                            
                             for iteration in range(max_iterations):
+                                current_iteration[0] = iteration
                                 response = self._get_ai_response_with_tools(tool_messages, enabled_tools)
                                 
                                 if 'tool_calls' in response and response['tool_calls']:
@@ -4448,6 +4594,25 @@ class WebChatServer:
                                         tool_name = tool_call['name']
                                         arguments = tool_call['arguments']
                                         
+                                        # 更新进度卡片 - 工具开始
+                                        tool_display_name = {
+                                            'search_news': '🔍 搜索新闻',
+                                            'get_weather': '🌤️ 查询天气',
+                                            'search_web': '🌐 网页搜索',
+                                            'get_date_time': '🕐 获取时间',
+                                            'http_get': '📡 获取网页',
+                                            'understand_image': '🖼️ 理解图片',
+                                            'workspace_create_file': '📝 创建文件',
+                                            'workspace_read_file': '📖 读取文件',
+                                            'workspace_edit_file': '✏️ 编辑文件',
+                                            'workspace_delete_file': '🗑️ 删除文件',
+                                            'workspace_list_files': '📁 列出文件',
+                                            'workspace_tree': '🌳 显示目录树',
+                                            'workspace_send_file': '📤 发送文件'
+                                        }.get(tool_name, f'⚙️ {tool_name}')
+                                        
+                                        update_thinking_card('tool', tool_display_name, json.dumps(arguments, ensure_ascii=False)[:100])
+                                        
                                         # 工作区工具日志
                                         if tool_name.startswith('workspace_'):
                                             _log.info(f"[Workspace] 工具调用: {tool_name}")
@@ -4455,6 +4620,13 @@ class WebChatServer:
                                         
                                         # 执行工具，传递 context
                                         tool_result = execute_tool(tool_name, arguments, context=tool_context)
+                                        
+                                        # 更新进度卡片 - 工具完成
+                                        if tool_result.get('success'):
+                                            result_preview = str(tool_result.get('content', tool_result.get('files', tool_result)))[:100]
+                                            update_thinking_card('tool_done', tool_display_name, result_preview)
+                                        else:
+                                            update_thinking_card('tool_done', tool_display_name, None)
                                         
                                         # 工作区工具日志
                                         if tool_name.startswith('workspace_'):
@@ -4475,7 +4647,25 @@ class WebChatServer:
                                     break
                             
                             if not final_content:
+                                _log.warning(f"[Tools] AI 未生成最终回复，使用最后消息内容")
                                 final_content = tool_messages[-1].get('content', '处理完成')
+                            
+                            _log.info(f"[Tools] 最终回复长度: {len(final_content)}")
+                            
+                            # 如果回复太短（少于50字），再调用一次 AI 生成完整回复
+                            if len(final_content) < 50:
+                                _log.info(f"[Tools] 回复太短，重新生成完整回复")
+                                # 添加一个提示，要求 AI 生成符合设定的详细回复
+                                tool_messages.append({
+                                    "role": "user",
+                                    "content": "请根据以上工具调用结果，用你可爱的猫娘语气给主人一个详细的回复喵~"
+                                })
+                                final_response = self._get_ai_response_with_tools(tool_messages, enabled_tools)
+                                final_content = final_response.get('content', final_content)
+                                _log.info(f"[Tools] 重新生成后的回复长度: {len(final_content)}")
+                            
+                            # 将进度卡片标记为完成（不再删除）
+                            complete_thinking_card()
                         else:
                             # 无可用工具，使用普通 AI 调用
                             if file_contents and messages_for_ai and messages_for_ai[-1].get('role') == 'user':
