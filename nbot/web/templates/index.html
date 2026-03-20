@@ -9699,17 +9699,13 @@
                         return null;
                     };
 
-                    // 方法2：处理 markdown 代码块
-                    const codeBlockMatch = content.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
-                    if (codeBlockMatch) {
-                        const codeContent = codeBlockMatch[1].trim();
+                    // 方法2：处理 markdown JSON 代码块（只处理明确标记为json的代码块）
+                    const jsonCodeBlockMatch = content.match(/```json\s*([\s\S]*?)\s*```/);
+                    if (jsonCodeBlockMatch) {
+                        const codeContent = jsonCodeBlockMatch[1].trim();
                         const parsed = tryParseJson(codeContent);
                         if (parsed && parsed.msg) {
                             return parsed.msg;
-                        }
-                        // 如果不是JSON，直接返回代码内容
-                        if (!codeContent.startsWith('{') && !codeContent.startsWith('[')) {
-                            return codeContent;
                         }
                     }
 
