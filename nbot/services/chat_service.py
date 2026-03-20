@@ -6,7 +6,69 @@ from nbot.services.ai import (
 from nbot.core import prompt_manager, message_manager
 from nbot.core.message import create_message
 
+# 工作区管理
+try:
+    from nbot.core.workspace import workspace_manager
+    WORKSPACE_AVAILABLE = True
+except ImportError:
+    workspace_manager = None
+    WORKSPACE_AVAILABLE = False
+
 last_log_entry = {}
+
+
+def get_qq_session_id(user_id=None, group_id=None, group_user_id=None) -> str:
+    """
+    获取 QQ 端会话的统一 session_id
+    私聊: "qq_private_{user_id}"
+    群聊: "qq_group_{group_id}_{group_user_id}" 或 "qq_group_{group_id}"
+    """
+    if user_id:
+        return f"qq_private_{user_id}"
+    elif group_id:
+        if group_user_id:
+            return f"qq_group_{group_id}_{group_user_id}"
+        return f"qq_group_{group_id}"
+    return ""
+
+
+def get_workspace_context(user_id=None, group_id=None, group_user_id=None) -> dict:
+    """获取工作区上下文信息，用于传递给工具调用"""
+    session_id = get_qq_session_id(user_id, group_id, group_user_id)
+    if not session_id:
+        return {}
+
+    session_type = "qq_private" if user_id else "qq_group"
+
+    # 确保工作区已创建
+    if WORKSPACE_AVAILABLE:
+        workspace_manager.get_or_create(session_id, session_type)
+
+    return {
+        'session_id': session_id,
+        'session_type': session_type
+    }
+
+
+def ensure_workspace(user_id=None, group_id=None, group_user_id=None) -> str:
+    """确保会话的工作区存在，返回工作区路径"""
+    if not WORKSPACE_AVAILABLE:
+        return ""
+    session_id = get_qq_session_id(user_id, group_id, group_user_id)
+    if not session_id:
+        return ""
+    session_type = "qq_private" if user_id else "qq_group"
+    return workspace_manager.get_or_create(session_id, session_type)
+
+
+def delete_session_workspace(user_id=None, group_id=None, group_user_id=None) -> bool:
+    """删除会话对应的工作区"""
+    if not WORKSPACE_AVAILABLE:
+        return False
+    session_id = get_qq_session_id(user_id, group_id, group_user_id)
+    if not session_id:
+        return False
+    return workspace_manager.delete_workspace(session_id)
 
 
 def remove_brackets_content(text: str) -> str:

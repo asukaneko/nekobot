@@ -16,14 +16,11 @@ _log = logging.getLogger(__name__)
 config_parser = configparser.ConfigParser()
 config_parser.read('config.ini', encoding='utf-8')
 
-# 读取MiniMax API配置（用于web search）
+# MiniMax API 配置（仅用于 search_web 和 understand_image 工具）
 MINIMAX_API_KEY = config_parser.get('ApiKey', 'api_key', fallback="")
-MINIMAX_BASE_URL = config_parser.get('ApiKey', 'base_url', fallback="https://api.minimaxi.com/v1")
-MINIMAX_MODEL = config_parser.get('ApiKey', 'model', fallback="MiniMax-Text-01")
 
-# 固定搜索 API URL
+# 固定工具 API URL
 MINIMAX_SEARCH_URL = "https://api.minimaxi.com/v1/coding_plan/search"
-# 固定图片理解 API URL
 MINIMAX_VLM_URL = "https://api.minimaxi.com/v1/coding_plan/vlm"
 
 # Web 配置数据目录
@@ -71,14 +68,30 @@ def process_image_url(image_source: str) -> str:
 
 
 def get_enabled_tools() -> List[Dict]:
-    """获取启用的工具列表（从web配置）"""
+    """获取启用的工具列表
+    
+    自动合并所有工具类别，方便后续扩展新的工具类别
+    """
     web_config = load_tools_config()
+    enabled_names = set()
     if web_config:
-        # 获取启用的工具名称列表
         enabled_names = {t['name'] for t in web_config if t.get('enabled', True)}
-        # 过滤 TOOL_DEFINITIONS
-        return [t for t in TOOL_DEFINITIONS if t['function']['name'] in enabled_names]
-    return TOOL_DEFINITIONS  # 默认返回所有工具
+
+    # 从配置启用工具
+    if enabled_names:
+        tools = [t for t in TOOL_DEFINITIONS if t['function']['name'] in enabled_names]
+    else:
+        tools = list(TOOL_DEFINITIONS)
+
+    # 合并所有工具类别
+    all_tool_categories = [
+        WORKSPACE_TOOL_DEFINITIONS,
+    ]
+    
+    for category in all_tool_categories:
+        tools.extend(category)
+
+    return tools
 
 
 class ToolExecutor:
@@ -519,6 +532,126 @@ TOOL_DEFINITIONS = [
     }
 ]
 
+# ========== 工作区工具定义 ==========
+WORKSPACE_TOOL_DEFINITIONS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "workspace_create_file",
+            "description": "在当前会话的工作区中创建或覆盖一个文件。适用于为用户生成代码、文档、配置文件等场景。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "filename": {
+                        "type": "string",
+                        "description": "文件名（支持子目录，如 'src/main.py'）"
+                    },
+                    "content": {
+                        "type": "string",
+                        "description": "文件的文本内容"
+                    }
+                },
+                "required": ["filename", "content"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "workspace_read_file",
+            "description": "读取当前会话工作区中的文件内容。用于查看用户上传的文件或之前创建的文件。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "filename": {
+                        "type": "string",
+                        "description": "要读取的文件名"
+                    }
+                },
+                "required": ["filename"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "workspace_edit_file",
+            "description": "修改工作区中已有文件的部分内容（查找并替换）。适用于修改代码、更新配置等场景。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "filename": {
+                        "type": "string",
+                        "description": "要修改的文件名"
+                    },
+                    "old_content": {
+                        "type": "string",
+                        "description": "要被替换的原始内容片段"
+                    },
+                    "new_content": {
+                        "type": "string",
+                        "description": "替换后的新内容"
+                    }
+                },
+                "required": ["filename", "old_content", "new_content"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "workspace_delete_file",
+            "description": "删除工作区中的指定文件。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "filename": {
+                        "type": "string",
+                        "description": "要删除的文件名"
+                    }
+                },
+                "required": ["filename"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "workspace_list_files",
+            "description": "列出当前会话工作区中的所有文件。用于查看工作区内有哪些文件。",
+            "parameters": {
+                "type": "object",
+                "properties": {}
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "workspace_send_file",
+            "description": "将工作区中的文件发送给用户。当用户需要下载或获取工作区中的文件时使用。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "filename": {
+                        "type": "string",
+                        "description": "要发送的文件名"
+                    }
+                },
+                "required": ["filename"]
+            }
+        }
+    }
+]
+
+
+def get_all_tool_definitions(include_workspace: bool = True) -> List[Dict]:
+    """获取所有工具定义（包括工作区工具）"""
+    tools = list(TOOL_DEFINITIONS)
+    if include_workspace:
+        tools.extend(WORKSPACE_TOOL_DEFINITIONS)
+    return tools
+
 
 def execute_tool(tool_name: str, arguments: Dict[str, Any], context: Dict = None) -> Dict[str, Any]:
     """
@@ -527,11 +660,15 @@ def execute_tool(tool_name: str, arguments: Dict[str, Any], context: Dict = None
     Args:
         tool_name: 工具名称
         arguments: 工具参数
-        context: 可选的上下文信息
+        context: 可选的上下文信息，包含 session_id 等
 
     Returns:
         工具执行结果
     """
+    # 0. 工作区工具 - 需要 context 中的 session_id
+    if tool_name.startswith("workspace_"):
+        return _execute_workspace_tool(tool_name, arguments, context)
+
     # 1. 先从 Web 配置查找
     web_config = load_tools_config()
     tool_config = None
@@ -576,3 +713,57 @@ def execute_tool(tool_name: str, arguments: Dict[str, Any], context: Dict = None
             "success": False,
             "error": str(e)
         }
+
+
+def _execute_workspace_tool(tool_name: str, arguments: Dict[str, Any],
+                            context: Dict = None) -> Dict[str, Any]:
+    """执行工作区相关工具"""
+    try:
+        from nbot.core.workspace import workspace_manager
+    except ImportError:
+        return {"success": False, "error": "工作区模块不可用"}
+
+    if not context or not context.get('session_id'):
+        return {"success": False, "error": "缺少会话信息，无法操作工作区"}
+
+    session_id = context['session_id']
+    session_type = context.get('session_type', 'unknown')
+
+    try:
+        if tool_name == "workspace_create_file":
+            return workspace_manager.create_file(
+                session_id, arguments['filename'], arguments['content'], session_type)
+
+        elif tool_name == "workspace_read_file":
+            return workspace_manager.read_file(session_id, arguments['filename'])
+
+        elif tool_name == "workspace_edit_file":
+            return workspace_manager.edit_file(
+                session_id, arguments['filename'],
+                arguments['old_content'], arguments['new_content'])
+
+        elif tool_name == "workspace_delete_file":
+            return workspace_manager.delete_file(session_id, arguments['filename'])
+
+        elif tool_name == "workspace_list_files":
+            return workspace_manager.list_files(session_id)
+
+        elif tool_name == "workspace_send_file":
+            # 返回文件路径，由调用方负责实际发送
+            file_path = workspace_manager.get_file_path(session_id, arguments['filename'])
+            if file_path:
+                return {
+                    "success": True,
+                    "action": "send_file",
+                    "filename": arguments['filename'],
+                    "path": file_path,
+                    "size": os.path.getsize(file_path)
+                }
+            return {"success": False, "error": f"文件不存在: {arguments['filename']}"}
+
+        else:
+            return {"success": False, "error": f"未知的工作区工具: {tool_name}"}
+
+    except Exception as e:
+        _log.error(f"Workspace tool error: {tool_name} - {e}")
+        return {"success": False, "error": str(e)}

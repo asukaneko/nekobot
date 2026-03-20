@@ -22,6 +22,11 @@ from nbot.core.message import (
     migrate_messages,
 )
 
+from nbot.core.workspace import (
+    WorkspaceManager,
+    workspace_manager,
+)
+
 __all__ = [
     # prompt 模块
     'PromptManager',
@@ -42,4 +47,8 @@ __all__ = [
     'get_messages',
     'create_message',
     'migrate_messages',
+    
+    # workspace 模块
+    'WorkspaceManager',
+    'workspace_manager',
 ]

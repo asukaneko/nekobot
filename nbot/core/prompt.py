@@ -149,23 +149,33 @@ class PromptManager:
         try:
             from nbot.services.tools import get_enabled_tools
             enabled_tools = get_enabled_tools()
-            if not enabled_tools:
-                return ""
             
             tools_text = "## 可用工具 (Tools)\n"
             tools_text += "你可以使用以下工具来帮助用户：\n\n"
             
-            for tool in enabled_tools:
-                if tool.get("type") == "function" and "function" in tool:
-                    func = tool["function"]
-                    name = func.get("name", "")
-                    desc = func.get("description", "")
-                    if name and desc:
-                        tools_text += f"- **{name}**: {desc}\n"
+            if enabled_tools:
+                for tool in enabled_tools:
+                    if tool.get("type") == "function" and "function" in tool:
+                        func = tool["function"]
+                        name = func.get("name", "")
+                        desc = func.get("description", "")
+                        if name and desc:
+                            tools_text += f"- **{name}**: {desc}\n"
+            
+            # 添加工作区工具
+            tools_text += "\n### 工作区工具 (Workspace)\n"
+            tools_text += "每个会话都有独立的工作区，你可以使用以下工具操作工作区中的文件：\n"
+            tools_text += "- **workspace_create_file**: 在工作区中创建或覆盖文件，适用于生成代码、文档等\n"
+            tools_text += "- **workspace_read_file**: 读取工作区中的文件内容\n"
+            tools_text += "- **workspace_edit_file**: 修改工作区中的文件（查找替换方式）\n"
+            tools_text += "- **workspace_delete_file**: 删除工作区中的文件\n"
+            tools_text += "- **workspace_list_files**: 列出工作区中的所有文件\n"
+            tools_text += "- **workspace_send_file**: 将工作区中的文件发送给用户下载\n"
             
             tools_text += "\n**使用规则：**\n"
             tools_text += "1. 当用户请求需要使用工具时，你可以调用对应的工具\n"
             tools_text += "2. 工具调用会被系统自动处理\n"
+            tools_text += "3. 用户上传的文件会自动保存到工作区，你可以使用 workspace_read_file 查看\n"
             
             return tools_text
         except ImportError:

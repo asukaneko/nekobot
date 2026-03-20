@@ -13,6 +13,8 @@ from typing import Dict, Any, Optional, List
 from flask import Flask, request, jsonify, send_from_directory
 from flask_socketio import SocketIO, emit, join_room, leave_room
 
+_log = logging.getLogger(__name__)
+
 # 固定的核心指令 - 这些功能不会因为用户修改提示词而丢失
 CORE_INSTRUCTIONS = """【重要】你必须严格遵循以下要求：
 
@@ -34,7 +36,6 @@ try:
     MEMORY_AVAILABLE = True
 except ImportError:
     MEMORY_AVAILABLE = False
-    _log = logging.getLogger(__name__)
     _log.warning("Memory system not available")
 
 # 导入统一消息模块
@@ -56,7 +57,13 @@ except ImportError:
     prompt_manager = None
     _log.warning("Prompt manager not available")
 
-_log = logging.getLogger(__name__)
+# 导入工作区管理器
+try:
+    from nbot.core.workspace import workspace_manager
+    WORKSPACE_AVAILABLE = True
+except ImportError:
+    WORKSPACE_AVAILABLE = False
+    workspace_manager = None
 
 
 class WebMessageAdapter:
@@ -1262,7 +1269,12 @@ class WebChatServer:
         # 调用 AI（支持多轮工具调用）
         def run_workflow_with_tools():
             try:
-                from nbot.services.tools import TOOL_DEFINITIONS, execute_tool
+                from nbot.services.tools import get_all_tool_definitions, execute_tool
+                all_tools = get_all_tool_definitions(include_workspace=True)
+                tool_context = {
+                    'session_id': session_id,
+                    'session_type': 'workflow'
+                }
 
                 max_iterations = 10  # 最大迭代次数，防止无限循环
                 final_response = None
@@ -1271,7 +1283,7 @@ class WebChatServer:
                     _log.info(f"Workflow iteration {iteration + 1}")
 
                     # 调用 AI（支持工具）
-                    response = self._get_ai_response_with_tools(messages, TOOL_DEFINITIONS)
+                    response = self._get_ai_response_with_tools(messages, all_tools)
 
                     # 检查是否有工具调用
                     if 'tool_calls' in response and response['tool_calls']:
@@ -1301,7 +1313,7 @@ class WebChatServer:
                             _log.info(f"Executing tool: {tool_name} with args: {arguments}")
 
                             # 执行工具
-                            tool_result = execute_tool(tool_name, arguments)
+                            tool_result = execute_tool(tool_name, arguments, context=tool_context)
 
                             # 添加工具结果到消息历史
                             messages.append({
@@ -1372,6 +1384,11 @@ class WebChatServer:
         }
         self.sessions[session_id] = session
         self._save_data('sessions')
+
+        # 为工作流创建工作区
+        if WORKSPACE_AVAILABLE:
+            workspace_manager.get_or_create(session_id, 'workflow', f"[工作流] {workflow['name']}")
+
         return session_id
 
     def _send_workflow_result(self, workflow: Dict, result: str):
@@ -1572,16 +1589,27 @@ class WebChatServer:
                 return self._get_ai_response(temp_messages)
             return f"处理图片时出错: {str(e)}"
 
-    def _get_ai_response_with_tools(self, messages: List[Dict], tools: List[Dict], use_silicon: bool = True) -> Dict:
-        """调用 AI 并支持工具"""
+    def _get_ai_response_with_tools(self, messages: List[Dict], tools: List[Dict], use_silicon: bool = False) -> Dict:
+        """调用 AI 并支持工具
+        
+        Args:
+            messages: 消息列表
+            tools: 工具定义列表
+            use_silicon: 是否使用 Silicon API（默认 False，使用主 API）
+        """
         try:
             if not self.ai_client:
                 return {'content': 'AI 服务未配置'}
 
             import requests
 
+            # 从设置中获取超时时间，默认 120 秒
+            timeout = self.settings.get('api_timeout', 120)
+            max_retries = self.settings.get('api_retry_count', 3)
+            
+            # 检查是否应该使用 Silicon API
+            # 只有在明确指定 use_silicon=True 且有 Silicon API key 时才使用
             if use_silicon:
-                # 使用 Silicon API（支持更多模型）
                 silicon_api_key = getattr(self.ai_client, 'silicon_api_key', None)
                 if not silicon_api_key:
                     try:
@@ -1593,9 +1621,9 @@ class WebChatServer:
                         silicon_api_key = ''
 
                 if not silicon_api_key:
-                    _log.warning("Silicon API key not available, falling back to main API")
+                    _log.info("[AI] Silicon API key 未配置，使用主 API")
                     use_silicon = False
-
+            
             if use_silicon:
                 # Silicon API 调用
                 url = "https://api.siliconflow.cn/v1/chat/completions"
@@ -1611,11 +1639,43 @@ class WebChatServer:
                     "tools": tools,
                     "tool_choice": "auto"
                 }
-                resp = requests.post(url, json=payload, headers=headers, timeout=60)
+                
+                # 重试机制
+                last_error = None
+                for attempt in range(max_retries):
+                    try:
+                        _log.info(f"[AI] Silicon API 调用 (尝试 {attempt + 1}/{max_retries})")
+                        resp = requests.post(url, json=payload, headers=headers, timeout=timeout)
+                        resp.raise_for_status()
+                        data = resp.json()
+                        break
+                    except requests.exceptions.Timeout as e:
+                        last_error = e
+                        _log.warning(f"[AI] Silicon API 超时 (尝试 {attempt + 1}/{max_retries}): {e}")
+                        if attempt < max_retries - 1:
+                            time.sleep(2 ** attempt)  # 指数退避
+                        continue
+                    except requests.exceptions.RequestException as e:
+                        last_error = e
+                        _log.error(f"[AI] Silicon API 错误 (尝试 {attempt + 1}/{max_retries}): {e}")
+                        if attempt < max_retries - 1:
+                            time.sleep(2 ** attempt)
+                        continue
+                else:
+                    # 所有重试都失败
+                    raise last_error or Exception("API 调用失败")
             else:
                 # 使用主 API
                 url_base = (self.ai_base_url or "").rstrip("/")
-                url = f"{url_base}/chat/completions"
+                
+                # 检查 base_url 是否已经是完整的 API 端点
+                # MiniMax 的 base_url 通常已经包含完整的路径（如 /v1/text/chatcompletion_v2）
+                if "completion" in url_base.lower() or url_base.endswith("/v1"):
+                    # 已经是完整端点，直接使用
+                    url = url_base
+                else:
+                    # 需要添加 /chat/completions
+                    url = f"{url_base}/chat/completions"
 
                 headers = {
                     "Authorization": f"Bearer {self.ai_api_key}",
@@ -1628,10 +1688,30 @@ class WebChatServer:
                     "tools": tools,
                     "tool_choice": "auto"
                 }
-                resp = requests.post(url, json=payload, headers=headers)
-
-            resp.raise_for_status()
-            data = resp.json()
+                
+                # 重试机制
+                last_error = None
+                for attempt in range(max_retries):
+                    try:
+                        _log.info(f"[AI] 主 API 调用 (尝试 {attempt + 1}/{max_retries})")
+                        resp = requests.post(url, json=payload, headers=headers, timeout=timeout)
+                        resp.raise_for_status()
+                        data = resp.json()
+                        break
+                    except requests.exceptions.Timeout as e:
+                        last_error = e
+                        _log.warning(f"[AI] 主 API 超时 (尝试 {attempt + 1}/{max_retries}): {e}")
+                        if attempt < max_retries - 1:
+                            time.sleep(2 ** attempt)
+                        continue
+                    except requests.exceptions.RequestException as e:
+                        last_error = e
+                        _log.error(f"[AI] 主 API 错误 (尝试 {attempt + 1}/{max_retries}): {e}")
+                        if attempt < max_retries - 1:
+                            time.sleep(2 ** attempt)
+                        continue
+                else:
+                    raise last_error or Exception("API 调用失败")
 
             choice = data.get("choices", [{}])[0]
             message = choice.get("message", {})
@@ -1761,6 +1841,13 @@ class WebChatServer:
 
             self.sessions[session_id] = session
             self._save_data('sessions')
+
+            # 创建对应的工作区
+            if WORKSPACE_AVAILABLE:
+                workspace_manager.get_or_create(
+                    session_id, session.get('type', 'web'),
+                    session.get('name', ''))
+
             return jsonify({'id': session_id, 'session': session})
 
         @self.app.route('/api/sessions/<session_id>')
@@ -1903,6 +1990,9 @@ class WebChatServer:
             if session_id in self.sessions:
                 del self.sessions[session_id]
                 self._save_data('sessions')
+                # 删除对应的工作区
+                if WORKSPACE_AVAILABLE:
+                    workspace_manager.delete_workspace(session_id)
                 return jsonify({'success': True})
             return jsonify({'error': 'Session not found'}), 404
 
@@ -1968,6 +2058,68 @@ class WebChatServer:
             self._save_data('sessions')
             
             return jsonify({'success': True})
+
+        # ==================== 工作区 API ====================
+        @self.app.route('/api/sessions/<session_id>/workspace/files', methods=['GET'])
+        def get_workspace_files(session_id):
+            """获取会话工作区的文件列表"""
+            if not WORKSPACE_AVAILABLE:
+                return jsonify({'error': 'Workspace not available'}), 503
+            result = workspace_manager.list_files(session_id)
+            return jsonify(result)
+
+        @self.app.route('/api/sessions/<session_id>/workspace/upload', methods=['POST'])
+        def upload_workspace_file(session_id):
+            """上传文件到会话工作区"""
+            if not WORKSPACE_AVAILABLE:
+                return jsonify({'error': 'Workspace not available'}), 503
+
+            if session_id not in self.sessions:
+                return jsonify({'error': 'Session not found'}), 404
+
+            if 'file' not in request.files:
+                return jsonify({'error': 'No file provided'}), 400
+
+            file = request.files['file']
+            if not file.filename:
+                return jsonify({'error': 'Empty filename'}), 400
+
+            file_data = file.read()
+            session_type = self.sessions[session_id].get('type', 'web')
+            result = workspace_manager.save_uploaded_file(
+                session_id, file_data, file.filename, session_type)
+
+            if result.get('success'):
+                # 通知前端文件已上传
+                self.socketio.emit('workspace_file_uploaded', {
+                    'session_id': session_id,
+                    'filename': result['filename'],
+                    'size': result['size']
+                }, room=session_id)
+
+            return jsonify(result)
+
+        @self.app.route('/api/sessions/<session_id>/workspace/files/<path:filename>', methods=['GET'])
+        def download_workspace_file(session_id, filename):
+            """下载工作区中的文件"""
+            if not WORKSPACE_AVAILABLE:
+                return jsonify({'error': 'Workspace not available'}), 503
+
+            file_path = workspace_manager.get_file_path(session_id, filename)
+            if not file_path:
+                return jsonify({'error': 'File not found'}), 404
+
+            directory = os.path.dirname(file_path)
+            fname = os.path.basename(file_path)
+            return send_from_directory(directory, fname, as_attachment=True)
+
+        @self.app.route('/api/sessions/<session_id>/workspace/files/<path:filename>', methods=['DELETE'])
+        def delete_workspace_file(session_id, filename):
+            """删除工作区中的文件"""
+            if not WORKSPACE_AVAILABLE:
+                return jsonify({'error': 'Workspace not available'}), 503
+            result = workspace_manager.delete_file(session_id, filename)
+            return jsonify(result)
 
         @self.app.route('/api/sessions/<session_id>/chat', methods=['POST'])
         def chat_with_ai(session_id):
@@ -2043,6 +2195,21 @@ class WebChatServer:
                         _log.info(f"Added knowledge to context")
             except Exception as e:
                 _log.error(f"Failed to retrieve knowledge: {e}", exc_info=True)
+
+            # 添加工作区文件信息到上下文
+            if WORKSPACE_AVAILABLE:
+                try:
+                    ws_files = workspace_manager.list_files(session_id)
+                    files = ws_files.get('files', [])
+                    if files:
+                        file_list = ", ".join([f['name'] for f in files])
+                        system_additions.append(
+                            f"【工作区】当前会话工作区中有以下文件: {file_list}\n"
+                            "你可以使用 workspace_read_file、workspace_edit_file、workspace_create_file、"
+                            "workspace_delete_file、workspace_list_files、workspace_send_file 等工具操作这些文件。"
+                        )
+                except Exception as e:
+                    _log.error(f"Failed to get workspace info: {e}")
             
             # 将所有系统内容合并到第一条system消息中（确保AI能正确处理）
             if system_additions and messages_for_ai and messages_for_ai[0].get('role') == 'system':
@@ -2054,22 +2221,29 @@ class WebChatServer:
             # 异步获取 AI 回复
             def get_response():
                 try:
-                    # 导入工具定义
+                    # 导入工具定义（包括工作区工具）
                     try:
-                        from nbot.services.tools import TOOL_DEFINITIONS, execute_tool
+                        from nbot.services.tools import get_all_tool_definitions, execute_tool
                         use_tools = True
-                        available_tools = [tool.get('function', {}).get('name', 'unknown') for tool in TOOL_DEFINITIONS]
-                        _log.info(f"[Tools] 加载了 {len(TOOL_DEFINITIONS)} 个工具: {available_tools}")
+                        all_tools = get_all_tool_definitions(include_workspace=True)
+                        available_tools = [tool.get('function', {}).get('name', 'unknown') for tool in all_tools]
+                        _log.info(f"[Tools] 加载了 {len(all_tools)} 个工具: {available_tools}")
                     except ImportError as e:
                         _log.warning(f"[Tools] 工具模块不可用: {e}")
                         use_tools = False
-                        TOOL_DEFINITIONS = []
+                        all_tools = []
                         available_tools = []
+
+                    # 构建工作区上下文
+                    tool_context = {
+                        'session_id': session_id,
+                        'session_type': session.get('type', 'web')
+                    }
                     
                     # 调用 AI（支持工具调用）
                     if use_tools:
                         _log.info(f"[Tools] 发送请求到 AI，消息数量: {len(messages_for_ai)}")
-                        response = self._get_ai_response_with_tools(messages_for_ai, TOOL_DEFINITIONS)
+                        response = self._get_ai_response_with_tools(messages_for_ai, all_tools)
                         
                         # 检查是否有工具调用
                         if 'tool_calls' in response and response['tool_calls']:
@@ -2109,11 +2283,21 @@ class WebChatServer:
                                 
                                 start_time = time.time()
                                 try:
-                                    tool_result = execute_tool(tool_name, **tool_args)
+                                    tool_result = execute_tool(tool_name, tool_args, context=tool_context)
                                     tool_result_str = json.dumps(tool_result, ensure_ascii=False)
                                     elapsed = (time.time() - start_time) * 1000
                                     _log.info(f"[Tools] ✓ 工具执行成功 ({elapsed:.0f}ms): {tool_name}")
                                     _log.info(f"[Tools] ✓ 结果预览: {tool_result_str[:500]}{'...' if len(tool_result_str) > 500 else ''}")
+
+                                    # 如果是 workspace_send_file，自动发送文件到 Web 端
+                                    if tool_name == 'workspace_send_file' and tool_result.get('action') == 'send_file':
+                                        file_path = tool_result.get('path', '')
+                                        if file_path and session_id in self.sessions:
+                                            adapter = WebMessageAdapter('', '', session_id, self)
+                                            async def _do_send():
+                                                await adapter.send_file(file_path, tool_result.get('filename', ''))
+                                            self.socketio.start_background_task(_do_send)
+
                                 except Exception as te:
                                     tool_result_str = f"工具执行出错: {str(te)}"
                                     _log.error(f"[Tools] ✗ 工具执行失败: {tool_name} - {str(te)}")
@@ -3743,8 +3927,39 @@ class WebChatServer:
         # ==================== Tools API ====================
         @self.app.route('/api/tools')
         def get_tools():
-            """获取所有 Tools 配置"""
-            return jsonify(self.tools_config)
+            """获取所有 Tools 配置（包括内置的工具）"""
+            # 基于 name 去重，最终只保留每个 name 的一个条目
+            seen_names: set = set()
+            unique_tools: List[Dict] = []
+
+            # 先加入 self.tools_config
+            for t in self.tools_config:
+                name = t.get('name', '')
+                if name not in seen_names:
+                    seen_names.add(name)
+                    unique_tools.append(t)
+
+            # 补充内置工具（只补充 self.tools_config 中没有的）
+            try:
+                from nbot.services.tools import TOOL_DEFINITIONS, WORKSPACE_TOOL_DEFINITIONS
+
+                for tool_def in TOOL_DEFINITIONS + WORKSPACE_TOOL_DEFINITIONS:
+                    func = tool_def.get('function', {})
+                    name = func.get('name', '')
+                    if name and name not in seen_names:
+                        unique_tools.append({
+                            'id': f'_builtin_{name}',
+                            'name': name,
+                            'description': func.get('description', ''),
+                            'enabled': True,
+                            'parameters': func.get('parameters', {}),
+                            '_builtin': True
+                        })
+                        seen_names.add(name)
+            except Exception as e:
+                _log.error(f"Failed to load built-in tools: {e}")
+
+            return jsonify(unique_tools)
 
         @self.app.route('/api/tools', methods=['POST'])
         def create_tool():
@@ -3778,6 +3993,8 @@ class WebChatServer:
         @self.app.route('/api/tools/<tool_id>', methods=['DELETE'])
         def delete_tool(tool_id):
             """删除 Tool"""
+            if tool_id.startswith('_builtin_'):
+                return jsonify({'error': 'Cannot delete built-in tool'}), 400
             self.tools_config = [t for t in self.tools_config if t['id'] != tool_id]
             self._save_data('tools')
             return jsonify({'success': True})
@@ -3785,6 +4002,8 @@ class WebChatServer:
         @self.app.route('/api/tools/<tool_id>/toggle', methods=['POST'])
         def toggle_tool(tool_id):
             """切换 Tool 启用状态"""
+            if tool_id.startswith('_builtin_'):
+                return jsonify({'error': 'Cannot toggle built-in tool'}), 400
             for tool in self.tools_config:
                 if tool['id'] == tool_id:
                     tool['enabled'] = not tool.get('enabled', True)
@@ -3992,13 +4211,13 @@ class WebChatServer:
         # 强制转换为列表
         if not attachments or not isinstance(attachments, list):
             attachments = []
-            
+
         session = self.sessions.get(session_id)
         if not session:
             _log.warning(f"Session not found: {session_id}")
             self.log_message('warning', f'Session not found: {session_id}')
             return
-        
+
         # 检查是否有图片附件
         has_image = False
         try:
@@ -4184,9 +4403,16 @@ class WebChatServer:
                 else:
                     # 尝试使用工具调用（多轮）
                     try:
-                        from nbot.services.tools import TOOL_DEFINITIONS, execute_tool
-                        enabled_tools = [t for t in TOOL_DEFINITIONS if t.get('enabled', True)]
+                        from nbot.services.tools import get_enabled_tools, execute_tool
+                        enabled_tools = get_enabled_tools()
                         if enabled_tools:
+                            # 构建工具上下文（包含 session_id）
+                            tool_context = {
+                                'session_id': session_id,
+                                'session_type': session.get('type', 'unknown'),
+                                'user_id': session.get('user_id', session_id)
+                            }
+                            
                             # 构建多轮消息（使用深拷贝）
                             tool_messages = copy.deepcopy(messages_for_ai)
                             if file_contents and tool_messages and tool_messages[-1].get('role') == 'user':
@@ -4196,7 +4422,7 @@ class WebChatServer:
                             final_content = None
                             
                             for iteration in range(max_iterations):
-                                response = self._get_ai_response_with_tools(tool_messages, enabled_tools, use_silicon=True)
+                                response = self._get_ai_response_with_tools(tool_messages, enabled_tools)
                                 
                                 if 'tool_calls' in response and response['tool_calls']:
                                     tool_calls = response['tool_calls']
@@ -4221,7 +4447,23 @@ class WebChatServer:
                                     for tool_call in tool_calls:
                                         tool_name = tool_call['name']
                                         arguments = tool_call['arguments']
-                                        tool_result = execute_tool(tool_name, arguments)
+                                        
+                                        # 工作区工具日志
+                                        if tool_name.startswith('workspace_'):
+                                            _log.info(f"[Workspace] 工具调用: {tool_name}")
+                                            _log.info(f"[Workspace] 参数: {json.dumps(arguments, ensure_ascii=False)}")
+                                        
+                                        # 执行工具，传递 context
+                                        tool_result = execute_tool(tool_name, arguments, context=tool_context)
+                                        
+                                        # 工作区工具日志
+                                        if tool_name.startswith('workspace_'):
+                                            if tool_result.get('success'):
+                                                _log.info(f"[Workspace] ✓ 执行成功: {tool_name}")
+                                                _log.info(f"[Workspace] 结果预览: {str(tool_result)[:300]}")
+                                            else:
+                                                _log.error(f"[Workspace] ✗ 执行失败: {tool_name} - {tool_result.get('error')}")
+                                        
                                         tool_messages.append({
                                             "role": "tool",
                                             "tool_call_id": tool_call.get('id', ''),
@@ -4698,16 +4940,73 @@ def create_web_app(config: Dict[str, Any] = None) -> tuple[Flask, SocketIO]:
             file.seek(0, 2)  # 跳到文件末尾
             file_size = file.tell()
             file.seek(0)  # 重置文件指针
-            
+
             if file_size > MAX_FILE_SIZE:
                 return jsonify({'error': f'文件过大，最大支持 {MAX_FILE_SIZE // (1024*1024)}MB'}), 400
 
-            # 生成唯一文件名
+            session_id = request.form.get('session_id', '')
+            save_to_workspace = False
+
+            # 先读取文件内容（统一读取一次）
+            file_data = file.read()
+
+            # 如果提供了 session_id 且工作区可用，保存到工作区
+            if session_id and WORKSPACE_AVAILABLE:
+                session_type = 'web'
+                # 尝试从 server 实例获取会话类型
+                if session_id in server.sessions:
+                    session_type = server.sessions[session_id].get('type', 'web')
+                else:
+                    # 从磁盘加载会话
+                    try:
+                        sessions_file = os.path.join(server.data_dir, 'sessions.json')
+                        if os.path.exists(sessions_file):
+                            with open(sessions_file, 'r', encoding='utf-8') as f:
+                                disk_sessions = json.load(f)
+                            if session_id in disk_sessions:
+                                session_type = disk_sessions[session_id].get('type', 'web')
+                    except Exception as e:
+                        _log.warning(f"加载会话信息失败: {e}")
+
+                try:
+                    ws_result = workspace_manager.save_uploaded_file(
+                        session_id, file_data, file.filename, session_type)
+                    if ws_result.get('success'):
+                        save_to_workspace = True
+                        _log.info(f"文件已直接保存到工作区: {file.filename}")
+                except Exception as e:
+                    _log.error(f"保存到工作区异常，回退到普通上传: {e}", exc_info=True)
+
+            if save_to_workspace:
+                # 读取文本内容（如果需要）
+                content = None
+                if ws_result.get('mime_type', '').startswith('text/') or \
+                   any(file.filename.lower().endswith(ext) for ext in ['.txt', '.md', '.json', '.xml', '.csv']):
+                    try:
+                        ws_file_path = ws_result.get('path', '')
+                        if ws_file_path and os.path.exists(ws_file_path):
+                            with open(ws_file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                                content = f.read()
+                                if len(content.encode('utf-8')) > MAX_TEXT_CONTENT_SIZE:
+                                    content = content[:MAX_TEXT_CONTENT_SIZE]
+                    except Exception as e:
+                        _log.warning(f"读取工作区文件内容失败: {e}")
+
+                return jsonify({
+                    'success': True,
+                    'filename': ws_result.get('filename', file.filename),
+                    'path': ws_result.get('path', ''),
+                    'size': ws_result.get('size', file_size),
+                    'content': content,
+                    'in_workspace': True
+                })
+
+            # 回退：保存到 static/uploads（需要重置文件指针）
             import hashlib
+            file.seek(0)  # 重置指针，因为前面可能已经读过
             file_ext = os.path.splitext(file.filename)[1]
             unique_name = hashlib.md5(f"{file.filename}{time.time()}".encode()).hexdigest()[:16] + file_ext
 
-            # 保存文件
             upload_dir = os.path.join(server.static_folder, 'uploads')
             os.makedirs(upload_dir, exist_ok=True)
             file_path = os.path.join(upload_dir, unique_name)
@@ -4719,16 +5018,13 @@ def create_web_app(config: Dict[str, Any] = None) -> tuple[Flask, SocketIO]:
                 if file_ext.lower() in ['.txt', '.md', '.json', '.xml', '.csv']:
                     with open(file_path, 'r', encoding='utf-8') as f:
                         content = f.read()
-                        # 限制文本内容大小
                         if len(content.encode('utf-8')) > MAX_TEXT_CONTENT_SIZE:
                             content = content[:MAX_TEXT_CONTENT_SIZE]
                 elif file_ext.lower() in ['.docx']:
-                    # 尝试读取 docx 内容
                     try:
                         import docx
                         doc = docx.Document(file_path)
                         content = '\n'.join([para.text for para in doc.paragraphs])
-                        # 限制文本内容大小
                         if len(content.encode('utf-8')) > MAX_TEXT_CONTENT_SIZE:
                             content = content[:MAX_TEXT_CONTENT_SIZE]
                     except ImportError:
@@ -4742,7 +5038,8 @@ def create_web_app(config: Dict[str, Any] = None) -> tuple[Flask, SocketIO]:
                 'unique_name': unique_name,
                 'path': f'/static/uploads/{unique_name}',
                 'size': os.path.getsize(file_path),
-                'content': content  # 文本内容（如果有）
+                'content': content,
+                'in_workspace': False
             })
 
         except Exception as e:

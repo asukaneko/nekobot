@@ -4,6 +4,7 @@ from nbot.core.heartbeat import HeartbeatCore
 
 from nbot.web.utils.config_loader import load_config
 from nbot.services.chat_service import group_messages, user_messages, chat, generate_today_summary, summarize_group_text
+from nbot.services.chat_service import delete_session_workspace, get_qq_session_id, ensure_workspace, WORKSPACE_AVAILABLE
 from nbot.services.ai import ai_client
 from nbot.services.tts import tts
 import jmcomic,requests,random,configparser,json,yaml,re,os,asyncio,time,smtplib
@@ -1724,6 +1725,8 @@ async def handle_del_message(msg, is_group=True):
             return
         with open("saved_message/group_messages.json", "w", encoding="utf-8") as f:
             json.dump(group_messages, f, ensure_ascii=False, indent=4)
+        # 删除对应的工作区
+        delete_session_workspace(group_id=str(msg.group_id), group_user_id=str(msg.user_id))
         await msg.reply(text="主人要离我而去了吗？呜呜呜……好吧，那我们以后再见喵~")
     else:
         try:
@@ -1733,6 +1736,8 @@ async def handle_del_message(msg, is_group=True):
             return
         with open("saved_message/user_messages.json", "w", encoding="utf-8") as f:
             json.dump(user_messages, f, ensure_ascii=False, indent=4)
+        # 删除对应的工作区
+        delete_session_workspace(user_id=str(msg.user_id))
         await bot.api.post_private_msg(msg.user_id, text="主人要离我而去了吗？呜呜呜……好吧，那我们以后再见喵~")
 
 @register_command("/remind",help_text="/remind <多少小时后> <内容> -> 定时提醒",category = "7")
@@ -3659,6 +3664,98 @@ async def handle_at_all_group(msg, is_group=True):
     else:
         await bot.api.post_private_msg(msg.user_id,text="请在群聊中使用该命令")
 
+# ========== 工作区命令 ==========
+@register_command("/workspace", "/ws", help_text="/workspace 或 /ws -> 查看当前会话工作区文件列表", category="3")
+async def handle_workspace(msg, is_group=True):
+    """查看当前会话的工作区文件列表"""
+    if not WORKSPACE_AVAILABLE:
+        reply = "工作区功能不可用喵~"
+        if is_group:
+            await msg.reply(text=reply)
+        else:
+            await bot.api.post_private_msg(msg.user_id, text=reply)
+        return
+
+    from nbot.core.workspace import workspace_manager
+
+    if is_group:
+        session_id = get_qq_session_id(group_id=str(msg.group_id), group_user_id=str(msg.user_id))
+    else:
+        session_id = get_qq_session_id(user_id=str(msg.user_id))
+
+    result = workspace_manager.list_files(session_id)
+    files = result.get('files', [])
+
+    if not files:
+        reply = "当前工作区没有文件喵~"
+    else:
+        reply = f"工作区文件列表 ({len(files)} 个文件)：\n"
+        for f in files:
+            size_kb = f['size'] / 1024
+            if size_kb < 1:
+                size_str = f"{f['size']} B"
+            elif size_kb < 1024:
+                size_str = f"{size_kb:.1f} KB"
+            else:
+                size_str = f"{size_kb/1024:.2f} MB"
+            reply += f"  {f['name']} ({size_str})\n"
+
+    if is_group:
+        await msg.reply(text=reply)
+    else:
+        await bot.api.post_private_msg(msg.user_id, text=reply)
+
+@register_command("/ws_send", help_text="/ws_send <文件名> -> 发送工作区中的文件", category="3")
+async def handle_ws_send(msg, is_group=True):
+    """发送工作区中的文件给用户"""
+    if not WORKSPACE_AVAILABLE:
+        reply = "工作区功能不可用喵~"
+        if is_group:
+            await msg.reply(text=reply)
+        else:
+            await bot.api.post_private_msg(msg.user_id, text=reply)
+        return
+
+    from nbot.core.workspace import workspace_manager
+
+    # 解析文件名
+    raw = msg.raw_message
+    filename = raw[len("/ws_send"):].strip()
+    if not filename:
+        reply = "请指定文件名喵~ 用法: /ws_send 文件名"
+        if is_group:
+            await msg.reply(text=reply)
+        else:
+            await bot.api.post_private_msg(msg.user_id, text=reply)
+        return
+
+    if is_group:
+        session_id = get_qq_session_id(group_id=str(msg.group_id), group_user_id=str(msg.user_id))
+    else:
+        session_id = get_qq_session_id(user_id=str(msg.user_id))
+
+    file_path = workspace_manager.get_file_path(session_id, filename)
+    if not file_path:
+        reply = f"文件不存在喵~: {filename}"
+        if is_group:
+            await msg.reply(text=reply)
+        else:
+            await bot.api.post_private_msg(msg.user_id, text=reply)
+        return
+
+    file_path = normalize_file_path(file_path)
+    try:
+        if is_group:
+            await bot.api.post_group_file(msg.group_id, file=file_path)
+        else:
+            await bot.api.upload_private_file(msg.user_id, file_path, os.path.basename(file_path))
+    except Exception as e:
+        reply = f"发送文件失败喵~: {e}"
+        if is_group:
+            await msg.reply(text=reply)
+        else:
+            await bot.api.post_private_msg(msg.user_id, text=reply)
+
 #将help命令放在最后
 @register_command("/help","/h",help_text = "/help 或者 /h -> 查看帮助",category = "8")
 async def handle_help(msg, is_group=True):
@@ -3911,6 +4008,40 @@ def is_at_bot(msg) -> bool:
     return False
 
 
+def _save_incoming_files_to_workspace(msg, is_group: bool):
+    """检测消息中的文件并保存到工作区"""
+    if not WORKSPACE_AVAILABLE:
+        return
+    from nbot.core.workspace import workspace_manager
+
+    if is_group:
+        session_id = get_qq_session_id(group_id=str(msg.group_id), group_user_id=str(msg.user_id))
+        session_type = "qq_group"
+    else:
+        session_id = get_qq_session_id(user_id=str(msg.user_id))
+        session_type = "qq_private"
+
+    if not hasattr(msg, 'message') or not msg.message:
+        return
+
+    for elem in msg.message:
+        if not hasattr(elem, 'type'):
+            continue
+        # 处理文件类型消息
+        if elem.type == 'file':
+            file_url = elem.data.get('url', '')
+            file_name = elem.data.get('name', 'unknown_file')
+            if file_url:
+                try:
+                    resp = requests.get(file_url, timeout=30)
+                    if resp.status_code == 200:
+                        workspace_manager.save_uploaded_file(
+                            session_id, resp.content, file_name, session_type)
+                        _log.info(f"文件已保存到工作区: {file_name}")
+                except Exception as e:
+                    _log.warning(f"下载文件到工作区失败: {file_name}, {e}")
+
+
 async def dispatch_message(msg, is_group: bool):
     """分发消息到命令处理器"""
     raw_msg = msg.raw_message
@@ -3937,6 +4068,13 @@ async def dispatch_message(msg, is_group: bool):
         if image_match:
             image_url = image_match.group(1)
             _log.info(f"从 CQ 码解析图片 URL: {image_url[:50]}...")
+
+    # 检测并保存用户上传的文件到工作区
+    if WORKSPACE_AVAILABLE:
+        try:
+            _save_incoming_files_to_workspace(msg, is_group)
+        except Exception as e:
+            _log.warning(f"保存文件到工作区失败: {e}")
 
     # 检查是否是命令
     for commands, handler in command_handlers.items():

@@ -7629,6 +7629,7 @@
                                 // 创建 FormData
                                 const formData = new FormData();
                                 formData.append('file', uploadFile, file.name);
+                                formData.append('session_id', this.currentSession?.id || '');
                                 
                                 // 上传文件
                                 const res = await api.post('/api/upload', formData, {
