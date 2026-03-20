@@ -1,4 +1,4 @@
-import os, json, datetime, time, re
+import os, json, datetime, time, re, copy
 from nbot.services.ai import (
     ai_client, user_messages, group_messages, MAX_HISTORY_LENGTH,
     model, api_key, base_url
@@ -13,6 +13,15 @@ try:
 except ImportError:
     workspace_manager = None
     WORKSPACE_AVAILABLE = False
+
+# 工具调用支持
+try:
+    from nbot.services.tools import TOOL_DEFINITIONS, execute_tool
+    TOOLS_AVAILABLE = True
+except ImportError:
+    TOOL_DEFINITIONS = []
+    execute_tool = None
+    TOOLS_AVAILABLE = False
 
 last_log_entry = {}
 
@@ -59,6 +68,130 @@ def ensure_workspace(user_id=None, group_id=None, group_user_id=None) -> str:
         return ""
     session_type = "qq_private" if user_id else "qq_group"
     return workspace_manager.get_or_create(session_id, session_type)
+
+
+def _get_ai_response_with_tools_qq(messages: list, tools: list, session_id: str = None, max_iterations: int = 10) -> str:
+    """
+    QQ 端带工具调用的 AI 响应获取
+    支持多轮工具调用，直到得到最终回复
+    直接使用 HTTP 请求，不依赖 ai_client.chat_completion
+    """
+    import requests
+    
+    if not TOOLS_AVAILABLE or not tools:
+        # 不支持工具，直接调用 AI
+        response = ai_client.chat_completion(
+            model=model,
+            messages=messages,
+            stream=False
+        )
+        return response.choices[0].message.content
+    
+    # 获取 API 配置
+    url_base = (base_url or "").rstrip("/")
+    if not url_base:
+        raise ValueError("base_url 未配置")
+    if "/chat/completions" in url_base or "/chatcompletion" in url_base:
+        url = url_base
+    else:
+        url = f"{url_base}/chat/completions"
+    
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json"
+    }
+    
+    tool_messages = copy.deepcopy(messages)
+    final_content = ""
+    
+    for iteration in range(max_iterations):
+        try:
+            # 构造请求 payload
+            payload = {
+                "model": model,
+                "messages": tool_messages,
+                "tools": tools,
+                "tool_choice": "auto",
+                "stream": False
+            }
+            
+            # 发送请求
+            resp = requests.post(url, json=payload, headers=headers, timeout=120)
+            resp.raise_for_status()
+            data = resp.json()
+            
+            # 解析响应
+            choice = data.get("choices", [{}])[0]
+            message = choice.get("message", {})
+            
+            # 检查是否有工具调用
+            if message.get("tool_calls"):
+                tool_calls = message["tool_calls"]
+                
+                # 添加 AI 的回复到消息历史
+                tool_messages.append({
+                    "role": "assistant",
+                    "content": message.get("content", ""),
+                    "tool_calls": [
+                        {
+                            "id": tc.get("id"),
+                            "type": "function",
+                            "function": {
+                                "name": tc.get("function", {}).get("name"),
+                                "arguments": tc.get("function", {}).get("arguments")
+                            }
+                        } for tc in tool_calls
+                    ]
+                })
+                
+                # 执行所有工具调用
+                for tool_call in tool_calls:
+                    tool_name = tool_call.get("function", {}).get("name")
+                    try:
+                        arguments = json.loads(tool_call.get("function", {}).get("arguments", "{}"))
+                    except:
+                        arguments = {}
+                    
+                    print(f"[QQ Tools] 执行工具: {tool_name}, 参数: {arguments}")
+                    
+                    # 执行工具，传入 session_id
+                    try:
+                        # 添加 session_id 到参数中
+                        tool_context = {'session_id': session_id} if session_id else {}
+                        tool_result = execute_tool(tool_name, arguments, context=tool_context)
+                        result_content = json.dumps(tool_result, ensure_ascii=False)
+                    except Exception as e:
+                        result_content = json.dumps({"error": str(e)}, ensure_ascii=False)
+                    
+                    # 添加工具结果到消息历史
+                    tool_messages.append({
+                        "role": "tool",
+                        "tool_call_id": tool_call.get("id"),
+                        "content": result_content
+                    })
+                    
+                    print(f"[QQ Tools] 工具结果: {result_content[:200]}...")
+            else:
+                # 没有工具调用，得到最终回复
+                final_content = message.get("content", "")
+                break
+                
+        except Exception as e:
+            print(f"[QQ Tools] 工具调用出错: {e}")
+            # 出错时返回最后一次 AI 回复或错误信息
+            if tool_messages and tool_messages[-1].get("role") == "assistant":
+                final_content = tool_messages[-1].get("content", "")
+            if not final_content:
+                final_content = f"处理出错: {str(e)}"
+            break
+    
+    # 如果超过最大迭代次数，使用最后一条消息
+    if not final_content and tool_messages:
+        last_msg = tool_messages[-1]
+        if last_msg.get("role") == "assistant":
+            final_content = last_msg.get("content", "处理完成")
+    
+    return final_content
 
 
 def delete_session_workspace(user_id=None, group_id=None, group_user_id=None) -> bool:
@@ -153,10 +286,6 @@ def chat_json(content: str) -> str:
     return ai_client.analyze_json(content)
 
 
-def judge_search(content: str) -> bool:
-    return ai_client.should_search(content)
-
-
 def judge_reply(content: str) -> float:
     return ai_client.should_reply(content)
 
@@ -203,12 +332,9 @@ def chat(content: str = "", user_id=None, group_id=None, group_user_id=None,
     else:
         pre_text = ""
 
-    if content.startswith("搜索") or ("搜索" in content) or judge_search(content):
-        search_status = 1
-        search_res = online_search(content)
-    else:
-        search_status = 0
-        search_res = ""
+    # 搜索功能已移除，使用工具调用替代
+    search_status = 0
+    search_res = ""
 
     if image:
         print(f"[图片识别] chat 函数收到图片请求, URL: {url}")
@@ -246,27 +372,42 @@ def chat(content: str = "", user_id=None, group_id=None, group_user_id=None,
     if len(messages) > MAX_HISTORY_LENGTH:
         messages = [messages[0]] + messages[-MAX_HISTORY_LENGTH:]
 
-    response = ai_client.chat_completion(
-        model=model,
-        messages=messages,
-        stream=False
-    )
-    assistant_response = response.choices[0].message.content
+    # 获取工作区上下文（用于工具调用）
+    workspace_context = get_workspace_context(user_id, group_id, group_user_id)
+    
+    # 使用带工具调用的 AI 响应获取
+    if TOOLS_AVAILABLE and workspace_context.get('session_id'):
+        # 准备工具上下文
+        tool_context = {
+            'session_id': workspace_context['session_id'],
+            'user_id': user_id,
+            'group_id': group_id,
+            'source': 'qq'
+        }
+        
+        # 执行带工具的 AI 调用
+        assistant_response = _get_ai_response_with_tools_qq(
+            messages, 
+            TOOL_DEFINITIONS,
+            session_id=workspace_context.get('session_id'),
+            max_iterations=10
+        )
+    else:
+        # 普通 AI 调用（不支持工具）
+        response = ai_client.chat_completion(
+            model=model,
+            messages=messages,
+            stream=False
+        )
+        assistant_response = response.choices[0].message.content
 
     if not assistant_response:
         print("[DEBUG] API返回内容为空")
 
-    # 获取真实的 token 使用量
-    usage = response.usage if hasattr(response, 'usage') else None
-    if usage:
-        prompt_tokens = usage.prompt_tokens
-        completion_tokens = usage.completion_tokens
-        total_tokens = usage.total_tokens
-    else:
-        # 如果没有 usage 信息，使用估算
-        prompt_tokens = len(str(messages))
-        completion_tokens = len(assistant_response)
-        total_tokens = prompt_tokens + completion_tokens
+    # 获取 token 使用量（工具调用模式下使用估算）
+    prompt_tokens = len(str(messages))
+    completion_tokens = len(assistant_response)
+    total_tokens = prompt_tokens + completion_tokens
 
     # 更新 token 统计（使用真实数据）
     _update_token_stats(user_id, group_id, prompt_tokens, completion_tokens, total_tokens)

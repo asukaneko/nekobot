@@ -730,32 +730,45 @@ def _execute_workspace_tool(tool_name: str, arguments: Dict[str, Any],
     session_type = context.get('session_type', 'unknown')
 
     try:
+        # 兼容 file_path 和 filename 两种参数名
+        filename = arguments.get('filename') or arguments.get('file_path')
+        
         if tool_name == "workspace_create_file":
+            if not filename:
+                return {"success": False, "error": "缺少文件名参数 (filename 或 file_path)"}
             return workspace_manager.create_file(
-                session_id, arguments['filename'], arguments['content'], session_type)
+                session_id, filename, arguments['content'], session_type)
 
         elif tool_name == "workspace_read_file":
-            return workspace_manager.read_file(session_id, arguments['filename'])
+            if not filename:
+                return {"success": False, "error": "缺少文件名参数 (filename 或 file_path)"}
+            return workspace_manager.read_file(session_id, filename)
 
         elif tool_name == "workspace_edit_file":
+            if not filename:
+                return {"success": False, "error": "缺少文件名参数 (filename 或 file_path)"}
             return workspace_manager.edit_file(
-                session_id, arguments['filename'],
+                session_id, filename,
                 arguments['old_content'], arguments['new_content'])
 
         elif tool_name == "workspace_delete_file":
-            return workspace_manager.delete_file(session_id, arguments['filename'])
+            if not filename:
+                return {"success": False, "error": "缺少文件名参数 (filename 或 file_path)"}
+            return workspace_manager.delete_file(session_id, filename)
 
         elif tool_name == "workspace_list_files":
             return workspace_manager.list_files(session_id)
 
         elif tool_name == "workspace_send_file":
+            if not filename:
+                return {"success": False, "error": "缺少文件名参数 (filename 或 file_path)"}
             # 返回文件路径，由调用方负责实际发送
-            file_path = workspace_manager.get_file_path(session_id, arguments['filename'])
+            file_path = workspace_manager.get_file_path(session_id, filename)
             if file_path:
                 return {
                     "success": True,
                     "action": "send_file",
-                    "filename": arguments['filename'],
+                    "filename": filename,
                     "path": file_path,
                     "size": os.path.getsize(file_path)
                 }

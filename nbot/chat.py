@@ -24,7 +24,6 @@ from nbot.services.chat_service import (
     chat_video,
     chat_webpage,
     chat_json,
-    judge_search,
     judge_reply,
     chat,
     record_assistant_message,

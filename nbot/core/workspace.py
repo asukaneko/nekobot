@@ -87,9 +87,28 @@ class WorkspaceManager:
             return ws_path
 
         # 创建新工作区
-        # 用 session_id 前8位 + 类型 作为文件夹名，保证可读性
-        short_id = session_id.replace('-', '')[:8]
-        folder_name = f"{session_type}_{short_id}"
+        # 根据 session_type 生成更有区分度的文件夹名
+        if session_type.startswith('qq_'):
+            # QQ 会话：提取 QQ 号作为标识
+            # session_id 格式: qq_private_{qq_id} 或 qq_group_{group_id} 或 qq_group_{group_id}_{user_id}
+            parts = session_id.split('_')
+            if len(parts) >= 3:
+                # 提取最后一部分（QQ号或群号）
+                qq_id = parts[-1]
+                folder_name = f"{session_type}_{qq_id}"
+            else:
+                # 备用方案：使用 hash
+                import hashlib
+                short_hash = hashlib.md5(session_id.encode()).hexdigest()[:8]
+                folder_name = f"{session_type}_{short_hash}"
+        else:
+            # Web 会话：使用 session_id 前8位
+            short_id = session_id.replace('-', '')[:8]
+            folder_name = f"{session_type}_{short_id}"
+        
+        # 清理文件夹名中的非法字符
+        folder_name = folder_name.replace(':', '_').replace('/', '_').replace('\\', '_')
+        
         ws_path = os.path.join(self.workspaces_dir, folder_name)
         os.makedirs(ws_path, exist_ok=True)
 
