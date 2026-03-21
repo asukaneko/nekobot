@@ -5640,18 +5640,18 @@
         </div>
 
         <!-- 自定义确认对话框 -->
-        <div v-if="showConfirmDialog" class="modal-overlay" @click.self="cancelConfirm">
+        <div v-if="showConfirmDialog" class="modal-overlay" @click.self="cancelDialogConfirm">
             <div class="modal" style="max-width: 400px;">
                 <div class="modal-header">
                     <span class="modal-title">{{ confirmDialogConfig.title }}</span>
-                    <button class="modal-close" @click="cancelConfirm">&times;</button>
+                    <button class="modal-close" @click="cancelDialogConfirm">&times;</button>
                 </div>
                 <div class="modal-body">
                     <p style="font-size: 16px; line-height: 1.6;">{{ confirmDialogConfig.message }}</p>
                 </div>
                 <div class="modal-footer" style="justify-content: flex-end; gap: 12px;">
-                    <button class="btn" @click="cancelConfirm">取消</button>
-                    <button class="btn btn-primary" @click="confirmAction">确认</button>
+                    <button class="btn" @click="cancelDialogConfirm">取消</button>
+                    <button class="btn btn-primary" @click="confirmDialogAction">确认</button>
                 </div>
             </div>
         </div>
@@ -9024,6 +9024,21 @@
                     this.showConfirmModal = false;
                 },
                 
+                // 旧版确认对话框方法（用于兼容）
+                confirmDialogAction() {
+                    if (this.confirmDialogConfig.onConfirm) {
+                        this.confirmDialogConfig.onConfirm();
+                    }
+                    this.showConfirmDialog = false;
+                },
+                
+                cancelDialogConfirm() {
+                    if (this.confirmDialogConfig.onCancel) {
+                        this.confirmDialogConfig.onCancel();
+                    }
+                    this.showConfirmDialog = false;
+                },
+                
                 // Workflow Functions
                 getTriggerIcon(trigger) {
                     const type = this.workflowTriggerTypes.find(t => t.value === trigger);
@@ -9247,20 +9262,6 @@
                         onCancel: config.onCancel || null
                     };
                     this.showConfirmDialog = true;
-                },
-
-                confirmAction() {
-                    if (this.confirmDialogConfig.onConfirm) {
-                        this.confirmDialogConfig.onConfirm();
-                    }
-                    this.showConfirmDialog = false;
-                },
-
-                cancelConfirm() {
-                    if (this.confirmDialogConfig.onCancel) {
-                        this.confirmDialogConfig.onCancel();
-                    }
-                    this.showConfirmDialog = false;
                 },
 
                 // 自定义人格预设方法

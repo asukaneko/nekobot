@@ -2726,8 +2726,12 @@ def search_wenku8_books(search_term: str, search_type: str) -> list:
         return []
     response.encoding = "gbk"
     content = response.text
-    # 检查是否需要登录
-    if "出现错误" in content or "登录" in content:
+    # 检查HTTP状态码
+    if response.status_code == 403:
+        _log.warning("搜索返回403错误，Cookie可能已失效或被反爬虫机制拦截")
+        return []
+    # 检查是否需要登录（根据特定错误提示，排除已登录状态下的"退出登录"字样）
+    if "出现错误" in content or ("登录" in content and "退出登录" not in content):
         _log.warning("搜索需要登录，Cookie可能已失效")
         return []
     pattern = r'<div style="width:373px;height:136px;float:left;margin:5px 0px 5px 5px;">(.*?)</div>\s*</div>'
@@ -3278,12 +3282,23 @@ async def handle_hotnovel(msg, is_group=True):
             response.encoding = 'gbk'
             content = response.text
             
+            # 检查HTTP状态码
+            if response.status_code == 403:
+                _log.warning("热门榜单返回403错误，Cookie可能已失效或被反爬虫机制拦截")
+                reply = "❌ 榜单获取失败，Cookie 可能已失效喵！\n请管理员使用 `/set_wenku_cookie <新Cookie>` 命令更新 Cookie 喵~"
+                if is_group:
+                    await msg.reply(text=reply)
+                else:
+                    await bot.api.post_private_msg(msg.user_id, text=reply)
+                return
+            
             pattern = r'<div style="width:373px;height:136px;float:left;margin:5px 0px 5px 5px;">(.*?)</div>\s*</div>'
             page_matches = re.findall(pattern, content, re.DOTALL)
             
             if not page_matches:
                 if current_page == 1:
-                    if "出现错误" in content or "登录" in content or "login" in content.lower():
+                    # 检查是否需要登录（根据特定错误提示，排除已登录状态下的"退出登录"字样）
+                    if "出现错误" in content or (("登录" in content and "退出登录" not in content) or "login" in content.lower()):
                         reply = "❌ 榜单获取失败，Cookie 可能已失效喵！\n请管理员使用 `/set_wenku_cookie <新Cookie>` 命令更新 Cookie 喵~"
                     else:
                         reply = "没找到热门榜单喵，可能网页结构变了喵~"

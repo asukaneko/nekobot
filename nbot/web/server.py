@@ -302,20 +302,39 @@ class WebMessageAdapter:
                     return await adapter.send_file(file, name)
                 return True
             
+            async def post_private_file(self, user_id, file=None, name=None, **kwargs):
+                """模拟发送私聊文件（另一种方法名）"""
+                if file:
+                    file_name = name if name else os.path.basename(file)
+                    return await adapter.send_file(file, file_name)
+                return True
+            
             async def post_private_msg(self, user_id, text=None, rtf=None, **kwargs):
                 """模拟发送私聊消息"""
-                if rtf:
+                # 处理 dice 和 rps 参数
+                if kwargs.get('dice'):
+                    import random
+                    text = f"🎲 掷出了 {random.randint(1, 6)} 点"
+                elif kwargs.get('rps'):
+                    import random
+                    choices = ['✊ 石头', '✌️ 剪刀', '🖐️ 布']
+                    text = f"猜拳结果: {random.choice(choices)}"
+                elif rtf:
                     # 处理 MessageChain
                     content = str(rtf) if hasattr(rtf, '__str__') else str(rtf)
-                elif text:
-                    content = text
-                else:
-                    content = ""
-                return await adapter.reply(text=content)
+                    text = content
+                elif not text:
+                    text = ""
+                return await adapter.reply(text=text)
             
             async def post_group_msg(self, group_id, text=None, rtf=None, **kwargs):
                 """模拟发送群消息"""
-                return await self.post_private_msg(None, text=text, rtf=rtf)
+                return await self.post_private_msg(None, text=text, rtf=rtf, **kwargs)
+            
+            async def set_friend_add_request(self, flag, approve=True, remark=None, **kwargs):
+                """模拟处理好友添加请求"""
+                _log.info(f"模拟处理好友请求: flag={flag}, approve={approve}, remark={remark}")
+                return True
         
         return MockAPI()
     
@@ -4879,6 +4898,7 @@ class WebChatServer:
                     def run_command():
                         import asyncio
                         # 临时替换全局的 bot 变量，让命令中的 bot.api 调用生效
+                        original_bot = None
                         try:
                             import nbot.commands as cmd_module
                             original_bot = getattr(cmd_module, 'bot', None)
