@@ -3109,6 +3109,148 @@
         .preview-card strong {
             color: var(--accent-primary);
         }
+
+        /* API Documentation Styles */
+        .api-doc-content {
+            display: flex;
+            gap: 20px;
+            min-height: 500px;
+        }
+
+        .api-doc-nav {
+            width: 180px;
+            flex-shrink: 0;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .api-doc-nav-btn {
+            padding: 12px 16px;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            color: var(--text-secondary);
+            cursor: pointer;
+            text-align: left;
+            transition: all 0.2s;
+            font-size: 14px;
+        }
+
+        .api-doc-nav-btn:hover {
+            background: var(--bg-tertiary);
+            color: var(--text-primary);
+        }
+
+        .api-doc-nav-btn.active {
+            background: var(--accent-primary);
+            color: white;
+            border-color: var(--accent-primary);
+        }
+
+        .api-doc-list {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+
+        .api-doc-item {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            overflow: hidden;
+        }
+
+        .api-doc-header {
+            padding: 16px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            cursor: pointer;
+        }
+
+        .api-doc-header:hover {
+            background: var(--bg-tertiary);
+        }
+
+        .api-method {
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: bold;
+            font-family: monospace;
+        }
+
+        .method-get { background: #61affe; color: white; }
+        .method-post { background: #49cc90; color: white; }
+        .method-put { background: #fca130; color: white; }
+        .method-delete { background: #f93e3e; color: white; }
+
+        .api-path {
+            font-family: monospace;
+            font-size: 14px;
+            color: var(--accent-primary);
+        }
+
+        .api-desc {
+            color: var(--text-secondary);
+            font-size: 14px;
+        }
+
+        .api-doc-details {
+            padding: 0 16px 16px;
+            border-top: 1px solid var(--border-color);
+            margin-top: 8px;
+        }
+
+        .api-doc-section {
+            margin-top: 12px;
+        }
+
+        .api-doc-section strong {
+            display: block;
+            margin-bottom: 8px;
+            color: var(--text-secondary);
+            font-size: 13px;
+        }
+
+        .api-doc-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 13px;
+        }
+
+        .api-doc-table th,
+        .api-doc-table td {
+            padding: 8px 12px;
+            border: 1px solid var(--border-color);
+            text-align: left;
+        }
+
+        .api-doc-table th {
+            background: var(--bg-tertiary);
+            font-weight: 600;
+        }
+
+        .param-type {
+            padding: 2px 6px;
+            background: var(--bg-tertiary);
+            border-radius: 4px;
+            font-size: 12px;
+            font-family: monospace;
+        }
+
+        .api-doc-code {
+            background: var(--bg-tertiary);
+            padding: 12px;
+            border-radius: 8px;
+            font-family: monospace;
+            font-size: 12px;
+            overflow-x: auto;
+            white-space: pre-wrap;
+            word-break: break-all;
+        }
     </style>
 </head>
 <body>
@@ -3788,7 +3930,7 @@
                                 </div>
                                 
                                 <!-- 滚动到底部按钮 -->
-                                <button v-if="showScrollToBottom" class="scroll-to-bottom-btn" @click="scrollToBottom(true)" title="滚动到底部">
+                                <button v-if="showScrollToBottom" class="scroll-to-bottom-btn" @click="scrollToBottom(true, false)" title="滚动到底部">
                                     <i class="fas fa-arrow-down"></i>
                                 </button>
                             </div>
@@ -5380,6 +5522,12 @@
                                         <button class="btn btn-secondary" @click="reloadConfig">
                                             <i class="fas fa-redo"></i> 重载配置
                                         </button>
+                                        <button class="btn btn-primary" @click="showApiDocModal = true">
+                                            <i class="fas fa-book"></i> API 文档
+                                        </button>
+                                        <button class="btn btn-secondary" @click="testWebSocket">
+                                            <i class="fas fa-plug"></i> 测试 WebSocket
+                                        </button>
                                     </div>
                                 </div>
                             </div>
@@ -5387,6 +5535,64 @@
                     </div>
                 </div>
             </main>
+        </div>
+
+        <!-- API Documentation Modal -->
+        <div v-if="showApiDocModal" class="modal-overlay" @click.self="showApiDocModal = false">
+            <div class="modal" style="max-width: 900px; max-height: 90vh;">
+                <div class="modal-header">
+                    <span class="modal-title"><i class="fas fa-book"></i> API 文档</span>
+                    <button class="modal-close" @click="showApiDocModal = false">&times;</button>
+                </div>
+                <div class="modal-body" style="max-height: 80vh; overflow-y: auto;">
+                    <div class="api-doc-content">
+                        <!-- API 分类导航 -->
+                        <div class="api-doc-nav">
+                            <button 
+                                v-for="cat in apiDocCategories" 
+                                :key="cat.id"
+                                class="api-doc-nav-btn"
+                                :class="{ active: currentApiCategory === cat.id }"
+                                @click="currentApiCategory = cat.id"
+                            >
+                                <i :class="cat.icon"></i> {{ cat.name }}
+                            </button>
+                        </div>
+                        
+                        <!-- API 列表 -->
+                        <div class="api-doc-list">
+                            <div v-for="api in filteredApiDocs" :key="api.path + api.method" class="api-doc-item">
+                                <div class="api-doc-header">
+                                    <span class="api-method" :class="'method-' + api.method.toLowerCase()">{{ api.method }}</span>
+                                    <span class="api-path">{{ api.path }}</span>
+                                    <span class="api-desc">{{ api.description }}</span>
+                                </div>
+                                <div v-if="api.params || api.body" class="api-doc-details">
+                                    <div v-if="api.params" class="api-doc-section">
+                                        <strong>参数:</strong>
+                                        <table class="api-doc-table">
+                                            <tr><th>名称</th><th>类型</th><th>说明</th></tr>
+                                            <tr v-for="param in api.params" :key="param.name">
+                                                <td><code>{{ param.name }}</code></td>
+                                                <td><span class="param-type">{{ param.type }}</span></td>
+                                                <td>{{ param.desc }}</td>
+                                            </tr>
+                                        </table>
+                                    </div>
+                                    <div v-if="api.body" class="api-doc-section">
+                                        <strong>请求体示例:</strong>
+                                        <pre class="api-doc-code">{{ api.body }}</pre>
+                                    </div>
+                                    <div v-if="api.response" class="api-doc-section">
+                                        <strong>响应示例:</strong>
+                                        <pre class="api-doc-code">{{ api.response }}</pre>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
         </div>
 
         <!-- Theme Settings Panel -->
@@ -6607,6 +6813,72 @@
                     debugWsLogs: [],
                     systemInfo: null,
                     
+                    // API Documentation
+                    showApiDocModal: false,
+                    currentApiCategory: 'sessions',
+                    apiDocCategories: [
+                        { id: 'sessions', name: '会话管理', icon: 'fas fa-comments' },
+                        { id: 'memory', name: '记忆管理', icon: 'fas fa-brain' },
+                        { id: 'knowledge', name: '知识库', icon: 'fas fa-book' },
+                        { id: 'workflow', name: '工作流', icon: 'fas fa-project-diagram' },
+                        { id: 'stats', name: '统计信息', icon: 'fas fa-chart-bar' },
+                        { id: 'settings', name: '系统设置', icon: 'fas fa-cog' }
+                    ],
+                    apiDocData: {
+                        sessions: [
+                            { method: 'GET', path: '/api/sessions', description: '获取所有会话列表', params: [
+                                { name: 'type', type: 'string', desc: '筛选类型: web/qq/all' }
+                            ], response: '{"sessions": [...], "web": [...], "qq_private": [...], "qq_group": [...]}' },
+                            { method: 'GET', path: '/api/session/:id', description: '获取指定会话详情', params: [
+                                { name: 'id', type: 'string', desc: '会话ID' }
+                            ]},
+                            { method: 'POST', path: '/api/session', description: '创建新会话', body: '{"name": "会话名称", "type": "web"}', response: '{"id": "xxx", "name": "会话名称"}' },
+                            { method: 'PUT', path: '/api/session/:id', description: '更新会话设置', params: [
+                                { name: 'id', type: 'string', desc: '会话ID' }
+                            ], body: '{"name": "新名称", "ai_config": {...}}' },
+                            { method: 'DELETE', path: '/api/session/:id', description: '删除会话', params: [
+                                { name: 'id', type: 'string', desc: '会话ID' }
+                            ]}
+                        ],
+                        memory: [
+                            { method: 'GET', path: '/api/memory', description: '获取记忆列表', params: [
+                                { name: 'type', type: 'string', desc: '记忆类型: long/short/all' },
+                                { name: 'target_id', type: 'string', desc: '关联目标ID' }
+                            ], response: '{"memories": [...], "long_term": [...], "short_term": [...]}' },
+                            { method: 'POST', path: '/api/memory', description: '添加新记忆', body: '{"key": "标题", "value": "内容", "type": "long", "target_id": "用户ID"}', response: '{"success": true}' },
+                            { method: 'PUT', path: '/api/memory/:id', description: '更新记忆', body: '{"key": "新标题", "value": "新内容"}' },
+                            { method: 'DELETE', path: '/api/memory/:id', description: '删除记忆' },
+                            { method: 'DELETE', path: '/api/memory', description: '清空所有记忆', params: [
+                                { name: 'target_id', type: 'string', desc: '可选，指定目标ID' }
+                            ]}
+                        ],
+                        knowledge: [
+                            { method: 'GET', path: '/api/knowledge', description: '获取知识库文档列表' },
+                            { method: 'POST', path: '/api/knowledge', description: '添加知识文档', body: '{"title": "标题", "content": "内容", "category": "分类"}' },
+                            { method: 'DELETE', path: '/api/knowledge/:id', description: '删除知识文档' },
+                            { method: 'POST', path: '/api/knowledge/search', description: '搜索知识库', body: '{"query": "搜索关键词"}' }
+                        ],
+                        workflow: [
+                            { method: 'GET', path: '/api/workflows', description: '获取工作流列表' },
+                            { method: 'POST', path: '/api/workflow', description: '创建工作流', body: '{"name": "工作流名称", "trigger": "关键词触发", "steps": [...]}' },
+                            { method: 'PUT', path: '/api/workflow/:id', description: '更新工作流' },
+                            { method: 'DELETE', path: '/api/workflow/:id', description: '删除工作流' },
+                            { method: 'POST', path: '/api/workflow/:id/execute', description: '手动执行工作流', body: '{"session_id": "xxx", "params": {...}}' }
+                        ],
+                        stats: [
+                            { method: 'GET', path: '/api/stats', description: '获取系统统计信息', response: '{"today_messages": 10, "total_messages": 100, "active_sessions": 5, "token_usage": 50000}' },
+                            { method: 'GET', path: '/api/stats/platforms', description: '获取各平台消息统计' },
+                            { method: 'GET', path: '/api/stats/tokens', description: '获取 Token 使用统计' }
+                        ],
+                        settings: [
+                            { method: 'GET', path: '/api/config', description: '获取系统配置' },
+                            { method: 'PUT', path: '/api/config', description: '更新系统配置', body: '{"key": "配置键", "value": "配置值"}' },
+                            { method: 'GET', path: '/api/personality', description: '获取人格配置' },
+                            { method: 'PUT', path: '/api/personality', description: '更新人格配置', body: '{"name": "角色名", "description": "角色描述"}' },
+                            { method: 'GET', path: '/api/system/reload', description: '重载系统配置' }
+                        ]
+                    },
+                    
                     // Socket Connection
                     socketConnected: false
                 }
@@ -6629,6 +6901,10 @@
                         debug: '调试台'
                     };
                     return titles[this.currentPage] || 'NekoBot';
+                },
+
+                filteredApiDocs() {
+                    return this.apiDocData[this.currentApiCategory] || [];
                 },
 
                 availableModels() {
@@ -9620,6 +9896,25 @@
                     }
                 },
 
+                async testWebSocket() {
+                    this.showConfirm({
+                        title: 'WebSocket 连接测试',
+                        message: '确定要测试 WebSocket 连接吗？这将发送一个测试事件。',
+                        confirmText: '测试',
+                        icon: 'fa-plug',
+                        iconColor: 'var(--info)',
+                        action: async () => {
+                            try {
+                                // 发送一个 ping 事件测试连接
+                                socket.emit('ping', { timestamp: Date.now() });
+                                this.showToast('WebSocket 测试事件已发送，请查看控制台', 'success');
+                            } catch (e) {
+                                this.showToast('WebSocket 测试失败', 'error');
+                            }
+                        }
+                    });
+                },
+
                 // Socket.io
                 initSocket() {
                     socket.on('connect', () => {
@@ -9748,15 +10043,15 @@
                     });
                 },
                 
-                scrollToBottom(force = false) {
+                scrollToBottom(force = false, instant = true) {
                     const container = this.$refs.messagesContainer;
                     if (container) {
                         // 强制滚动或用户没有手动滚动时才滚动
                         if (force || !this.isUserScrolling) {
-                            // 使用平滑滚动动画
+                            // 加载消息时立即滚动，按钮点击使用平滑滚动
                             container.scrollTo({
                                 top: container.scrollHeight,
-                                behavior: 'smooth'
+                                behavior: instant ? 'instant' : 'smooth'
                             });
                         }
                     }

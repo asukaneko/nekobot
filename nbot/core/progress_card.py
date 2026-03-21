@@ -22,6 +22,8 @@ class StepType(Enum):
     FILE_DONE = "file_done"
     UPLOAD = "upload"
     UPLOAD_DONE = "upload_done"
+    KNOWLEDGE = "knowledge"
+    KNOWLEDGE_DONE = "knowledge_done"
     DONE = "done"
 
 
@@ -36,6 +38,8 @@ STEP_CONFIG = {
     StepType.FILE_DONE: {'type': 'file', 'icon': '📄', 'status': 'done'},
     StepType.UPLOAD: {'type': 'upload', 'icon': '📤', 'status': 'running'},
     StepType.UPLOAD_DONE: {'type': 'upload', 'icon': '📤', 'status': 'done'},
+    StepType.KNOWLEDGE: {'type': 'knowledge', 'icon': '📚', 'status': 'running'},
+    StepType.KNOWLEDGE_DONE: {'type': 'knowledge', 'icon': '📚', 'status': 'done'},
     StepType.DONE: {'type': 'done', 'icon': '✅', 'status': 'done'},
 }
 

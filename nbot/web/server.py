@@ -6,6 +6,7 @@ import json
 import uuid
 import logging
 import os
+import re
 import threading
 import time
 from datetime import datetime, timedelta
@@ -43,13 +44,22 @@ try:
 except ImportError:
     APSCHEDULER_AVAILABLE = False
 
-# 导入 Memory 系统
+# 导入 Memory 系统（已废弃，使用 prompt_manager 的 memory）
 try:
     from nbot.core.memory import MemoryStore, MemoryType
     MEMORY_AVAILABLE = True
 except ImportError:
     MEMORY_AVAILABLE = False
     _log.warning("Memory system not available")
+
+# 导入知识库管理器
+try:
+    from nbot.core.knowledge import get_knowledge_manager
+    KNOWLEDGE_MANAGER_AVAILABLE = True
+except ImportError:
+    get_knowledge_manager = None
+    KNOWLEDGE_MANAGER_AVAILABLE = False
+    _log.warning("Knowledge manager not available")
 
 # 导入统一消息模块
 try:
@@ -178,7 +188,7 @@ class WebMessageAdapter:
 
     def _retrieve_knowledge(self, query: str, max_docs: int = 3) -> str:
         """
-        从知识库中检索相关内容
+        从知识库中检索相关内容（使用 knowledge_manager 向量检索 + 关键词匹配）
         
         Args:
             query: 用户查询文本
@@ -187,72 +197,93 @@ class WebMessageAdapter:
         Returns:
             格式化的知识内容字符串
         """
-        if not self.knowledge_docs:
+        if not KNOWLEDGE_MANAGER_AVAILABLE:
             return ""
         
         if not query:
             return ""
         
-        # 简单的关键词匹配检索
-        query_lower = query.lower()
-        query_words = set(query_lower.replace('?', '').replace('！', '').replace('。', '').split())
-        
-        scored_docs = []
-        for doc in self.knowledge_docs:
-            content = doc.get('content', '')
-            name = doc.get('name', '')
+        try:
+            km = get_knowledge_manager()
+            if not km:
+                return ""
             
-            if not content:
-                continue
+            # 方法1: 向量检索
+            results = km.search(query, base_id=None, top_k=max_docs)
             
-            # 计算相关性得分
-            content_lower = content.lower()
-            name_lower = name.lower()
+            # 方法2: 关键词匹配（当向量检索无结果时使用）
+            if not results or all(sim < 0.1 for _, sim, _ in results):
+                _log.info("[Knowledge] 向量检索无结果，尝试关键词匹配...")
+                results = self._keyword_search(km, query, max_docs)
             
-            score = 0
+            if not results:
+                return ""
             
-            # 检查名称匹配
-            for word in query_words:
-                if word in name_lower:
-                    score += 3  # 名称匹配权重更高
+            knowledge_parts = ["【知识库参考】"]
+            seen_titles = set()
             
-            # 检查内容匹配
-            for word in query_words:
-                if word in content_lower:
-                    score += 1
+            for doc, similarity, chunk_content in results:
+                if doc.title in seen_titles:
+                    continue
+                seen_titles.add(doc.title)
+                
+                content = chunk_content
+                if len(content) > 500:
+                    content = content[:500] + "..."
+                
+                knowledge_parts.append(f"\n📄 {doc.title}\n{content}")
             
-            # 检查用户消息中是否包含文档名称的关键词
-            for word in name_lower.split():
-                if len(word) > 2 and word in query_lower:
-                    score += 2
-            
-            if score > 0:
-                scored_docs.append((score, doc))
-        
-        # 按得分排序
-        scored_docs.sort(key=lambda x: x[0], reverse=True)
-        
-        if not scored_docs:
+            if seen_titles:
+                _log.info(f"[Knowledge] 检索到 {len(seen_titles)} 条相关内容")
+                return "\n".join(knowledge_parts)
             return ""
-        
-        # 获取前 max_docs 个文档
-        selected_docs = scored_docs[:max_docs]
-        
-        knowledge_parts = ["【知识库参考】"]
-        for score, doc in selected_docs:
-            name = doc.get('name', '未命名')
-            content = doc.get('content', '')
             
-            # 截取相关内容片段（避免过长）
-            if len(content) > 500:
-                # 尝试找到关键词所在位置，截取附近内容
-                content = content[:500] + "..."
+        except Exception as e:
+            _log.error(f"[Knowledge] 检索失败: {e}")
+            return ""
+    
+    def _keyword_search(self, km, query: str, max_docs: int = 3) -> list:
+        """关键词匹配搜索"""
+        try:
+            bases = km.list_knowledge_bases()
+            if not bases:
+                return []
             
-            knowledge_parts.append(f"\n【{name}】\n{content}")
-        
-        _log.info(f"[Knowledge] 检索到 {len(selected_docs)} 个相关文档，得分: {[s[0] for s in selected_docs]}")
-        
-        return "\n".join(knowledge_parts)
+            query_lower = query.lower()
+            query_words = set(re.findall(r'[\w]+', query_lower))
+            
+            all_docs = []
+            for kb in bases:
+                for doc_id in kb.documents:
+                    doc = km.store.load_document(doc_id)
+                    if doc:
+                        all_docs.append((doc, doc.content))
+            
+            if not all_docs:
+                return []
+            
+            scored = []
+            for doc, content in all_docs:
+                content_lower = content.lower()
+                title_lower = doc.title.lower()
+                
+                score = 0
+                for word in query_words:
+                    if word in title_lower:
+                        score += 3
+                    if word in content_lower:
+                        score += 1
+                
+                if score > 0:
+                    scored.append((doc, score, content))
+            
+            scored.sort(key=lambda x: x[1], reverse=True)
+            
+            return [(doc, float(score), content) for doc, score, content in scored[:max_docs]]
+            
+        except Exception as e:
+            _log.error(f"[Knowledge] 关键词搜索失败: {e}")
+            return []
 
     def _create_mock_api(self):
         """创建模拟的 QQ API 对象，用于兼容 QQ 命令"""
@@ -481,7 +512,7 @@ class WebChatServer:
         # 内存数据存储
         self.workflows: List[Dict] = []
         self.memories: List[Dict] = []
-        self.knowledge_docs: List[Dict] = []
+        # knowledge_docs 已移除，由 knowledge_manager 管理
         self.ai_config: Dict = {}
         self.personality: Dict = {}
         self.token_stats: Dict = {}
@@ -614,6 +645,58 @@ class WebChatServer:
                 _log.info("Web login password is set")
         except Exception as e:
             _log.error(f"Failed to load web config: {e}")
+
+    def _retrieve_knowledge(self, query: str, max_docs: int = 3) -> str:
+        """
+        从知识库中检索相关内容（使用 knowledge_manager 向量检索）
+        
+        Args:
+            query: 用户查询文本
+            max_docs: 最大返回文档数
+            
+        Returns:
+            格式化的知识内容字符串
+        """
+        if not KNOWLEDGE_MANAGER_AVAILABLE:
+            return ""
+        
+        if not query:
+            return ""
+        
+        try:
+            km = get_knowledge_manager()
+            if not km:
+                return ""
+            
+            results = km.search(query, base_id=None, top_k=max_docs)
+            
+            if not results:
+                return ""
+            
+            knowledge_parts = ["【知识库参考】"]
+            seen_titles = set()
+            
+            for doc, similarity, chunk_content in results:
+                if similarity < 0.1:
+                    continue
+                if doc.title in seen_titles:
+                    continue
+                seen_titles.add(doc.title)
+                
+                content = chunk_content
+                if len(content) > 500:
+                    content = content[:500] + "..."
+                
+                knowledge_parts.append(f"\n📄 {doc.title}\n{content}")
+            
+            if seen_titles:
+                _log.info(f"[Knowledge] 检索到 {len(seen_titles)} 条相关内容")
+                return "\n".join(knowledge_parts)
+            return ""
+            
+        except Exception as e:
+            _log.error(f"[Knowledge] 检索失败: {e}")
+            return ""
 
     def _init_default_data(self):
         """初始化默认数据"""
@@ -932,11 +1015,10 @@ class WebChatServer:
                 except Exception as e:
                     _log.error(f"Failed to sync memories with prompt_manager: {e}")
             
-            # 加载知识库
-            knowledge_file = os.path.join(self.data_dir, 'knowledge.json')
-            if os.path.exists(knowledge_file):
-                with open(knowledge_file, 'r', encoding='utf-8') as f:
-                    self.knowledge_docs = json.load(f)
+            # 知识库现在由 knowledge_manager 管理，不再从旧文件加载
+            # if os.path.exists(knowledge_file):
+            #     with open(knowledge_file, 'r', encoding='utf-8') as f:
+            #         self.knowledge_docs = json.load(f)
             
             # 加载 AI 配置
             ai_config_file = os.path.join(self.data_dir, 'ai_config.json')
@@ -1036,8 +1118,7 @@ class WebChatServer:
                 with open(os.path.join(self.data_dir, 'memories.json'), 'w', encoding='utf-8') as f:
                     json.dump(self.memories, f, ensure_ascii=False, indent=2)
             elif data_type == 'knowledge':
-                with open(os.path.join(self.data_dir, 'knowledge.json'), 'w', encoding='utf-8') as f:
-                    json.dump(self.knowledge_docs, f, ensure_ascii=False, indent=2)
+                pass  # 知识库由 knowledge_manager 管理，无需保存
             elif data_type == 'ai_config':
                 with open(os.path.join(self.data_dir, 'ai_config.json'), 'w', encoding='utf-8') as f:
                     json.dump(self.ai_config, f, ensure_ascii=False, indent=2)
@@ -2348,6 +2429,7 @@ class WebChatServer:
 
             # 收集需要添加到系统提示词的内容
             system_additions = []
+            knowledge_retrieved = False  # 记录知识库是否检索成功
             
             # 检索相关记忆并添加到上下文（使用旧的记忆系统）
             if session.get('type') == 'web':
@@ -2369,6 +2451,7 @@ class WebChatServer:
                     knowledge_text = self._retrieve_knowledge(user_content)
                     if knowledge_text:
                         system_additions.append(knowledge_text)
+                        knowledge_retrieved = True  # 标记知识库检索成功
                         _log.info(f"Added knowledge to context")
             except Exception as e:
                 _log.error(f"Failed to retrieve knowledge: {e}", exc_info=True)
@@ -3401,45 +3484,136 @@ class WebChatServer:
         # ==================== 知识库 API ====================
         @self.app.route('/api/knowledge')
         def get_knowledge():
-            return jsonify(self.knowledge_docs)
+            if not KNOWLEDGE_MANAGER_AVAILABLE:
+                return jsonify([])
+            try:
+                km = get_knowledge_manager()
+                bases = km.list_knowledge_bases()
+                docs = []
+                for kb in bases:
+                    for doc_id in kb.documents:
+                        doc = km.store.load_document(doc_id)
+                        if doc:
+                            docs.append({
+                                'id': doc.id,
+                                'name': doc.title,
+                                'title': doc.title,
+                                'type': doc.source or 'txt',
+                                'source': doc.source,
+                                'size': len(doc.content),
+                                'content': doc.content[:200] + '...' if len(doc.content) > 200 else doc.content,
+                                'full_content': doc.content,
+                                'description': '',
+                                'indexed': True,
+                                'tags': doc.tags,
+                                'created_at': doc.created_at
+                            })
+                return jsonify(docs)
+            except Exception as e:
+                _log.error(f"Failed to get knowledge: {e}")
+                return jsonify([])
 
         @self.app.route('/api/knowledge', methods=['POST'])
         def add_knowledge():
-            data = request.json
-            doc = {
-                'id': str(uuid.uuid4()),
-                'name': data.get('name', ''),
-                'type': data.get('type', 'txt'),
-                'size': data.get('size', 0),
-                'indexed': False,
-                'content': data.get('content', ''),
-                'created_at': datetime.now().isoformat()
-            }
-            self.knowledge_docs.append(doc)
-            self._save_data('knowledge')
-            return jsonify({'success': True, 'document': doc})
+            if not KNOWLEDGE_MANAGER_AVAILABLE:
+                return jsonify({'success': False, 'error': 'Knowledge manager not available'}), 503
+            try:
+                data = request.json
+                km = get_knowledge_manager()
+                title = data.get('name', '未命名')
+                content = data.get('content', '')
+                source = data.get('source', '')
+                tags = data.get('tags', [])
+                
+                if not content:
+                    return jsonify({'success': False, 'error': 'Content is required'}), 400
+                
+                default_kb = km.store.load_base('default')
+                if not default_kb:
+                    default_kb = km.create_knowledge_base('默认知识库', '系统默认知识库')
+                
+                doc = km.add_document('default', title, content, source, tags)
+                
+                return jsonify({
+                    'success': True,
+                    'document': {
+                        'id': doc.id,
+                        'name': doc.title,
+                        'title': doc.title,
+                        'type': doc.source or 'txt',
+                        'source': doc.source,
+                        'size': len(doc.content),
+                        'content': doc.content,
+                        'description': '',
+                        'indexed': True,
+                        'tags': doc.tags,
+                        'created_at': doc.created_at
+                    }
+                })
+            except Exception as e:
+                _log.error(f"Failed to add knowledge: {e}")
+                return jsonify({'success': False, 'error': str(e)}), 500
 
         @self.app.route('/api/knowledge/<doc_id>')
         def get_knowledge_doc(doc_id):
-            for doc in self.knowledge_docs:
-                if doc['id'] == doc_id:
-                    return jsonify(doc)
-            return jsonify({'error': 'Document not found'}), 404
+            if not KNOWLEDGE_MANAGER_AVAILABLE:
+                return jsonify({'error': 'Knowledge manager not available'}), 503
+            try:
+                km = get_knowledge_manager()
+                doc = km.store.load_document(doc_id)
+                if doc:
+                    return jsonify({
+                        'id': doc.id,
+                        'name': doc.title,
+                        'title': doc.title,
+                        'type': doc.source or 'txt',
+                        'source': doc.source,
+                        'size': len(doc.content),
+                        'content': doc.content,
+                        'description': '',
+                        'indexed': True,
+                        'tags': doc.tags,
+                        'created_at': doc.created_at
+                    })
+                return jsonify({'error': 'Document not found'}), 404
+            except Exception as e:
+                return jsonify({'error': str(e)}), 500
 
         @self.app.route('/api/knowledge/<doc_id>', methods=['DELETE'])
         def delete_knowledge(doc_id):
-            self.knowledge_docs = [d for d in self.knowledge_docs if d['id'] != doc_id]
-            self._save_data('knowledge')
-            return jsonify({'success': True})
+            if not KNOWLEDGE_MANAGER_AVAILABLE:
+                return jsonify({'success': False, 'error': 'Knowledge manager not available'}), 503
+            try:
+                km = get_knowledge_manager()
+                doc = km.store.load_document(doc_id)
+                if not doc:
+                    return jsonify({'success': False, 'error': 'Document not found'}), 404
+                
+                chunk_file = km.store.chunks_dir / f"{doc_id}_0.json"
+                if chunk_file.exists():
+                    chunk_file.unlink()
+                
+                doc_file = km.store.documents_dir / f"{doc_id}.json"
+                if doc_file.exists():
+                    doc_file.unlink()
+                
+                for kb_file in km.store.bases_dir.glob("*.json"):
+                    with open(kb_file, 'r', encoding='utf-8') as f:
+                        kb_data = json.load(f)
+                    if doc_id in kb_data.get('documents', []):
+                        kb_data['documents'].remove(doc_id)
+                        with open(kb_file, 'w', encoding='utf-8') as f:
+                            json.dump(kb_data, f, ensure_ascii=False, indent=2)
+                
+                return jsonify({'success': True})
+            except Exception as e:
+                return jsonify({'success': False, 'error': str(e)}), 500
 
         @self.app.route('/api/knowledge/<doc_id>/index', methods=['POST'])
         def index_knowledge(doc_id):
-            for doc in self.knowledge_docs:
-                if doc['id'] == doc_id:
-                    doc['indexed'] = True
-                    self._save_data('knowledge')
-                    return jsonify({'success': True})
-            return jsonify({'error': 'Document not found'}), 404
+            if not KNOWLEDGE_MANAGER_AVAILABLE:
+                return jsonify({'success': False, 'error': 'Knowledge manager not available'}), 503
+            return jsonify({'success': True, 'message': '知识库自动索引，无需手动触发'})
 
         # ==================== AI 配置 API ====================
         @self.app.route('/api/ai-config')
@@ -4118,12 +4292,22 @@ class WebChatServer:
             except Exception as e:
                 _log.warning(f"统计文件传输失败: {e}")
             
+            kb_docs_count = 0
+            if KNOWLEDGE_MANAGER_AVAILABLE:
+                try:
+                    km = get_knowledge_manager()
+                    bases = km.list_knowledge_bases()
+                    for kb in bases:
+                        kb_docs_count += len(kb.documents)
+                except:
+                    pass
+            
             stats = {
                 'today_messages': today_messages,
                 'total_messages': total_messages,
                 'active_sessions': len(self.sessions),
                 'token_usage': self.token_stats.get('today', 0),
-                'kb_docs': len(self.knowledge_docs),
+                'kb_docs': kb_docs_count,
                 'memory_usage': memory_usage,
                 'qq_connected': True,
                 'ai_service_status': 'normal' if self.ai_client else 'not_configured',
@@ -4690,6 +4874,21 @@ class WebChatServer:
         
         self.log_message('info', f'开始生成AI回复 for session {session_id[:8]}... (附件: {len(attachments)}, 图片: {has_image})')
         
+        # 知识库检索
+        knowledge_retrieved = False
+        knowledge_text = ""
+        _log.info(f"[Knowledge] 知识库开关状态: {self.settings.get('knowledge', True)}")
+        if self.settings.get('knowledge', True):
+            try:
+                _log.info(f"[Knowledge] 开始检索，查询: {user_content[:50]}...")
+                knowledge_text = self._retrieve_knowledge(user_content)
+                _log.info(f"[Knowledge] 检索结果长度: {len(knowledge_text)} 字符")
+                if knowledge_text:
+                    knowledge_retrieved = True
+                    _log.info(f"[Knowledge] 知识库检索成功")
+            except Exception as e:
+                _log.error(f"[Knowledge] 知识库检索失败: {e}")
+        
         def get_response():
             try:
                 # 使用深拷贝避免修改原始消息
@@ -4700,6 +4899,16 @@ class WebChatServer:
                 MAX_HISTORY = 20
                 if len(messages_for_ai) > MAX_HISTORY:
                     messages_for_ai = [messages_for_ai[0]] + messages_for_ai[-MAX_HISTORY:]
+                
+                # 添加知识库内容到系统消息
+                if knowledge_text and messages_for_ai:
+                    if messages_for_ai[0].get('role') == 'system':
+                        messages_for_ai[0]['content'] += f"\n\n{knowledge_text}"
+                    else:
+                        messages_for_ai.insert(0, {
+                            'role': 'system',
+                            'content': knowledge_text
+                        })
                 
                 # 检查附件并处理
                 image_urls = []
@@ -4916,6 +5125,13 @@ class WebChatServer:
                     progress_card.update(StepType.UPLOAD_DONE, f"附件处理完成 ({len(attachments)} 个文件)", True)
                     _log.info(f"[ProgressCard] UPLOAD_DONE 更新完成，步骤数: {len(progress_card.steps)}")
                 
+                # 知识库检索成功，更新进度
+                if progress_card and knowledge_retrieved:
+                    _log.info(f"[ProgressCard] 准备更新 KNOWLEDGE 步骤")
+                    progress_card.update(StepType.KNOWLEDGE, "📚 知识库检索...")
+                    progress_card.update(StepType.KNOWLEDGE_DONE, "📚 知识库已加载", True)
+                    _log.info(f"[ProgressCard] KNOWLEDGE 步骤更新完成")
+                
                 # 合并文件内容到用户消息
                 enhanced_content = user_content
                 if file_contents:
@@ -4980,6 +5196,8 @@ class WebChatServer:
                                         'file_done': StepType.FILE_DONE,
                                         'upload': StepType.UPLOAD,
                                         'upload_done': StepType.UPLOAD_DONE,
+                                        'knowledge': StepType.KNOWLEDGE,
+                                        'knowledge_done': StepType.KNOWLEDGE_DONE,
                                     }
                                     step_type_enum = step_type_map.get(step_type)
                                     if step_type_enum:

@@ -23,7 +23,69 @@ except ImportError:
     execute_tool = None
     TOOLS_AVAILABLE = False
 
+# 知识库管理
+try:
+    from nbot.core.knowledge import get_knowledge_manager
+    KNOWLEDGE_AVAILABLE = True
+except ImportError:
+    get_knowledge_manager = None
+    KNOWLEDGE_AVAILABLE = False
+
 last_log_entry = {}
+
+
+def search_knowledge_base(query: str, user_id: str = None, group_id: str = None) -> str:
+    """
+    搜索知识库并返回相关内容
+    
+    Args:
+        query: 用户查询内容
+        user_id: 用户ID
+        group_id: 群组ID
+        
+    Returns:
+        知识库相关内容，如果无匹配则返回空字符串
+    """
+    if not KNOWLEDGE_AVAILABLE or not query:
+        return ""
+    
+    try:
+        km = get_knowledge_manager()
+        if not km:
+            return ""
+        
+        owner_id = user_id or group_id
+        owner_type = "user" if user_id else "group"
+        
+        results = km.search(query, base_id=None, top_k=3)
+        
+        if not results:
+            return ""
+        
+        knowledge_text = "【知识库检索结果】\n"
+        seen_titles = set()
+        
+        for doc, similarity, chunk_content in results:
+            if similarity < 0.1:
+                continue
+            if doc.title in seen_titles:
+                continue
+            seen_titles.add(doc.title)
+            
+            knowledge_text += f"\n📄 {doc.title}\n"
+            knowledge_text += f"{chunk_content[:300]}"
+            if len(chunk_content) > 300:
+                knowledge_text += "..."
+            knowledge_text += "\n"
+        
+        if seen_titles:
+            print(f"[知识库] 检索到 {len(seen_titles)} 条相关内容")
+            return knowledge_text
+        return ""
+        
+    except Exception as e:
+        print(f"[知识库] 检索失败: {e}")
+        return ""
 
 
 def get_qq_session_id(user_id=None, group_id=None, group_user_id=None) -> str:
@@ -368,6 +430,11 @@ def chat(content: str = "", user_id=None, group_id=None, group_user_id=None,
 
     # 记录用户消息到新消息模块
     record_user_message(content, user_id, group_id, group_user_id)
+
+    # 知识库检索 - 根据用户提问匹配相关内容
+    knowledge_res = search_knowledge_base(content, user_id, group_id)
+    if knowledge_res:
+        messages.append({"role": "system", "content": knowledge_res})
 
     if len(messages) > MAX_HISTORY_LENGTH:
         messages = [messages[0]] + messages[-MAX_HISTORY_LENGTH:]
