@@ -529,6 +529,55 @@ TOOL_DEFINITIONS = [
                 "required": ["prompt", "image_source"]
             }
         }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "save_to_memory",
+            "description": "将重要信息保存到记忆管理系统。当用户要求记住某些信息、保存重要内容、记录关键事项时使用此工具。可以保存为长期记忆（永久保存）或短期记忆（自动过期）。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "key": {
+                        "type": "string",
+                        "description": "记忆的标题/关键词，用于标识这段记忆，如'用户的喜好'、'项目需求'、'重要日期'等"
+                    },
+                    "value": {
+                        "type": "string",
+                        "description": "要保存的记忆内容，详细描述需要记住的信息"
+                    },
+                    "mem_type": {
+                        "type": "string",
+                        "description": "记忆类型：'long'表示长期记忆（永久保存），'short'表示短期记忆（会在一定时间后自动过期），默认为'long'",
+                        "enum": ["long", "short"],
+                        "default": "long"
+                    },
+                    "expire_days": {
+                        "type": "integer",
+                        "description": "如果是短期记忆，设置过期天数（默认7天），长期记忆可忽略此参数",
+                        "default": 7
+                    }
+                },
+                "required": ["key", "value"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "read_memory",
+            "description": "读取已保存的记忆内容。当用户询问之前记住的内容、查询保存的信息、确认记忆中的内容时使用此工具。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "mem_type": {
+                        "type": "string",
+                        "description": "记忆类型筛选：'long'表示长期记忆，'short'表示短期记忆，不填则返回所有记忆",
+                        "enum": ["long", "short"]
+                    }
+                }
+            }
+        }
     }
 ]
 
@@ -739,7 +788,14 @@ def execute_tool(tool_name: str, arguments: Dict[str, Any], context: Dict = None
         executor = get_executor()
         return executor.execute_tool(tool_config, arguments, context)
 
-    # 3. 否则使用内置 Tool
+    # 3. 处理记忆工具（需要 context 中的用户信息）
+    if tool_name == "save_to_memory":
+        return _execute_save_to_memory(arguments, context)
+    
+    if tool_name == "read_memory":
+        return _execute_read_memory(arguments, context)
+
+    # 4. 否则使用内置 Tool
     _log.info(f"Executing built-in tool: {tool_name}")
     executor = ToolExecutor()
 
@@ -876,3 +932,98 @@ def _execute_workspace_tool(tool_name: str, arguments: Dict[str, Any],
     except Exception as e:
         _log.error(f"Workspace tool error: {tool_name} - {e}")
         return {"success": False, "error": str(e)}
+
+
+def _execute_save_to_memory(arguments: Dict[str, Any], context: Dict = None) -> Dict[str, Any]:
+    """执行保存到记忆工具"""
+    try:
+        from nbot.core.prompt import prompt_manager
+        
+        if not prompt_manager:
+            return {"success": False, "error": "记忆管理系统不可用"}
+        
+        key = arguments.get('key', '')
+        value = arguments.get('value', '')
+        mem_type = arguments.get('mem_type', 'long')
+        expire_days = arguments.get('expire_days', 7)
+        
+        if not key or not value:
+            return {"success": False, "error": "缺少必需的参数: key 和 value"}
+        
+        # 从 context 获取目标ID（用户ID或群ID）
+        target_id = ''
+        if context:
+            # 优先使用 user_id，然后是 group_id
+            target_id = context.get('user_id', '') or context.get('group_id', '')
+        
+        # 添加记忆
+        success = prompt_manager.add_memory(key, value, target_id, mem_type, expire_days)
+        
+        if success:
+            mem_type_desc = "长期记忆" if mem_type == "long" else f"短期记忆（{expire_days}天）"
+            return {
+                "success": True,
+                "message": f"已成功保存到{mem_type_desc}",
+                "key": key,
+                "type": mem_type
+            }
+        else:
+            return {"success": False, "error": "保存记忆失败"}
+            
+    except Exception as e:
+        _log.error(f"Save to memory error: {e}")
+        return {"success": False, "error": f"保存记忆时出错: {str(e)}"}
+
+
+def _execute_read_memory(arguments: Dict[str, Any], context: Dict = None) -> Dict[str, Any]:
+    """执行读取记忆工具"""
+    try:
+        from nbot.core.prompt import prompt_manager
+        
+        if not prompt_manager:
+            return {"success": False, "error": "记忆管理系统不可用"}
+        
+        # 可选参数
+        mem_type = arguments.get('mem_type', None)  # 'long', 'short', 或 None（全部）
+        
+        # 从 context 获取目标ID（用户ID或群ID）
+        target_id = None
+        if context:
+            target_id = context.get('user_id', '') or context.get('group_id', '')
+            if not target_id:
+                target_id = None
+        
+        # 获取记忆（按 target_id 过滤）
+        memories = prompt_manager.get_memories(target_id, mem_type)
+        
+        if not memories:
+            return {
+                "success": True,
+                "message": "没有找到任何记忆",
+                "count": 0,
+                "memories": []
+            }
+        
+        # 格式化返回
+        formatted_memories = []
+        for mem in memories:
+            mem_type_val = mem.get('type', 'long')
+            mem_type_desc = "长期记忆" if mem_type_val == "long" else "短期记忆"
+            created_at = mem.get('created_at', '未知时间')
+            formatted_memories.append({
+                "key": mem.get('key', ''),
+                "value": mem.get('value', ''),
+                "type": mem_type_desc,
+                "created_at": created_at
+            })
+        
+        return {
+            "success": True,
+            "message": f"共找到 {len(memories)} 条记忆",
+            "count": len(memories),
+            "memories": formatted_memories
+        }
+        
+    except Exception as e:
+        _log.error(f"Read memory error: {e}")
+        return {"success": False, "error": f"读取记忆时出错: {str(e)}"}

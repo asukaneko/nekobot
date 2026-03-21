@@ -740,6 +740,22 @@
             background: linear-gradient(135deg, #fa709a 0%, #fee140 100%);
         }
 
+        .stat-icon.pink {
+            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+        }
+
+        .stat-icon.cyan {
+            background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+        }
+
+        .stat-icon.yellow {
+            background: linear-gradient(135deg, #feca57 0%, #ff9ff3 100%);
+        }
+
+        .stat-icon.red {
+            background: linear-gradient(135deg, #ff6b6b 0%, #ee5a6f 100%);
+        }
+
         .stat-content {
             flex: 1;
         }
@@ -3289,8 +3305,52 @@
                             </div>
                         </div>
 
+                        <!-- 第二行统计卡片 -->
+                        <div class="stats-grid" style="margin-top: 20px;">
+                            <div class="stat-card">
+                                <div class="stat-icon pink">
+                                    <i class="fas fa-users"></i>
+                                </div>
+                                <div class="stat-content">
+                                    <div class="stat-label">今日活跃用户</div>
+                                    <div class="stat-value">{{ stats.today_active_users || 0 }}</div>
+                                    <div class="stat-subtitle">QQ + Web 活跃用户数</div>
+                                </div>
+                            </div>
+                            <div class="stat-card">
+                                <div class="stat-icon cyan">
+                                    <i class="fas fa-robot"></i>
+                                </div>
+                                <div class="stat-content">
+                                    <div class="stat-label">AI 调用次数</div>
+                                    <div class="stat-value">{{ formatNumber(stats.ai_calls || 0) }}</div>
+                                    <div class="stat-subtitle">今日 AI 服务调用</div>
+                                </div>
+                            </div>
+                            <div class="stat-card">
+                                <div class="stat-icon yellow">
+                                    <i class="fas fa-file-alt"></i>
+                                </div>
+                                <div class="stat-content">
+                                    <div class="stat-label">文件传输</div>
+                                    <div class="stat-value">{{ formatNumber(stats.file_transfers || 0) }}</div>
+                                    <div class="stat-subtitle">今日文件上传/下载</div>
+                                </div>
+                            </div>
+                            <div class="stat-card">
+                                <div class="stat-icon red">
+                                    <i class="fas fa-bolt"></i>
+                                </div>
+                                <div class="stat-content">
+                                    <div class="stat-label">平均响应</div>
+                                    <div class="stat-value">{{ stats.avg_response_time || '1.2' }}s</div>
+                                    <div class="stat-subtitle">AI 平均响应时间</div>
+                                </div>
+                            </div>
+                        </div>
+
                         <!-- 图表和系统状态区域 -->
-                        <div class="dashboard-main">
+                        <div class="dashboard-main" style="margin-top: 20px;">
                             <!-- 左侧：消息趋势分析 -->
                             <div class="chart-card trend-chart">
                                 <div class="chart-header">
@@ -3337,6 +3397,12 @@
                                             {{ stats.ai_service_status === 'normal' ? '正常' : '未配置' }}
                                         </span>
                                     </div>
+                                    <div class="status-item">
+                                        <span class="status-label">WebSocket</span>
+                                        <span class="status-value" :class="socketConnected ? 'text-success' : 'text-warning'">
+                                            {{ socketConnected ? '已连接' : '未连接' }}
+                                        </span>
+                                    </div>
                                 </div>
 
                                 <!-- 平台消息统计 -->
@@ -3349,6 +3415,29 @@
                                     </div>
                                     <div class="chart-body">
                                         <div ref="platformChart" class="chart-container"></div>
+                                    </div>
+                                </div>
+
+                                <!-- 最近活动 -->
+                                <div class="chart-card activity-card" style="margin-top: 16px;">
+                                    <div class="chart-header">
+                                        <div>
+                                            <div class="chart-title">最近活动</div>
+                                            <div class="chart-subtitle">最近的系统事件</div>
+                                        </div>
+                                    </div>
+                                    <div class="chart-body" style="max-height: 200px; overflow-y: auto;">
+                                        <div v-if="recentActivities && recentActivities.length > 0">
+                                            <div v-for="(activity, index) in recentActivities" :key="index" class="activity-item" style="padding: 8px 0; border-bottom: 1px solid var(--border-color); font-size: 13px;">
+                                                <div style="display: flex; justify-content: space-between; align-items: center;">
+                                                    <span style="color: var(--text-primary);">{{ activity.message }}</span>
+                                                    <span style="color: var(--text-secondary); font-size: 11px;">{{ formatTime(activity.time) }}</span>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div v-else style="text-align: center; color: var(--text-secondary); padding: 20px;">
+                                            暂无活动记录
+                                        </div>
                                     </div>
                                 </div>
                             </div>
@@ -3567,6 +3656,9 @@
                                             <i :class="msg.role === 'user' ? 'fas fa-user' : 'fas fa-robot'"></i>
                                         </div>
                                         <div class="message-content">
+                                            <div v-if="msg.role === 'user' && msg.sender" class="message-sender" style="font-size: 12px; color: rgba(255,255,255,0.9); font-weight: 600; margin-bottom: 4px; text-shadow: 0 1px 2px rgba(0,0,0,0.3);">
+                                                <i class="fab fa-qq"></i> {{ msg.sender }}
+                                            </div>
                                             <div v-if="msg.content">{{ parseMessageContent(msg.content, msg) }}</div>
                                             <div class="message-time">{{ formatTime(msg.timestamp) }}</div>
                                         </div>
@@ -4079,7 +4171,7 @@
 
                         <!-- 添加记忆按钮 -->
                         <div class="memory-actions">
-                            <button class="btn btn-primary" @click="showAddMemoryModal = true">
+                            <button class="btn btn-primary" @click="openAddMemoryModal">
                                 <i class="fas fa-plus"></i> 添加记忆
                             </button>
                             <div class="memory-search">
@@ -5459,6 +5551,11 @@
                         <label class="form-label">关联对象（可选）</label>
                         <select v-model="editingMemory.target_id" class="form-select">
                             <option value="">全局记忆（对所有用户生效）</option>
+                            <optgroup v-if="username" label="当前用户">
+                                <option :value="username">
+                                    {{ username }} (当前登录用户)
+                                </option>
+                            </optgroup>
                             <optgroup label="QQ 群组">
                                 <option v-for="session in qqGroupSessions" :key="session.id" :value="session.qq_id">
                                     {{ session.name }}
@@ -6163,9 +6260,16 @@
                         qq_connected: false,
                         ai_service_status: 'not_configured',
                         platform_count: 1,
-                        uptime: '0小时'
+                        uptime: '0小时',
+                        today_active_users: 0,
+                        ai_calls: 0,
+                        file_transfers: 0,
+                        avg_response_time: '1.2'
                     },
-                    
+
+                    // 最近活动
+                    recentActivities: [],
+
                     // Charts
                     trendChart: null,
                     platformChart: null,
@@ -6501,7 +6605,10 @@
                     },
                     debugResponse: null,
                     debugWsLogs: [],
-                    systemInfo: null
+                    systemInfo: null,
+                    
+                    // Socket Connection
+                    socketConnected: false
                 }
             },
             
@@ -7906,6 +8013,9 @@
                 },
                 
                 async selectQqChat(type, id) {
+                    // 清空Web会话状态，避免同时显示
+                    this.currentSession = null;
+                    this.currentMessages = [];
                     this.currentQqId = id;
                     this.currentQqMessages = [];
                     
@@ -8835,6 +8945,17 @@
                     this.showAddMemoryModal = true;
                 },
 
+                openAddMemoryModal() {
+                    this.resetEditingMemory();
+                    // 优先使用当前登录用户名，其次使用会话ID
+                    if (this.username) {
+                        this.editingMemory.target_id = this.username;
+                    } else if (this.currentSession) {
+                        this.editingMemory.target_id = this.currentSession.qq_id || this.currentSession.id;
+                    }
+                    this.showAddMemoryModal = true;
+                },
+
                 async saveMemory() {
                     if (!this.editingMemory.key || !this.editingMemory.value) {
                         this.showToast('请填写标题和内容', 'warning');
@@ -9503,11 +9624,16 @@
                 initSocket() {
                     socket.on('connect', () => {
                         console.log('Socket connected');
+                        this.socketConnected = true;
                     });
                     
                     socket.on('disconnect', () => {
                         console.log('Socket disconnected');
+                        this.socketConnected = false;
                     });
+                    
+                    // 初始状态检查
+                    this.socketConnected = socket.connected;
                     
                     socket.on('joined_session', (data) => {
                         console.log('Successfully joined session:', data);

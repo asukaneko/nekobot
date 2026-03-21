@@ -441,6 +441,9 @@ def chat(content: str = "", user_id=None, group_id=None, group_user_id=None,
         except:
             pass
 
+    # 注意：AI回复的记录已通过 BotAPI 的补丁自动处理（wrapped_post_group_msg）
+    # 这里不需要再调用 record_assistant_message，避免重复保存
+
     try:
         with open("saved_message/user_messages.json", "w", encoding='utf-8') as f:
             json.dump(user_messages, f, ensure_ascii=False, indent=4)
@@ -709,8 +712,10 @@ def _record_message(role, content, user_id=None, group_id=None, group_user_id=No
             group_messages[session_key] = [group_messages[session_key][0]] + group_messages[session_key][-MAX_HISTORY_LENGTH:]
         
         # 同时记录到新消息模块（使用 group_id 作为文件标识）
+        # 只有用户消息才设置 sender，AI 回复 sender 为空
+        sender_id = group_user_id if (role == "user" and group_user_id) else ""
         message_manager.add_qq_group_message(group_id,
-            create_message(role, record_content, source="qq_group"))
+            create_message(role, record_content, sender=sender_id, source="qq_group"))
 
     try:
         with open("saved_message/user_messages.json", "w", encoding="utf-8") as f:
