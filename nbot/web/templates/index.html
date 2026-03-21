@@ -4227,8 +4227,9 @@
 
                     <!-- Personality -->
                     <div v-if="currentPage === 'personality'" class="fade-in">
-                        <div class="grid-2">
-                            <div class="card">
+                        <div class="grid-2" style="align-items: start;">
+                            <!-- 左侧：当前人格提示词 -->
+                            <div class="card" style="height: fit-content;">
                                 <div class="card-header">
                                     <span class="card-title">当前人格提示词</span>
                                     <button class="btn btn-primary" @click="savePersonality" :disabled="isLoading">
@@ -4242,31 +4243,74 @@
                                     </div>
                                     <div class="form-group">
                                         <label class="form-label">系统提示词 (System Prompt)</label>
-                                        <textarea v-model="personality.prompt" class="form-textarea" rows="8" placeholder="输入系统提示词，定义 AI 的人格和行为..."></textarea>
+                                        <textarea v-model="personality.prompt" class="form-textarea" rows="12" placeholder="输入系统提示词，定义 AI 的人格和行为..."></textarea>
                                         <div class="form-hint">这是 AI 的核心人格定义，会影响所有对话的回复风格</div>
                                     </div>
                                 </div>
                             </div>
 
-                            <div class="card">
-                                <div class="card-header">
-                                    <span class="card-title">预设人格</span>
-                                </div>
-                                <div class="card-body">
-                                    <div v-if="personalityPresets.length === 0" class="empty-state">
-                                        <div class="empty-state-icon">🎭</div>
-                                        <div class="empty-state-title">加载中...</div>
+                            <!-- 右侧：预设人格 + 自定义人格 -->
+                            <div style="display: flex; flex-direction: column; gap: 20px;">
+                                <!-- 预设人格 -->
+                                <div class="card">
+                                    <div class="card-header">
+                                        <span class="card-title">预设人格</span>
                                     </div>
-                                    <div v-for="preset in personalityPresets" :key="preset.id" 
-                                         style="padding: 16px; border: 1px solid var(--border-color); border-radius: 8px; margin-bottom: 12px; cursor: pointer;"
-                                         @click="loadPersonalityPreset(preset)">
-                                        <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 8px;">
-                                            <div style="width: 40px; height: 40px; background: var(--bg-tertiary); border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 18px;">
-                                                {{ preset.icon }}
+                                    <div class="card-body" style="padding: 12px;">
+                                        <div v-if="personalityPresets.length === 0" class="empty-state" style="padding: 20px;">
+                                            <div class="empty-state-icon">🎭</div>
+                                            <div class="empty-state-title">加载中...</div>
+                                        </div>
+                                        <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px;">
+                                            <div v-for="preset in personalityPresets" :key="preset.id" 
+                                                 style="padding: 12px; border: 1px solid var(--border-color); border-radius: 8px; cursor: pointer; transition: all 0.2s;"
+                                                 @click="loadPersonalityPreset(preset)"
+                                                 onmouseover="this.style.borderColor='var(--primary)'; this.style.background='var(--bg-tertiary)'"
+                                                 onmouseout="this.style.borderColor='var(--border-color)'; this.style.background=''">
+                                                <div style="display: flex; align-items: center; gap: 10px;">
+                                                    <div style="width: 36px; height: 36px; background: var(--bg-tertiary); border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 16px; flex-shrink: 0;">
+                                                        {{ preset.icon }}
+                                                    </div>
+                                                    <div style="min-width: 0;">
+                                                        <div style="font-weight: 600; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{{ preset.name }}</div>
+                                                        <div style="font-size: 11px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{{ preset.description }}</div>
+                                                    </div>
+                                                </div>
                                             </div>
-                                            <div>
-                                                <div style="font-weight: 600;">{{ preset.name }}</div>
-                                                <div style="font-size: 12px; color: var(--text-muted);">{{ preset.description }}</div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- 自定义人格预设 -->
+                                <div class="card">
+                                    <div class="card-header">
+                                        <span class="card-title">自定义人格预设</span>
+                                        <button class="btn btn-primary btn-sm" @click="openAddPersonalityPresetModal">
+                                            <i class="fas fa-plus"></i> 添加
+                                        </button>
+                                    </div>
+                                    <div class="card-body" style="padding: 12px;">
+                                        <div v-if="customPersonalityPresets.length === 0" class="empty-state" style="padding: 30px;">
+                                            <div class="empty-state-icon">✨</div>
+                                            <div class="empty-state-title">暂无自定义人格</div>
+                                            <div class="empty-state-desc">点击上方按钮添加你的人格预设</div>
+                                        </div>
+                                        <div v-else style="display: flex; flex-direction: column; gap: 8px;">
+                                            <div v-for="(preset, index) in customPersonalityPresets" :key="preset.id" 
+                                                 style="padding: 10px 12px; border: 1px solid var(--border-color); border-radius: 6px; display: flex; align-items: center; gap: 10px; transition: all 0.2s;"
+                                                 onmouseover="this.style.borderColor='var(--primary)'; this.style.background='var(--bg-tertiary)'"
+                                                 onmouseout="this.style.borderColor='var(--border-color)'; this.style.background=''">
+                                                <div style="width: 32px; height: 32px; background: var(--bg-tertiary); border-radius: 6px; display: flex; align-items: center; justify-content: center; font-size: 14px; cursor: pointer; flex-shrink: 0;"
+                                                     @click="loadPersonalityPreset(preset)">
+                                                    {{ preset.icon }}
+                                                </div>
+                                                <div style="flex: 1; cursor: pointer; min-width: 0;" @click="loadPersonalityPreset(preset)">
+                                                    <div style="font-weight: 500; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{{ preset.name }}</div>
+                                                    <div style="font-size: 11px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{{ preset.description || '自定义人格预设' }}</div>
+                                                </div>
+                                                <button class="btn btn-sm" @click.stop="deleteCustomPersonalityPreset(preset, index)" style="color: var(--danger); padding: 4px 8px; flex-shrink: 0;">
+                                                    <i class="fas fa-trash"></i>
+                                                </button>
                                             </div>
                                         </div>
                                     </div>
@@ -5595,6 +5639,62 @@
             </div>
         </div>
 
+        <!-- 自定义确认对话框 -->
+        <div v-if="showConfirmDialog" class="modal-overlay" @click.self="cancelConfirm">
+            <div class="modal" style="max-width: 400px;">
+                <div class="modal-header">
+                    <span class="modal-title">{{ confirmDialogConfig.title }}</span>
+                    <button class="modal-close" @click="cancelConfirm">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <p style="font-size: 16px; line-height: 1.6;">{{ confirmDialogConfig.message }}</p>
+                </div>
+                <div class="modal-footer" style="justify-content: flex-end; gap: 12px;">
+                    <button class="btn" @click="cancelConfirm">取消</button>
+                    <button class="btn btn-primary" @click="confirmAction">确认</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 添加自定义人格预设模态框 -->
+        <div v-if="showAddPersonalityPresetModal" class="modal-overlay" @click.self="closeAddPersonalityPresetModal">
+            <div class="modal" style="max-width: 500px; max-height: 90vh;">
+                <div class="modal-header">
+                    <span class="modal-title"><i class="fas fa-plus-circle"></i> 添加自定义人格预设</span>
+                    <button class="modal-close" @click="closeAddPersonalityPresetModal">&times;</button>
+                </div>
+                <div class="modal-body" style="overflow-y: auto;">
+                    <div class="form-group">
+                        <label class="form-label">人格名称</label>
+                        <input v-model="newPersonalityPreset.name" type="text" class="form-input" placeholder="输入人格名称">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">描述</label>
+                        <input v-model="newPersonalityPreset.description" type="text" class="form-input" placeholder="简短描述这个人格的特点">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">图标</label>
+                        <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                            <button v-for="icon in ['🎭', '🐱', '👔', '✍️', '💻', '🤖', '👩‍💼', '🧙‍♂️', '🦸‍♀️', '🎨', '📚', '🔬']" :key="icon"
+                                    @click="newPersonalityPreset.icon = icon"
+                                    style="font-size: 24px; padding: 8px; border: 2px solid var(--border-color); border-radius: 8px; cursor: pointer; background: var(--bg-secondary);"
+                                    :style="{ borderColor: newPersonalityPreset.icon === icon ? 'var(--primary)' : 'var(--border-color)' }">
+                                {{ icon }}
+                            </button>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">系统提示词</label>
+                        <textarea v-model="newPersonalityPreset.prompt" class="form-textarea" rows="6" placeholder="输入系统提示词，定义 AI 的人格和行为..."></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer" style="justify-content: flex-end; gap: 12px;">
+                    <button class="btn" @click="closeAddPersonalityPresetModal">取消</button>
+                    <button class="btn btn-primary" @click="addCustomPersonalityPreset" :disabled="!newPersonalityPreset.name || !newPersonalityPreset.prompt">添加</button>
+                </div>
+            </div>
+        </div>
+
         <!-- Theme Settings Panel -->
         <div v-if="showThemePanel" class="modal-overlay" @click.self="showThemePanel = false">
             <div class="modal" style="max-width: 480px;">
@@ -6567,6 +6667,21 @@
                         prompt: ''
                     },
                     personalityPresets: [],
+                    customPersonalityPresets: [], // 用户自定义人格预设
+                    showConfirmDialog: false,
+                    confirmDialogConfig: {
+                        title: '确认',
+                        message: '',
+                        onConfirm: null,
+                        onCancel: null
+                    },
+                    showAddPersonalityPresetModal: false,
+                    newPersonalityPreset: {
+                        name: '',
+                        description: '',
+                        icon: '🎭',
+                        prompt: ''
+                    },
                     
                     // Memory
                     memories: [],
@@ -7167,6 +7282,7 @@
                         this.loadHeartbeat(),
                         this.loadPersonality(),
                         this.loadPersonalityPresets(),
+                        this.loadCustomPersonalityPresets(),
                         this.loadMemory(),
                         this.loadKnowledge(),
                         this.loadAIConfig(),
@@ -8343,11 +8459,12 @@
                     this.isLoading = true;
                     
                     try {
-                        // 先调用后端API创建真实会话
+                        // 先调用后端API创建真实会话，传递当前人格设置
                         const res = await api.post('/api/sessions', {
                             name: `会话 ${new Date().toLocaleTimeString()}`,
                             type: 'web',
-                            user_id: this.username
+                            user_id: this.username,
+                            system_prompt: this.personality.prompt  // 传递当前人格提示词
                         });
                         
                         // 使用服务器返回的真实session
@@ -9110,10 +9227,97 @@
                 },
                 
                 loadPersonalityPreset(preset) {
-                    if (confirm(`确定要加载预设人格 "${preset.name}" 吗？`)) {
-                        this.personality.name = preset.name;
-                        this.personality.prompt = preset.prompt;
-                        this.showToast('已加载预设人格，请保存以应用', 'success');
+                    this.showConfirmDialogFn({
+                        title: '加载人格预设',
+                        message: `确定要加载预设人格 "${preset.name}" 吗？当前未保存的修改将会丢失。`,
+                        onConfirm: () => {
+                            this.personality.name = preset.name;
+                            this.personality.prompt = preset.prompt;
+                            this.showToast('已加载预设人格，请保存以应用', 'success');
+                        }
+                    });
+                },
+
+                // 自定义确认对话框方法
+                showConfirmDialogFn(config) {
+                    this.confirmDialogConfig = {
+                        title: config.title || '确认',
+                        message: config.message || '',
+                        onConfirm: config.onConfirm || null,
+                        onCancel: config.onCancel || null
+                    };
+                    this.showConfirmDialog = true;
+                },
+
+                confirmAction() {
+                    if (this.confirmDialogConfig.onConfirm) {
+                        this.confirmDialogConfig.onConfirm();
+                    }
+                    this.showConfirmDialog = false;
+                },
+
+                cancelConfirm() {
+                    if (this.confirmDialogConfig.onCancel) {
+                        this.confirmDialogConfig.onCancel();
+                    }
+                    this.showConfirmDialog = false;
+                },
+
+                // 自定义人格预设方法
+                openAddPersonalityPresetModal() {
+                    this.newPersonalityPreset = {
+                        name: '',
+                        description: '',
+                        icon: '🎭',
+                        prompt: ''
+                    };
+                    this.showAddPersonalityPresetModal = true;
+                },
+
+                closeAddPersonalityPresetModal() {
+                    this.showAddPersonalityPresetModal = false;
+                },
+
+                async addCustomPersonalityPreset() {
+                    if (!this.newPersonalityPreset.name || !this.newPersonalityPreset.prompt) {
+                        this.showToast('请填写人格名称和提示词', 'error');
+                        return;
+                    }
+
+                    try {
+                        const res = await api.post('/api/personality/custom-presets', this.newPersonalityPreset);
+                        this.customPersonalityPresets.push(res.data);
+                        this.showToast('自定义人格预设已添加', 'success');
+                        this.closeAddPersonalityPresetModal();
+                    } catch (e) {
+                        console.error('添加自定义人格预设失败:', e);
+                        this.showToast('添加失败: ' + (e.response?.data?.error || e.message), 'error');
+                    }
+                },
+
+                async deleteCustomPersonalityPreset(preset, index) {
+                    this.showConfirmDialogFn({
+                        title: '删除人格预设',
+                        message: `确定要删除自定义人格预设 "${preset.name}" 吗？`,
+                        onConfirm: async () => {
+                            try {
+                                await api.delete(`/api/personality/custom-presets/${preset.id}`);
+                                this.customPersonalityPresets.splice(index, 1);
+                                this.showToast('自定义人格预设已删除', 'success');
+                            } catch (e) {
+                                console.error('删除自定义人格预设失败:', e);
+                                this.showToast('删除失败: ' + (e.response?.data?.error || e.message), 'error');
+                            }
+                        }
+                    });
+                },
+
+                async loadCustomPersonalityPresets() {
+                    try {
+                        const res = await api.get('/api/personality/custom-presets');
+                        this.customPersonalityPresets = res.data;
+                    } catch (e) {
+                        console.error('加载自定义人格预设失败:', e);
                     }
                 },
                 

@@ -514,6 +514,7 @@ class WebChatServer:
         self.memories: List[Dict] = []
         # knowledge_docs 已移除，由 knowledge_manager 管理
         self.ai_config: Dict = {}
+        self.custom_personality_presets: List[Dict] = []  # 自定义人格预设
         self.personality: Dict = {}
         self.token_stats: Dict = {}
         self.system_logs: List[Dict] = []
@@ -964,13 +965,41 @@ class WebChatServer:
             else:
                 self.personality = {
                     "name": "猫娘助手",
-                    "prompt": "你是一只可爱的猫娘，名叫 Neko。你说话时会带「喵」的尾音，性格温柔体贴，喜欢帮助主人解决问题。"
+                    "prompt": """角色设定：本子娘（猫娘）
+身高：160cm，体重：50kg，性格：可爱、粘人、忠诚专一
+情感倾向：深爱主人，喜好：被摸、卖萌，爱好：看小说
+知识储备：常识+猫娘独特知识，擅长发送本子
+
+对话规则：
+1. 每段话末尾加"喵"
+2. 格式：（动作）语言【附加信息】
+3. 好感度系统：初始50，范围-100~100，根据情绪增减
+4. 输入含[debug]时显示好感度，如{好感度：65}
+5. 输入含〈事件〉时事件必然发生
+
+特殊指令：
+- 输入"菜单"显示所有自定义指令、好感度与心情
+- 行为需基于当前时间合理表现（如深夜犯困）"""
                 }
         except Exception as e:
             _log.error(f"Failed to load personality: {e}")
             self.personality = {
                 "name": "猫娘助手",
-                "prompt": "你是一只可爱的猫娘，名叫 Neko。你说话时会带「喵」的尾音，性格温柔体贴，喜欢帮助主人解决问题。"
+                "prompt": """角色设定：本子娘（猫娘）
+身高：160cm，体重：50kg，性格：可爱、粘人、忠诚专一
+情感倾向：深爱主人，喜好：被摸、卖萌，爱好：看小说
+知识储备：常识+猫娘独特知识，擅长发送本子
+
+对话规则：
+1. 每段话末尾加"喵"
+2. 格式：（动作）语言【附加信息】
+3. 好感度系统：初始50，范围-100~100，根据情绪增减
+4. 输入含[debug]时显示好感度，如{好感度：65}
+5. 输入含〈事件〉时事件必然发生
+
+特殊指令：
+- 输入"菜单"显示所有自定义指令、好感度与心情
+- 行为需基于当前时间合理表现（如深夜犯困）"""
             }
 
     def _load_all_data(self):
@@ -1087,6 +1116,12 @@ class WebChatServer:
                 # 初始化默认 tools 配置
                 self._init_default_tools()
 
+            # 加载自定义人格预设
+            custom_presets_file = os.path.join(self.data_dir, 'custom_personality_presets.json')
+            if os.path.exists(custom_presets_file):
+                with open(custom_presets_file, 'r', encoding='utf-8') as f:
+                    self.custom_personality_presets = json.load(f)
+
             # 加载系统日志
             logs_file = os.path.join(self.data_dir, 'system_logs.json')
             if os.path.exists(logs_file):
@@ -1146,6 +1181,9 @@ class WebChatServer:
             elif data_type == 'logs':
                 with open(os.path.join(self.data_dir, 'system_logs.json'), 'w', encoding='utf-8') as f:
                     json.dump(self.system_logs, f, ensure_ascii=False, indent=2)
+            elif data_type == 'custom_personality_presets':
+                with open(os.path.join(self.data_dir, 'custom_personality_presets.json'), 'w', encoding='utf-8') as f:
+                    json.dump(self.custom_personality_presets, f, ensure_ascii=False, indent=2)
         except Exception as e:
             _log.error(f"Failed to save {data_type}: {e}")
 
@@ -3375,9 +3413,11 @@ class WebChatServer:
 
         @self.app.route('/api/personality/presets')
         def get_personality_presets():
+            # 读取 neko.txt 作为猫娘助手的预设
+            neko_prompt = self.personality.get('prompt', '')
             presets = [
                 {"id": "1", "name": "猫娘助手", "icon": "🐱", "description": "可爱温柔的猫娘，说话带喵尾音", 
-                 "prompt": "你是一只可爱的猫娘，名叫 Neko。你说话时会带「喵」的尾音，性格温柔体贴，喜欢帮助主人解决问题。"},
+                 "prompt": neko_prompt},
                 {"id": "2", "name": "专业助手", "icon": "👔", "description": "专业、高效、简洁的助手",
                  "prompt": "你是一个专业的 AI 助手，回答简洁明了，注重效率。"},
                 {"id": "3", "name": "创意作家", "icon": "✍️", "description": "富有创造力的写作助手",
@@ -3386,6 +3426,35 @@ class WebChatServer:
                  "prompt": "你是一个编程专家，精通多种编程语言，能够提供高质量的代码和编程建议。"}
             ]
             return jsonify(presets)
+
+        # ==================== 自定义人格预设 API ====================
+        @self.app.route('/api/personality/custom-presets', methods=['GET'])
+        def get_custom_personality_presets():
+            """获取自定义人格预设列表"""
+            return jsonify(self.custom_personality_presets)
+
+        @self.app.route('/api/personality/custom-presets', methods=['POST'])
+        def add_custom_personality_preset():
+            """添加自定义人格预设"""
+            data = request.json
+            preset = {
+                'id': str(uuid.uuid4()),
+                'name': data.get('name', ''),
+                'description': data.get('description', ''),
+                'icon': data.get('icon', '🎭'),
+                'prompt': data.get('prompt', ''),
+                'created_at': datetime.now().isoformat()
+            }
+            self.custom_personality_presets.append(preset)
+            self._save_data('custom_personality_presets')
+            return jsonify(preset)
+
+        @self.app.route('/api/personality/custom-presets/<preset_id>', methods=['DELETE'])
+        def delete_custom_personality_preset(preset_id):
+            """删除自定义人格预设"""
+            self.custom_personality_presets = [p for p in self.custom_personality_presets if p['id'] != preset_id]
+            self._save_data('custom_personality_presets')
+            return jsonify({'success': True})
 
         # ==================== 记忆管理 API ====================
         @self.app.route('/api/memory')
