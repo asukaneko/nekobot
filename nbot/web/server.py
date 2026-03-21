@@ -38,7 +38,7 @@ CORE_INSTRUCTIONS = """【重要】你必须严格遵循以下要求：
 现在你可以开始与用户对话了。"""
 
 try:
-    from apscheduler.schedulers.background import BackgroundScheduler
+    from apscheduler.schedulers.asyncio import AsyncIOScheduler
     from apscheduler.triggers.cron import CronTrigger
     APSCHEDULER_AVAILABLE = True
 except ImportError:
@@ -583,8 +583,19 @@ class WebChatServer:
         # 工作流调度器
         self.scheduler = None
         if APSCHEDULER_AVAILABLE:
-            self.scheduler = BackgroundScheduler()
-            self.scheduler.start()
+            try:
+                # 尝试获取当前事件循环，如果没有则创建
+                import asyncio
+                try:
+                    loop = asyncio.get_running_loop()
+                except RuntimeError:
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                self.scheduler = AsyncIOScheduler(event_loop=loop)
+                self.scheduler.start()
+            except Exception as e:
+                _log.error(f"Failed to start scheduler: {e}")
+                self.scheduler = None
         
         # QQ Bot 引用（用于发送消息到QQ）
         self.qq_bot = None
@@ -2166,6 +2177,47 @@ class WebChatServer:
                     return jsonify({'messages': messages})
             except Exception as e:
                 _log.error(f"获取QQ消息失败: {e}")
+                return jsonify({'error': str(e)}), 500
+
+        @self.app.route('/api/qq/messages/<qq_type>/<qq_id>', methods=['DELETE'])
+        def delete_qq_messages(qq_type, qq_id):
+            """删除 QQ 消息记录
+            
+            Args:
+                qq_type: private 或 group
+                qq_id: 用户 ID 或群 ID
+            """
+            try:
+                import os
+                
+                if qq_type == 'private':
+                    file_path = os.path.join(self.base_dir, 'data', 'qq', 'private', f'{qq_id}.json')
+                elif qq_type == 'group':
+                    file_path = os.path.join(self.base_dir, 'data', 'qq', 'group', f'{qq_id}.json')
+                else:
+                    return jsonify({'error': 'Invalid type'}), 400
+                
+                if os.path.exists(file_path):
+                    os.remove(file_path)
+                    _log.info(f"Deleted QQ {qq_type} messages for {qq_id}")
+                
+                # 同时删除对应的 Web 会话（如果存在）
+                session_id_to_delete = None
+                for sid, session in self.sessions.items():
+                    if session.get('qq_id') == qq_id and session.get('type') == f'qq_{qq_type}':
+                        session_id_to_delete = sid
+                        break
+                
+                if session_id_to_delete:
+                    del self.sessions[session_id_to_delete]
+                    self._save_data('sessions')
+                    if WORKSPACE_AVAILABLE:
+                        workspace_manager.delete_workspace(session_id_to_delete)
+                    _log.info(f"Deleted associated web session {session_id_to_delete}")
+                
+                return jsonify({'success': True})
+            except Exception as e:
+                _log.error(f"删除QQ消息失败: {e}")
                 return jsonify({'error': str(e)}), 500
 
         @self.app.route('/api/sessions/<session_id>', methods=['PUT'])
@@ -5638,8 +5690,20 @@ class WebChatServer:
                 pass
 
         try:
+            # 使用同步包装函数来调用异步函数
+            def run_heartbeat_sync():
+                import asyncio
+                try:
+                    # 尝试获取当前事件循环
+                    loop = asyncio.get_running_loop()
+                    # 如果已经在事件循环中，创建任务
+                    asyncio.create_task(self._execute_heartbeat())
+                except RuntimeError:
+                    # 没有事件循环，创建新的
+                    asyncio.run(self._execute_heartbeat())
+            
             job = self.scheduler.add_job(
-                func=self._execute_heartbeat,
+                func=run_heartbeat_sync,
                 trigger='interval',
                 minutes=interval_minutes,
                 id='heartbeat',
@@ -5661,7 +5725,7 @@ class WebChatServer:
             except:
                 pass
 
-    def _execute_heartbeat(self):
+    async def _execute_heartbeat(self):
         """执行 Heartbeat 任务"""
         if not self.heartbeat_config.get('enabled'):
             return
@@ -5698,18 +5762,18 @@ class WebChatServer:
         # 调用 AI 处理
         try:
             from nbot.services.chat_service import chat as do_chat
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            response = loop.run_in_executor(None, do_chat, content, 'heartbeat', None, session_id, False, None, None)
-            response_text = loop.run_until_complete(response)
-            loop.close()
+            # chat 函数是同步的，直接调用
+            response_text = do_chat(content, user_id='heartbeat', group_id=None, group_user_id=None, image=False, url=None, video=None)
 
             if response_text:
                 _log.info(f"Heartbeat AI response: {response_text[:200]}...")
 
                 # 发送响应到目标
                 for target in targets:
-                    self._send_heartbeat_to_target(target, response_text)
+                    try:
+                        await self._send_heartbeat_to_target(target, response_text)
+                    except Exception as send_error:
+                        _log.error(f"Failed to send heartbeat to {target}: {send_error}", exc_info=True)
 
                 # 更新会话
                 self.sessions[session_id]['messages'].append({
@@ -5717,8 +5781,10 @@ class WebChatServer:
                     "content": response_text
                 })
                 self._save_data('sessions')
+            else:
+                _log.warning("Heartbeat AI returned empty response")
         except Exception as e:
-            _log.error(f"Error executing heartbeat: {e}")
+            _log.error(f"Error executing heartbeat: {e}", exc_info=True)
 
         # 更新最后运行时间
         self.heartbeat_config['last_run'] = datetime.now().isoformat()
@@ -5744,21 +5810,33 @@ class WebChatServer:
 
         return ""
 
-    def _send_heartbeat_to_target(self, target: str, content: str):
+    async def _send_heartbeat_to_target(self, target: str, content: str):
         """发送 heartbeat 结果到指定目标"""
         try:
             if target.startswith('qq_group:'):
                 group_id = target.split(':', 1)[1]
                 if self.qq_bot:
                     # 发送消息到 QQ 群
-                    self.qq_bot.send_group_message(group_id, content)
+                    await self.qq_bot.api.post_group_msg(group_id=group_id, text=content)
                     _log.info(f"Heartbeat sent to group {group_id}")
-            elif target.startswith('qq_user:'):
+            elif target.startswith('qq_user:') or target.startswith('qq_private:'):
+                # 支持两种格式：qq_user:xxx 和 qq_private:xxx
                 user_id = target.split(':', 1)[1]
                 if self.qq_bot:
                     # 发送消息到 QQ 用户
-                    self.qq_bot.send_private_message(user_id, content)
+                    await self.qq_bot.api.post_private_msg(user_id=user_id, text=content)
                     _log.info(f"Heartbeat sent to user {user_id}")
+            elif target.startswith('web:'):
+                # 发送到指定 Web 会话
+                session_id = target.split(':', 1)[1]
+                if self.socketio:
+                    self.socketio.emit('message', {
+                        'session_id': session_id,
+                        'content': content,
+                        'role': 'assistant',
+                        'timestamp': datetime.now().isoformat()
+                    }, room=session_id)
+                    _log.info(f"Heartbeat sent to web session {session_id}")
             elif target == 'web':
                 # 广播到所有 Web 客户端
                 if self.socketio:
@@ -5766,6 +5844,7 @@ class WebChatServer:
                         'content': content,
                         'timestamp': datetime.now().isoformat()
                     })
+                    _log.info(f"Heartbeat broadcast to all web clients")
         except Exception as e:
             _log.error(f"Failed to send heartbeat to {target}: {e}")
 

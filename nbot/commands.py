@@ -166,16 +166,39 @@ def register_command(*command,help_text = None,admin_show = False,category = "1"
         return func
     return decorator
 
-def load_address(): # 加载配置文件，返回图片保存地址
-    with open("resources/config/option.yml", "r", encoding="utf-8") as f:
+def load_address(): # 加载配置文件，返回图片保存地址（绝对路径）
+    """
+    加载配置文件，返回缓存目录的绝对路径
+    支持跨平台（Windows/Linux/Mac）
+    """
+    # 获取项目根目录（即包含 nbot 目录的目录）
+    # 使用当前文件所在位置来确定项目根目录
+    current_file_dir = os.path.dirname(os.path.abspath(__file__))
+    # 从 nbot/commands.py 回到项目根目录
+    project_root = os.path.dirname(current_file_dir)
+
+    config_path = os.path.join(project_root, "resources", "config", "option.yml")
+
+    with open(config_path, "r", encoding="utf-8") as f:
         conf = yaml.safe_load(f)
         after_photo_list = conf.get("plugins", {}).get("after_album", [])
         if after_photo_list and isinstance(after_photo_list, list):
             pdf_dir = after_photo_list[0].get("kwargs", {}).get("pdf_dir", "./cache/pdf/")
         else:
             pdf_dir = "./cache/pdf/"
-        pdf_dir = os.path.normpath(pdf_dir)
-        return os.path.dirname(pdf_dir)  # 返回pdf目录的父目录
+
+    # 将相对路径转换为绝对路径
+    if not os.path.isabs(pdf_dir):
+        # 如果是相对路径，基于项目根目录解析
+        pdf_dir = os.path.join(project_root, pdf_dir)
+
+    pdf_dir = os.path.normpath(pdf_dir)
+    cache_dir = os.path.dirname(pdf_dir)  # 返回pdf目录的父目录
+
+    # 确保目录存在
+    os.makedirs(cache_dir, exist_ok=True)
+
+    return cache_dir
 
 def load_favorites():
     """加载收藏夹数据"""

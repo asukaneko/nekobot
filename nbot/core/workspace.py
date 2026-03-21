@@ -4,6 +4,10 @@
 每个会话（QQ私聊/群聊、Web会话）对应一个独立的工作区文件夹。
 用户上传的文件存入工作区，AI 也可以在工作区中创建、读取、修改、删除文件。
 删除会话时同步删除对应的工作区文件夹。
+
+环境变量:
+    NBOT_WORKSPACE_DIR: 自定义工作区根目录路径（可选）
+                        如果不设置，默认使用项目目录下的 data/workspaces
 """
 
 import os
@@ -33,11 +37,33 @@ class WorkspaceManager:
             return
         self._initialized = True
 
-        self.base_dir = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
-        self.workspaces_dir = os.path.join(self.base_dir, 'data', 'workspaces')
+        # 优先从环境变量获取工作区目录
+        workspace_env = os.environ.get('NBOT_WORKSPACE_DIR')
+
+        if workspace_env:
+            # 使用环境变量指定的路径
+            self.workspaces_dir = os.path.normpath(workspace_env)
+            _log.info(f"使用环境变量指定的工作区目录: {self.workspaces_dir}")
+        else:
+            # 默认使用项目目录下的 data/workspaces
+            self.base_dir = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+            self.workspaces_dir = os.path.join(self.base_dir, 'data', 'workspaces')
+            _log.info(f"使用默认工作区目录: {self.workspaces_dir}")
+
         self.meta_file = os.path.join(self.workspaces_dir, '_meta.json')
 
-        os.makedirs(self.workspaces_dir, exist_ok=True)
+        # 确保工作区目录存在
+        try:
+            os.makedirs(self.workspaces_dir, exist_ok=True)
+            _log.info(f"工作区目录已就绪: {self.workspaces_dir}")
+        except Exception as e:
+            _log.error(f"创建工作区目录失败: {e}")
+            # 如果创建失败，使用临时目录作为后备
+            import tempfile
+            self.workspaces_dir = os.path.join(tempfile.gettempdir(), 'nbot_workspaces')
+            self.meta_file = os.path.join(self.workspaces_dir, '_meta.json')
+            os.makedirs(self.workspaces_dir, exist_ok=True)
+            _log.warning(f"使用临时目录作为工作区: {self.workspaces_dir}")
 
         # session_id -> workspace_path 的映射
         self._meta: Dict[str, Dict[str, Any]] = {}
@@ -46,11 +72,38 @@ class WorkspaceManager:
     # ========== 元数据管理 ==========
 
     def _load_meta(self):
-        """加载工作区元数据"""
+        """加载工作区元数据，并修复跨平台路径问题"""
         if os.path.exists(self.meta_file):
             try:
                 with open(self.meta_file, 'r', encoding='utf-8') as f:
-                    self._meta = json.load(f)
+                    loaded_meta = json.load(f)
+
+                # 修复跨平台路径问题
+                # 如果元数据中的路径是其他系统的格式（如Windows路径在Linux上），需要重新计算
+                self._meta = {}
+                for session_id, info in loaded_meta.items():
+                    old_path = info.get('path', '')
+                    folder = info.get('folder', '')
+
+                    # 重新计算当前平台下的正确路径
+                    # 使用保存的folder名称，在当前workspaces_dir下重建路径
+                    if folder:
+                        new_path = os.path.join(self.workspaces_dir, folder)
+                    else:
+                        # 如果没有folder字段，从session_id生成
+                        new_path = os.path.join(self.workspaces_dir, session_id)
+
+                    # 规范化路径
+                    new_path = os.path.normpath(new_path)
+
+                    # 如果路径发生了变化，记录日志
+                    if old_path != new_path:
+                        _log.info(f"修复工作区路径: {old_path} -> {new_path}")
+
+                    # 更新路径
+                    info['path'] = new_path
+                    self._meta[session_id] = info
+
             except Exception as e:
                 _log.error(f"加载工作区元数据失败: {e}")
                 self._meta = {}
