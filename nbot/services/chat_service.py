@@ -221,6 +221,13 @@ def _get_ai_response_with_tools_qq(messages: list, tools: list, session_id: str 
                         # 添加 session_id 到参数中
                         tool_context = {'session_id': session_id} if session_id else {}
                         tool_result = execute_tool(tool_name, arguments, context=tool_context)
+                        
+                        # 检查是否需要用户确认（exec_command 的特殊处理）
+                        if tool_result.get('require_confirmation'):
+                            # 返回确认请求，中断工具调用流程
+                            confirmation_msg = tool_result.get('message', f"AI 请求执行命令，需要您的确认。")
+                            return f"{confirmation_msg}\n\n请回复「确认执行」或「同意」来执行该命令。"
+                        
                         result_content = json.dumps(tool_result, ensure_ascii=False)
                     except Exception as e:
                         result_content = json.dumps({"error": str(e)}, ensure_ascii=False)

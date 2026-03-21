@@ -10,9 +10,9 @@
     <script src="https://unpkg.com/axios/dist/axios.min.js"></script>
     <script src="https://unpkg.com/socket.io-client@4.7.2/dist/socket.io.min.js"></script>
     <script src="https://cdn.bootcdn.net/ajax/libs/echarts/5.4.3/echarts.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://unpkg.com/marked@11.1.1/marked.min.js"></script>
+    <link rel="stylesheet" href="https://unpkg.com/@highlightjs/cdn-assets@11.9.0/styles/github-dark.min.css">
+    <script src="https://unpkg.com/@highlightjs/cdn-assets@11.9.0/highlight.min.js"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
         /* 深色主题（默认） */
@@ -1853,7 +1853,6 @@
             overflow-wrap: break-word;
             word-wrap: break-word;
             hyphens: auto;
-            white-space: pre-wrap;
         }
 
         .message.user .message-content {
@@ -1864,17 +1863,70 @@
         /* Markdown 样式 */
         .markdown-body {
             font-size: 14px;
-            line-height: 1.5;
+            line-height: 1.6;
         }
 
-        /* 移除段落之间的额外空行 */
-        .markdown-body br {
-            display: none;
+        /* 段落间距 */
+        .markdown-body p {
+            margin-bottom: 8px;
         }
 
-        .markdown-body p br,
-        .markdown-body li br {
-            display: inline;
+        .markdown-body p:last-child {
+            margin-bottom: 0;
+        }
+
+        /* 列表间距 */
+        .markdown-body ul,
+        .markdown-body ol {
+            margin-top: 6px;
+            margin-bottom: 6px;
+            padding-left: 20px;
+        }
+
+        .markdown-body li {
+            margin-bottom: 4px;
+        }
+
+        .markdown-body li:last-child {
+            margin-bottom: 0;
+        }
+
+        /* 标题间距 */
+        .markdown-body h1,
+        .markdown-body h2,
+        .markdown-body h3,
+        .markdown-body h4,
+        .markdown-body h5,
+        .markdown-body h6 {
+            margin-top: 12px;
+            margin-bottom: 8px;
+        }
+
+        .markdown-body h1:first-child,
+        .markdown-body h2:first-child,
+        .markdown-body h3:first-child {
+            margin-top: 0;
+        }
+
+        /* 代码块间距 */
+        .markdown-body pre {
+            margin: 10px 0;
+        }
+
+        /* 引用块间距 */
+        .markdown-body blockquote {
+            margin: 8px 0;
+            padding: 8px 12px;
+        }
+
+        /* 表格间距 */
+        .markdown-body table {
+            margin: 10px 0;
+        }
+
+        /* 分割线间距 */
+        .markdown-body hr {
+            margin: 12px 0;
         }
 
         .markdown-body h1,
@@ -7366,7 +7418,8 @@
                     await Promise.all([
                         this.loadStats(),
                         this.loadSessions(),
-                        this.loadSettings()
+                        this.loadSettings(),
+                        this.loadPersonality()
                     ]);
                     // 延迟初始化图表
                     setTimeout(() => this.initCharts(), 100);

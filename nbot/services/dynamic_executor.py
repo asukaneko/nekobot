@@ -43,6 +43,8 @@ class DynamicExecutor:
                 return self._execute_static(implementation, params, context)
             elif impl_type == 'minimax_web_search':
                 return self._execute_minimax_search(implementation, params, context)
+            elif impl_type == 'builtin':
+                return self._execute_builtin(implementation, params, context)
             else:
                 return {
                     'success': False,
@@ -256,6 +258,29 @@ class DynamicExecutor:
             return {
                 'success': False,
                 'error': f'搜索失败: {str(e)}'
+            }
+    
+    def _execute_builtin(self, implementation: Dict, params: Dict, context: Dict) -> Dict[str, Any]:
+        """执行内置工具"""
+        handler = implementation.get('handler', '')
+        
+        try:
+            if handler == 'exec_command':
+                from nbot.services.tools import ToolExecutor
+                command = params.get('command', '')
+                timeout = params.get('timeout', 30)
+                confirmed = params.get('confirmed', False)
+                return ToolExecutor.exec_command(command, timeout=timeout, confirmed=confirmed)
+            else:
+                return {
+                    'success': False,
+                    'error': f'Unknown builtin handler: {handler}'
+                }
+        except Exception as e:
+            _log.error(f"Builtin execution failed: {e}")
+            return {
+                'success': False,
+                'error': f'执行失败: {str(e)}'
             }
     
     def _prepare_variables(self, params: Dict, context: Dict) -> Dict[str, str]:

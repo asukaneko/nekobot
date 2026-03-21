@@ -12,6 +12,21 @@ import configparser
 
 _log = logging.getLogger(__name__)
 
+# 动态执行器（延迟导入避免循环依赖）
+_dynamic_executor = None
+
+def get_dynamic_executor():
+    """获取动态执行器实例（延迟加载）"""
+    global _dynamic_executor
+    if _dynamic_executor is None:
+        try:
+            from nbot.services.dynamic_executor import get_executor
+            _dynamic_executor = get_executor()
+        except Exception as e:
+            _log.error(f"Failed to load dynamic executor: {e}")
+            _dynamic_executor = None
+    return _dynamic_executor
+
 # 加载配置文件
 config_parser = configparser.ConfigParser()
 config_parser.read('config.ini', encoding='utf-8')
@@ -25,6 +40,33 @@ MINIMAX_VLM_URL = "https://api.minimaxi.com/v1/coding_plan/vlm"
 
 # Web 配置数据目录
 WEB_DATA_DIR = os.path.join(os.path.dirname(__file__), '..', '..', 'data', 'web')
+
+# Exec 工具配置
+EXEC_WHITELIST = {
+    'ls', 'cat', 'echo', 'pwd', 'whoami', 'date', 'cal', 'df', 'du',
+    'head', 'tail', 'wc', 'grep', 'find', 'ps', 'top', 'htop',
+    'ping', 'curl', 'wget', 'git', 'python', 'python3', 'pip',
+    'node', 'npm', 'yarn', 'docker', 'docker-compose', 'kubectl',
+    'systemctl', 'service', 'journalctl', 'uname', 'hostname',
+    'netstat', 'ss', 'lsof', 'ifconfig', 'ip', 'route',
+    'tar', 'gzip', 'gunzip', 'zip', 'unzip', 'chmod', 'chown',
+    'mkdir', 'touch', 'cp', 'mv', 'rm', 'rmdir', 'ln',
+    'which', 'whereis', 'type', 'file', 'stat', 'md5sum', 'sha256sum',
+    'cd', 'dir'
+}
+
+EXEC_BLACKLIST_PATTERNS = [
+    r'rm\s+-rf\s+/',
+    r'mkfs',
+    r'dd\s+if=',
+    r'>\s*/dev/',
+    r':\(\)\s*\{',
+    r'fork\s*\(',
+    r'while\s*\(true\)',
+    r'download.*exec',
+    r'curl.*\|.*bash',
+    r'wget.*\|.*sh',
+]
 
 
 def load_tools_config() -> List[Dict]:
@@ -419,6 +461,102 @@ class ToolExecutor:
                 "url": url
             }
 
+    @staticmethod
+    def exec_command(command: str, timeout: int = 30, confirmed: bool = False) -> Dict[str, Any]:
+        """
+        执行命令行命令
+        
+        Args:
+            command: 要执行的命令
+            timeout: 超时时间（秒），默认30秒
+            confirmed: 是否已经用户确认，False表示需要检查确认
+        
+        Returns:
+            命令执行结果，如果需要确认则返回确认请求
+        """
+        import subprocess
+        import re
+        import shlex
+        
+        try:
+            # 安全检查：检测危险模式
+            for pattern in EXEC_BLACKLIST_PATTERNS:
+                if re.search(pattern, command, re.IGNORECASE):
+                    return {
+                        "success": False,
+                        "error": f"命令包含危险操作模式，已阻止执行",
+                        "command": command,
+                        "blocked_reason": "dangerous_pattern"
+                    }
+            
+            # 解析命令获取主命令名
+            try:
+                cmd_parts = shlex.split(command)
+                main_cmd = cmd_parts[0] if cmd_parts else ""
+            except:
+                main_cmd = command.split()[0] if command else ""
+            
+            # 检查是否在白名单中
+            is_whitelisted = main_cmd in EXEC_WHITELIST
+            
+            # 如果未确认且不在白名单，返回确认请求
+            if not confirmed and not is_whitelisted:
+                return {
+                    "success": False,
+                    "error": "需要用户确认",
+                    "command": command,
+                    "require_confirmation": True,
+                    "main_command": main_cmd,
+                    "is_whitelisted": is_whitelisted,
+                    "message": f"AI 请求执行命令: `{command}`\n\n该命令不在白名单中，请谨慎确认。"
+                }
+            
+            # 执行命令
+            _log.info(f"Executing command: {command}")
+            
+            # 使用 subprocess 执行命令
+            result = subprocess.run(
+                command,
+                shell=True,
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+                cwd=os.getcwd()
+            )
+            
+            # 构建返回结果
+            output = result.stdout
+            error_output = result.stderr
+            
+            # 限制输出长度
+            max_output_length = 10000
+            if len(output) > max_output_length:
+                output = output[:max_output_length] + f"\n\n... (输出已截断，共 {len(result.stdout)} 字符)"
+            
+            return {
+                "success": result.returncode == 0,
+                "command": command,
+                "returncode": result.returncode,
+                "stdout": output,
+                "stderr": error_output[:5000] if error_output else "",
+                "is_whitelisted": is_whitelisted
+            }
+            
+        except subprocess.TimeoutExpired:
+            _log.error(f"Command timeout: {command}")
+            return {
+                "success": False,
+                "error": f"命令执行超时（{timeout}秒）",
+                "command": command
+            }
+        except Exception as e:
+            _log.error(f"Exec command error: {e}")
+            return {
+                "success": False,
+                "error": str(e),
+                "command": command
+            }
+
 
 # 工具定义（用于 AI 工具调用）
 TOOL_DEFINITIONS = [
@@ -576,6 +714,33 @@ TOOL_DEFINITIONS = [
                         "enum": ["long", "short"]
                     }
                 }
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "exec_command",
+            "description": "执行命令行命令。用于执行系统命令、运行脚本、查看系统状态等。白名单内的命令（如ls, cat, echo, git, python等）会直接执行，不在白名单中的命令需要用户确认。危险命令会被自动阻止。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "command": {
+                        "type": "string",
+                        "description": "要执行的命令行命令，如'ls -la'、'cat file.txt'、'python script.py'等"
+                    },
+                    "timeout": {
+                        "type": "integer",
+                        "description": "命令超时时间（秒），默认30秒",
+                        "default": 30
+                    },
+                    "confirmed": {
+                        "type": "boolean",
+                        "description": "是否已经用户确认。首次调用时设为false，如果返回需要确认，则用户确认后再次调用设为true",
+                        "default": False
+                    }
+                },
+                "required": ["command"]
             }
         }
     }
@@ -785,8 +950,14 @@ def execute_tool(tool_name: str, arguments: Dict[str, Any], context: Dict = None
     # 2. 如果找到 Web 配置且有 implementation，使用动态执行
     if tool_config and tool_config.get('implementation'):
         _log.info(f"Executing dynamic tool: {tool_name}")
-        executor = get_executor()
-        return executor.execute_tool(tool_config, arguments, context)
+        executor = get_dynamic_executor()
+        if executor:
+            return executor.execute_tool(tool_config, arguments, context)
+        else:
+            return {
+                "success": False,
+                "error": "Dynamic executor not available"
+            }
 
     # 3. 处理记忆工具（需要 context 中的用户信息）
     if tool_name == "save_to_memory":
@@ -806,6 +977,7 @@ def execute_tool(tool_name: str, arguments: Dict[str, Any], context: Dict = None
         "get_date_time": executor.get_date_time,
         "http_get": executor.http_get,
         "understand_image": executor.understand_image,
+        "exec_command": executor.exec_command,
     }
 
     if tool_name not in tool_map:

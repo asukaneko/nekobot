@@ -977,6 +977,36 @@ class WebChatServer:
                     },
                     "max_length": 2000
                 }
+            },
+            {
+                "id": "exec_command",
+                "name": "exec_command",
+                "description": "执行命令行命令。白名单内的命令（如ls, cat, echo, git, python等）会直接执行，不在白名单中的命令需要用户确认。危险命令会被自动阻止。",
+                "enabled": True,
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "command": {
+                            "type": "string",
+                            "description": "要执行的命令行命令，如'ls -la'、'cat file.txt'、'python script.py'等"
+                        },
+                        "timeout": {
+                            "type": "integer",
+                            "description": "命令超时时间（秒），默认30秒",
+                            "default": 30
+                        },
+                        "confirmed": {
+                            "type": "boolean",
+                            "description": "是否已经用户确认。首次调用时设为false，如果返回需要确认，则用户确认后再次调用设为true",
+                            "default": False
+                        }
+                    },
+                    "required": ["command"]
+                },
+                "implementation": {
+                    "type": "builtin",
+                    "handler": "exec_command"
+                }
             }
         ]
         self._save_data('tools')
@@ -984,7 +1014,7 @@ class WebChatServer:
     def _load_personality(self):
         """加载人格提示词"""
         try:
-            prompt_file = "resources/prompts/neko.txt"
+            prompt_file = os.path.join(self.base_dir, "resources", "prompts", "neko.txt")
             if os.path.exists(prompt_file):
                 with open(prompt_file, "r", encoding="utf-8") as f:
                     prompt = f.read()
@@ -2886,6 +2916,26 @@ class WebChatServer:
             
             return jsonify({'success': True, 'user_message': user_message})
 
+        # ==================== Exec 命令确认 API ====================
+        @self.app.route('/api/exec/confirm', methods=['POST'])
+        def exec_confirm():
+            """确认执行命令（用于非白名单命令）"""
+            data = request.json
+            command = data.get('command')
+            timeout = data.get('timeout', 30)
+            
+            if not command:
+                return jsonify({'error': 'Command is required'}), 400
+            
+            try:
+                from nbot.services.tools import ToolExecutor
+                # 执行命令，confirmed=True 表示用户已确认
+                result = ToolExecutor.exec_command(command, timeout=timeout, confirmed=True)
+                return jsonify(result)
+            except Exception as e:
+                _log.error(f"Exec confirm error: {e}")
+                return jsonify({'success': False, 'error': str(e)}), 500
+
         # ==================== AI 工具调用 API ====================
         @self.app.route('/api/ai/tools', methods=['POST'])
         def ai_tools_handler():
@@ -3473,7 +3523,7 @@ class WebChatServer:
             
             # 保存到文件
             try:
-                prompt_file = "resources/prompts/neko.txt"
+                prompt_file = os.path.join(self.base_dir, "resources", "prompts", "neko.txt")
                 os.makedirs(os.path.dirname(prompt_file), exist_ok=True)
                 with open(prompt_file, "w", encoding="utf-8") as f:
                     f.write(self.personality['prompt'])
@@ -5997,8 +6047,8 @@ def create_web_app(config: Dict[str, Any] = None) -> tuple[Flask, SocketIO]:
         return send_from_directory(server.static_folder, filename)
 
     # 添加文件上传 API
-    # 文件大小限制：10MB
-    MAX_FILE_SIZE = 10 * 1024 * 1024
+    # 文件大小限制：50MB
+    MAX_FILE_SIZE = 50 * 1024 * 1024
     # 文本内容限制：100KB（足够大多数文本文件）
     MAX_TEXT_CONTENT_SIZE = 100 * 1024
 
