@@ -8673,15 +8673,19 @@
                     // 必须清空进度卡片，防止跨会话污染
                     this.thinkingCards = [];
                     
+                    // 中断之前的消息加载（如果有）
+                    if (this.messageRefreshTimer) {
+                        clearInterval(this.messageRefreshTimer);
+                        this.messageRefreshTimer = null;
+                    }
+                    
+                    // 延迟一下再加载新会话的消息，确保状态已清理
+                    await new Promise(resolve => setTimeout(resolve, 50));
+                    
                     socket.emit('leave_session');
                     socket.emit('join_session', { session_id: session.id });
                     await this.loadMessages();
                     this.updateContextStats();
-                    
-                    // 清除之前的消息刷新定时器
-                    if (this.messageRefreshTimer) {
-                        clearInterval(this.messageRefreshTimer);
-                    }
                     
                     // 设置新的消息刷新定时器（每 2 秒）
                     this.messageRefreshTimer = setInterval(() => {

@@ -557,6 +557,109 @@ class ToolExecutor:
                 "command": command
             }
 
+    @staticmethod
+    def download_file(url: str, filename: str = None, workspace_id: str = None) -> Dict[str, Any]:
+        """
+        从 URL 下载文件到工作区
+        
+        Args:
+            url: 文件下载链接
+            filename: 保存的文件名（可选，默认从 URL 中提取）
+            workspace_id: 工作区 ID（可选，默认使用当前会话的工作区）
+        
+        Returns:
+            下载结果
+        """
+        try:
+            # 如果没有指定文件名，从 URL 中提取
+            if not filename:
+                from urllib.parse import urlparse, unquote
+                parsed = urlparse(url)
+                filename = unquote(os.path.basename(parsed.path))
+                if not filename:
+                    filename = f"downloaded_file_{int(datetime.now().timestamp())}"
+            
+            # 确保文件名安全
+            filename = os.path.basename(filename)  # 移除路径
+            
+            # 下载文件
+            req = urllib.request.Request(
+                url,
+                headers={
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+                }
+            )
+            
+            _log.info(f"Downloading file from {url} to workspace {workspace_id}")
+            
+            with urllib.request.urlopen(req, timeout=60) as response:
+                content = response.read()
+                content_type = response.headers.get('Content-Type', 'application/octet-stream')
+                
+            # 确定文件类型
+            file_type = 'file'
+            if content_type.startswith('image/'):
+                file_type = 'image'
+            elif content_type.startswith('text/'):
+                file_type = 'text'
+            elif content_type == 'application/pdf':
+                file_type = 'pdf'
+            
+            # 保存到工作区
+            try:
+                from nbot.core.workspace import workspace_manager
+                
+                # 如果没有指定 workspace_id，尝试使用默认工作区
+                if not workspace_id:
+                    # 尝试获取当前上下文中的工作区
+                    workspace_id = 'default'
+                
+                # 创建工作区目录（如果不存在）
+                workspace_path = workspace_manager.get_or_create(workspace_id)
+                file_path = os.path.join(workspace_path, filename)
+                
+                # 保存文件
+                with open(file_path, 'wb') as f:
+                    f.write(content)
+                
+                _log.info(f"File saved to {file_path}")
+                
+                return {
+                    "success": True,
+                    "url": url,
+                    "filename": filename,
+                    "file_path": file_path,
+                    "file_type": file_type,
+                    "content_type": content_type,
+                    "size": len(content),
+                    "workspace_id": workspace_id,
+                    "message": f"文件已成功下载到工作区: {filename}"
+                }
+                
+            except Exception as e:
+                _log.error(f"Failed to save file to workspace: {e}")
+                return {
+                    "success": False,
+                    "error": f"保存文件到工作区失败: {str(e)}",
+                    "url": url,
+                    "filename": filename
+                }
+                
+        except urllib.error.URLError as e:
+            _log.error(f"Download URL error: {e}")
+            return {
+                "success": False,
+                "error": f"下载失败: {str(e)}",
+                "url": url
+            }
+        except Exception as e:
+            _log.error(f"Download file error: {e}")
+            return {
+                "success": False,
+                "error": str(e),
+                "url": url
+            }
+
 
 # 工具定义（用于 AI 工具调用）
 TOOL_DEFINITIONS = [
@@ -741,6 +844,31 @@ TOOL_DEFINITIONS = [
                     }
                 },
                 "required": ["command"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "download_file",
+            "description": "从 URL 下载文件到工作区。当用户需要下载网络文件、保存图片、下载文档等时使用此工具。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "url": {
+                        "type": "string",
+                        "description": "文件下载链接，如'https://example.com/file.pdf'"
+                    },
+                    "filename": {
+                        "type": "string",
+                        "description": "保存的文件名（可选，默认从 URL 中提取）"
+                    },
+                    "workspace_id": {
+                        "type": "string",
+                        "description": "工作区 ID（可选，默认使用当前会话的工作区）"
+                    }
+                },
+                "required": ["url"]
             }
         }
     }

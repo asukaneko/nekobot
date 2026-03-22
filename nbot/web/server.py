@@ -3381,7 +3381,9 @@ class WebChatServer:
         def run_heartbeat():
             """手动触发 Heartbeat"""
             try:
-                self._execute_heartbeat()
+                import asyncio
+                # 使用 asyncio.run 运行异步函数，force=True 跳过 enabled 检查
+                asyncio.run(self._execute_heartbeat(force=True))
                 return jsonify({'success': True})
             except Exception as e:
                 return jsonify({'success': False, 'error': str(e)}), 500
@@ -5775,9 +5777,14 @@ class WebChatServer:
             except:
                 pass
 
-    async def _execute_heartbeat(self):
-        """执行 Heartbeat 任务"""
-        if not self.heartbeat_config.get('enabled'):
+    async def _execute_heartbeat(self, force: bool = False):
+        """执行 Heartbeat 任务
+        
+        Args:
+            force: 是否强制执行，跳过 enabled 检查
+        """
+        if not force and not self.heartbeat_config.get('enabled'):
+            _log.info("Heartbeat is disabled, skipping execution")
             return
 
         config = self.heartbeat_config

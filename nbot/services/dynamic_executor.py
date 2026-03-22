@@ -271,6 +271,15 @@ class DynamicExecutor:
                 timeout = params.get('timeout', 30)
                 confirmed = params.get('confirmed', False)
                 return ToolExecutor.exec_command(command, timeout=timeout, confirmed=confirmed)
+            elif handler == 'download_file':
+                from nbot.services.tools import ToolExecutor
+                url = params.get('url', '')
+                filename = params.get('filename')
+                workspace_id = params.get('workspace_id')
+                # 如果没有提供 workspace_id，尝试从 context 获取
+                if not workspace_id and context.get('session_id'):
+                    workspace_id = context.get('session_id')
+                return ToolExecutor.download_file(url, filename=filename, workspace_id=workspace_id)
             else:
                 return {
                     'success': False,
