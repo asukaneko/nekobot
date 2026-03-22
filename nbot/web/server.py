@@ -35,6 +35,14 @@ CORE_INSTRUCTIONS = """【重要】你必须严格遵循以下要求：
 - 你不需要在回复中提及文件路径或重复文件内容
 - 只需简单告知用户文件已发送即可
 
+【多轮思考指南】
+当你需要进行多轮思考或执行多个操作时：
+- 你可以在一轮中调用工具，然后在后续轮次中继续思考和调用更多工具
+- 当你认为所有操作都已完成，不需要再调用任何工具时，在回复的末尾加上 "break"（不含引号）
+- 例如："我已经完成了文件分析并发送给你 break"
+- 如果不加 break，系统会继续给你思考的机会，让你调用更多工具
+- 重要：如果你说"我将发送文件"但还没有调用 workspace_send_file 工具，请不要加 break，系统会给你机会继续调用工具
+
 现在你可以开始与用户对话了。"""
 
 try:
@@ -1439,7 +1447,7 @@ class WebChatServer:
 
         # 构建消息
         messages = [
-            {"role": "system", "content": system_prompt}
+            {"role": "system", "content": f"{system_prompt}\n\n{CORE_INSTRUCTIONS}"}
         ]
 
         # 添加历史上下文（最近10条）
@@ -1812,7 +1820,7 @@ class WebChatServer:
 
     def _get_ai_response_with_tools(self, messages: List[Dict], tools: List[Dict], use_silicon: bool = False) -> Dict:
         """调用 AI 并支持工具
-        
+
         Args:
             messages: 消息列表
             tools: 工具定义列表
@@ -1957,13 +1965,15 @@ class WebChatServer:
 
             choice = data.get("choices", [{}])[0]
             message = choice.get("message", {})
+            finish_reason = choice.get('finish_reason', '')
 
             result = {
-                'content': message.get('content', '')
+                'content': message.get('content', ''),
+                'finish_reason': finish_reason
             }
 
             # 处理工具调用
-            if 'tool_calls' in message:
+            if 'tool_calls' in message or finish_reason == 'tool_calls':
                 tool_calls = message['tool_calls']
                 result['tool_calls'] = []
 
@@ -2553,18 +2563,21 @@ class WebChatServer:
             if messages_for_ai and messages_for_ai[0].get('role') == 'system':
                 system_prompt = messages_for_ai[0].get('content', '')
                 messages_for_ai[0]['content'] = f"{system_prompt}\n\n{CORE_INSTRUCTIONS}"
+                _log.info(f"[CoreInstructions] 已添加到现有系统提示词后，长度: {len(messages_for_ai[0]['content'])}")
             elif messages_for_ai and messages_for_ai[0].get('role') != 'system':
                 # 如果第一条不是系统消息，插入核心指令
                 messages_for_ai.insert(0, {
                     'role': 'system',
                     'content': CORE_INSTRUCTIONS
                 })
+                _log.info(f"[CoreInstructions] 已插入到消息开头（原第一条不是系统消息）")
             else:
                 # 没有任何消息，添加系统消息和核心指令
                 messages_for_ai.insert(0, {
                     'role': 'system',
                     'content': CORE_INSTRUCTIONS
                 })
+                _log.info(f"[CoreInstructions] 已添加到空消息列表")
 
             # 收集需要添加到系统提示词的内容
             system_additions = []
@@ -2704,7 +2717,12 @@ class WebChatServer:
                                                 'workspace_file_info': '文件信息',
                                                 'web_search': '网页搜索',
                                                 'generate_image': '生成图片',
-                                                'save_to_memory': '保存记忆'
+                                                'save_to_memory': '保存记忆',
+                                                'todo_add': '添加待办',
+                                                'todo_list': '列出待办',
+                                                'todo_complete': '完成待办',
+                                                'todo_delete': '删除待办',
+                                                'todo_clear': '清空待办'
                                             }
                                             tool_display_name = tool_names.get(tool_name, tool_name)
                                             
@@ -2815,7 +2833,12 @@ class WebChatServer:
                                                 'workspace_file_info': '文件信息',
                                                 'web_search': '网页搜索',
                                                 'generate_image': '生成图片',
-                                                'save_to_memory': '保存记忆'
+                                                'save_to_memory': '保存记忆',
+                                                'todo_add': '添加待办',
+                                                'todo_list': '列出待办',
+                                                'todo_complete': '完成待办',
+                                                'todo_delete': '删除待办',
+                                                'todo_clear': '清空待办'
                                             }
                                             tool_display_name = tool_names.get(tool_name, tool_name)
                                             progress_card.update(StepType.TOOL_DONE, f"{tool_display_name}失败", False)
@@ -3060,8 +3083,8 @@ class WebChatServer:
 当用户想要启用/禁用工作流时，先列出工作流让用户选择，然后使用 toggle_workflow 工具。
 当用户想要执行工作流时，使用 execute_workflow 工具。"""
                 
-                full_messages = [{"role": "system", "content": system_prompt}] + messages
-                
+                full_messages = [{"role": "system", "content": f"{system_prompt}\n\n{CORE_INSTRUCTIONS}"}] + messages
+
                 # 调用 AI（支持工具的版本）
                 response = self._get_ai_response_with_tools(full_messages, tools)
                 
@@ -5353,6 +5376,9 @@ class WebChatServer:
                     try:
                         from nbot.services.tools import get_enabled_tools, execute_tool
                         enabled_tools = get_enabled_tools()
+                        # 记录加载的工具列表
+                        tool_names = [t.get('function', {}).get('name', 'unknown') for t in enabled_tools]
+                        _log.info(f"[Tools] 已加载 {len(enabled_tools)} 个工具: {tool_names}")
                         if enabled_tools:
                             # 构建工具上下文（包含 session_id）
                             tool_context = {
@@ -5408,6 +5434,7 @@ class WebChatServer:
                                 
                                 if 'tool_calls' in response and response['tool_calls']:
                                     tool_calls = response['tool_calls']
+                                    _log.info(f"[Tools] AI 调用工具: {[tc.get('name') for tc in tool_calls]}")
                                     
                                     # 添加 AI 回复到消息历史
                                     tool_messages.append({
@@ -5444,7 +5471,12 @@ class WebChatServer:
                                             'workspace_delete_file': '🗑️ 删除文件',
                                             'workspace_list_files': '📁 列出文件',
                                             'workspace_tree': '🌳 显示目录树',
-                                            'workspace_send_file': '📤 发送文件'
+                                            'workspace_send_file': '📤 发送文件',
+                                            'todo_add': '✅ 添加待办',
+                                            'todo_list': '📋 列出待办',
+                                            'todo_complete': '✓ 完成待办',
+                                            'todo_delete': '🗑️ 删除待办',
+                                            'todo_clear': '🧹 清空待办'
                                         }.get(tool_name, f'⚙️ {tool_name}')
                                         
                                         update_thinking_card('tool', tool_display_name, json.dumps(arguments, ensure_ascii=False)[:100])
@@ -5471,6 +5503,13 @@ class WebChatServer:
                                                 _log.info(f"[Workspace] 结果预览: {str(tool_result)[:300]}")
                                             else:
                                                 _log.error(f"[Workspace] ✗ 执行失败: {tool_name} - {tool_result.get('error')}")
+                                        
+                                        # Todo 工具日志
+                                        if tool_name.startswith('todo_'):
+                                            if tool_result.get('success'):
+                                                _log.info(f"[Todo] ✓ 执行成功: {tool_name} - {tool_result.get('message', '')}")
+                                            else:
+                                                _log.error(f"[Todo] ✗ 执行失败: {tool_name} - {tool_result.get('error', '')}")
                                         
                                         tool_messages.append({
                                             "role": "tool",
@@ -5560,10 +5599,39 @@ class WebChatServer:
                                             else:
                                                 _log.warning(f"[SendFile] 无法发送文件: file_path={file_path}, filename={filename}, session_id={session_id}")
                                 else:
-                                    # AI 没有调用工具，得到最终回复
+                                    # AI 没有调用工具，得到回复内容
                                     final_content = response.get('content', '')
-                                    break
-                            
+                                    finish_reason = response.get('finish_reason', '')
+
+                                    # 判断是否应该终止思考
+                                    # 1. finish_reason == 'stop' 表示模型正常完成（OpenAI标准）
+                                    # 2. finish_reason 为空但 AI 返回了内容（某些国内API不返回finish_reason）
+                                    # 3. 回复以 'break' 结尾表示AI主动要求终止
+                                    # 4. 达到最大迭代次数
+                                    should_stop = (
+                                        finish_reason == 'stop' or
+                                        (not finish_reason and final_content) or  # 兼容不返回finish_reason的API
+                                        final_content.rstrip().endswith('break') or
+                                        iteration >= max_iterations - 1
+                                    )
+
+                                    if should_stop:
+                                        # 移除末尾的break标记（如果有）
+                                        if final_content.rstrip().endswith('break'):
+                                            final_content = final_content.rstrip()[:-5].rstrip()
+                                        _log.info(f"[AgentLoop] 终止思考: finish_reason={finish_reason}, iteration={iteration}")
+                                        break
+                                    else:
+                                        # AI 没有要求终止，继续下一轮思考
+                                        # 将AI的回复添加到消息历史
+                                        tool_messages.append({
+                                            "role": "assistant",
+                                            "content": final_content
+                                        })
+                                        _log.info(f"[AgentLoop] 继续思考: finish_reason={finish_reason}, iteration={iteration}")
+                                        # 继续下一轮迭代，给AI机会调用工具
+                                        continue
+
                             if not final_content:
                                 _log.warning(f"[Tools] AI 未生成最终回复，使用默认提示")
                                 final_content = '抱歉，处理过程中出现了问题，请稍后再试~'

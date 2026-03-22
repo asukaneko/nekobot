@@ -2306,6 +2306,36 @@
             align-items: flex-end;
         }
 
+        .chat-input-container {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .chat-input-header {
+            display: flex;
+            justify-content: flex-end;
+            gap: 8px;
+        }
+
+        .chat-input-expand-btn {
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            padding: 4px 8px;
+            color: var(--text-secondary);
+            cursor: pointer;
+            font-size: 12px;
+            transition: all 0.2s;
+        }
+
+        .chat-input-expand-btn:hover {
+            background: var(--bg-hover);
+            color: var(--text-primary);
+            border-color: var(--accent-primary);
+        }
+
         .chat-input {
             flex: 1;
             background: var(--bg-tertiary);
@@ -2316,8 +2346,15 @@
             font-size: 14px;
             resize: none;
             min-height: 48px;
+            height: 48px;
             max-height: 120px;
             outline: none;
+            transition: all 0.3s ease;
+        }
+
+        .chat-input.expanded {
+            height: 200px;
+            max-height: 300px;
         }
 
         .chat-input:focus { border-color: var(--accent-primary); }
@@ -4270,15 +4307,29 @@
                                                 </button>
                                             </div>
                                         </div>
-                                        <textarea 
-                                            v-model="inputMessage" 
-                                            class="chat-input" 
-                                            placeholder="输入消息... (Shift+Enter 换行)"
-                                            @keydown.enter.prevent="handleEnter"
-                                            rows="1"
-                                            :disabled="isLoading"
-                                        ></textarea>
+                                        <div class="chat-input-container">
+                                            <div class="chat-input-header">
+                                                <button class="chat-input-expand-btn" @click="toggleInputSize" :title="isInputExpanded ? '缩小输入栏' : '扩大输入栏'">
+                                                    <i :class="isInputExpanded ? 'fas fa-compress-alt' : 'fas fa-expand-alt'"></i>
+                                                    {{ isInputExpanded ? '缩小' : '扩大' }}
+                                                </button>
+                                            </div>
+                                            <textarea
+                                                v-model="inputMessage"
+                                                class="chat-input"
+                                                :class="{ 'expanded': isInputExpanded }"
+                                                placeholder="输入消息... (Shift+Enter 换行)"
+                                                @keydown.enter.prevent="handleEnter"
+                                                rows="1"
+                                                :disabled="isLoading"
+                                            ></textarea>
+                                        </div>
                                         <div class="chat-actions">
+                                            <!-- 上传到工作区按钮 -->
+                                            <label class="btn btn-icon" :disabled="isLoading" title="上传文件到工作区（不触发AI）">
+                                                <i class="fas fa-folder-open"></i>
+                                                <input type="file" ref="workspaceFileInput" @change="handleWorkspaceFileUpload" multiple accept="*/*" style="display: none;">
+                                            </label>
                                             <!-- 文件上传按钮 -->
                                             <label class="btn btn-icon" :disabled="isLoading" title="发送文件或图片">
                                                 <i class="fas fa-paperclip"></i>
@@ -6887,6 +6938,7 @@
                     thinkingCards: [],  // 进度卡片列表
                     showThinkingCard: true,  // 是否显示进度卡片
                     isUserScrolling: false,
+                    isInputExpanded: false,  // 输入栏是否扩大
                     showScrollToBottom: false,
                     sessionSearch: '',
                     
@@ -7562,6 +7614,10 @@
 
                 toggleSidebar() {
                     this.isSidebarCollapsed = !this.isSidebarCollapsed;
+                },
+
+                toggleInputSize() {
+                    this.isInputExpanded = !this.isInputExpanded;
                 },
                 
                 async loadAllData() {
@@ -8981,7 +9037,70 @@
                     }
                     this.uploadedFiles.splice(index, 1);
                 },
-                
+
+                /**
+                 * 处理文件上传到工作区（不触发AI）
+                 */
+                async handleWorkspaceFileUpload(event) {
+                    const files = event.target.files;
+                    if (!files || files.length === 0) return;
+
+                    // 检查是否有当前会话
+                    if (!this.currentSession) {
+                        this.showToast('请先选择一个会话', 'warning');
+                        event.target.value = '';
+                        return;
+                    }
+
+                    const sessionId = this.currentSession.id;
+                    let successCount = 0;
+                    let failCount = 0;
+
+                    for (const file of files) {
+                        // 检查文件大小（限制50MB）
+                        if (file.size > 50 * 1024 * 1024) {
+                            this.showToast(`文件 ${file.name} 过大，最大支持50MB`, 'error');
+                            failCount++;
+                            continue;
+                        }
+
+                        try {
+                            const formData = new FormData();
+                            formData.append('file', file);
+
+                            // 显示上传中提示
+                            this.showToast(`正在上传 ${file.name}...`, 'info');
+
+                            // 调用工作区上传API
+                            const res = await api.post(`/api/sessions/${sessionId}/workspace/upload`, formData, {
+                                headers: { 'Content-Type': 'multipart/form-data' }
+                            });
+
+                            if (res.data.success) {
+                                successCount++;
+                                this.showToast(`文件 ${file.name} 已上传到工作区`, 'success');
+                            } else {
+                                failCount++;
+                                this.showToast(`上传 ${file.name} 失败: ${res.data.error || '未知错误'}`, 'error');
+                            }
+                        } catch (e) {
+                            failCount++;
+                            console.error('上传文件到工作区失败:', e);
+                            this.showToast(`上传 ${file.name} 失败: ${e.message}`, 'error');
+                        }
+                    }
+
+                    // 清空文件输入框，以便重复选择同一文件
+                    event.target.value = '';
+
+                    // 显示汇总信息
+                    if (successCount > 0 && failCount === 0) {
+                        this.showToast(`成功上传 ${successCount} 个文件到工作区`, 'success');
+                    } else if (successCount > 0 && failCount > 0) {
+                        this.showToast(`上传完成：${successCount} 个成功，${failCount} 个失败`, 'warning');
+                    }
+                },
+
                 handleEnter(e) {
                     if (e.shiftKey) {
                         // Shift+Enter 换行

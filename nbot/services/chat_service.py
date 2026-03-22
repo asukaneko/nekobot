@@ -1,4 +1,5 @@
 import os, json, datetime, time, re, copy
+from concurrent.futures import ThreadPoolExecutor, TimeoutError
 from nbot.services.ai import (
     ai_client, user_messages, group_messages, MAX_HISTORY_LENGTH,
     model, api_key, base_url
@@ -22,6 +23,9 @@ except ImportError:
     TOOL_DEFINITIONS = []
     execute_tool = None
     TOOLS_AVAILABLE = False
+
+# 工具执行线程池（避免阻塞主线程）
+_tool_executor = ThreadPoolExecutor(max_workers=5, thread_name_prefix="tool_exec")
 
 # 知识库管理
 try:
@@ -216,11 +220,15 @@ def _get_ai_response_with_tools_qq(messages: list, tools: list, session_id: str 
                     
                     print(f"[QQ Tools] 执行工具: {tool_name}, 参数: {arguments}")
                     
-                    # 执行工具，传入 session_id
+                    # 执行工具，传入 session_id（使用线程池避免阻塞）
                     try:
                         # 添加 session_id 到参数中
                         tool_context = {'session_id': session_id} if session_id else {}
-                        tool_result = execute_tool(tool_name, arguments, context=tool_context)
+                        
+                        # 使用线程池异步执行工具，避免阻塞 Web 服务
+                        future = _tool_executor.submit(execute_tool, tool_name, arguments, tool_context)
+                        # 设置 60 秒超时
+                        tool_result = future.result(timeout=60)
                         
                         # 检查是否需要用户确认（exec_command 的特殊处理）
                         if tool_result.get('require_confirmation'):
@@ -229,6 +237,8 @@ def _get_ai_response_with_tools_qq(messages: list, tools: list, session_id: str 
                             return f"{confirmation_msg}\n\n请回复「确认执行」或「同意」来执行该命令。"
                         
                         result_content = json.dumps(tool_result, ensure_ascii=False)
+                    except TimeoutError:
+                        result_content = json.dumps({"error": "工具执行超时（60秒）"}, ensure_ascii=False)
                     except Exception as e:
                         result_content = json.dumps({"error": str(e)}, ensure_ascii=False)
                     

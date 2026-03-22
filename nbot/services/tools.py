@@ -129,9 +129,13 @@ def get_enabled_tools() -> List[Dict]:
     all_tool_categories = [
         WORKSPACE_TOOL_DEFINITIONS,
     ]
-    
+
     for category in all_tool_categories:
         tools.extend(category)
+
+    # 添加 Todo 工具
+    from nbot.services.todo_tools import TODO_TOOL_DEFINITIONS
+    tools.extend(TODO_TOOL_DEFINITIONS)
 
     return tools
 
@@ -1045,6 +1049,11 @@ WORKSPACE_TOOL_DEFINITIONS = [
 def get_all_tool_definitions(include_workspace: bool = True) -> List[Dict]:
     """获取所有工具定义（包括工作区工具）"""
     tools = list(TOOL_DEFINITIONS)
+    
+    # 添加 Todo 工具定义
+    from nbot.services.todo_tools import TODO_TOOL_DEFINITIONS
+    tools.extend(TODO_TOOL_DEFINITIONS)
+    
     if include_workspace:
         tools.extend(WORKSPACE_TOOL_DEFINITIONS)
     return tools
@@ -1066,7 +1075,19 @@ def execute_tool(tool_name: str, arguments: Dict[str, Any], context: Dict = None
     if tool_name.startswith("workspace_"):
         return _execute_workspace_tool(tool_name, arguments, context)
 
-    # 1. 先从 Web 配置查找
+    # 1. 处理 Todo 工具（优先于 Web 配置检查，避免被当作动态工具处理）
+    if tool_name.startswith("todo_"):
+        from nbot.services.todo_tools import execute_todo_tool
+        return execute_todo_tool(tool_name, arguments, context)
+
+    # 2. 处理记忆工具（需要 context 中的用户信息）
+    if tool_name == "save_to_memory":
+        return _execute_save_to_memory(arguments, context)
+    
+    if tool_name == "read_memory":
+        return _execute_read_memory(arguments, context)
+
+    # 3. 从 Web 配置查找
     web_config = load_tools_config()
     tool_config = None
 
@@ -1075,7 +1096,7 @@ def execute_tool(tool_name: str, arguments: Dict[str, Any], context: Dict = None
             tool_config = config
             break
 
-    # 2. 如果找到 Web 配置且有 implementation，使用动态执行
+    # 4. 如果找到 Web 配置且有 implementation，使用动态执行
     if tool_config and tool_config.get('implementation'):
         _log.info(f"Executing dynamic tool: {tool_name}")
         executor = get_dynamic_executor()
@@ -1087,14 +1108,7 @@ def execute_tool(tool_name: str, arguments: Dict[str, Any], context: Dict = None
                 "error": "Dynamic executor not available"
             }
 
-    # 3. 处理记忆工具（需要 context 中的用户信息）
-    if tool_name == "save_to_memory":
-        return _execute_save_to_memory(arguments, context)
-    
-    if tool_name == "read_memory":
-        return _execute_read_memory(arguments, context)
-
-    # 4. 否则使用内置 Tool
+    # 5. 否则使用内置 Tool
     _log.info(f"Executing built-in tool: {tool_name}")
     executor = ToolExecutor()
 
