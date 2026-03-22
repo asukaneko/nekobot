@@ -105,6 +105,15 @@ except ImportError:
     progress_card_manager = None
     _log.warning("Progress card manager not available")
 
+# 导入 Todo 卡片管理器
+try:
+    from nbot.core.todo_card import todo_card_manager, TodoCard
+    TODO_CARD_AVAILABLE = True
+except ImportError:
+    TODO_CARD_AVAILABLE = False
+    todo_card_manager = None
+    _log.warning("Todo card manager not available")
+
 # 导入文件解析器
 try:
     from nbot.core.file_parser import file_parser
@@ -533,6 +542,12 @@ class WebChatServer:
             progress_card_manager.set_socketio(socketio)
             progress_card_manager.set_sessions(self.sessions)
             _log.info("[ProgressCard] 进度卡片管理器已初始化")
+        
+        # 初始化 Todo 卡片管理器
+        if TODO_CARD_AVAILABLE and todo_card_manager:
+            todo_card_manager.set_socketio(socketio)
+            todo_card_manager.set_sessions(self.sessions)
+            _log.info("[TodoCard] Todo 卡片管理器已初始化")
         self.web_users: Dict[str, str] = {}
         self.active_connections: Dict[str, str] = {}
         
@@ -1082,6 +1097,11 @@ class WebChatServer:
                 if PROGRESS_CARD_AVAILABLE and progress_card_manager:
                     progress_card_manager.set_sessions(self.sessions)
                     _log.info("[ProgressCard] 重新设置 sessions 到 ProgressCardManager")
+                
+                # 重新设置 sessions 到 TodoCardManager
+                if TODO_CARD_AVAILABLE and todo_card_manager:
+                    todo_card_manager.set_sessions(self.sessions)
+                    _log.info("[TodoCard] 重新设置 sessions 到 TodoCardManager")
             
             # 加载工作流
             workflows_file = os.path.join(self.data_dir, 'workflows.json')
@@ -2700,6 +2720,31 @@ class WebChatServer:
                                     elapsed = (time.time() - start_time) * 1000
                                     _log.info(f"[Tools] ✓ 工具执行成功 ({elapsed:.0f}ms): {tool_name}")
                                     _log.info(f"[Tools] ✓ 结果预览: {tool_result_str[:500]}{'...' if len(tool_result_str) > 500 else ''}")
+
+                                    # 更新 Todo 卡片
+                                    if tool_name.startswith('todo_') and todo_card and TODO_CARD_AVAILABLE:
+                                        try:
+                                            if tool_name == 'todo_add' and tool_result.get('success'):
+                                                todo_info = tool_result.get('todo', {})
+                                                todo_card.add_todo(
+                                                    todo_id=todo_info.get('id'),
+                                                    content=todo_info.get('content', ''),
+                                                    priority=todo_info.get('priority', 'medium')
+                                                )
+                                            elif tool_name == 'todo_complete' and tool_result.get('success'):
+                                                todo_info = tool_result.get('todo', {})
+                                                todo_card.complete_todo(todo_info.get('id'))
+                                            elif tool_name == 'todo_delete' and tool_result.get('success'):
+                                                deleted_todo = tool_result.get('deleted_todo', {})
+                                                todo_card.delete_todo(deleted_todo.get('id'))
+                                            elif tool_name == 'todo_list' and tool_result.get('success'):
+                                                todos = tool_result.get('todos', [])
+                                                todo_card.update_todos(todos)
+                                            elif tool_name == 'todo_clear' and tool_result.get('success'):
+                                                todo_card.todos = []
+                                                todo_card._emit_update()
+                                        except Exception as e:
+                                            _log.warning(f"[TodoCard] 更新 Todo 卡片失败: {e}")
 
                                     # 更新进度卡片 - 标记工具调用完成
                                     if progress_card:
@@ -5150,6 +5195,7 @@ class WebChatServer:
                 
                 # 创建进度卡片（所有消息都创建，立即显示"AI 正在思考..."）
                 progress_card = None
+                todo_card = None
                 has_attachments = attachments and isinstance(attachments, list) and len(attachments) > 0
                 
                 if PROGRESS_CARD_AVAILABLE and progress_card_manager and self.socketio:
@@ -5162,6 +5208,14 @@ class WebChatServer:
                     # 立即显示"AI 正在思考..."
                     from nbot.core.progress_card import StepType
                     progress_card.update(StepType.THINKING, "AI 正在思考...")
+                
+                # 创建 Todo 卡片（用于显示待办事项）
+                if TODO_CARD_AVAILABLE and todo_card_manager and self.socketio:
+                    todo_card = todo_card_manager.create_card(
+                        session_id=session_id,
+                        parent_message_id=parent_message_id
+                    )
+                    _log.info(f"[TodoCard] 创建 Todo 卡片: {todo_card.card_id}")
                 
                 if has_attachments:
                     # 更新进度：开始处理附件
@@ -5508,6 +5562,30 @@ class WebChatServer:
                                         if tool_name.startswith('todo_'):
                                             if tool_result.get('success'):
                                                 _log.info(f"[Todo] ✓ 执行成功: {tool_name} - {tool_result.get('message', '')}")
+                                                # 更新 Todo 卡片
+                                                if todo_card and TODO_CARD_AVAILABLE:
+                                                    try:
+                                                        if tool_name == 'todo_add':
+                                                            todo_info = tool_result.get('todo', {})
+                                                            todo_card.add_todo(
+                                                                todo_id=todo_info.get('id'),
+                                                                content=todo_info.get('content', ''),
+                                                                priority=todo_info.get('priority', 'medium')
+                                                            )
+                                                        elif tool_name == 'todo_complete':
+                                                            todo_info = tool_result.get('todo', {})
+                                                            todo_card.complete_todo(todo_info.get('id'))
+                                                        elif tool_name == 'todo_delete':
+                                                            deleted_todo = tool_result.get('deleted_todo', {})
+                                                            todo_card.delete_todo(deleted_todo.get('id'))
+                                                        elif tool_name == 'todo_list':
+                                                            todos = tool_result.get('todos', [])
+                                                            todo_card.update_todos(todos)
+                                                        elif tool_name == 'todo_clear':
+                                                            todo_card.todos = []
+                                                            todo_card._emit_update()
+                                                    except Exception as e:
+                                                        _log.warning(f"[TodoCard] 更新 Todo 卡片失败: {e}")
                                             else:
                                                 _log.error(f"[Todo] ✗ 执行失败: {tool_name} - {tool_result.get('error', '')}")
                                         

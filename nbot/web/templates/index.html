@@ -642,6 +642,111 @@
             padding: 10px 20px;
         }
         
+        /* Todo 卡片样式 */
+        .todo-cards-container {
+            padding: 10px 20px;
+            position: relative;
+            z-index: 10;
+        }
+        
+        .todo-card {
+            background: var(--bg-secondary);
+            border: 1px solid #f59e0b;
+            border-radius: 12px;
+            padding: 12px 16px;
+            margin-bottom: 8px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+        }
+        
+        .todo-card-header {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-weight: 600;
+            color: #f59e0b;
+            font-size: 14px;
+            margin-bottom: 10px;
+        }
+        
+        .todo-card-header i {
+            font-size: 16px;
+        }
+        
+        .todo-summary {
+            margin-left: auto;
+            font-size: 12px;
+            color: var(--text-secondary);
+            font-weight: normal;
+        }
+        
+        .todo-card-list {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+        
+        .todo-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 10px;
+            background: var(--bg-tertiary);
+            border-radius: 6px;
+            font-size: 13px;
+            transition: all 0.2s ease;
+        }
+        
+        .todo-item.completed {
+            opacity: 0.7;
+            text-decoration: line-through;
+        }
+        
+        .todo-item.completed .todo-content {
+            color: var(--text-secondary);
+        }
+        
+        .todo-status-icon {
+            font-size: 14px;
+            flex-shrink: 0;
+        }
+        
+        .todo-priority-icon {
+            font-size: 12px;
+            flex-shrink: 0;
+        }
+        
+        .todo-content {
+            flex: 1;
+            color: var(--text-primary);
+            word-break: break-word;
+        }
+        
+        /* 完成状态的 Todo 卡片 */
+        .todo-card.is-complete {
+            border-color: #4ade80;
+            background: linear-gradient(135deg, rgba(74, 222, 128, 0.1) 0%, var(--bg-secondary) 100%);
+        }
+        
+        .todo-card.is-complete .todo-card-header {
+            color: #4ade80;
+        }
+        
+        /* 消息下方的 Todo 卡片容器 */
+        .message-todo-cards-wrapper {
+            display: flex;
+            margin-bottom: 16px;
+        }
+        
+        .message-todo-cards-wrapper .message-todo-cards {
+            flex: 1;
+            margin-left: 52px;
+            padding: 0;
+        }
+        
+        .message-todo-cards .todo-card {
+            margin-bottom: 4px;
+        }
+        
         .session-name-input {
             width: 100%;
             padding: 4px 8px;
@@ -4226,6 +4331,28 @@
                                                             <i :class="step.status === 'done' ? 'fas fa-check' : (step.status === 'error' ? 'fas fa-times' : 'fas fa-cog fa-spin')"></i>
                                                             <span class="step-name">{{ step.name }}</span>
                                                             <span v-if="step.detail" class="step-detail">{{ step.detail }}</span>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        
+                                        <!-- 该消息关联的 Todo 卡片（在消息下方独立显示） -->
+                                        <div v-if="msg.todo_cards && msg.todo_cards.length > 0" class="message-todo-cards-wrapper">
+                                            <div class="todo-cards-container message-todo-cards">
+                                                <div v-for="(card, index) in msg.todo_cards" :key="card.id || index" class="todo-card" :class="{ 'is-complete': card.is_complete }">
+                                                    <div class="todo-card-header">
+                                                        <i :class="card.is_complete ? 'fas fa-check-circle' : 'fas fa-tasks'"></i>
+                                                        <span>{{ card.content }}</span>
+                                                        <span v-if="card.summary" class="todo-summary">
+                                                            ({{ card.summary.completed }}/{{ card.summary.total }})
+                                                        </span>
+                                                    </div>
+                                                    <div class="todo-card-list">
+                                                        <div v-for="(todo, idx) in card.todos" :key="idx" class="todo-item" :class="[todo.status]">
+                                                            <span class="todo-status-icon">{{ todo.status_icon }}</span>
+                                                            <span class="todo-priority-icon" :title="todo.priority_label">{{ todo.priority_icon }}</span>
+                                                            <span class="todo-content">{{ todo.content }}</span>
                                                         </div>
                                                     </div>
                                                 </div>
@@ -10649,6 +10776,36 @@
                                         this.thinkingCards[existingIdx] = msg;
                                     } else {
                                         this.thinkingCards.push(msg);
+                                    }
+                                }
+                                this.$nextTick(() => this.scrollToBottom());
+                                return;  // 不添加到消息列表
+                            }
+                            
+                            // 处理 Todo 卡片（优先处理，避免被添加到消息列表）
+                            if (msg.type === 'todo_card') {
+                                // 如果后端没发 id，前端自己生成一个
+                                if (!msg.id) {
+                                    msg.id = 'td_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5);
+                                }
+                                
+                                const parentMsgId = msg.parent_message_id;
+                                
+                                if (parentMsgId) {
+                                    const parentMsg = this.currentMessages.find(m => m.id === parentMsgId);
+                                    
+                                    if (parentMsg) {
+                                        // Vue 3 中直接赋值即可触发响应式更新
+                                        if (!parentMsg.todo_cards) {
+                                            parentMsg.todo_cards = [];
+                                        }
+                                        const existingIdx = parentMsg.todo_cards.findIndex(c => c.id === msg.id);
+                                        
+                                        if (existingIdx !== -1) {
+                                            parentMsg.todo_cards[existingIdx] = msg;
+                                        } else {
+                                            parentMsg.todo_cards.push(msg);
+                                        }
                                     }
                                 }
                                 this.$nextTick(() => this.scrollToBottom());

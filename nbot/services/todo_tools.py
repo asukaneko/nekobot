@@ -152,7 +152,7 @@ TODO_TOOL_DEFINITIONS = [
         "type": "function",
         "function": {
             "name": "todo_add",
-            "description": "添加待办事项。当需要记录任务、创建待办清单时使用此工具。每个待办事项有唯一的ID，可以用于后续操作。",
+            "description": "添加待办事项。当需要记录任务、创建待办清单时使用此工具。每个待办事项有唯一的ID，可以用于后续操作。建议在面对复杂任务、多步骤操作或需要跟踪进度时使用此工具来管理任务。",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -162,7 +162,7 @@ TODO_TOOL_DEFINITIONS = [
                     },
                     "priority": {
                         "type": "string",
-                        "description": "优先级：high（高）、medium（中）、low（低），默认为 medium",
+                        "description": "优先级：high（高）、medium（中）、low（低），默认为 medium。对于复杂任务中的关键步骤，建议使用 high 优先级",
                         "enum": ["high", "medium", "low"],
                         "default": "medium"
                     }
@@ -175,7 +175,7 @@ TODO_TOOL_DEFINITIONS = [
         "type": "function",
         "function": {
             "name": "todo_list",
-            "description": "列出当前会话的所有待办事项。可以按状态筛选，结果按优先级排序。",
+            "description": "列出当前会话的所有待办事项。可以按状态筛选，结果按优先级排序。在复杂任务执行过程中，可以使用此工具查看当前进度和剩余任务。",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -192,7 +192,7 @@ TODO_TOOL_DEFINITIONS = [
         "type": "function",
         "function": {
             "name": "todo_complete",
-            "description": "将指定的待办事项标记为已完成。需要提供待办事项的ID。",
+            "description": "将指定的待办事项标记为已完成。当完成一个任务步骤后，使用此工具更新待办状态。",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -209,7 +209,7 @@ TODO_TOOL_DEFINITIONS = [
         "type": "function",
         "function": {
             "name": "todo_delete",
-            "description": "删除指定的待办事项。需要提供待办事项的ID。",
+            "description": "删除指定的待办事项。当某个任务不再需要或创建错误时，使用此工具删除。",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -226,7 +226,7 @@ TODO_TOOL_DEFINITIONS = [
         "type": "function",
         "function": {
             "name": "todo_clear",
-            "description": "清空待办事项。可以清空所有事项或只清空特定状态的事项。",
+            "description": "清空待办事项。可以清空所有事项或只清空特定状态的事项。任务全部完成后，可以使用此工具清理待办列表。",
             "parameters": {
                 "type": "object",
                 "properties": {
