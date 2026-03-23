@@ -4968,9 +4968,9 @@
                                                 <i class="fas fa-paperclip"></i>
                                                 <input type="file" ref="fileInput" @change="handleFileSelect" multiple accept="image/*,.pdf,.doc,.docx,.txt,.json,.xml" style="display: none;">
                                             </label>
-                                            <button class="btn btn-primary" @click="sendMessage" :disabled="(!inputMessage.trim() && uploadedFiles.length === 0) || isLoading">
-                                                <span v-if="isLoading"><div class="spinner"></div></span>
-                                                <i v-else class="fas fa-paper-plane"></i>
+                                            <button class="btn" :class="isLoading ? 'btn-danger' : 'btn-primary'" @click="isLoading ? stopGeneration() : sendMessage()" :disabled="!isLoading && (!inputMessage.trim() && uploadedFiles.length === 0)">
+                                                <span v-if="isLoading"><i class="fas fa-stop"></i></span>
+                                                <span v-else><div class="spinner" v-if="isLoading"></div><i v-else class="fas fa-paper-plane"></i></span>
                                             </button>
                                         </div>
                                     </div>
@@ -9603,7 +9603,7 @@
                     
                     // 设置加载动画
                     this.isTyping = true;
-                    this.isLoading = false;
+                    this.isLoading = true;
                     
                     try {
                         // 通过 WebSocket 发送消息
@@ -9746,6 +9746,20 @@
                     }
                     e.preventDefault();
                     this.sendMessage();
+                },
+
+                async stopGeneration() {
+                    if (!this.isLoading) return;
+
+                    try {
+                        await api.post('/api/stop', {
+                            session_id: this.currentSession?.id
+                        });
+                        this.showToast('已发送停止信号', 'info');
+                    } catch (e) {
+                        console.error('停止生成失败:', e);
+                        this.showToast('停止失败: ' + (e.response?.data?.error || e.message), 'error');
+                    }
                 },
                 
                 async clearSession() {

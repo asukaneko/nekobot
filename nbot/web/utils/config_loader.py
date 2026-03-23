@@ -1,10 +1,20 @@
 import configparser
 import os
 from dotenv import load_dotenv
-from ncatbot.utils.config import config
 
 # 尝试加载 .env 文件
-load_dotenv()
+# 优先从项目根目录加载（兼容 Windows 和不同运行目录）
+_env_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))), '.env')
+if os.path.exists(_env_path):
+    load_dotenv(_env_path)
+else:
+    load_dotenv()
+
+# 尝试导入 config 对象（用于同步到全局配置）
+try:
+    from nbot.utils.config import config as _global_config
+except ImportError:
+    _global_config = None
 
 def load_config():
     """加载配置，支持环境变量和 config.ini"""
@@ -19,11 +29,12 @@ def load_config():
     token = os.getenv('TOKEN') or config_parser.get('BotConfig', 'token', fallback="")
     webui_uri = os.getenv('WEBUI_URI') or config_parser.get('BotConfig', 'webui_uri', fallback="127.0.0.1:6099")
 
-    config.set_bot_uin(bot_uin)
-    config.set_root(root)
-    config.set_ws_uri(ws_uri)
-    config.set_token(token)
-    config.set_webui_uri(webui_uri)
+    if _global_config:
+        _global_config.set_bot_uin(bot_uin)
+        _global_config.set_root(root)
+        _global_config.set_ws_uri(ws_uri)
+        _global_config.set_token(token)
+        _global_config.set_webui_uri(webui_uri)
 
     return bot_uin, root
 

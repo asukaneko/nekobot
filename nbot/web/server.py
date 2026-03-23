@@ -123,6 +123,18 @@ except ImportError:
     file_parser = None
     _log.warning("File parser not available")
 
+# 导入配置加载器（支持 .env 环境变量）
+try:
+    from nbot.web.utils.config_loader import get_api_config, get_pic_config, get_search_config, get_video_config
+    CONFIG_LOADER_AVAILABLE = True
+except ImportError:
+    CONFIG_LOADER_AVAILABLE = False
+    get_api_config = None
+    get_pic_config = None
+    get_search_config = None
+    get_video_config = None
+    _log.warning("Config loader not available")
+
 
 class WebMessageAdapter:
     """Web 消息适配器，用于兼容 QQ 命令处理"""
@@ -626,6 +638,9 @@ class WebChatServer:
         # 登录密码
         self.web_password = None
 
+        # 停止事件字典（用于取消 AI 生成）
+        self.stop_events: Dict[str, threading.Event] = {}
+
         # 初始化 Memory 存储
         self.memory_store = None
         if MEMORY_AVAILABLE:
@@ -657,17 +672,35 @@ class WebChatServer:
             return f"{minutes}分钟"
 
     def _load_ai_config(self):
-        """从配置文件加载 AI 配置"""
+        """从配置文件加载 AI 配置（支持 .env 环境变量）"""
         try:
-            import configparser
-            config = configparser.ConfigParser()
-            config.read('config.ini', encoding='utf-8')
+            if CONFIG_LOADER_AVAILABLE and get_api_config:
+                api_config = get_api_config()
+                self.ai_api_key = api_config.get('api_key', '')
+                self.ai_base_url = api_config.get('base_url', '')
+                self.ai_model = api_config.get('model', 'MiniMax-M2.7')
+                
+                pic_config = get_pic_config() if get_pic_config else {}
+                search_config = get_search_config() if get_search_config else {}
+                video_config = get_video_config() if get_video_config else {}
+            else:
+                import configparser
+                config = configparser.ConfigParser()
+                config.read('config.ini', encoding='utf-8')
+                
+                self.ai_api_key = config.get('ApiKey', 'api_key', fallback='')
+                self.ai_base_url = config.get('ApiKey', 'base_url', fallback='')
+                self.ai_model = config.get('ApiKey', 'model', fallback='MiniMax-M2.7')
+                
+                pic_config = {'model': config.get('pic', 'model', fallback='')}
+                search_config = {
+                    'api_key': config.get('search', 'api_key', fallback=''),
+                    'api_url': config.get('search', 'api_url', fallback='')
+                }
+                video_config = {'api_key': config.get('video', 'api_key', fallback='')}
             
-            self.ai_api_key = config.get('ApiKey', 'api_key', fallback='')
-            self.ai_base_url = config.get('ApiKey', 'base_url', fallback='')
-            self.ai_model = config.get('ApiKey', 'model', fallback='gpt-4')
+            _log.info(f"[Config] 加载 AI 配置: model={self.ai_model}, base_url={self.ai_base_url[:30] if self.ai_base_url else 'None'}...")
             
-            # 初始化 AI 客户端
             if self.ai_api_key and self.ai_base_url:
                 try:
                     from nbot.services.ai import AIClient
@@ -675,14 +708,17 @@ class WebChatServer:
                         api_key=self.ai_api_key,
                         base_url=self.ai_base_url,
                         model=self.ai_model,
-                        pic_model=config.get('pic', 'model', fallback=''),
-                        search_api_key=config.get('search', 'api_key', fallback=''),
-                        search_api_url=config.get('search', 'api_url', fallback=''),
-                        video_api=config.get('video', 'api_key', fallback=''),
-                        silicon_api_key=config.get('ApiKey', 'silicon_api_key', fallback='')
+                        pic_model=pic_config.get('model', ''),
+                        search_api_key=search_config.get('api_key', ''),
+                        search_api_url=search_config.get('api_url', ''),
+                        video_api=video_config.get('api_key', ''),
+                        silicon_api_key=api_config.get('silicon_api_key', '')
                     )
+                    _log.info("[Config] AI 客户端初始化成功")
                 except Exception as e:
                     _log.error(f"Failed to initialize AI client: {e}")
+            else:
+                _log.warning("[Config] AI 配置不完整，api_key 或 base_url 为空")
         except Exception as e:
             _log.error(f"Failed to load AI config: {e}")
     
@@ -2312,6 +2348,24 @@ class WebChatServer:
                     workspace_manager.delete_workspace(session_id)
                 return jsonify({'success': True})
             return jsonify({'error': 'Session not found'}), 404
+
+        @self.app.route('/api/stop', methods=['POST'])
+        def stop_generation():
+            """停止指定会话的 AI 生成"""
+            data = request.json or {}
+            session_id = data.get('session_id')
+            
+            if not session_id:
+                return jsonify({'error': 'session_id is required'}), 400
+            
+            # 设置停止事件
+            if session_id in self.stop_events:
+                self.stop_events[session_id].set()
+                _log.info(f"[Stop] 停止信号已发送: {session_id}")
+                return jsonify({'success': True, 'message': '停止信号已发送'})
+            
+            # 没有正在运行的生成
+            return jsonify({'success': False, 'error': 'No active generation for this session'}), 404
 
         @self.app.route('/api/sessions/<session_id>/messages', methods=['GET'])
         def get_messages(session_id):
@@ -5217,6 +5271,10 @@ class WebChatServer:
                     )
                     _log.info(f"[TodoCard] 创建 Todo 卡片: {todo_card.card_id}")
                 
+                # 创建停止事件
+                stop_event = threading.Event()
+                self.stop_events[session_id] = stop_event
+                
                 if has_attachments:
                     # 更新进度：开始处理附件
                     if progress_card:
@@ -5481,6 +5539,12 @@ class WebChatServer:
                             # 注意：complete_thinking_card 函数已在前面定义
                             
                             for iteration in range(max_iterations):
+                                # 检查停止事件
+                                if stop_event.is_set():
+                                    _log.info(f"[Stop] 检测到停止信号，终止生成: session_id={session_id}")
+                                    final_content = "【生成已停止】"
+                                    break
+
                                 # 更新进度卡片迭代计数
                                 if progress_card:
                                     progress_card.increment_iteration()
@@ -5818,6 +5882,11 @@ class WebChatServer:
                 }, room=session_id)
                 # 即使出错也保存会话
                 self._save_data('sessions')
+            finally:
+                # 清理停止事件
+                if session_id in self.stop_events:
+                    del self.stop_events[session_id]
+                    _log.info(f"[Stop] 清理停止事件: {session_id}")
         
         # 使用 Flask-SocketIO 的后台任务机制
         self.socketio.start_background_task(get_response)
