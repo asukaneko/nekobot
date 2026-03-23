@@ -342,6 +342,31 @@
             font-weight: 600;
         }
 
+        /* 移动端可点击的页面标题 */
+        @media (max-width: 768px) {
+            .page-title.mobile-clickable {
+                cursor: pointer;
+                padding: 8px 12px;
+                margin: -8px -12px;
+                border-radius: 8px;
+                -webkit-tap-highlight-color: transparent;
+                touch-action: manipulation;
+                display: flex;
+                align-items: center;
+                gap: 8px;
+            }
+
+            .page-title.mobile-clickable::before {
+                content: '☰';
+                font-size: 16px;
+                color: var(--text-secondary);
+            }
+
+            .page-title.mobile-clickable:active {
+                background: var(--bg-hover);
+            }
+        }
+
         .top-actions {
             display: flex;
             align-items: center;
@@ -908,6 +933,21 @@
 
         @media (max-width: 1200px) {
             .dashboard-main { grid-template-columns: 1fr; }
+        }
+
+        .dashboard-left {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .dashboard-left .stats-grid {
+            grid-template-columns: repeat(2, 1fr);
+        }
+
+        @media (max-width: 768px) {
+            .dashboard-left .stats-grid {
+                grid-template-columns: 1fr;
+            }
         }
 
         .dashboard-sidebar {
@@ -2221,6 +2261,17 @@
 
         /* Mobile Sidebar Styles */
         @media (max-width: 768px) {
+            /* 防止内容溢出 */
+            html, body {
+                overflow-x: hidden;
+                max-width: 100vw;
+            }
+
+            .app-container {
+                max-width: 100vw;
+                overflow-x: hidden;
+            }
+
             .sidebar {
                 position: fixed;
                 left: 0;
@@ -2273,17 +2324,441 @@
                 display: flex;
                 align-items: center;
                 justify-content: center;
-                width: 40px;
-                height: 40px;
+                width: 44px;
+                height: 44px;
                 background: transparent;
                 border: none;
                 color: var(--text-primary);
                 font-size: 20px;
                 cursor: pointer;
+                -webkit-tap-highlight-color: transparent;
+                touch-action: manipulation;
+                padding: 10px;
+                margin: -10px;
+                border-radius: 8px;
+                position: relative;
+                z-index: 10;
+            }
+
+            .mobile-menu-btn:active {
+                background: var(--bg-hover);
             }
 
             .main-content {
                 margin-left: 0 !important;
+                max-width: 100vw;
+                overflow-x: hidden;
+            }
+
+            /* 内容区域防止溢出 */
+            .content-area {
+                max-width: 100vw;
+                overflow-x: hidden;
+                padding: 16px;
+            }
+
+            /* 移动端聊天界面优化 */
+            .chat-header {
+                padding: 12px 16px;
+                min-height: 56px;
+            }
+
+            .chat-header-title {
+                font-size: 15px;
+            }
+
+            .chat-header-subtitle {
+                font-size: 11px;
+            }
+
+            .chat-actions {
+                gap: 4px;
+            }
+
+            .chat-actions .btn-icon {
+                width: 36px;
+                height: 36px;
+                font-size: 14px;
+            }
+
+            /* 消息区域优化 */
+            .messages-container {
+                padding: 12px;
+            }
+
+            .message {
+                gap: 8px;
+                margin-bottom: 16px;
+            }
+
+            .message-avatar {
+                width: 32px;
+                height: 32px;
+                font-size: 12px;
+            }
+
+            /* 输入区域优化 */
+            .chat-input-area {
+                padding: 12px;
+            }
+
+            .chat-input-wrapper {
+                gap: 8px;
+            }
+
+            .chat-input {
+                padding: 10px 14px;
+                font-size: 16px; /* 防止 iOS 缩放 */
+                min-height: 44px;
+                max-height: 120px;
+            }
+
+            .chat-input-actions {
+                padding: 8px 12px;
+            }
+
+            /* 上下文指示器在移动端隐藏 */
+            .context-indicator {
+                display: none;
+            }
+
+            /* 附件预览优化 */
+            .uploaded-files-preview {
+                gap: 8px;
+                margin-bottom: 8px;
+            }
+
+            .uploaded-file-item {
+                padding: 6px 10px;
+                font-size: 12px;
+            }
+
+            .file-thumbnail {
+                width: 40px;
+                height: 40px;
+            }
+
+            /* 滚动到底部按钮优化 */
+            .scroll-to-bottom-btn {
+                width: 40px;
+                height: 40px;
+                font-size: 14px;
+                right: 16px;
+                bottom: 80px;
+            }
+
+            /* 空状态优化 */
+            .empty-state {
+                padding: 40px 20px;
+            }
+
+            .empty-state-icon {
+                font-size: 48px;
+            }
+
+            .empty-state-title {
+                font-size: 16px;
+            }
+
+            .empty-state-desc {
+                font-size: 13px;
+            }
+        }
+
+        /* 超小屏幕额外优化 */
+        @media (max-width: 480px) {
+            .chat-header {
+                padding: 10px 12px;
+            }
+
+            .chat-header-info {
+                gap: 8px;
+            }
+
+            .session-icon {
+                width: 36px;
+                height: 36px;
+                font-size: 14px;
+            }
+
+            .chat-actions .btn-icon {
+                width: 32px;
+                height: 32px;
+                font-size: 13px;
+            }
+
+            .messages-container {
+                padding: 10px;
+            }
+
+            .message-avatar {
+                width: 28px;
+                height: 28px;
+                font-size: 11px;
+            }
+
+            .chat-input {
+                padding: 8px 12px;
+                font-size: 16px;
+            }
+
+            /* 移动端输入区域改为垂直布局 */
+            .chat-input-wrapper {
+                flex-direction: column;
+                gap: 12px;
+            }
+
+            .chat-input-container {
+                width: 100%;
+            }
+
+            /* 移动端操作按钮放在下一行 */
+            .chat-actions {
+                width: 100%;
+                justify-content: flex-end;
+                gap: 8px;
+                padding-top: 8px;
+                border-top: 1px solid var(--border-color);
+                align-items: center;
+            }
+
+            /* 移动端进度指示器 */
+            .chat-actions .context-indicator {
+                width: 40px;
+                height: 40px;
+                margin-right: 4px;
+            }
+
+            .chat-actions .context-indicator svg {
+                width: 40px;
+                height: 40px;
+            }
+
+            .chat-actions .context-indicator .percentage {
+                font-size: 10px;
+            }
+
+            /* 移动端扩大按钮 */
+            .chat-actions .chat-input-expand-btn {
+                width: 40px;
+                height: 40px;
+                padding: 0;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                background: var(--bg-tertiary);
+                border: 1px solid var(--border-color);
+                border-radius: 8px;
+                color: var(--text-secondary);
+                font-size: 16px;
+            }
+
+            .chat-actions .chat-input-expand-btn:hover {
+                background: var(--bg-hover);
+                color: var(--text-primary);
+            }
+
+            /* 移动端发送按钮优化 */
+            .chat-actions .btn-primary {
+                width: 40px;
+                height: 40px;
+                padding: 0;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+            }
+
+            .chat-actions .btn-primary i {
+                font-size: 16px;
+            }
+
+            /* 移动端文件上传按钮优化 */
+            .chat-actions .btn-icon {
+                width: 40px;
+                height: 40px;
+                font-size: 16px;
+            }
+
+            /* 移动端 Markdown 内容优化 */
+            .markdown-body {
+                font-size: 14px;
+                line-height: 1.5;
+            }
+
+            .markdown-body h1 {
+                font-size: 18px;
+            }
+
+            .markdown-body h2 {
+                font-size: 16px;
+            }
+
+            .markdown-body h3,
+            .markdown-body h4,
+            .markdown-body h5,
+                .markdown-body h6 {
+                font-size: 14px;
+            }
+
+            .markdown-body pre {
+                padding: 10px;
+                font-size: 12px;
+            }
+
+            .markdown-body code {
+                font-size: 12px;
+            }
+
+            .markdown-body table {
+                font-size: 12px;
+            }
+
+            .markdown-body th,
+            .markdown-body td {
+                padding: 6px 8px;
+            }
+
+            /* 代码块横向滚动 */
+            .code-block {
+                max-width: 100%;
+                overflow-x: auto;
+            }
+
+            .code-block pre {
+                white-space: pre;
+                word-wrap: normal;
+            }
+
+            /* 移动端聊天布局：整体可滚动，会话列表在下方 */
+            .chat-layout {
+                flex-direction: column;
+                gap: 12px;
+                height: auto;
+                overflow: visible;
+            }
+
+            .chat-sidebar {
+                width: 100%;
+                order: 2; /* 将会话列表移到下方 */
+                max-height: none; /* 移除高度限制 */
+                border-radius: 12px;
+                flex: none;
+            }
+
+            .chat-main {
+                order: 1; /* 聊天区域在上方 */
+                height: calc(100vh - 200px); /* 固定高度，独立滚动 */
+                min-height: 400px;
+                flex: none;
+            }
+
+            .messages-container {
+                min-height: 0;
+                max-height: none;
+                flex: 1;
+                overflow-y: auto;
+            }
+
+            .chat-sidebar-header {
+                padding: 12px;
+                position: sticky;
+                top: 0;
+                background: var(--bg-secondary);
+                z-index: 10;
+            }
+
+            .chat-sidebar-header .btn {
+                padding: 12px 16px;
+                font-size: 15px;
+                min-height: 44px;
+            }
+
+            .chat-tabs {
+                padding: 12px;
+                position: sticky;
+                top: 0;
+                background: var(--bg-secondary);
+                z-index: 10;
+                border-bottom: 1px solid var(--border-color);
+                flex-wrap: wrap;
+                gap: 8px;
+            }
+
+            .chat-tab {
+                padding: 10px 12px;
+                font-size: 14px;
+                min-height: 40px;
+                flex: 1 1 calc(33.333% - 6px);
+                min-width: 80px;
+                white-space: nowrap;
+            }
+
+            .session-list {
+                padding: 12px;
+                max-height: none; /* 移除高度限制，整体滚动 */
+            }
+
+            .session-item {
+                padding: 16px 14px;
+                gap: 14px;
+                min-height: 70px;
+                margin-bottom: 8px;
+                border-radius: 12px;
+                cursor: pointer;
+                -webkit-tap-highlight-color: transparent;
+                touch-action: manipulation;
+            }
+
+            .session-item:active {
+                background: var(--bg-hover);
+            }
+
+            .session-icon {
+                width: 44px;
+                height: 44px;
+                font-size: 18px;
+                flex-shrink: 0;
+            }
+
+            .session-name {
+                font-size: 16px;
+                font-weight: 500;
+            }
+
+            .session-meta {
+                font-size: 13px;
+                margin-top: 6px;
+            }
+
+            .session-preview {
+                font-size: 14px;
+                margin-top: 6px;
+            }
+
+            .session-actions .btn-icon-small {
+                width: 36px;
+                height: 36px;
+                font-size: 14px;
+            }
+
+            .empty-hint {
+                padding: 32px;
+                font-size: 15px;
+            }
+
+            /* 搜索框优化 */
+            .search-box {
+                padding: 12px 14px;
+                min-height: 44px;
+            }
+
+            .search-box input {
+                font-size: 15px;
+            }
+
+            /* QQ列表样式优化 */
+            .qq-list .session-item {
+                min-height: 80px;
             }
         }
 
@@ -2419,20 +2894,23 @@
         }
 
         .chat-input-header {
-            display: flex;
-            justify-content: flex-end;
-            gap: 8px;
+            display: none; /* 电脑端隐藏头部，按钮移到chat-actions */
         }
 
         .chat-input-expand-btn {
             background: var(--bg-tertiary);
             border: 1px solid var(--border-color);
-            border-radius: 6px;
-            padding: 4px 8px;
+            border-radius: 8px;
+            padding: 0;
             color: var(--text-secondary);
             cursor: pointer;
-            font-size: 12px;
+            font-size: 16px;
             transition: all 0.2s;
+            width: 44px;
+            height: 44px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
         }
 
         .chat-input-expand-btn:hover {
@@ -2467,6 +2945,34 @@
         .chat-actions {
             display: flex;
             gap: 8px;
+            align-items: center;
+        }
+
+        /* 电脑端按钮统一大小 */
+        .chat-actions .btn,
+        .chat-actions .btn-icon {
+            width: 44px;
+            height: 44px;
+            padding: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 16px;
+        }
+
+        /* 电脑端进度指示器样式 */
+        .chat-actions .context-indicator {
+            width: 44px;
+            height: 44px;
+        }
+
+        .chat-actions .context-indicator svg {
+            width: 44px;
+            height: 44px;
+        }
+
+        .chat-actions .context-indicator .percentage {
+            font-size: 11px;
         }
 
         .uploaded-files-preview {
@@ -3813,7 +4319,7 @@
             <main class="main-content">
                 <!-- Top Bar -->
                 <header class="top-bar">
-                    <h1 class="page-title">{{ pageTitle }}</h1>
+                    <h1 class="page-title mobile-clickable" @click="toggleMobileMenu">{{ pageTitle }}</h1>
                     <div class="top-actions">
                         <button class="btn-icon" @click="refreshData" title="刷新" :disabled="isLoading">
                             <i class="fas fa-sync-alt" :class="{ 'fa-spin': isLoading }"></i>
@@ -3825,7 +4331,31 @@
                 <div class="content-area">
                     <!-- Dashboard -->
                     <div v-if="currentPage === 'dashboard'" class="fade-in">
-                        <!-- 统计卡片 -->
+                        <!-- 消息趋势分析（放在最上面） -->
+                        <div class="chart-card trend-chart" style="margin-bottom: 20px;">
+                            <div class="chart-header">
+                                <div>
+                                    <div class="chart-title">消息趋势分析</div>
+                                    <div class="chart-subtitle">接收消息数量随时间的变化</div>
+                                </div>
+                                <div class="time-filter">
+                                    <button
+                                        v-for="period in timePeriods"
+                                        :key="period.value"
+                                        class="time-filter-btn"
+                                        :class="{ active: selectedPeriod === period.value }"
+                                        @click="changeTimePeriod(period.value)"
+                                    >
+                                        {{ period.label }}
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="chart-body">
+                                <div ref="trendChart" class="chart-container"></div>
+                            </div>
+                        </div>
+
+                        <!-- 统计卡片 - 第一行 -->
                         <div class="stats-grid">
                             <div class="stat-card">
                                 <div class="stat-icon purple">
@@ -3869,73 +4399,51 @@
                             </div>
                         </div>
 
-                        <!-- 第二行统计卡片 -->
-                        <div class="stats-grid" style="margin-top: 20px;">
-                            <div class="stat-card">
-                                <div class="stat-icon pink">
-                                    <i class="fas fa-users"></i>
-                                </div>
-                                <div class="stat-content">
-                                    <div class="stat-label">今日活跃用户</div>
-                                    <div class="stat-value">{{ stats.today_active_users || 0 }}</div>
-                                    <div class="stat-subtitle">QQ + Web 活跃用户数</div>
-                                </div>
-                            </div>
-                            <div class="stat-card">
-                                <div class="stat-icon cyan">
-                                    <i class="fas fa-robot"></i>
-                                </div>
-                                <div class="stat-content">
-                                    <div class="stat-label">AI 调用次数</div>
-                                    <div class="stat-value">{{ formatNumber(stats.ai_calls || 0) }}</div>
-                                    <div class="stat-subtitle">今日 AI 服务调用</div>
-                                </div>
-                            </div>
-                            <div class="stat-card">
-                                <div class="stat-icon yellow">
-                                    <i class="fas fa-file-alt"></i>
-                                </div>
-                                <div class="stat-content">
-                                    <div class="stat-label">文件传输</div>
-                                    <div class="stat-value">{{ formatNumber(stats.file_transfers || 0) }}</div>
-                                    <div class="stat-subtitle">今日文件上传/下载</div>
-                                </div>
-                            </div>
-                            <div class="stat-card">
-                                <div class="stat-icon red">
-                                    <i class="fas fa-bolt"></i>
-                                </div>
-                                <div class="stat-content">
-                                    <div class="stat-label">平均响应</div>
-                                    <div class="stat-value">{{ stats.avg_response_time || '1.2' }}s</div>
-                                    <div class="stat-subtitle">AI 平均响应时间</div>
-                                </div>
-                            </div>
-                        </div>
-
                         <!-- 图表和系统状态区域 -->
                         <div class="dashboard-main" style="margin-top: 20px;">
-                            <!-- 左侧：消息趋势分析 -->
-                            <div class="chart-card trend-chart">
-                                <div class="chart-header">
-                                    <div>
-                                        <div class="chart-title">消息趋势分析</div>
-                                        <div class="chart-subtitle">接收消息数量随时间的变化</div>
+                            <!-- 左侧：统计卡片第二行 -->
+                            <div class="dashboard-left">
+                                <div class="stats-grid">
+                                    <div class="stat-card">
+                                        <div class="stat-icon pink">
+                                            <i class="fas fa-users"></i>
+                                        </div>
+                                        <div class="stat-content">
+                                            <div class="stat-label">今日活跃用户</div>
+                                            <div class="stat-value">{{ stats.today_active_users || 0 }}</div>
+                                            <div class="stat-subtitle">QQ + Web 活跃用户数</div>
+                                        </div>
                                     </div>
-                                    <div class="time-filter">
-                                        <button 
-                                            v-for="period in timePeriods" 
-                                            :key="period.value"
-                                            class="time-filter-btn"
-                                            :class="{ active: selectedPeriod === period.value }"
-                                            @click="changeTimePeriod(period.value)"
-                                        >
-                                            {{ period.label }}
-                                        </button>
+                                    <div class="stat-card">
+                                        <div class="stat-icon cyan">
+                                            <i class="fas fa-robot"></i>
+                                        </div>
+                                        <div class="stat-content">
+                                            <div class="stat-label">AI 调用次数</div>
+                                            <div class="stat-value">{{ formatNumber(stats.ai_calls || 0) }}</div>
+                                            <div class="stat-subtitle">今日 AI 服务调用</div>
+                                        </div>
                                     </div>
-                                </div>
-                                <div class="chart-body">
-                                    <div ref="trendChart" class="chart-container"></div>
+                                    <div class="stat-card">
+                                        <div class="stat-icon yellow">
+                                            <i class="fas fa-file-alt"></i>
+                                        </div>
+                                        <div class="stat-content">
+                                            <div class="stat-label">文件传输</div>
+                                            <div class="stat-value">{{ formatNumber(stats.file_transfers || 0) }}</div>
+                                            <div class="stat-subtitle">今日文件上传/下载</div>
+                                        </div>
+                                    </div>
+                                    <div class="stat-card">
+                                        <div class="stat-icon red">
+                                            <i class="fas fa-bolt"></i>
+                                        </div>
+                                        <div class="stat-content">
+                                            <div class="stat-label">平均响应</div>
+                                            <div class="stat-value">{{ stats.avg_response_time || '1.2' }}s</div>
+                                            <div class="stat-subtitle">AI 平均响应时间</div>
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
 
@@ -4186,7 +4694,7 @@
                             <template v-if="currentQqId && (chatTab === 'qq_private' || chatTab === 'qq_group')">
                                 <div class="chat-header">
                                     <div class="chat-header-info">
-                                        <button class="mobile-menu-btn" @click="isMobileMenuOpen = true">
+                                        <button class="mobile-menu-btn" @click="toggleMobileMenu" @touchstart.prevent="toggleMobileMenu">
                                             <i class="fas fa-bars"></i>
                                         </button>
                                         <div class="session-icon" :style="{ background: chatTab === 'qq_private' ? 'var(--qq-private)' : 'var(--qq-group)' }">
@@ -4247,7 +4755,7 @@
                                 <div class="chat-header">
                                     <div class="chat-header-info">
                                         <!-- Mobile Menu Button -->
-                                        <button class="mobile-menu-btn" @click="isMobileMenuOpen = true">
+                                        <button class="mobile-menu-btn" @click="toggleMobileMenu" @touchstart.prevent="toggleMobileMenu">
                                             <i class="fas fa-bars"></i>
                                         </button>
                                         <div class="session-icon" :style="{ background: currentSession.type === 'qq' ? 'var(--info)' : 'var(--accent-primary)' }">
@@ -4392,55 +4900,7 @@
                                         </div>
                                     </div>
                                     <div class="chat-input-wrapper">
-                                        <!-- Context Length Indicator -->
-                                        <div v-if="currentSession" class="context-indicator" tabindex="0">
-                                            <svg>
-                                                <circle class="progress-ring-circle progress-ring-bg" 
-                                                        :cx="20" :cy="20" :r="16"></circle>
-                                                <circle class="progress-ring-circle progress-ring-fill"
-                                                        :class="{ warning: contextUsage > 70, danger: contextUsage > 90 }"
-                                                        :cx="20" :cy="20" :r="16"
-                                                        :stroke-dasharray="circumference"
-                                                        :stroke-dashoffset="circumference - (contextUsage / 100 * circumference)"></circle>
-                                            </svg>
-                                            <span class="percentage">{{ Math.round(contextUsage) }}%</span>
-                                            
-                                            <!-- Tooltip -->
-                                            <div class="context-tooltip">
-                                                <h4>上下文使用情况</h4>
-                                                <p>当前会话的消息统计</p>
-                                                <div class="context-stats">
-                                                    <div class="stat-item">
-                                                        <div class="stat-label">消息数</div>
-                                                        <div class="stat-value">{{ currentMessages.length }}</div>
-                                                    </div>
-                                                    <div class="stat-item">
-                                                        <div class="stat-label">总字符数</div>
-                                                        <div class="stat-value">{{ formatNumber(contextCharCount) }}</div>
-                                                    </div>
-                                                    <div class="stat-item">
-                                                        <div class="stat-label">预估Token</div>
-                                                        <div class="stat-value">{{ formatNumber(contextTokenEstimate) }}</div>
-                                                    </div>
-                                                    <div class="stat-item">
-                                                        <div class="stat-label">限制条数</div>
-                                                        <div class="stat-value">{{ settings.max_context_length || 50 }}</div>
-                                                    </div>
-                                                </div>
-                                                <button class="compress-btn" 
-                                                        @click="compressContext" 
-                                                        :disabled="isCompressing">
-                                                    {{ isCompressing ? '压缩中...' : '压缩上下文' }}
-                                                </button>
-                                            </div>
-                                        </div>
                                         <div class="chat-input-container">
-                                            <div class="chat-input-header">
-                                                <button class="chat-input-expand-btn" @click="toggleInputSize" :title="isInputExpanded ? '缩小输入栏' : '扩大输入栏'">
-                                                    <i :class="isInputExpanded ? 'fas fa-compress-alt' : 'fas fa-expand-alt'"></i>
-                                                    {{ isInputExpanded ? '缩小' : '扩大' }}
-                                                </button>
-                                            </div>
                                             <textarea
                                                 v-model="inputMessage"
                                                 class="chat-input"
@@ -4452,6 +4912,52 @@
                                             ></textarea>
                                         </div>
                                         <div class="chat-actions">
+                                            <!-- Context Length Indicator -->
+                                            <div v-if="currentSession" class="context-indicator" tabindex="0">
+                                                <svg>
+                                                    <circle class="progress-ring-circle progress-ring-bg"
+                                                            :cx="20" :cy="20" :r="16"></circle>
+                                                    <circle class="progress-ring-circle progress-ring-fill"
+                                                            :class="{ warning: contextUsage > 70, danger: contextUsage > 90 }"
+                                                            :cx="20" :cy="20" :r="16"
+                                                            :stroke-dasharray="circumference"
+                                                            :stroke-dashoffset="circumference - (contextUsage / 100 * circumference)"></circle>
+                                                </svg>
+                                                <span class="percentage">{{ Math.round(contextUsage) }}%</span>
+
+                                                <!-- Tooltip -->
+                                                <div class="context-tooltip">
+                                                    <h4>上下文使用情况</h4>
+                                                    <p>当前会话的消息统计</p>
+                                                    <div class="context-stats">
+                                                        <div class="stat-item">
+                                                            <div class="stat-label">消息数</div>
+                                                            <div class="stat-value">{{ currentMessages.length }}</div>
+                                                        </div>
+                                                        <div class="stat-item">
+                                                            <div class="stat-label">总字符数</div>
+                                                            <div class="stat-value">{{ formatNumber(contextCharCount) }}</div>
+                                                        </div>
+                                                        <div class="stat-item">
+                                                            <div class="stat-label">预估Token</div>
+                                                            <div class="stat-value">{{ formatNumber(contextTokenEstimate) }}</div>
+                                                        </div>
+                                                        <div class="stat-item">
+                                                            <div class="stat-label">限制条数</div>
+                                                            <div class="stat-value">{{ settings.max_context_length || 50 }}</div>
+                                                        </div>
+                                                    </div>
+                                                    <button class="compress-btn"
+                                                            @click="compressContext"
+                                                            :disabled="isCompressing">
+                                                        {{ isCompressing ? '压缩中...' : '压缩上下文' }}
+                                                    </button>
+                                                </div>
+                                            </div>
+                                            <!-- Expand Button -->
+                                            <button class="btn btn-icon chat-input-expand-btn" @click="toggleInputSize" :title="isInputExpanded ? '缩小输入栏' : '扩大输入栏'">
+                                                <i :class="isInputExpanded ? 'fas fa-compress-alt' : 'fas fa-expand-alt'"></i>
+                                            </button>
                                             <!-- 上传到工作区按钮 -->
                                             <label class="btn btn-icon" :disabled="isLoading" title="上传文件到工作区（不触发AI）">
                                                 <i class="fas fa-folder-open"></i>
@@ -7741,6 +8247,11 @@
 
                 toggleSidebar() {
                     this.isSidebarCollapsed = !this.isSidebarCollapsed;
+                },
+
+                toggleMobileMenu() {
+                    this.isMobileMenuOpen = !this.isMobileMenuOpen;
+                    console.log('[MobileMenu] Toggle:', this.isMobileMenuOpen);
                 },
 
                 toggleInputSize() {
