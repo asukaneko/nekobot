@@ -11374,6 +11374,20 @@
                         this.isLoading = false;
                         this.showToast(err.message || '发生错误', 'error');
                     });
+                    
+                    // 监听会话重命名事件
+                    socket.on('session_renamed', (data) => {
+                        console.log('Session renamed:', data);
+                        // 更新当前会话的名称
+                        if (this.currentSession && data.session_id === this.currentSession.id) {
+                            this.currentSession.name = data.name;
+                        }
+                        // 更新会话列表中的名称
+                        const session = this.sessions.find(s => s.id === data.session_id);
+                        if (session) {
+                            session.name = data.name;
+                        }
+                    });
                 },
                 
                 scrollToBottom(force = false, instant = true) {

@@ -1749,6 +1749,42 @@ class WebChatServer:
                 return True
         return False
 
+    def _generate_session_name(self, messages: List[Dict]) -> str:
+        """根据对话内容生成会话名称"""
+        if not self.ai_client:
+            return None
+        
+        try:
+            # 构建提示词
+            prompt_messages = [
+                {
+                    "role": "system",
+                    "content": "你是一个会话命名助手。请根据用户的对话内容，生成一个简短、贴切的会话名称（不超过10个字）。只返回名称，不要有任何解释。"
+                },
+                {
+                    "role": "user",
+                    "content": f"请为以下对话生成一个简短的会话名称（不超过10个字）：\n\n用户: {messages[-2]['content'] if len(messages) >= 2 else messages[-1]['content']}\n\nAI: {messages[-1]['content'] if messages[-1]['role'] == 'assistant' else '...'}"
+                }
+            ]
+            
+            response = self.ai_client.chat_completion(
+                model=self.ai_model,
+                messages=prompt_messages,
+                stream=False
+            )
+            
+            name = response.choices[0].message.content.strip()
+            # 清理可能的引号和多余字符
+            name = name.strip('"\'「」『』【】()（）')
+            
+            if name and len(name) <= 20:
+                return name
+            return None
+            
+        except Exception as e:
+            _log.error(f"生成会话名失败: {e}")
+            return None
+
     def _get_ai_response(self, messages: List[Dict]) -> str:
         """获取 AI 回复"""
         if not self.ai_client:
@@ -2605,8 +2641,10 @@ class WebChatServer:
         @self.app.route('/api/sessions/<session_id>/chat', methods=['POST'])
         def chat_with_ai(session_id):
             """与 AI 对话"""
+            _log.info(f"[SessionRename] chat_with_ai called for session {session_id[:8]}...")
             session = self.sessions.get(session_id)
             if not session:
+                _log.warning(f"[SessionRename] Session not found: {session_id}")
                 return jsonify({'error': 'Session not found'}), 404
             
             data = request.json
@@ -2706,6 +2744,7 @@ class WebChatServer:
 
             # 异步获取 AI 回复
             def get_response():
+                _log.info(f"[SessionRename] get_response started for session {session_id[:8]}...")
                 try:
                     # 导入工具定义（包括工作区工具）
                     try:
@@ -3016,6 +3055,31 @@ class WebChatServer:
                         'session_id': session_id,
                         'message': assistant_message
                     }, room=session_id)
+                    
+                    # 自动重命名会话（如果是默认名称且对话轮数达到一定数量）
+                    try:
+                        current_name = session.get('name', '')
+                        message_count = len(session.get('messages', []))
+                        _log.info(f"[SessionRename] 检查重命名条件: name='{current_name}', count={message_count}")
+                        # 如果是默认名称（以"会话"开头或是空名称），且已有至少4条消息（2轮对话）
+                        if (current_name.startswith('会话') or not current_name) and message_count >= 4:
+                            _log.info(f"[SessionRename] 条件满足，开始生成新名称...")
+                            new_name = self._generate_session_name(session['messages'])
+                            if new_name:
+                                session['name'] = new_name
+                                self._save_data('sessions')
+                                # 通知前端会话名称已更新
+                                self.socketio.emit('session_renamed', {
+                                    'session_id': session_id,
+                                    'name': new_name
+                                }, room=session_id)
+                                _log.info(f"[SessionRename] 会话 {session_id[:8]}... 已重命名为: {new_name}")
+                            else:
+                                _log.warning(f"[SessionRename] 生成名称失败，返回 None")
+                        else:
+                            _log.info(f"[SessionRename] 条件不满足: startswith={current_name.startswith('会话')}, empty={not current_name}, count={message_count}")
+                    except Exception as e:
+                        _log.error(f"[SessionRename] 自动重命名失败: {e}", exc_info=True)
                     
                 except Exception as e:
                     _log.error(f"Error in AI chat: {e}")
@@ -5864,6 +5928,31 @@ class WebChatServer:
                 # 保存会话和 Token 统计到磁盘
                 self._save_data('sessions')
                 self._save_data('token_stats')
+                
+                # 自动重命名会话（如果是默认名称且对话轮数达到一定数量）
+                try:
+                    current_name = session.get('name', '')
+                    message_count = len(session.get('messages', []))
+                    _log.info(f"[SessionRename] 检查重命名条件: name='{current_name}', count={message_count}")
+                    # 如果是默认名称（以"会话"开头或是空名称），且已有至少4条消息（2轮对话）
+                    if (current_name.startswith('会话') or not current_name or current_name.startswith('Web 会话')) and message_count >= 4:
+                        _log.info(f"[SessionRename] 条件满足，开始生成新名称...")
+                        new_name = self._generate_session_name(session['messages'])
+                        if new_name:
+                            session['name'] = new_name
+                            self._save_data('sessions')
+                            # 通知前端会话名称已更新
+                            self.socketio.emit('session_renamed', {
+                                'session_id': session_id,
+                                'name': new_name
+                            }, room=session_id)
+                            _log.info(f"[SessionRename] 会话 {session_id[:8]}... 已重命名为: {new_name}")
+                        else:
+                            _log.warning(f"[SessionRename] 生成名称失败，返回 None")
+                    else:
+                        _log.info(f"[SessionRename] 条件不满足: startswith={current_name.startswith('会话')}, empty={not current_name}, count={message_count}")
+                except Exception as e:
+                    _log.error(f"[SessionRename] 自动重命名失败: {e}", exc_info=True)
                 
             except Exception as e:
                 _log.error(f"Error in AI response: {e}")
