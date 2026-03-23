@@ -50,8 +50,9 @@ def run_bot():
 if __name__ == '__main__':
     import sys
 
-    # 默认启用 Web，使用 --no-web 参数可以禁用
+    # 解析命令行参数
     web_disabled = '--no-web' in sys.argv
+    only_web = '--only-web' in sys.argv
     web_port = 5000
     web_host = '0.0.0.0'
 
@@ -65,6 +66,10 @@ if __name__ == '__main__':
         # 只启动 QQ Bot
         _log.info("Starting NekoBot (Web disabled)...")
         nbot.commands.bot.run(enable_webui_interaction=False)
+    elif only_web:
+        # 只启动 Web 服务（不连接 QQ）
+        _log.info("Starting NekoBot Web Dashboard only (QQ disabled)...")
+        start_web_server(host=web_host, port=web_port, bot=None)
     else:
         # 同时启动 QQ Bot 和 Web 服务
         _log.info("Starting NekoBot with Web Dashboard...")

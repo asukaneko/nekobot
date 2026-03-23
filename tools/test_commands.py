@@ -233,7 +233,7 @@ class NekoBotShell(cmd.Cmd):
     def do_config(self, arg):
         """config - 查看当前配置"""
         try:
-            from nbot.utils.config_loader import load_config
+            from nbot.web.utils.config_loader import load_config
             config = load_config()
             print("=== 当前配置 ===")
             for section in config.sections():

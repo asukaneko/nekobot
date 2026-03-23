@@ -16,6 +16,7 @@ __pycache__/config.cpython-312.pyc
 .gitignore
 find.json
 config.ini
+.env
 edgedriver_win64
 wenku8_cookie.txt
 saved_message
@@ -26,3 +27,6 @@ switches.json
 __pycache__
 config.copy.ini
 todo
+uploads
+test_agent
+static
