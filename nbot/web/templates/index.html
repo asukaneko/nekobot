@@ -2929,15 +2929,8 @@
             font-size: 14px;
             resize: none;
             min-height: 48px;
-            height: 48px;
-            max-height: 120px;
             outline: none;
             transition: all 0.3s ease;
-        }
-
-        .chat-input.expanded {
-            height: 200px;
-            max-height: 300px;
         }
 
         .chat-input:focus { border-color: var(--accent-primary); }
@@ -2973,6 +2966,79 @@
 
         .chat-actions .context-indicator .percentage {
             font-size: 11px;
+        }
+
+        /* 扩展编辑器模态框 */
+        .expand-editor-modal {
+            width: 90%;
+            max-width: 900px;
+            height: 80vh;
+            background: var(--bg-secondary);
+            border-radius: 12px;
+            display: flex;
+            flex-direction: column;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+        }
+
+        .expand-editor-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 16px 20px;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .expand-editor-title {
+            font-size: 16px;
+            font-weight: 600;
+        }
+
+        .expand-editor-actions {
+            display: flex;
+            gap: 8px;
+        }
+
+        .expand-editor-content {
+            flex: 1;
+            padding: 16px;
+            overflow: hidden;
+        }
+
+        .expand-editor-textarea {
+            width: 100%;
+            height: 100%;
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 16px;
+            color: var(--text-primary);
+            font-size: 14px;
+            font-family: 'Consolas', 'Monaco', monospace;
+            line-height: 1.6;
+            resize: none;
+            box-sizing: border-box;
+            outline: none;
+        }
+
+        .expand-editor-textarea:focus {
+            border-color: var(--accent-primary);
+        }
+
+        .expand-editor-footer {
+            display: flex;
+            gap: 24px;
+            padding: 12px 20px;
+            border-top: 1px solid var(--border-color);
+            font-size: 12px;
+            color: var(--text-secondary);
+        }
+
+        .expand-editor-footer kbd {
+            background: var(--bg-tertiary);
+            padding: 2px 6px;
+            border-radius: 4px;
+            border: 1px solid var(--border-color);
+            margin-right: 4px;
         }
 
         .uploaded-files-preview {
@@ -4904,11 +4970,9 @@
                                             <textarea
                                                 v-model="inputMessage"
                                                 class="chat-input"
-                                                :class="{ 'expanded': isInputExpanded }"
                                                 placeholder="输入消息... (Shift+Enter 换行)"
                                                 @keydown.enter.prevent="handleEnter"
                                                 rows="1"
-                                                :disabled="isLoading"
                                             ></textarea>
                                         </div>
                                         <div class="chat-actions">
@@ -4955,8 +5019,8 @@
                                                 </div>
                                             </div>
                                             <!-- Expand Button -->
-                                            <button class="btn btn-icon chat-input-expand-btn" @click="toggleInputSize" :title="isInputExpanded ? '缩小输入栏' : '扩大输入栏'">
-                                                <i :class="isInputExpanded ? 'fas fa-compress-alt' : 'fas fa-expand-alt'"></i>
+                                            <button class="btn btn-icon chat-input-expand-btn" @click="openExpandEditor(inputMessage)" title="扩展编辑器">
+                                                <i class="fas fa-expand-alt"></i>
                                             </button>
                                             <!-- 上传到工作区按钮 -->
                                             <label class="btn btn-icon" :disabled="isLoading" title="上传文件到工作区（不触发AI）">
@@ -6924,6 +6988,37 @@
             </div>
         </div>
 
+        <!-- 扩展编辑器模态框 -->
+        <div v-if="showExpandEditor" class="modal-overlay" @click.self="closeExpandEditor">
+            <div class="expand-editor-modal">
+                <div class="expand-editor-header">
+                    <div class="expand-editor-title">
+                        <i class="fas fa-edit"></i> 扩展编辑器
+                    </div>
+                    <div class="expand-editor-actions">
+                        <button class="btn btn-secondary" @click="closeExpandEditor">取消</button>
+                        <button class="btn btn-primary" @click="applyExpandEditor">
+                            <i class="fas fa-check"></i> 确定并关闭
+                        </button>
+                    </div>
+                </div>
+                <div class="expand-editor-content">
+                    <textarea
+                        v-model="expandEditorContent"
+                        ref="expandEditorTextarea"
+                        class="expand-editor-textarea"
+                        placeholder="在这里输入你的内容..."
+                        @keydown.ctrl.enter="applyExpandEditor"
+                        @keydown.esc="closeExpandEditor"
+                    ></textarea>
+                </div>
+                <div class="expand-editor-footer">
+                    <span><kbd>Ctrl</kbd>+<kbd>Enter</kbd> 确认并关闭</span>
+                    <span><kbd>Esc</kbd> 取消</span>
+                </div>
+            </div>
+        </div>
+
         <!-- Toast Container -->
         <div class="toast-container">
             <div v-for="toast in toasts" :key="toast.id" class="toast" :class="toast.type">
@@ -7571,7 +7666,6 @@
                     thinkingCards: [],  // 进度卡片列表
                     showThinkingCard: true,  // 是否显示进度卡片
                     isUserScrolling: false,
-                    isInputExpanded: false,  // 输入栏是否扩大
                     showScrollToBottom: false,
                     sessionSearch: '',
                     
@@ -7852,6 +7946,9 @@
                     showSessionDetailsModal: false,
                     viewingSession: null,
                     showConfirmModal: false,
+                    showExpandEditor: false,
+                    expandEditorContent: '',
+                    expandEditorCallback: null,
                     confirmModalConfig: {
                         title: '确认操作',
                         message: '确定要执行这个操作吗？',
@@ -8254,10 +8351,6 @@
                     console.log('[MobileMenu] Toggle:', this.isMobileMenuOpen);
                 },
 
-                toggleInputSize() {
-                    this.isInputExpanded = !this.isInputExpanded;
-                },
-                
                 async loadAllData() {
                     await Promise.all([
                         this.loadStats(),
@@ -9507,7 +9600,14 @@
                 },
                 
                 async sendMessage() {
-                    if (!this.currentSession || this.isLoading) return;
+                    if (!this.currentSession) return;
+                    
+                    // 如果 AI 正在生成，先停止生成
+                    if (this.isLoading) {
+                        await this.stopGeneration();
+                        // 等待一小段时间确保停止完成
+                        await new Promise(resolve => setTimeout(resolve, 100));
+                    }
                     
                     const content = this.inputMessage.trim();
                     this.inputMessage = '';
@@ -10135,6 +10235,31 @@
                         this.confirmDialogConfig.onCancel();
                     }
                     this.showConfirmDialog = false;
+                },
+
+                // 扩展编辑器方法
+                openExpandEditor(content = '') {
+                    this.expandEditorContent = content;
+                    this.showExpandEditor = true;
+                    // 聚焦到文本框
+                    this.$nextTick(() => {
+                        if (this.$refs.expandEditorTextarea) {
+                            this.$refs.expandEditorTextarea.focus();
+                        }
+                    });
+                },
+
+                closeExpandEditor() {
+                    this.showExpandEditor = false;
+                    this.expandEditorContent = '';
+                },
+
+                applyExpandEditor() {
+                    const content = this.expandEditorContent;
+                    this.showExpandEditor = false;
+                    this.expandEditorContent = '';
+                    // 将内容设置到主输入框
+                    this.inputMessage = content;
                 },
                 
                 // Workflow Functions

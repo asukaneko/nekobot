@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>扩展编辑器</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei', sans-serif;
+            background: var(--bg-primary, #0d1117);
+            color: var(--text-primary, #e6edf3);
+            margin: 0;
+            padding: 0;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .editor-header {
+            background: var(--bg-secondary, #161b22);
+            border-bottom: 1px solid var(--border-color, #30363d);
+            padding: 12px 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .editor-title {
+            font-size: 14px;
+            font-weight: 500;
+        }
+
+        .editor-actions {
+            display: flex;
+            gap: 8px;
+        }
+
+        .btn {
+            padding: 8px 16px;
+            border-radius: 6px;
+            border: none;
+            cursor: pointer;
+            font-size: 13px;
+            transition: all 0.2s;
+        }
+
+        .btn-primary {
+            background: #ec4899;
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background: #db2777;
+        }
+
+        .btn-secondary {
+            background: var(--bg-tertiary, #21262d);
+            color: var(--text-primary, #e6edf3);
+            border: 1px solid var(--border-color, #30363d);
+        }
+
+        .btn-secondary:hover {
+            background: var(--bg-hover, #30363d);
+        }
+
+        .editor-content {
+            flex: 1;
+            padding: 16px;
+        }
+
+        .editor-textarea {
+            width: 100%;
+            height: 100%;
+            background: var(--bg-tertiary, #21262d);
+            border: 1px solid var(--border-color, #30363d);
+            border-radius: 8px;
+            padding: 16px;
+            color: var(--text-primary, #e6edf3);
+            font-size: 14px;
+            font-family: 'Consolas', 'Monaco', monospace;
+            line-height: 1.6;
+            resize: none;
+            box-sizing: border-box;
+            outline: none;
+        }
+
+        .editor-textarea:focus {
+            border-color: #ec4899;
+        }
+
+        .editor-footer {
+            background: var(--bg-secondary, #161b22);
+            border-top: 1px solid var(--border-color, #30363d);
+            padding: 12px 20px;
+            font-size: 12px;
+            color: var(--text-secondary, #8b949e);
+        }
+
+        .shortcut-hint {
+            display: flex;
+            gap: 16px;
+        }
+
+        kbd {
+            background: var(--bg-tertiary, #21262d);
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-family: inherit;
+            border: 1px solid var(--border-color, #30363d);
+        }
+    </style>
+</head>
+<body>
+    <div class="editor-header">
+        <div class="editor-title">📝 扩展编辑器</div>
+        <div class="editor-actions">
+            <button class="btn btn-secondary" onclick="cancelEdit()">取消</button>
+            <button class="btn btn-primary" onclick="saveAndClose()">确定并关闭</button>
+        </div>
+    </div>
+
+    <div class="editor-content">
+        <textarea
+            id="editorTextarea"
+            class="editor-textarea"
+            placeholder="在这里输入你的内容..."
+        ></textarea>
+    </div>
+
+    <div class="editor-footer">
+        <div class="shortcut-hint">
+            <span><kbd>Ctrl</kbd>+<kbd>Enter</kbd> 确认并关闭</span>
+            <span><kbd>Esc</kbd> 取消</span>
+        </div>
+    </div>
+
+    <script>
+        const urlParams = new URLSearchParams(window.location.search);
+        const initialContent = urlParams.get('content') || '';
+        const sessionId = urlParams.get('session_id') || '';
+
+        document.getElementById('editorTextarea').value = decodeURIComponent(initialContent);
+        document.getElementById('editorTextarea').focus();
+
+        document.addEventListener('keydown', function(e) {
+            if (e.ctrlKey && e.key === 'Enter') {
+                e.preventDefault();
+                saveAndClose();
+            }
+            if (e.key === 'Escape') {
+                e.preventDefault();
+                cancelEdit();
+            }
+        });
+
+        function saveAndClose() {
+            const content = document.getElementById('editorTextarea').value;
+
+            if (window.opener) {
+                window.opener.postMessage({
+                    type: 'editorContent',
+                    content: content,
+                    session_id: sessionId
+                }, '*');
+            }
+
+            window.close();
+        }
+
+        function cancelEdit() {
+            window.close();
+        }
+
+        window.addEventListener('message', function(e) {
+            if (e.data && e.data.type === 'updateContent') {
+                document.getElementById('editorTextarea').value = e.data.content;
+            }
+        });
+    </script>
+</body>
+</html>
