@@ -5717,13 +5717,40 @@ class WebChatServer:
                                             else:
                                                 _log.error(f"[Todo] ✗ 执行失败: {tool_name} - {tool_result.get('error', '')}")
                                         
-                                        tool_messages.append({
-                                            "role": "tool",
-                                            "tool_call_id": tool_call.get('id', ''),
-                                            "content": json.dumps(tool_result, ensure_ascii=False)
-                                        })
+                                        # 处理 send_message 工具（不中断思考流程）
+                                        if tool_name == 'send_message' and tool_result.get('action') == 'send_message':
+                                            # 立即发送消息给用户，不添加到 tool_messages
+                                            progress_msg = {
+                                                'id': str(uuid.uuid4()),
+                                                'role': 'assistant',
+                                                'content': tool_result.get('content', ''),
+                                                'timestamp': datetime.now().isoformat(),
+                                                'sender': 'AI',
+                                                'message_type': tool_result.get('message_type', 'progress'),
+                                                'is_progress_message': True  # 标记为进度消息
+                                            }
+                                            # 发送消息但不保存到 session（避免污染对话历史）
+                                            self.socketio.emit('progress_message', {
+                                                'session_id': session_id,
+                                                'message': progress_msg
+                                            }, room=session_id)
+                                            _log.info(f"[SendMessage] 已发送进度消息: {tool_result.get('content', '')[:50]}...")
+                                            
+                                            # 添加工具结果到消息历史（让 AI 知道消息已发送）
+                                            tool_messages.append({
+                                                "role": "tool",
+                                                "tool_call_id": tool_call.get('id', ''),
+                                                "content": json.dumps({"success": True, "message": "消息已发送"}, ensure_ascii=False)
+                                            })
+                                        else:
+                                            # 普通工具，正常处理
+                                            tool_messages.append({
+                                                "role": "tool",
+                                                "tool_call_id": tool_call.get('id', ''),
+                                                "content": json.dumps(tool_result, ensure_ascii=False)
+                                            })
                                         
-                                        # 如果是 workspace_send_file，自动发送文件到 Web 端
+                                        # 如果是 workspace_send_file ，自动发送文件到 Web 端
                                         if tool_name == 'workspace_send_file' and tool_result.get('action') == 'send_file':
                                             file_path = tool_result.get('path', '')
                                             filename = tool_result.get('filename', '')

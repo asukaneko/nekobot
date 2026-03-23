@@ -11388,6 +11388,25 @@
                             session.name = data.name;
                         }
                     });
+                    
+                    // 监听进度消息事件（AI思考过程中发送的消息）
+                    socket.on('progress_message', (data) => {
+                        console.log('[DEBUG] Progress message received:', data);
+                        console.log('[DEBUG] Current session:', this.currentSession?.id);
+                        console.log('[DEBUG] Message data:', data.message);
+                        if (this.currentSession && data.session_id === this.currentSession.id) {
+                            // 添加进度消息到当前消息列表（使用 Vue.set 确保响应式）
+                            const newMessage = {...data.message, is_progress: true};
+                            this.currentMessages = [...this.currentMessages, newMessage];
+                            console.log('[DEBUG] Message added, total messages:', this.currentMessages.length);
+                            this.$nextTick(() => {
+                                this.scrollToBottom();
+                                console.log('[DEBUG] Scrolled to bottom');
+                            });
+                        } else {
+                            console.log('[DEBUG] Session mismatch or no current session');
+                        }
+                    });
                 },
                 
                 scrollToBottom(force = false, instant = true) {

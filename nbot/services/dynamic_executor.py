@@ -280,6 +280,12 @@ class DynamicExecutor:
                 if not workspace_id and context.get('session_id'):
                     workspace_id = context.get('session_id')
                 return ToolExecutor.download_file(url, filename=filename, workspace_id=workspace_id)
+            elif handler == 'send_message':
+                from nbot.services.tools import ToolExecutor
+                content = params.get('content', '')
+                message_type = params.get('message_type', 'info')
+                session_id = context.get('session_id')
+                return ToolExecutor.send_message(content, message_type=message_type, session_id=session_id)
             else:
                 return {
                     'success': False,

@@ -664,6 +664,39 @@ class ToolExecutor:
                 "url": url
             }
 
+    @staticmethod
+    def send_message(content: str, message_type: str = "info", session_id: str = None) -> Dict[str, Any]:
+        """
+        向用户发送消息（不中断思考流程）
+        
+        Args:
+            content: 消息内容
+            message_type: 消息类型，可选 info/progress/warning/success
+            session_id: 会话 ID（从 context 自动获取）
+        
+        Returns:
+            发送结果
+        """
+        try:
+            _log.info(f"[SendMessage] AI 发送{type}消息: {content[:50]}...")
+            
+            # 返回特殊标记，让调用者知道需要发送消息
+            return {
+                "success": True,
+                "action": "send_message",
+                "content": content,
+                "message_type": message_type,
+                "session_id": session_id,
+                "message": "消息已发送给用户"
+            }
+            
+        except Exception as e:
+            _log.error(f"[SendMessage] 发送消息失败: {e}")
+            return {
+                "success": False,
+                "error": str(e)
+            }
+
 
 # 工具定义（用于 AI 工具调用）
 TOOL_DEFINITIONS = [
@@ -873,6 +906,29 @@ TOOL_DEFINITIONS = [
                     }
                 },
                 "required": ["url"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "send_message",
+            "description": "在思考过程中向用户发送消息，不中断思考流程。当AI需要长时间处理时，可以使用此工具告知用户当前进度。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "content": {
+                        "type": "string",
+                        "description": "要发送给用户的消息内容"
+                    },
+                    "message_type": {
+                        "type": "string",
+                        "description": "消息类型：info(普通信息)/progress(进度通知)/warning(警告)/success(成功通知)",
+                        "enum": ["info", "progress", "warning", "success"],
+                        "default": "info"
+                    }
+                },
+                "required": ["content"]
             }
         }
     }
