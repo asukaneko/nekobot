@@ -1,7 +1,53 @@
+import configparser
+import os
+from dotenv import load_dotenv
+
+def _sync_env_to_config_ini():
+    _env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '.env')
+    if os.path.exists(_env_path):
+        load_dotenv(_env_path)
+    else:
+        load_dotenv()
+
+    config_parser = configparser.ConfigParser()
+    config_parser.read('config.ini', encoding='utf-8')
+
+    if 'BotConfig' not in config_parser:
+        config_parser['BotConfig'] = {}
+    if 'ApiKey' not in config_parser:
+        config_parser['ApiKey'] = {}
+
+    bot_uin = os.getenv('BOT_UIN')
+    if bot_uin:
+        config_parser.set('BotConfig', 'bot_uin', bot_uin)
+    root = os.getenv('ROOT')
+    if root:
+        config_parser.set('BotConfig', 'root', root)
+    ws_uri = os.getenv('WS_URI')
+    if ws_uri:
+        config_parser.set('BotConfig', 'ws_uri', ws_uri)
+    token = os.getenv('TOKEN')
+    if token:
+        config_parser.set('BotConfig', 'token', token)
+    api_key = os.getenv('API_KEY')
+    if api_key:
+        config_parser.set('ApiKey', 'api_key', api_key)
+    base_url = os.getenv('BASE_URL')
+    if base_url:
+        config_parser.set('ApiKey', 'base_url', base_url)
+    model = os.getenv('MODEL')
+    if model:
+        config_parser.set('ApiKey', 'model', model)
+
+    with open('config.ini', 'w', encoding='utf-8') as f:
+        config_parser.write(f)
+
+_sync_env_to_config_ini()
+
 from ncatbot.utils.logger import get_log
+from ncatbot.utils.config import config as ncatbot_config
 import nbot.commands
 from nbot.chat import chat,tts,chat_video,chat_image,chat_webpage,chat_json,record_assistant_message,record_user_message,log_to_group_full_file,judge_reply,load_prompt,chat_gif
-import os
 import json
 import datetime
 import asyncio
@@ -13,6 +59,20 @@ try:
     if_tts = nbot.commands.if_tts
 except AttributeError:
     if_tts = False
+
+def _apply_env_to_ncatbot_config():
+    bot_uin = os.getenv('BOT_UIN')
+    if bot_uin:
+        ncatbot_config.set_bot_uin(bot_uin)
+    root = os.getenv('ROOT')
+    if root:
+        ncatbot_config.set_root(root)
+    ws_uri = os.getenv('WS_URI')
+    if ws_uri:
+        ncatbot_config.set_ws_uri(ws_uri)
+    token = os.getenv('TOKEN')
+    if token:
+        ncatbot_config.set_token(token)
 
 web_server_instance = None
 
@@ -49,6 +109,8 @@ def run_bot():
 
 if __name__ == '__main__':
     import sys
+
+    _apply_env_to_ncatbot_config()
 
     # 解析命令行参数
     web_disabled = '--no-web' in sys.argv
