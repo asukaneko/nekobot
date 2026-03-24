@@ -84,6 +84,12 @@ def start_web_server(host='0.0.0.0', port=5000, bot=None):
 
         _log.info(f"Starting Web Chat Server on {host}:{port}...")
 
+        # 隐藏 Flask/Werkzeug 默认日志
+        import logging
+        werkzeug_log = logging.getLogger('werkzeug')
+        werkzeug_log.setLevel(logging.ERROR)  # 只显示错误日志，隐藏 INFO 日志
+        werkzeug_log.disabled = True  # 完全禁用 werkzeug 日志
+
         app, socketio, web_server = create_web_app()
         web_server_instance = web_server
         
@@ -92,7 +98,7 @@ def start_web_server(host='0.0.0.0', port=5000, bot=None):
             web_server.set_qq_bot(bot)
             _log.info("QQ Bot reference set in web server")
 
-        socketio.run(app, host=host, port=port, debug=False, allow_unsafe_werkzeug=True)
+        socketio.run(app, host=host, port=port, debug=False, allow_unsafe_werkzeug=True, log_output=False)
 
     except ImportError as e:
         _log.error(f"Failed to import web module: {e}")

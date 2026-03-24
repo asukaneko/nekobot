@@ -459,6 +459,8 @@
             gap: 4px;
             margin-left: auto;
             padding-left: 8px;
+            flex-shrink: 0;
+            align-items: center;
         }
 
         .session-item:hover .session-actions {
@@ -1874,8 +1876,10 @@
             padding: 12px;
             border-radius: 8px;
             cursor: pointer;
-            transition: all 0.2s;
+            transition: background 0.2s;
             margin-bottom: 4px;
+            height: 64px;
+            box-sizing: border-box;
         }
 
         .session-item:hover { background: var(--bg-tertiary); }
@@ -1909,6 +1913,9 @@
             font-size: 12px;
             color: var(--text-muted);
             margin-top: 2px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
         }
 
         .chat-main {

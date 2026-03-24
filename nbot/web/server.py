@@ -474,6 +474,9 @@ class WebMessageAdapter:
         safe_name = f"{file_hash}_{file_name}"
         dest_path = os.path.join(files_dir, safe_name)
 
+        # 确保目标目录存在（处理子目录情况）
+        os.makedirs(os.path.dirname(dest_path), exist_ok=True)
+
         # 复制文件到静态目录
         try:
             shutil.copy2(file_path, dest_path)
@@ -2946,13 +2949,16 @@ class WebChatServer:
                                                     # 复制文件到静态目录
                                                     files_dir = os.path.join(self.static_folder, 'files')
                                                     os.makedirs(files_dir, exist_ok=True)
-                                                    
+
                                                     import hashlib
                                                     import time
                                                     file_hash = hashlib.md5(f"{file_path}{time.time()}".encode()).hexdigest()[:8]
                                                     safe_name = f"{file_hash}_{filename}"
                                                     dest_path = os.path.join(files_dir, safe_name)
-                                                    
+
+                                                    # 确保目标目录存在（处理子目录情况）
+                                                    os.makedirs(os.path.dirname(dest_path), exist_ok=True)
+
                                                     shutil.copy2(file_path, dest_path)
                                                     download_url = f"/static/files/{safe_name}"
                                                     
@@ -5925,13 +5931,16 @@ class WebChatServer:
                                                         # 复制文件到静态目录
                                                         files_dir = os.path.join(self.static_folder, 'files')
                                                         os.makedirs(files_dir, exist_ok=True)
-                                                        
+
                                                         import hashlib
                                                         import time
                                                         file_hash = hashlib.md5(f"{file_path}{time.time()}".encode()).hexdigest()[:8]
                                                         safe_name = f"{file_hash}_{filename}"
                                                         dest_path = os.path.join(files_dir, safe_name)
-                                                        
+
+                                                        # 确保目标目录存在（处理子目录情况）
+                                                        os.makedirs(os.path.dirname(dest_path), exist_ok=True)
+
                                                         shutil.copy2(file_path, dest_path)
                                                         download_url = f"/static/files/{safe_name}"
                                                         
@@ -6561,8 +6570,8 @@ def create_web_app(config: Dict[str, Any] = None) -> tuple[Flask, SocketIO]:
     app.config['SECRET_KEY'] = 'nbot-secret-key'
     app.config.update(config or {})
 
-    # 增加 SocketIO 消息大小限制到 100MB
-    socketio = SocketIO(app, cors_allowed_origins="*", max_http_buffer_size=100*1024*1024)
+    # 增加 SocketIO 消息大小限制到 100MB，并强制使用 threading 模式避免 eventlet 阻塞问题
+    socketio = SocketIO(app, async_mode='threading', cors_allowed_origins="*", max_http_buffer_size=100*1024*1024)
 
     server = WebChatServer(app, socketio)
 
