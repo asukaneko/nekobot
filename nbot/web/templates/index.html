@@ -6410,9 +6410,14 @@
                         <div class="card">
                             <div class="card-header">
                                 <span class="card-title"><i class="fas fa-magic"></i> Skills 配置</span>
-                                <button class="btn btn-primary" @click="openSkillModal()" :disabled="isLoading">
-                                    <i class="fas fa-plus"></i> 新建 Skill
-                                </button>
+                                <div style="display: flex; gap: 8px;">
+                                    <button class="btn btn-secondary" @click="loadSkillsStorage" :disabled="isLoading">
+                                        <i class="fas fa-folder"></i> 查看存储空间
+                                    </button>
+                                    <button class="btn btn-primary" @click="openSkillModal()" :disabled="isLoading">
+                                        <i class="fas fa-plus"></i> 新建 Skill
+                                    </button>
+                                </div>
                             </div>
                             <div class="card-body">
                                 <div v-if="skills.length === 0" class="empty-state">
@@ -6431,13 +6436,22 @@
                                                     <span class="badge" :class="skill.enabled ? 'badge-success' : 'badge-secondary'">
                                                         {{ skill.enabled ? '启用' : '禁用' }}
                                                     </span>
+                                                    <span v-if="skill.has_storage" class="badge badge-info">
+                                                        <i class="fas fa-folder"></i> 有存储
+                                                    </span>
                                                 </div>
                                                 <p style="margin: 0 0 8px 0; color: var(--text-secondary); font-size: 14px;">{{ skill.description }}</p>
                                                 <div v-if="skill.aliases && skill.aliases.length > 0" style="font-size: 12px; color: var(--text-secondary);">
                                                     <i class="fas fa-tags"></i> 别名: {{ skill.aliases.join(', ') }}
                                                 </div>
+                                                <div v-if="skill.scripts && skill.scripts.length > 0" style="font-size: 12px; color: var(--text-secondary); margin-top: 4px;">
+                                                    <i class="fas fa-file-code"></i> 脚本: {{ skill.scripts.join(', ') }}
+                                                </div>
                                             </div>
                                             <div style="display: flex; gap: 8px;">
+                                                <button class="btn btn-secondary" @click="viewSkillStorage(skill)" title="查看存储空间">
+                                                    <i class="fas fa-folder-open"></i>
+                                                </button>
                                                 <button class="btn btn-secondary" @click="openSkillModal(skill)" :disabled="isLoading">
                                                     <i class="fas fa-edit"></i>
                                                 </button>
@@ -6448,6 +6462,57 @@
                                                     <i class="fas fa-trash"></i>
                                                 </button>
                                             </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Skills 存储空间面板 -->
+                        <div v-if="showSkillsStoragePanel" class="card" style="margin-top: 20px;">
+                            <div class="card-header">
+                                <span class="card-title"><i class="fas fa-folder-open"></i> Skills 存储空间</span>
+                                <button class="btn btn-secondary" @click="showSkillsStoragePanel = false">
+                                    <i class="fas fa-times"></i> 关闭
+                                </button>
+                            </div>
+                            <div class="card-body">
+                                <div v-if="skillsStorage.length === 0" class="empty-state">
+                                    <i class="fas fa-folder" style="font-size: 48px; color: var(--text-secondary); margin-bottom: 16px;"></i>
+                                    <p>暂无 Skills 存储空间</p>
+                                    <p style="font-size: 12px; color: var(--text-secondary);">创建 Skill 时会自动创建存储空间</p>
+                                </div>
+                                <div v-else>
+                                    <div v-for="storage in skillsStorage" :key="storage.name" class="storage-item" style="border: 1px solid var(--border-color); border-radius: 8px; padding: 16px; margin-bottom: 12px;">
+                                        <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 12px;">
+                                            <div>
+                                                <h4 style="margin: 0; font-size: 16px;">
+                                                    <i class="fas fa-folder" style="color: var(--accent-primary);"></i>
+                                                    {{ storage.name }}
+                                                </h4>
+                                            </div>
+                                            <div style="display: flex; gap: 8px;">
+                                                <button class="btn btn-secondary" @click="viewSkillStorageDetail(storage.name)" :disabled="isLoading">
+                                                    <i class="fas fa-eye"></i> 查看详情
+                                                </button>
+                                                <button class="btn btn-danger" @click="deleteSkillStorage(storage.name)" :disabled="isLoading">
+                                                    <i class="fas fa-trash"></i> 删除
+                                                </button>
+                                            </div>
+                                        </div>
+                                        <div style="display: flex; gap: 16px; font-size: 12px; color: var(--text-secondary);">
+                                            <span v-if="storage.scripts && storage.scripts.length > 0">
+                                                <i class="fas fa-file-code"></i> 脚本: {{ storage.scripts.length }} 个
+                                            </span>
+                                            <span v-if="storage.has_config">
+                                                <i class="fas fa-file-alt"></i> 有配置
+                                            </span>
+                                            <span v-if="storage.has_data">
+                                                <i class="fas fa-database"></i> 有数据
+                                            </span>
+                                            <span>
+                                                <i class="fas fa-file"></i> 文件: {{ storage.files_count }} 个
+                                            </span>
                                         </div>
                                     </div>
                                 </div>
@@ -7256,64 +7321,45 @@
                         </label>
                     </div>
 
-                    <!-- 功能实现配置 -->
-                    <div class="form-section" style="margin-top: 20px; border-top: 1px solid var(--border-color); padding-top: 20px;">
-                        <div class="form-section-title" style="font-weight: bold; margin-bottom: 12px;">功能实现配置</div>
+                    <div class="form-group">
+                        <label class="form-label">SKILL.md 内容（可选）</label>
+                        <textarea v-model="skillForm.skillMd" class="form-textarea" rows="8" placeholder="# 技能名称
 
-                        <div class="form-group">
-                            <label class="form-label">实现类型</label>
-                            <select v-model="skillForm.implementationType" class="form-select">
-                                <option value="">选择类型...</option>
-                                <option value="http">HTTP 请求</option>
-                                <option value="static">静态响应</option>
-                                <option value="python">Python 代码</option>
-                            </select>
-                        </div>
+## 功能描述
 
-                        <!-- HTTP 配置 -->
-                        <div v-if="skillForm.implementationType === 'http'" class="implementation-config">
-                            <div class="form-group">
-                                <label class="form-label">请求方法</label>
-                                <select v-model="skillForm.implementation.method" class="form-select">
-                                    <option value="GET">GET</option>
-                                    <option value="POST">POST</option>
-                                </select>
-                            </div>
-                            <div class="form-group">
-                                <label class="form-label">请求 URL</label>
-                                <input v-model="skillForm.implementation.url" type="text" class="form-input" placeholder="例如：https://api.example.com/search">
-                                <div class="form-hint">可用变量：{{query}}, {{minimax_api_key}} 等</div>
-                            </div>
-                            <div class="form-group">
-                                <label class="form-label">Headers (JSON)</label>
-                                <textarea v-model="skillForm.implementationHeadersText" class="form-textarea" rows="3" placeholder='{"Authorization": "Bearer {{api_key}}"}'></textarea>
-                            </div>
-                            <div class="form-group">
-                                <label class="form-label">Body (JSON)</label>
-                                <textarea v-model="skillForm.implementationBodyText" class="form-textarea" rows="3" placeholder='{"query": "{{query}}"}'></textarea>
-                            </div>
-                            <div class="form-group">
-                                <label class="form-label">响应数据路径</label>
-                                <input v-model="skillForm.implementation.response_path" type="text" class="form-input" placeholder="例如：result.data">
-                                <div class="form-hint">从响应JSON中提取数据的路径，用点号分隔</div>
-                            </div>
-                        </div>
+描述这个技能的主要功能...
 
-                        <!-- 静态响应配置 -->
-                        <div v-if="skillForm.implementationType === 'static'" class="implementation-config">
-                            <div class="form-group">
-                                <label class="form-label">响应内容</label>
-                                <textarea v-model="skillForm.implementation.response" class="form-textarea" rows="3" placeholder="例如：[搜索] 关键词: {{query}}"></textarea>
-                                <div class="form-hint">可用变量：{{query}} 等参数变量</div>
-                            </div>
-                        </div>
+## 使用说明
 
-                        <!-- Python 代码配置 -->
-                        <div v-if="skillForm.implementationType === 'python'" class="implementation-config">
-                            <div class="form-group">
-                                <label class="form-label">Python 代码</label>
-                                <textarea v-model="skillForm.implementation.code" class="form-textarea" rows="5" placeholder="例如：import datetime; return datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')"></textarea>
-                                <div class="form-hint">注意：只能使用受限的Python环境</div>
+1. 第一步
+2. 第二步
+
+## 输入参数
+
+| 参数名 | 类型 | 说明 |
+|--------|------|------|
+| param1 | string | 参数1说明 |
+
+## 输出格式
+
+描述输出格式..."></textarea>
+                        <div class="form-hint">定义技能的详细信息、使用方法、参数说明等，将保存为 SKILL.md 文件</div>
+                    </div>
+
+                    <!-- 提示信息 -->
+                    <div class="form-section" style="margin-top: 20px; padding: 16px; background: var(--bg-tertiary); border-radius: 8px;">
+                        <div style="display: flex; align-items: start; gap: 12px;">
+                            <i class="fas fa-info-circle" style="color: var(--accent-primary); margin-top: 2px;"></i>
+                            <div>
+                                <div style="font-weight: 500; margin-bottom: 8px;">关于技能实现</div>
+                                <div style="color: var(--text-secondary); font-size: 13px; line-height: 1.6;">
+                                    创建后，您可以在存储空间中编辑以下内容：
+                                    <ul style="margin: 8px 0; padding-left: 20px;">
+                                        <li><strong>SKILL.md</strong> - 编辑技能定义、参数、使用说明</li>
+                                        <li><strong>scripts/</strong> - 编写 Python 脚本实现功能</li>
+                                        <li><strong>resources/</strong> - 添加配置文件、数据文件等</li>
+                                    </ul>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -7322,7 +7368,150 @@
                     <button class="btn btn-secondary" @click="showSkillModal = false">取消</button>
                     <button class="btn btn-primary" @click="saveSkill" :disabled="isLoading || !skillForm.name || !skillForm.description">
                         <span v-if="isLoading"><div class="spinner" style="display: inline-block; margin-right: 8px;"></div>保存中...</span>
-                        <span v-else>保存</span>
+                        <span v-else>{{ editingSkill ? '保存' : '创建并初始化存储空间' }}</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Skill Storage Detail Modal -->
+        <div v-if="showSkillStorageModal" class="modal-overlay" @click.self="showSkillStorageModal = false">
+            <div class="modal" style="max-width: 900px; max-height: 90vh; overflow-y: auto;">
+                <div class="modal-header">
+                    <span class="modal-title">
+                        <i class="fas fa-folder-open"></i> Skill 存储空间: {{ currentSkillStorageName }}
+                    </span>
+                    <button class="modal-close" @click="showSkillStorageModal = false">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <div style="margin-bottom: 20px;">
+                        <h4 style="margin: 0 0 12px 0;">文件列表</h4>
+                        <div v-if="currentSkillStorageFiles && currentSkillStorageFiles.length > 0" class="files-list">
+                            <div v-for="file in currentSkillStorageFiles" :key="file.path" class="file-item" style="display: flex; justify-content: space-between; align-items: center; padding: 12px; border: 1px solid var(--border-color); border-radius: 8px; margin-bottom: 8px;">
+                                <div>
+                                    <i :class="getFileIcon(file.name)" style="margin-right: 8px;"></i>
+                                    <strong>{{ file.name }}</strong>
+                                    <span style="color: var(--text-secondary); margin-left: 12px; font-size: 12px;">
+                                        {{ formatFileSize(file.size) }}
+                                    </span>
+                                </div>
+                                <div style="display: flex; gap: 8px;">
+                                    <button v-if="isTextFile(file.name)" class="btn btn-secondary" @click="viewSkillScript(currentSkillStorageName, file.name)" :disabled="isLoading">
+                                        <i class="fas fa-eye"></i> 查看
+                                    </button>
+                                    <button v-if="isTextFile(file.name)" class="btn btn-primary" @click="editSkillScript(currentSkillStorageName, file.name)" :disabled="isLoading">
+                                        <i class="fas fa-edit"></i> 编辑
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                        <div v-else class="empty-state" style="padding: 40px;">
+                            <i class="fas fa-folder-open" style="font-size: 36px; color: var(--text-secondary);"></i>
+                            <p style="margin: 12px 0 0 0;">暂无文件</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary" @click="showSkillStorageModal = false">关闭</button>
+                    <button class="btn btn-primary" @click="createSkillScript" :disabled="isLoading || !currentSkillStorageName">
+                        <i class="fas fa-plus"></i> 新建脚本
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- New Script Name Modal -->
+        <div v-if="showNewScriptModal" class="modal-overlay" @click.self="closeNewScriptModal">
+            <div class="modal" style="max-width: 450px;">
+                <div class="modal-header">
+                    <span class="modal-title">
+                        <i class="fas fa-file-code"></i> 新建脚本
+                    </span>
+                    <button class="modal-close" @click="closeNewScriptModal">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <div class="form-group">
+                        <label class="form-label">脚本名称 <span class="required">*</span></label>
+                        <input v-model="newScriptName" type="text" class="form-input" placeholder="输入脚本名称" @keydown.enter="confirmNewScript">
+                        <div class="form-hint">例如：utils, helpers, main 等</div>
+                    </div>
+                    <div class="form-group" style="margin-top: 16px;">
+                        <label class="form-label">文件后缀 <span class="required">*</span></label>
+                        <div style="display: flex; gap: 8px; align-items: center;">
+                            <span style="color: var(--text-secondary);">.</span>
+                            <input v-model="newScriptExtension" type="text" class="form-input" placeholder="py, js, sh 等" style="flex: 1;" @keydown.enter="confirmNewScript">
+                        </div>
+                        <div class="form-hint">支持任意后缀名，如 py, js, sh, json, txt 等</div>
+                    </div>
+                    <div v-if="newScriptName && newScriptExtension" style="margin-top: 16px; padding: 12px; background: var(--bg-secondary); border-radius: 6px; font-family: monospace;">
+                        <span style="color: var(--text-secondary);">完整文件名:</span>
+                        <span style="color: var(--primary); margin-left: 8px;">{{ newScriptName }}.{{ newScriptExtension }}</span>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary" @click="closeNewScriptModal">取消</button>
+                    <button class="btn btn-primary" @click="confirmNewScript" :disabled="!newScriptName.trim() || !newScriptExtension.trim()">
+                        <i class="fas fa-arrow-right"></i> 创建并编辑
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Input Modal (通用输入模态框) -->
+        <div v-if="showInputModal" class="modal-overlay" @click.self="closeInputModal">
+            <div class="modal" style="max-width: 500px;">
+                <div class="modal-header">
+                    <span class="modal-title">
+                        <i class="fas fa-edit"></i> {{ inputModalConfig.title }}
+                    </span>
+                    <button class="modal-close" @click="closeInputModal">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <p v-if="inputModalConfig.message" style="margin: 0 0 12px 0; color: var(--text-secondary);">
+                        {{ inputModalConfig.message }}
+                    </p>
+                    <div class="form-group">
+                        <input
+                            v-model="inputModalValue"
+                            type="text"
+                            class="form-input"
+                            :placeholder="inputModalConfig.placeholder"
+                            @keydown.enter="confirmInputModal"
+                            style="width: 100%;"
+                        >
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary" @click="closeInputModal">取消</button>
+                    <button class="btn btn-primary" @click="confirmInputModal" :disabled="!inputModalValue.trim() && inputModalConfig.required">
+                        <i class="fas fa-check"></i> 确认
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Skill Script Editor Modal -->
+        <div v-if="showSkillScriptModal" class="modal-overlay" @click.self="closeSkillScriptModal">
+            <div class="modal" style="max-width: 95%; max-height: 95vh; display: flex; flex-direction: column;">
+                <div class="modal-header">
+                    <span class="modal-title">
+                        <i class="fas fa-code"></i> 编辑脚本: {{ editingSkillScriptName }}
+                    </span>
+                    <button class="modal-close" @click="closeSkillScriptModal">&times;</button>
+                </div>
+                <div class="modal-body" style="flex: 1; display: flex; flex-direction: column; padding: 0;">
+                    <textarea
+                        v-model="skillScriptContent"
+                        class="code-editor"
+                        style="flex: 1; min-height: 500px; font-family: 'Consolas', 'Monaco', monospace; font-size: 13px; line-height: 1.5; background: var(--bg-tertiary); border: none; border-radius: 0; padding: 16px; color: var(--text-primary); resize: none;"
+                        placeholder="输入脚本内容..."
+                    ></textarea>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary" @click="closeSkillScriptModal">取消</button>
+                    <button class="btn btn-primary" @click="saveSkillScript" :disabled="isLoading">
+                        <span v-if="isLoading"><div class="spinner" style="display: inline-block; margin-right: 8px;"></div>保存中...</span>
+                        <span v-else><i class="fas fa-save"></i> 保存</span>
                     </button>
                 </div>
             </div>
@@ -7866,6 +8055,30 @@
                         enabled: true,
                         parameters: {}
                     },
+
+                    // Skills 存储配置
+                    skillsStorage: [],
+                    showSkillsStoragePanel: false,
+                    showSkillStorageModal: false,
+                    currentSkillStorageName: '',
+                    currentSkillStorageFiles: [],
+                    showSkillScriptModal: false,
+                    editingSkillScriptName: '',
+                    skillScriptContent: '',
+                    newScriptName: '',
+                    newScriptExtension: 'py',
+                    showNewScriptModal: false,
+
+                    // Input Modal (通用输入模态框)
+                    showInputModal: false,
+                    inputModalConfig: {
+                        title: '',
+                        message: '',
+                        placeholder: '',
+                        defaultValue: '',
+                        onConfirm: null
+                    },
+                    inputModalValue: '',
 
                     // Tools 配置
                     tools: [],
@@ -8939,7 +9152,6 @@
                 openSkillModal(skill = null) {
                     if (skill) {
                         this.editingSkill = skill;
-                        const impl = skill.implementation || {};
                         this.skillForm = {
                             id: skill.id,
                             name: skill.name,
@@ -8948,10 +9160,7 @@
                             aliasesText: skill.aliases ? skill.aliases.join(', ') : '',
                             enabled: skill.enabled,
                             parameters: skill.parameters || {},
-                            implementationType: impl.type || '',
-                            implementation: { ...impl },
-                            implementationHeadersText: impl.headers ? JSON.stringify(impl.headers, null, 2) : '',
-                            implementationBodyText: impl.body ? JSON.stringify(impl.body, null, 2) : ''
+                            skillMd: skill.skill_md || ''
                         };
                     } else {
                         this.editingSkill = null;
@@ -8963,10 +9172,7 @@
                             aliasesText: '',
                             enabled: true,
                             parameters: {},
-                            implementationType: '',
-                            implementation: {},
-                            implementationHeadersText: '',
-                            implementationBodyText: ''
+                            skillMd: ''
                         };
                     }
                     this.showSkillModal = true;
@@ -8980,60 +9186,32 @@
                             ? this.skillForm.aliasesText.split(',').map(s => s.trim()).filter(s => s)
                             : [];
 
-                        // 构建 implementation
-                        let implementation = null;
-                        if (this.skillForm.implementationType) {
-                            implementation = {
-                                type: this.skillForm.implementationType
-                            };
-
-                            if (this.skillForm.implementationType === 'http') {
-                                implementation.method = this.skillForm.implementation.method || 'GET';
-                                implementation.url = this.skillForm.implementation.url || '';
-                                implementation.response_path = this.skillForm.implementation.response_path || '';
-
-                                // 解析 Headers
-                                if (this.skillForm.implementationHeadersText) {
-                                    try {
-                                        implementation.headers = JSON.parse(this.skillForm.implementationHeadersText);
-                                    } catch (e) {
-                                        implementation.headers = {};
-                                    }
-                                }
-
-                                // 解析 Body
-                                if (this.skillForm.implementationBodyText) {
-                                    try {
-                                        implementation.body = JSON.parse(this.skillForm.implementationBodyText);
-                                    } catch (e) {
-                                        implementation.body = {};
-                                    }
-                                }
-                            } else if (this.skillForm.implementationType === 'static') {
-                                implementation.response = this.skillForm.implementation.response || '';
-                            } else if (this.skillForm.implementationType === 'python') {
-                                implementation.code = this.skillForm.implementation.code || '';
-                            }
-                        }
-
+                        // 构建基本数据（实现配置在 SKILL.md 中管理）
                         const data = {
                             name: this.skillForm.name,
                             description: this.skillForm.description,
                             aliases: aliases,
                             enabled: this.skillForm.enabled,
-                            parameters: this.skillForm.parameters,
-                            implementation: implementation
+                            parameters: this.skillForm.parameters || {},
+                            skill_md: this.skillForm.skillMd || ''
                         };
 
                         if (this.editingSkill) {
                             await api.put(`/api/skills/${this.editingSkill.id}`, data);
+                            this.showSkillModal = false;
+                            await this.loadSkills();
+                            this.showToast('Skill 已更新', 'success');
                         } else {
-                            await api.post('/api/skills', data);
+                            const res = await api.post('/api/skills', data);
+                            this.showSkillModal = false;
+                            await this.loadSkills();
+                            await this.loadSkillsStorage();
+                            if (res.data?.storage_created) {
+                                this.showToast(`Skill 已创建，存储空间已自动创建`, 'success');
+                            } else {
+                                this.showToast('Skill 已创建', 'success');
+                            }
                         }
-
-                        this.showSkillModal = false;
-                        await this.loadSkills();
-                        this.showToast('Skill 已保存', 'success');
                     } catch (e) {
                         this.showToast('保存失败', 'error');
                     } finally {
@@ -9054,7 +9232,8 @@
                             try {
                                 await api.delete(`/api/skills/${id}`);
                                 await this.loadSkills();
-                                this.showToast('Skill 已删除', 'success');
+                                await this.loadSkillsStorage();
+                                this.showToast('Skill 已删除（包括存储空间）', 'success');
                             } catch (e) {
                                 console.error('删除 Skill 失败:', e);
                                 this.showToast('删除失败: ' + (e.response?.data?.error || e.message), 'error');
@@ -9078,7 +9257,226 @@
                     }
                 },
 
-                // Tools 配置方法
+                // Skills 存储方法
+                    async loadSkillsStorage() {
+                        this.showSkillsStoragePanel = true;
+                        this.isLoading = true;
+                        try {
+                            const res = await api.get('/api/skills/storage');
+                            this.skillsStorage = res.data || [];
+                        } catch (e) {
+                            console.error('Failed to load skills storage:', e);
+                            this.showToast('加载存储空间失败', 'error');
+                        } finally {
+                            this.isLoading = false;
+                        }
+                    },
+
+                    async viewSkillStorage(skill) {
+                        this.currentSkillStorageName = skill.name;
+                        await this.viewSkillStorageDetail(skill.name);
+                    },
+
+                    async viewSkillStorageDetail(skillName) {
+                        this.isLoading = true;
+                        try {
+                            const res = await api.get(`/api/skills/storage/${encodeURIComponent(skillName)}`);
+                            this.currentSkillStorageName = skillName;
+                            this.currentSkillStorageFiles = res.data?.files || [];
+                            this.showSkillStorageModal = true;
+                        } catch (e) {
+                            console.error('Failed to load skill storage detail:', e);
+                            this.showToast('加载存储详情失败: ' + (e.response?.data?.error || e.message), 'error');
+                        } finally {
+                            this.isLoading = false;
+                        }
+                    },
+
+                    async viewSkillScript(skillName, fileName) {
+                        this.isLoading = true;
+                        try {
+                            // 使用新的文件 API 来读取任意文件
+                            const res = await api.get(`/api/skills/storage/${encodeURIComponent(skillName)}/file/${encodeURIComponent(fileName)}`);
+                            this.editingSkillScriptName = fileName;
+                            this.skillScriptContent = res.data?.content || '';
+                            this.showSkillScriptModal = true;
+                        } catch (e) {
+                            console.error('Failed to load script:', e);
+                            this.showToast('加载脚本失败: ' + (e.response?.data?.error || e.message), 'error');
+                        } finally {
+                            this.isLoading = false;
+                        }
+                    },
+
+                    async editSkillScript(skillName, fileName) {
+                        this.isLoading = true;
+                        try {
+                            const res = await api.get(`/api/skills/storage/${encodeURIComponent(skillName)}/file/${encodeURIComponent(fileName)}`);
+                            this.editingSkillScriptName = fileName;
+                            this.skillScriptContent = res.data?.content || '';
+                            this.currentSkillStorageName = skillName;
+                            this.showSkillScriptModal = true;
+                        } catch (e) {
+                            console.error('Failed to load script for edit:', e);
+                            this.showToast('加载脚本失败: ' + (e.response?.data?.error || e.message), 'error');
+                        } finally {
+                            this.isLoading = false;
+                        }
+                    },
+
+                    async saveSkillScript() {
+                        if (!this.skillScriptContent.trim()) {
+                            this.showToast('脚本内容不能为空', 'error');
+                            return;
+                        }
+                        if (!this.currentSkillStorageName) {
+                            this.showToast('未选择 Skill', 'error');
+                            return;
+                        }
+                        this.isLoading = true;
+                        try {
+                            const fileName = this.editingSkillScriptName;
+                            console.log('Saving file:', {
+                                skillName: this.currentSkillStorageName,
+                                fileName: fileName,
+                                contentLength: this.skillScriptContent.length
+                            });
+                            // 使用新的文件 API 来保存任意文件
+                            const response = await api.post(`/api/skills/storage/${encodeURIComponent(this.currentSkillStorageName)}/file/${encodeURIComponent(fileName)}`, {
+                                content: this.skillScriptContent
+                            });
+                            console.log('File saved successfully:', response);
+                            this.showToast('文件已保存', 'success');
+                            this.showSkillScriptModal = false;
+                            await this.viewSkillStorageDetail(this.currentSkillStorageName);
+                        } catch (e) {
+                            console.error('Failed to save script:', e);
+                            const errorMsg = e.response?.data?.error || e.message || '未知错误';
+                            this.showToast('保存失败: ' + errorMsg, 'error');
+                        } finally {
+                            this.isLoading = false;
+                        }
+                    },
+
+                    closeSkillScriptModal() {
+                        this.showSkillScriptModal = false;
+                        this.editingSkillScriptName = '';
+                        this.skillScriptContent = '';
+                    },
+
+                    openNewScriptModal() {
+                        this.newScriptName = '';
+                        this.newScriptExtension = 'py';
+                        this.showNewScriptModal = true;
+                    },
+
+                    closeNewScriptModal() {
+                        this.showNewScriptModal = false;
+                        this.newScriptName = '';
+                        this.newScriptExtension = 'py';
+                    },
+
+                    // 通用输入模态框方法
+                    showInput(config) {
+                        this.inputModalConfig = {
+                            title: config.title || '输入',
+                            message: config.message || '',
+                            placeholder: config.placeholder || '',
+                            defaultValue: config.defaultValue || '',
+                            required: config.required || false,
+                            onConfirm: config.onConfirm || null
+                        };
+                        this.inputModalValue = config.defaultValue || '';
+                        this.showInputModal = true;
+                    },
+
+                    closeInputModal() {
+                        this.showInputModal = false;
+                        this.inputModalValue = '';
+                        this.inputModalConfig = {
+                            title: '',
+                            message: '',
+                            placeholder: '',
+                            defaultValue: '',
+                            required: false,
+                            onConfirm: null
+                        };
+                    },
+
+                    confirmInputModal() {
+                        if (this.inputModalConfig.required && !this.inputModalValue.trim()) {
+                            return;
+                        }
+                        const value = this.inputModalValue;
+                        const onConfirm = this.inputModalConfig.onConfirm;
+                        this.closeInputModal();
+                        if (onConfirm && typeof onConfirm === 'function') {
+                            onConfirm(value);
+                        }
+                    },
+
+                    confirmNewScript() {
+                        if (!this.newScriptName.trim() || !this.newScriptExtension.trim()) {
+                            return;
+                        }
+                        const scriptName = this.newScriptName.trim();
+                        const extension = this.newScriptExtension.trim().replace(/^\./, '');
+                        // 脚本文件放到 scripts/ 目录下，其他文件放到根目录
+                        const isScriptFile = ['py', 'js', 'ts', 'sh', 'bash'].includes(extension.toLowerCase());
+                        this.editingSkillScriptName = isScriptFile ? `scripts/${scriptName}.${extension}` : `${scriptName}.${extension}`;
+
+                        if (isScriptFile) {
+                            this.skillScriptContent = `# 新建脚本: ${scriptName}.${extension}
+
+def main(params):
+    """主函数"""
+    # params: 从调用方传递的参数
+    return {"success": True, "message": "Hello World"}
+`;
+                        } else if (['json', 'yaml', 'yml'].includes(extension.toLowerCase())) {
+                            this.skillScriptContent = JSON.stringify({
+                                "name": scriptName,
+                                "version": "1.0.0"
+                            }, null, 2);
+                        } else {
+                            this.skillScriptContent = `# ${scriptName}.${extension}
+# 自定义脚本文件
+`;
+                        }
+
+                        this.showNewScriptModal = false;
+                        this.showSkillScriptModal = true;
+                    },
+
+                    async deleteSkillStorage(skillName) {
+                        this.showConfirm({
+                            title: '删除存储空间',
+                            message: `确定要删除 Skill "${skillName}" 的存储空间吗？此操作不可恢复！`,
+                            confirmText: '删除',
+                            icon: 'fa-trash',
+                            iconColor: 'var(--danger)',
+                            danger: true,
+                            action: async () => {
+                                this.isLoading = true;
+                                try {
+                                    await api.delete(`/api/skills/storage/${encodeURIComponent(skillName)}`);
+                                    this.showToast('存储空间已删除', 'success');
+                                    await this.loadSkillsStorage();
+                                } catch (e) {
+                                    console.error('Failed to delete skill storage:', e);
+                                    this.showToast('删除失败: ' + (e.response?.data?.error || e.message), 'error');
+                                } finally {
+                                    this.isLoading = false;
+                                }
+                            }
+                        });
+                    },
+
+                    createSkillScript() {
+                        this.openNewScriptModal();
+                    },
+
+                    // Tools 配置方法
                 async loadTools() {
                     try {
                         const res = await api.get('/api/tools');
@@ -10384,25 +10782,25 @@
                 },
                 
                 async executeWorkflow(workflow) {
-                    this.isLoading = true;
-                    try {
-                        // 提示用户输入任务内容
-                        const userContent = prompt('请输入工作流任务内容（可选）：', workflow.description || '');
-                        if (userContent === null) {
-                            this.isLoading = false;
-                            return;
+                    this.showInput({
+                        title: '执行工作流',
+                        message: '请输入工作流任务内容（可选）：',
+                        placeholder: '输入任务内容...',
+                        defaultValue: workflow.description || '',
+                        onConfirm: async (userContent) => {
+                            this.isLoading = true;
+                            try {
+                                await api.post(`/api/workflows/${workflow.id}/execute`, {
+                                    content: userContent || workflow.description || '请执行工作流任务'
+                                });
+                                this.showToast('工作流执行已启动', 'success');
+                            } catch (e) {
+                                this.showToast('执行失败', 'error');
+                            } finally {
+                                this.isLoading = false;
+                            }
                         }
-                        
-                        await api.post(`/api/workflows/${workflow.id}/execute`, {
-                            content: userContent || workflow.description || '请执行工作流任务'
-                        });
-                        
-                        this.showToast('工作流执行已启动', 'success');
-                    } catch (e) {
-                        this.showToast('执行失败', 'error');
-                    } finally {
-                        this.isLoading = false;
-                    }
+                    });
                 },
                 
                 // AI Generate Workflow - 使用工具调用
@@ -11736,6 +12134,59 @@
                     if (size < 1024 * 1024) return (size / 1024).toFixed(1) + ' KB';
                     if (size < 1024 * 1024 * 1024) return (size / (1024 * 1024)).toFixed(1) + ' MB';
                     return (size / (1024 * 1024 * 1024)).toFixed(1) + ' GB';
+                },
+
+                isTextFile(fileName) {
+                    const textExtensions = [
+                        'py', 'js', 'ts', 'jsx', 'tsx', 'sh', 'bash', 'zsh',
+                        'json', 'yaml', 'yml', 'toml', 'xml', 'html', 'css',
+                        'md', 'txt', 'csv', 'log', 'ini', 'conf', 'cfg',
+                        'sql', 'java', 'kt', 'swift', 'c', 'cpp', 'h', 'hpp',
+                        'go', 'rs', 'rb', 'php', 'pl', 'r', 'lua', 'vim',
+                        'gitignore', 'dockerfile', 'makefile', 'env'
+                    ];
+                    const ext = fileName.split('.').pop()?.toLowerCase();
+                    return ext && textExtensions.includes(ext);
+                },
+
+                getFileIcon(fileName) {
+                    const ext = fileName.split('.').pop()?.toLowerCase();
+                    const iconMap = {
+                        'py': 'fas fa-file-code',
+                        'js': 'fas fa-file-code',
+                        'ts': 'fas fa-file-code',
+                        'jsx': 'fas fa-file-code',
+                        'tsx': 'fas fa-file-code',
+                        'sh': 'fas fa-terminal',
+                        'bash': 'fas fa-terminal',
+                        'zsh': 'fas fa-terminal',
+                        'json': 'fas fa-file-code',
+                        'yaml': 'fas fa-file-code',
+                        'yml': 'fas fa-file-code',
+                        'xml': 'fas fa-file-code',
+                        'html': 'fas fa-file-code',
+                        'css': 'fas fa-file-code',
+                        'md': 'fas fa-file-alt',
+                        'txt': 'fas fa-file-alt',
+                        'csv': 'fas fa-file-csv',
+                        'sql': 'fas fa-database',
+                        'png': 'fas fa-file-image',
+                        'jpg': 'fas fa-file-image',
+                        'jpeg': 'fas fa-file-image',
+                        'gif': 'fas fa-file-image',
+                        'svg': 'fas fa-file-image',
+                        'pdf': 'fas fa-file-pdf',
+                        'zip': 'fas fa-file-archive',
+                        'rar': 'fas fa-file-archive',
+                        '7z': 'fas fa-file-archive',
+                        'xlsx': 'fas fa-file-excel',
+                        'xls': 'fas fa-file-excel',
+                        'doc': 'fas fa-file-word',
+                        'docx': 'fas fa-file-word',
+                        'exe': 'fas fa-file-alt',
+                        'dll': 'fas fa-file-alt'
+                    };
+                    return iconMap[ext] || 'fas fa-file';
                 },
                 
                 previewAttachment(att) {

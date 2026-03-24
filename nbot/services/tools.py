@@ -111,9 +111,13 @@ def process_image_url(image_source: str) -> str:
 
 def get_enabled_tools() -> List[Dict]:
     """获取启用的工具列表
-    
-    自动合并所有工具类别，方便后续扩展新的工具类别
+
+    自动从注册表获取所有已注册的工具
     """
+    # 从注册表获取所有装饰器注册的工具
+    from nbot.services.tool_registry import get_all_tool_definitions as get_registry_tools
+    registered_tools = get_registry_tools()
+
     web_config = load_tools_config()
     enabled_names = set()
     if web_config:
@@ -136,6 +140,9 @@ def get_enabled_tools() -> List[Dict]:
     # 添加 Todo 工具
     from nbot.services.todo_tools import TODO_TOOL_DEFINITIONS
     tools.extend(TODO_TOOL_DEFINITIONS)
+
+    # 添加注册表中的工具
+    tools.extend(registered_tools)
 
     return tools
 
@@ -1103,13 +1110,26 @@ WORKSPACE_TOOL_DEFINITIONS = [
 
 
 def get_all_tool_definitions(include_workspace: bool = True) -> List[Dict]:
-    """获取所有工具定义（包括工作区工具）"""
+    """获取所有工具定义（包括工作区工具和注册的工具）"""
     tools = list(TOOL_DEFINITIONS)
-    
+
     # 添加 Todo 工具定义
     from nbot.services.todo_tools import TODO_TOOL_DEFINITIONS
     tools.extend(TODO_TOOL_DEFINITIONS)
-    
+
+    # 导入 Skills 工具以触发装饰器注册
+    try:
+        from nbot.services import skills_tools
+        # 从注册表获取所有装饰器注册的工具
+        from nbot.services.tool_registry import get_all_tool_definitions as get_registered_tools
+        registered_tools = get_registered_tools()
+        _log.info(f"[Tools] 从注册表加载了 {len(registered_tools)} 个工具: {[t.get('function', {}).get('name') for t in registered_tools]}")
+        tools.extend(registered_tools)
+    except ImportError as e:
+        _log.warning(f"[Tools] 注册表工具加载失败: {e}")
+    except Exception as e:
+        _log.warning(f"[Tools] 注册表工具处理失败: {e}")
+
     if include_workspace:
         tools.extend(WORKSPACE_TOOL_DEFINITIONS)
     return tools
@@ -1117,7 +1137,7 @@ def get_all_tool_definitions(include_workspace: bool = True) -> List[Dict]:
 
 def execute_tool(tool_name: str, arguments: Dict[str, Any], context: Dict = None) -> Dict[str, Any]:
     """
-    执行指定的工具（优先使用 Web 配置）
+    执行指定的工具（优先使用注册表，然后是 Web 配置）
 
     Args:
         tool_name: 工具名称
@@ -1131,12 +1151,23 @@ def execute_tool(tool_name: str, arguments: Dict[str, Any], context: Dict = None
     if tool_name.startswith("workspace_"):
         return _execute_workspace_tool(tool_name, arguments, context)
 
-    # 1. 处理 Todo 工具（优先于 Web 配置检查，避免被当作动态工具处理）
+    # 1. 优先从注册表获取（使用装饰器注册的工具）
+    from nbot.services.tool_registry import get_registry
+    registry = get_registry()
+    executor = registry.get_executor(tool_name)
+    if executor:
+        try:
+            return executor(arguments, context)
+        except Exception as e:
+            _log.error(f"Tool execution error: {tool_name} - {e}")
+            return {"success": False, "error": str(e)}
+
+    # 2. 处理 Todo 工具（优先于 Web 配置检查）
     if tool_name.startswith("todo_"):
         from nbot.services.todo_tools import execute_todo_tool
         return execute_todo_tool(tool_name, arguments, context)
 
-    # 2. 处理记忆工具（需要 context 中的用户信息）
+    # 3. 处理记忆工具（需要 context 中的用户信息）
     if tool_name == "save_to_memory":
         return _execute_save_to_memory(arguments, context)
     

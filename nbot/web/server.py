@@ -1749,12 +1749,24 @@ class WebChatServer:
                 return True
         return False
 
-    def _generate_session_name(self, messages: List[Dict]) -> str:
+    def _generate_session_name(self, messages: List[Dict], session_id: str = None, parent_message_id: str = None) -> str:
         """根据对话内容生成会话名称"""
         if not self.ai_client:
             return None
-        
+
+        progress_card = None
+
         try:
+            # 如果有 session_id 和 parent_message_id，创建进度卡片
+            if session_id and parent_message_id and PROGRESS_CARD_AVAILABLE and progress_card_manager and self.socketio:
+                progress_card = progress_card_manager.create_card(
+                    session_id=session_id,
+                    parent_message_id=parent_message_id
+                )
+                if progress_card:
+                    from nbot.core.progress_card import StepType
+                    progress_card.update(StepType.THINKING, "📝 正在生成会话名称...")
+
             # 构建提示词
             prompt_messages = [
                 {
@@ -1766,23 +1778,38 @@ class WebChatServer:
                     "content": f"请为以下对话生成一个简短的会话名称（不超过10个字）：\n\n用户: {messages[-2]['content'] if len(messages) >= 2 else messages[-1]['content']}\n\nAI: {messages[-1]['content'] if messages[-1]['role'] == 'assistant' else '...'}"
                 }
             ]
-            
+
             response = self.ai_client.chat_completion(
                 model=self.ai_model,
                 messages=prompt_messages,
                 stream=False
             )
-            
+
             name = response.choices[0].message.content.strip()
             # 清理可能的引号和多余字符
             name = name.strip('"\'「」『』【】()（）')
-            
+
             if name and len(name) <= 20:
+                # 完成进度卡片
+                if progress_card:
+                    from nbot.core.progress_card import StepType
+                    progress_card.update(StepType.DONE, f"✅ 会话名称: {name}", True)
+                    progress_card.complete()
                 return name
+
+            # 完成进度卡片（失败）
+            if progress_card:
+                from nbot.core.progress_card import StepType
+                progress_card.update(StepType.DONE, "❌ 名称生成失败", False)
+                progress_card.complete()
             return None
-            
+
         except Exception as e:
             _log.error(f"生成会话名失败: {e}")
+            if progress_card:
+                from nbot.core.progress_card import StepType
+                progress_card.update(StepType.DONE, f"❌ 错误: {str(e)}", False)
+                progress_card.complete()
             return None
 
     def _get_ai_response(self, messages: List[Dict]) -> str:
@@ -3064,7 +3091,11 @@ class WebChatServer:
                         # 如果是默认名称（以"会话"开头或是空名称），且已有至少4条消息（2轮对话）
                         if (current_name.startswith('会话') or not current_name) and message_count >= 4:
                             _log.info(f"[SessionRename] 条件满足，开始生成新名称...")
-                            new_name = self._generate_session_name(session['messages'])
+                            new_name = self._generate_session_name(
+                                session['messages'],
+                                session_id=session_id,
+                                parent_message_id=assistant_message['id']
+                            )
                             if new_name:
                                 session['name'] = new_name
                                 self._save_data('sessions')
@@ -4900,9 +4931,10 @@ class WebChatServer:
         def create_skill():
             """创建新 Skill"""
             data = request.json
+            skill_name = data.get('name', '')
             skill = {
                 'id': str(uuid.uuid4()),
-                'name': data.get('name', ''),
+                'name': skill_name,
                 'description': data.get('description', ''),
                 'aliases': data.get('aliases', []),
                 'enabled': data.get('enabled', True),
@@ -4910,7 +4942,31 @@ class WebChatServer:
             }
             self.skills_config.append(skill)
             self._save_data('skills')
-            return jsonify({'success': True, 'skill': skill})
+
+            # 自动创建 Skill 存储空间
+            storage_created = False
+            try:
+                from nbot.core.skills_manager import get_skills_storage_manager
+                manager = get_skills_storage_manager()
+                if not manager.skill_exists(skill_name):
+                    storage = manager.create_skill(skill_name, {
+                        'name': skill_name,
+                        'description': data.get('description', ''),
+                        'config': skill
+                    })
+
+                    # 保存用户提供的 SKILL.md 内容（可选）
+                    skill_md_content = data.get('skill_md', '')
+                    if skill_md_content:
+                        storage.save_skill_md(skill_md_content)
+                        _log.info(f"已保存用户提供的 SKILL.md 内容: {skill_name}")
+
+                    _log.info(f"已创建 Skill 存储空间: {skill_name}")
+                    storage_created = True
+            except Exception as e:
+                _log.error(f"创建 Skill 存储空间失败: {e}")
+
+            return jsonify({'success': True, 'skill': skill, 'storage_created': storage_created})
 
         @self.app.route('/api/skills/<skill_id>', methods=['PUT'])
         def update_skill(skill_id):
@@ -4918,20 +4974,85 @@ class WebChatServer:
             data = request.json
             for skill in self.skills_config:
                 if skill['id'] == skill_id:
-                    skill['name'] = data.get('name', skill['name'])
+                    old_name = skill['name']
+                    new_name = data.get('name', skill['name'])
+
+                    skill['name'] = new_name
                     skill['description'] = data.get('description', skill['description'])
                     skill['aliases'] = data.get('aliases', skill['aliases'])
                     skill['enabled'] = data.get('enabled', skill['enabled'])
                     skill['parameters'] = data.get('parameters', skill['parameters'])
                     self._save_data('skills')
+
+                    # 更新 Skill 存储空间
+                    try:
+                        from nbot.core.skills_manager import get_skills_storage_manager
+                        manager = get_skills_storage_manager()
+
+                        # 如果名称改变了，重命名存储空间
+                        if old_name != new_name:
+                            if manager.skill_exists(old_name):
+                                # 创建新的存储空间并复制内容
+                                new_storage = manager.create_skill(new_name, {
+                                    'name': new_name,
+                                    'description': data.get('description', ''),
+                                    'config': skill
+                                })
+                                old_storage = manager.get_skill_storage(old_name)
+                                # 复制脚本
+                                for script in old_storage.list_scripts():
+                                    content = old_storage.load_script(script)
+                                    if content:
+                                        new_storage.save_script(script, content)
+                                # 复制资源
+                                for resource in old_storage.list_resources():
+                                    content = old_storage.load_resource(resource)
+                                    if content:
+                                        new_storage.save_resource(resource, content)
+                                # 删除旧的存储空间
+                                manager.delete_skill(old_name)
+                                _log.info(f"Skill 存储空间已重命名: {old_name} -> {new_name}")
+                        else:
+                            # 只是更新配置
+                            storage = manager.get_skill_storage(new_name)
+                            storage.save_config({
+                                'name': new_name,
+                                'description': data.get('description', ''),
+                                'config': skill
+                            })
+                    except Exception as e:
+                        _log.error(f"更新 Skill 存储空间失败: {e}")
+
                     return jsonify({'success': True, 'skill': skill})
             return jsonify({'error': 'Skill not found'}), 404
 
         @self.app.route('/api/skills/<skill_id>', methods=['DELETE'])
         def delete_skill(skill_id):
             """删除 Skill"""
+            # 获取要删除的 Skill 名称
+            skill_to_delete = None
+            for skill in self.skills_config:
+                if skill['id'] == skill_id:
+                    skill_to_delete = skill
+                    break
+
+            skill_name = skill_to_delete.get('name') if skill_to_delete else None
+
+            # 删除配置
             self.skills_config = [s for s in self.skills_config if s['id'] != skill_id]
             self._save_data('skills')
+
+            # 同时删除存储空间
+            if skill_name:
+                try:
+                    from nbot.core.skills_manager import get_skills_storage_manager
+                    manager = get_skills_storage_manager()
+                    if manager.skill_exists(skill_name):
+                        manager.delete_skill(skill_name)
+                        _log.info(f"已删除 Skill 存储空间: {skill_name}")
+                except Exception as e:
+                    _log.error(f"删除 Skill 存储空间失败: {e}")
+
             return jsonify({'success': True})
 
         @self.app.route('/api/skills/<skill_id>/toggle', methods=['POST'])
@@ -5964,7 +6085,11 @@ class WebChatServer:
                     # 如果是默认名称（以"会话"开头或是空名称），且已有至少4条消息（2轮对话）
                     if (current_name.startswith('会话') or not current_name or current_name.startswith('Web 会话')) and message_count >= 4:
                         _log.info(f"[SessionRename] 条件满足，开始生成新名称...")
-                        new_name = self._generate_session_name(session['messages'])
+                        new_name = self._generate_session_name(
+                            session['messages'],
+                            session_id=session_id,
+                            parent_message_id=assistant_message['id']
+                        )
                         if new_name:
                             session['name'] = new_name
                             self._save_data('sessions')
@@ -6509,6 +6634,192 @@ def create_web_app(config: Dict[str, Any] = None) -> tuple[Flask, SocketIO]:
 
         except Exception as e:
             _log.error(f"文件上传失败: {e}", exc_info=True)
+            return jsonify({'error': str(e)}), 500
+
+    # Skills 存储 API
+    @app.route('/api/skills/storage', methods=['GET'])
+    def get_skills_storage():
+        """获取所有 Skills 的存储列表"""
+        try:
+            from nbot.core.skills_manager import get_skills_storage_manager
+            manager = get_skills_storage_manager()
+            skills = manager.list_skills()
+            return jsonify(skills)
+        except Exception as e:
+            _log.error(f"获取 Skills 存储失败: {e}", exc_info=True)
+            return jsonify({'error': str(e)}), 500
+
+    @app.route('/api/skills/storage/<skill_name>', methods=['GET'])
+    def get_skill_storage(skill_name):
+        """获取指定 Skill 的存储详情"""
+        try:
+            from nbot.core.skills_manager import get_skills_storage_manager
+            manager = get_skills_storage_manager()
+            info = manager.get_skill_info(skill_name)
+            if not info:
+                return jsonify({'error': 'Skill 不存在'}), 404
+            return jsonify({
+                'name': skill_name,
+                'skill_md': info.get('skill_md'),
+                'reference_md': info.get('reference_md'),
+                'license': info.get('license'),
+                'files': info.get('files', []),
+                'scripts': info.get('scripts', []),
+                'resources': info.get('resources', [])
+            })
+        except Exception as e:
+            _log.error(f"获取 Skill 存储详情失败: {e}", exc_info=True)
+            return jsonify({'error': str(e)}), 500
+
+    @app.route('/api/skills/storage/<skill_name>/skill-md', methods=['GET', 'POST'])
+    def skill_md_file(skill_name):
+        """获取或保存 SKILL.md"""
+        try:
+            from nbot.core.skills_manager import get_skills_storage_manager
+            manager = get_skills_storage_manager()
+            storage = manager.get_skill_storage(skill_name)
+
+            if request.method == 'GET':
+                content = storage.load_skill_md()
+                return jsonify({'content': content or ''})
+            else:
+                content = request.json.get('content', '')
+                storage.save_skill_md(content)
+                return jsonify({'success': True, 'message': 'SKILL.md 已保存'})
+        except Exception as e:
+            _log.error(f"SKILL.md 操作失败: {e}", exc_info=True)
+            return jsonify({'error': str(e)}), 500
+
+    @app.route('/api/skills/storage/<skill_name>/reference-md', methods=['GET', 'POST'])
+    def reference_md_file(skill_name):
+        """获取或保存 reference.md"""
+        try:
+            from nbot.core.skills_manager import get_skills_storage_manager
+            manager = get_skills_storage_manager()
+            storage = manager.get_skill_storage(skill_name)
+
+            if request.method == 'GET':
+                content = storage.load_reference_md()
+                return jsonify({'content': content or ''})
+            else:
+                content = request.json.get('content', '')
+                storage.save_reference_md(content)
+                return jsonify({'success': True, 'message': 'reference.md 已保存'})
+        except Exception as e:
+            _log.error(f"reference.md 操作失败: {e}", exc_info=True)
+            return jsonify({'error': str(e)}), 500
+
+    @app.route('/api/skills/storage/<skill_name>/file/<path:file_name>', methods=['GET'])
+    def get_skill_file(skill_name, file_name):
+        """读取 Skill 任意文件内容"""
+        try:
+            from nbot.core.skills_manager import get_skills_storage_manager
+            manager = get_skills_storage_manager()
+            storage = manager.get_skill_storage(skill_name)
+
+            # 构建文件路径
+            file_path = os.path.join(storage.skill_dir, file_name)
+
+            if not os.path.exists(file_path):
+                return jsonify({'error': f'文件不存在: {file_name}'}), 404
+
+            try:
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    content = f.read()
+                return jsonify({'content': content, 'file_name': file_name})
+            except UnicodeDecodeError:
+                return jsonify({'error': '不支持读取二进制文件'}), 400
+        except Exception as e:
+            _log.error(f"读取 Skill 文件失败: {e}", exc_info=True)
+            return jsonify({'error': str(e)}), 500
+
+    @app.route('/api/skills/storage/<skill_name>/file/<path:file_name>', methods=['POST'])
+    def save_skill_file(skill_name, file_name):
+        """保存 Skill 任意文件内容"""
+        try:
+            from nbot.core.skills_manager import get_skills_storage_manager
+            manager = get_skills_storage_manager()
+
+            if not manager.skill_exists(skill_name):
+                return jsonify({'error': 'Skill 不存在'}), 404
+
+            storage = manager.get_skill_storage(skill_name)
+
+            # 构建文件路径
+            file_path = os.path.join(storage.skill_dir, file_name)
+            os.makedirs(os.path.dirname(file_path), exist_ok=True)
+
+            # 获取请求内容
+            data = request.json or {}
+            content = data.get('content', '')
+
+            # 保存文件
+            with open(file_path, 'w', encoding='utf-8') as f:
+                f.write(content)
+
+            return jsonify({'success': True, 'message': '文件已保存'})
+        except Exception as e:
+            _log.error(f"保存 Skill 文件失败: {e}", exc_info=True)
+            return jsonify({'error': str(e)}), 500
+
+    @app.route('/api/skills/storage/<skill_name>/script/<script_name>', methods=['GET'])
+    def get_skill_script(skill_name, script_name):
+        """读取 Skill 脚本内容"""
+        try:
+            from nbot.core.skills_manager import get_skills_storage_manager
+            manager = get_skills_storage_manager()
+            storage = manager.get_skill_storage(skill_name)
+            content = storage.load_script(script_name)
+            if content is None:
+                return jsonify({'error': '脚本不存在'}), 404
+            return jsonify({'content': content})
+        except Exception as e:
+            _log.error(f"读取 Skill 脚本失败: {e}", exc_info=True)
+            return jsonify({'error': str(e)}), 500
+
+    @app.route('/api/skills/storage/<skill_name>/script/<script_name>', methods=['POST'])
+    def save_skill_script(skill_name, script_name):
+        """保存 Skill 脚本"""
+        try:
+            from nbot.core.skills_manager import get_skills_storage_manager
+            manager = get_skills_storage_manager()
+
+            # 确保存储目录存在
+            if not manager.skill_exists(skill_name):
+                manager.create_skill(skill_name, {'name': skill_name})
+
+            storage = manager.get_skill_storage(skill_name)
+
+            # 获取请求内容
+            data = request.json or {}
+            content = data.get('content', '')
+
+            # 保存脚本
+            storage.save_script(script_name, content)
+
+            return jsonify({'success': True, 'message': '脚本已保存'})
+        except Exception as e:
+            _log.error(f"保存 Skill 脚本失败: {e}", exc_info=True)
+            return jsonify({'error': str(e)}), 500
+
+    @app.route('/api/skills/storage/<skill_name>', methods=['DELETE'])
+    def delete_skill_storage(skill_name):
+        """删除 Skill 存储"""
+        try:
+            from nbot.core.skills_manager import get_skills_storage_manager
+            manager = get_skills_storage_manager()
+
+            if not manager.skill_exists(skill_name):
+                return jsonify({'error': 'Skill 存储不存在'}), 404
+
+            success = manager.delete_skill(skill_name)
+            if success:
+                _log.info(f"已删除 Skill 存储: {skill_name}")
+                return jsonify({'success': True, 'message': 'Skill 存储已删除'})
+            else:
+                return jsonify({'error': '删除失败'}), 500
+        except Exception as e:
+            _log.error(f"删除 Skill 存储失败: {e}", exc_info=True)
             return jsonify({'error': str(e)}), 500
 
     return app, socketio, server
