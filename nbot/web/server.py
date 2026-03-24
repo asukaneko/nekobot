@@ -1824,6 +1824,14 @@ class WebChatServer:
                 messages=messages,
                 stream=False
             )
+
+            # 检查 choices 是否有效
+            if not response.choices or len(response.choices) == 0:
+                base_resp = getattr(response, 'base_resp', {}) or {}
+                status_msg = base_resp.get("status_msg", "API 返回空响应")
+                _log.warning(f"[AI] API 返回空 choices: {status_msg}")
+                return f"AI 服务暂时不可用: {status_msg}"
+
             content = response.choices[0].message.content
 
             # 清理响应内容
@@ -2082,7 +2090,15 @@ class WebChatServer:
                 else:
                     raise last_error or Exception("API 调用失败")
 
-            choice = data.get("choices", [{}])[0]
+            # 检查 choices 是否有效
+            choices = data.get("choices")
+            if not choices or len(choices) == 0:
+                base_resp = data.get("base_resp", {})
+                status_msg = base_resp.get("status_msg", "API 返回空响应")
+                _log.warning(f"[AI] API 返回空 choices: {status_msg}")
+                raise Exception(f"API 错误: {status_msg}")
+
+            choice = choices[0]
             message = choice.get("message", {})
             finish_reason = choice.get('finish_reason', '')
 
@@ -2831,7 +2847,11 @@ class WebChatServer:
                                 tool_name = tool_call['name']
                                 tool_args = tool_call['arguments']
                                 _log.info(f"[Tools] ➜ 执行工具: {tool_name}")
-                                _log.info(f"[Tools] ➜ 参数详情: {json.dumps(tool_args, ensure_ascii=False)}")
+                                args_str = json.dumps(tool_args, ensure_ascii=False)
+                                if len(args_str) > 200:
+                                    _log.info(f"[Tools] ➜ 参数详情: {args_str[:200]}... (共 {len(args_str)} 字符)")
+                                else:
+                                    _log.info(f"[Tools] ➜ 参数详情: {args_str}")
                                 
                                 start_time = time.time()
                                 try:
@@ -5787,7 +5807,11 @@ class WebChatServer:
                                         # 工作区工具日志
                                         if tool_name.startswith('workspace_'):
                                             _log.info(f"[Workspace] 工具调用: {tool_name}")
-                                            _log.info(f"[Workspace] 参数: {json.dumps(arguments, ensure_ascii=False)}")
+                                            args_str = json.dumps(arguments, ensure_ascii=False)
+                                            if len(args_str) > 200:
+                                                _log.info(f"[Workspace] 参数: {args_str[:200]}... (共 {len(args_str)} 字符)")
+                                            else:
+                                                _log.info(f"[Workspace] 参数: {args_str}")
                                         
                                         # 执行工具，传递 context
                                         tool_result = execute_tool(tool_name, arguments, context=tool_context)

@@ -5007,8 +5007,8 @@
                                                             <div class="stat-value">{{ formatNumber(contextTokenEstimate) }}</div>
                                                         </div>
                                                         <div class="stat-item">
-                                                            <div class="stat-label">限制条数</div>
-                                                            <div class="stat-value">{{ settings.max_context_length || 50 }}</div>
+                                                            <div class="stat-label">限制Token</div>
+                                                            <div class="stat-value">{{ formatNumber(aiConfig.max_tokens || 8000) }}</div>
                                                         </div>
                                                     </div>
                                                     <button class="compress-btn"
@@ -5780,6 +5780,22 @@
                                             <span class="slider-value">{{ aiConfig.max_tokens }}</span>
                                         </div>
                                         <input v-model.number="aiConfig.max_tokens" type="range" min="100" max="32000" step="100" class="form-slider">
+                                        <!-- 实时上下文使用预览 -->
+                                        <div style="margin-top: 12px; padding: 12px; background: var(--bg-secondary); border-radius: 8px;">
+                                            <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
+                                                <span style="font-size: 12px; color: var(--text-secondary);">当前上下文使用</span>
+                                                <span style="font-size: 12px; font-weight: 500;">
+                                                    {{ Math.round((contextTokenEstimate || 0) / (aiConfig.max_tokens || 8000) * 100) }}%
+                                                </span>
+                                            </div>
+                                            <div class="progress-bar" style="height: 8px;">
+                                                <div class="progress-fill" :style="{ width: Math.min(100, (contextTokenEstimate || 0) / (aiConfig.max_tokens || 8000) * 100) + '%' }"></div>
+                                            </div>
+                                            <div style="display: flex; justify-content: space-between; margin-top: 6px; font-size: 11px; color: var(--text-secondary);">
+                                                <span>预估 {{ formatNumber(contextTokenEstimate || 0) }} Token</span>
+                                                <span>限制 {{ formatNumber(aiConfig.max_tokens || 8000) }} Token</span>
+                                            </div>
+                                        </div>
                                     </div>
                                     <div class="form-group">
                                         <div class="slider-header">
@@ -8485,11 +8501,10 @@
                         }, 0)
                     );
                     
-                    // 计算使用百分比（基于消息数量，max_context_length是消息数量限制）
-                    const maxLength = this.settings.max_context_length || 50;
-                    this.contextUsage = Math.min(100, 
-                        (this.currentMessages.length / maxLength) * 100
-                    );
+                    // 计算使用百分比（基于 Token 数量，使用 max_tokens 作为限制）
+                    const maxTokens = this.aiConfig.max_tokens || 8000;
+                    const estimatedTokens = this.contextTokenEstimate || 0;
+                    this.contextUsage = Math.min(100, (estimatedTokens / maxTokens) * 100);
                 },
                 
                 async compressContext() {

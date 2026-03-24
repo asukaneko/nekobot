@@ -162,7 +162,7 @@ def skill_list_scripts(args: Dict, context: Dict = None) -> Dict[str, Any]:
 
 @register_tool(
     name="skill_read_script",
-    description="读取 Skill 存储空间中的任意文件内容。",
+    description="读取 Skill 存储空间中的文件内容。支持按行范围或字符范围读取。",
     parameters={
         "type": "object",
         "properties": {
@@ -173,6 +173,22 @@ def skill_list_scripts(args: Dict, context: Dict = None) -> Dict[str, Any]:
             "script_name": {
                 "type": "string",
                 "description": "文件名，可以是 SKILL.md、reference.md、LICENSE.txt 或 scripts/main.py 等"
+            },
+            "start_line": {
+                "type": "integer",
+                "description": "开始行号（从1开始），与 end_line 配合使用可读取指定行范围。例如：start_line=10, end_line=20 表示读取第10到20行。"
+            },
+            "end_line": {
+                "type": "integer",
+                "description": "结束行号（包含），需要与 start_line 配合使用。例如：start_line=10, end_line=20 表示读取第10到20行。"
+            },
+            "char_count": {
+                "type": "integer",
+                "description": "读取的字符数量，从文件开头或 start_char 指定位置开始。与 start_char 配合可从任意位置读取指定长度。"
+            },
+            "start_char": {
+                "type": "integer",
+                "description": "从第几个字符开始读取（从0开始）。需要与 char_count 配合使用。例如：start_char=100, char_count=200 表示从第100个字符开始读取200个字符。"
             }
         },
         "required": ["skill_name", "script_name"]
@@ -183,6 +199,10 @@ def skill_read_script(args: Dict, context: Dict = None) -> Dict[str, Any]:
     try:
         skill_name = args.get('skill_name', '')
         script_name = args.get('script_name', '')
+        start_line = args.get('start_line')
+        end_line = args.get('end_line')
+        char_count = args.get('char_count')
+        start_char = args.get('start_char')
 
         info = _get_skills_storage_info()
         storage = info["manager"].get_skill_storage(skill_name)
@@ -213,12 +233,86 @@ def skill_read_script(args: Dict, context: Dict = None) -> Dict[str, Any]:
                 "error": f"文件 '{script_name}' 是二进制文件，无法读取"
             }
 
-        return {
+        # 处理按行范围读取
+        if start_line is not None or end_line is not None:
+            lines = content.split('\n')
+            total_lines = len(lines)
+
+            # 转换行号（用户从1开始计数）
+            start = (start_line - 1) if start_line else 0
+            end = end_line if end_line else total_lines
+
+            # 确保范围有效
+            start = max(0, start)
+            end = min(total_lines, end)
+
+            if start >= total_lines:
+                return {
+                    "success": False,
+                    "error": f"开始行号 {start_line} 超出文件行数（文件共 {total_lines} 行）"
+                }
+
+            selected_content = '\n'.join(lines[start:end])
+            return {
+                "success": True,
+                "skill_name": skill_name,
+                "script_name": script_name,
+                "content": selected_content,
+                "total_lines": total_lines,
+                "read_lines": f"{start + 1}-{end}",
+                "total_length": len(content),
+                "read_length": len(selected_content),
+                "read_mode": "line_range"
+            }
+
+        # 处理按字符范围读取
+        if start_char is not None or char_count is not None:
+            start = start_char if start_char else 0
+            count = char_count if char_count else len(content) - start
+
+            if start >= len(content):
+                return {
+                    "success": False,
+                    "error": f"开始位置 {start_char} 超出文件长度（文件共 {len(content)} 字符）"
+                }
+
+            end = min(start + count, len(content))
+            selected_content = content[start:end]
+
+            return {
+                "success": True,
+                "skill_name": skill_name,
+                "script_name": script_name,
+                "content": selected_content,
+                "total_length": len(content),
+                "read_length": len(selected_content),
+                "read_range": f"{start}-{end}",
+                "read_mode": "char_range"
+            }
+
+        # 默认：如果内容过长，生成摘要
+        MAX_CONTENT_LENGTH = 8000
+        result = {
             "success": True,
             "skill_name": skill_name,
             "script_name": script_name,
-            "content": content
+            "total_length": len(content),
+            "read_mode": "auto_truncate"
         }
+
+        if len(content) > MAX_CONTENT_LENGTH:
+            # 返回摘要和部分内容
+            first_line = content.split('\n')[0] if content else ""
+            result["content"] = content[:MAX_CONTENT_LENGTH]
+            result["truncated"] = True
+            result["summary"] = f"文件共 {len(content)} 字符，已截断显示前 {MAX_CONTENT_LENGTH} 字符。"
+            result["first_line"] = first_line[:200] if first_line else ""
+            result["read_more"] = f"如需读取更多内容，请使用 start_line/end_line 或 start_char/char_count 参数。"
+        else:
+            result["content"] = content
+            result["truncated"] = False
+
+        return result
 
     except Exception as e:
         _log.error(f"skill_read_script error: {e}")
