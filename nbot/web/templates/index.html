@@ -2487,6 +2487,68 @@
                 font-size: 13px;
             }
 
+            /* 文件上传菜单样式 */
+            .file-upload-menu {
+                position: relative;
+                display: inline-block;
+            }
+
+            .file-menu-dropdown {
+                position: absolute;
+                bottom: 100%;
+                right: 0;
+                margin-bottom: 8px;
+                background: var(--bg-secondary);
+                border: 1px solid var(--border-color);
+                border-radius: 8px;
+                box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+                min-width: 200px;
+                z-index: 1000;
+                overflow: hidden;
+            }
+
+            .file-menu-item {
+                display: flex;
+                align-items: center;
+                gap: 12px;
+                padding: 12px 16px;
+                cursor: pointer;
+                transition: background 0.2s;
+                border-bottom: 1px solid var(--border-color);
+            }
+
+            .file-menu-item:last-child {
+                border-bottom: none;
+            }
+
+            .file-menu-item:hover {
+                background: var(--bg-tertiary);
+            }
+
+            .file-menu-item > i {
+                font-size: 18px;
+                color: var(--accent-primary);
+                width: 24px;
+                text-align: center;
+            }
+
+            .file-menu-item-info {
+                display: flex;
+                flex-direction: column;
+                gap: 2px;
+            }
+
+            .file-menu-item-title {
+                font-size: 14px;
+                font-weight: 500;
+                color: var(--text-primary);
+            }
+
+            .file-menu-item-desc {
+                font-size: 12px;
+                color: var(--text-secondary);
+            }
+
             .messages-container {
                 padding: 10px;
             }
@@ -2966,6 +3028,68 @@
 
         .chat-actions .context-indicator .percentage {
             font-size: 11px;
+        }
+
+        /* 文件上传菜单样式 - 桌面端 */
+        .file-upload-menu {
+            position: relative;
+            display: inline-block;
+        }
+
+        .file-menu-dropdown {
+            position: absolute;
+            bottom: 100%;
+            right: 0;
+            margin-bottom: 8px;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+            min-width: 220px;
+            z-index: 1000;
+            overflow: hidden;
+        }
+
+        .file-menu-item {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 12px 16px;
+            cursor: pointer;
+            transition: background 0.2s;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .file-menu-item:last-child {
+            border-bottom: none;
+        }
+
+        .file-menu-item:hover {
+            background: var(--bg-tertiary);
+        }
+
+        .file-menu-item > i {
+            font-size: 18px;
+            color: var(--accent-primary);
+            width: 24px;
+            text-align: center;
+        }
+
+        .file-menu-item-info {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+        }
+
+        .file-menu-item-title {
+            font-size: 14px;
+            font-weight: 500;
+            color: var(--text-primary);
+        }
+
+        .file-menu-item-desc {
+            font-size: 12px;
+            color: var(--text-secondary);
         }
 
         /* 扩展编辑器模态框 */
@@ -5022,16 +5146,31 @@
                                             <button class="btn btn-icon chat-input-expand-btn" @click="openExpandEditor(inputMessage)" title="扩展编辑器">
                                                 <i class="fas fa-expand-alt"></i>
                                             </button>
-                                            <!-- 上传到工作区按钮 -->
-                                            <label class="btn btn-icon" :disabled="isLoading" title="上传文件到工作区（不触发AI）">
-                                                <i class="fas fa-folder-open"></i>
-                                                <input type="file" ref="workspaceFileInput" @change="handleWorkspaceFileUpload" multiple accept="*/*" style="display: none;">
-                                            </label>
-                                            <!-- 文件上传按钮 -->
-                                            <label class="btn btn-icon" :disabled="isLoading" title="发送文件或图片">
-                                                <i class="fas fa-paperclip"></i>
+                                            <!-- 文件上传菜单 -->
+                                            <div class="file-upload-menu" :class="{ active: showFileMenu }" v-click-outside="closeFileMenu">
+                                                <button class="btn btn-icon" @click="toggleFileMenu" :disabled="isLoading" title="上传文件">
+                                                    <i class="fas fa-paperclip"></i>
+                                                </button>
+                                                <div class="file-menu-dropdown" v-show="showFileMenu">
+                                                    <div class="file-menu-item" @click="triggerFileUpload">
+                                                        <i class="fas fa-comment-dots"></i>
+                                                        <div class="file-menu-item-info">
+                                                            <span class="file-menu-item-title">发送到会话</span>
+                                                            <span class="file-menu-item-desc">发送文件或图片给AI</span>
+                                                        </div>
+                                                    </div>
+                                                    <div class="file-menu-item" @click="triggerWorkspaceUpload">
+                                                        <i class="fas fa-folder-open"></i>
+                                                        <div class="file-menu-item-info">
+                                                            <span class="file-menu-item-title">上传到工作区</span>
+                                                            <span class="file-menu-item-desc">仅上传文件，不触发AI</span>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                                <!-- 隐藏的文件输入 -->
                                                 <input type="file" ref="fileInput" @change="handleFileSelect" multiple accept="image/*,.pdf,.doc,.docx,.txt,.json,.xml" style="display: none;">
-                                            </label>
+                                                <input type="file" ref="workspaceFileInput" @change="handleWorkspaceFileUpload" multiple accept="*/*" style="display: none;">
+                                            </div>
                                             <button class="btn" :class="isLoading ? 'btn-danger' : 'btn-primary'" @click="isLoading ? stopGeneration() : sendMessage()" :disabled="!isLoading && (!inputMessage.trim() && uploadedFiles.length === 0)">
                                                 <span v-if="isLoading"><i class="fas fa-stop"></i></span>
                                                 <span v-else><div class="spinner" v-if="isLoading"></div><i v-else class="fas fa-paper-plane"></i></span>
@@ -7796,10 +7935,25 @@
 
     <script>
         const { createApp } = Vue;
-        
+
         const api = axios.create({ baseURL: '', timeout: 60000 });
         const socket = io();
-        
+
+        // 自定义指令：点击外部关闭
+        const clickOutside = {
+            mounted(el, binding) {
+                el._clickOutside = (event) => {
+                    if (!(el === event.target || el.contains(event.target))) {
+                        binding.value();
+                    }
+                };
+                document.addEventListener('click', el._clickOutside);
+            },
+            unmounted(el) {
+                document.removeEventListener('click', el._clickOutside);
+            }
+        };
+
         createApp({
             data() {
                 return {
@@ -7883,6 +8037,7 @@
                     isUserScrolling: false,
                     showScrollToBottom: false,
                     sessionSearch: '',
+                    showFileMenu: false,  // 文件上传菜单显示状态
                     
                     // QQ Chat
                     chatTab: 'web',  // web, qq_private, qq_group
@@ -8487,6 +8642,22 @@
             },
             
             methods: {
+                // 文件上传菜单方法
+                toggleFileMenu() {
+                    this.showFileMenu = !this.showFileMenu;
+                },
+                closeFileMenu() {
+                    this.showFileMenu = false;
+                },
+                triggerFileUpload() {
+                    this.showFileMenu = false;
+                    this.$refs.fileInput.click();
+                },
+                triggerWorkspaceUpload() {
+                    this.showFileMenu = false;
+                    this.$refs.workspaceFileInput.click();
+                },
+
                 // 会话刷新方法
                 async refreshSessionMessages(sessionId) {
                     // 如果当前查看的正是这个会话，刷新消息
@@ -12320,6 +12491,9 @@ def main(params):
                         this.toasts = this.toasts.filter(t => t.id !== toast.id);
                     }, 3000);
                 }
+            },
+            directives: {
+                'click-outside': clickOutside
             }
         }).mount('#app');
     </script>
