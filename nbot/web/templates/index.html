@@ -4845,7 +4845,7 @@
                                 </div>
 
                                 <div class="messages-container" ref="messagesContainer" @scroll="handleMessagesScroll">
-                                    <template v-for="msg in currentMessages" :key="msg.id">
+                                    <template v-for="msg in currentMessages.filter(m => !m.hide_in_web)" :key="msg.id">
                                         <!-- 消息主体 -->
                                         <div class="message" :class="msg.role">
                                             <div class="message-avatar">
@@ -5134,6 +5134,16 @@
                                         <label class="form-label">内容文件</label>
                                         <input v-model="heartbeatConfig.content_file" type="text" class="form-input" placeholder="heartbeat.md" @change="saveHeartbeatConfig">
                                         <div class="form-hint">任务内容保存在 resources 目录下的 md 文件中</div>
+                                    </div>
+                                    <div class="form-group">
+                                        <label class="form-label">追加到会话</label>
+                                        <select v-model="heartbeatConfig.target_session_id" class="form-select" @change="saveHeartbeatConfig">
+                                            <option value="">不追加（创建新会话）</option>
+                                            <option v-for="session in sessions.filter(s => s.type === 'web')" :key="session.id" :value="session.id">
+                                                {{ session.name || '未命名会话' }}
+                                            </option>
+                                        </select>
+                                        <div class="form-hint">选择现有 Web 会话，Heartbeat 将在该会话末尾追加内容并调用 AI；不选择则创建新会话</div>
                                     </div>
                                     <div class="form-group">
                                         <label class="form-label">发送目标</label>
@@ -7913,6 +7923,7 @@
                         enabled: false,
                         interval_minutes: 60,
                         content_file: 'heartbeat.md',
+                        target_session_id: '',
                         targets: [],
                         last_run: null,
                         next_run: null
@@ -8476,6 +8487,16 @@
             },
             
             methods: {
+                // 会话刷新方法
+                async refreshSessionMessages(sessionId) {
+                    // 如果当前查看的正是这个会话，刷新消息
+                    if (this.currentSession && this.currentSession.id === sessionId) {
+                        await this.loadMessages();
+                    }
+                    // 同时刷新会话列表（更新最后消息时间等）
+                    await this.loadSessions();
+                },
+
                 // Context Indicator Methods
                 updateContextStats() {
                     if (!this.currentSession || !this.currentMessages.length) {
@@ -11774,7 +11795,16 @@ def main(params):
                     socket.on('joined_session', (data) => {
                         console.log('Successfully joined session:', data);
                     });
-                    
+
+                    // 处理会话更新事件（如 heartbeat 追加到会话）
+                    socket.on('session_updated', (data) => {
+                        console.log('Session updated:', data);
+                        if (data.action === 'heartbeat_completed' && data.session_id) {
+                            // 刷新该会话的消息
+                            this.refreshSessionMessages(data.session_id);
+                        }
+                    });
+
                     socket.on('new_message', (msg) => {
                         console.log('Received new_message:', msg);
                         

@@ -590,6 +590,7 @@ class WebChatServer:
             'enabled': False,
             'interval_minutes': 60,
             'content_file': 'heartbeat.md',
+            'target_session_id': '',  # 追加到指定会话，不填则创建新会话
             'targets': [],  # 发送目标 ['qq_group:123456', 'qq_user:123456']
             'last_run': None,
             'next_run': None
@@ -3590,16 +3591,18 @@ class WebChatServer:
         def update_heartbeat():
             """更新 Heartbeat 配置"""
             data = request.json
-            
+
             enabled = data.get('enabled', self.heartbeat_config.get('enabled', False))
             interval_minutes = data.get('interval_minutes', self.heartbeat_config.get('interval_minutes', 60))
             content_file = data.get('content_file', self.heartbeat_config.get('content_file', 'heartbeat.md'))
+            target_session_id = data.get('target_session_id', self.heartbeat_config.get('target_session_id', ''))
             targets = data.get('targets', self.heartbeat_config.get('targets', []))
-            
+
             self.heartbeat_config = {
                 'enabled': enabled,
                 'interval_minutes': interval_minutes,
                 'content_file': content_file,
+                'target_session_id': target_session_id,
                 'targets': targets,
                 'last_run': self.heartbeat_config.get('last_run'),
                 'next_run': self.heartbeat_config.get('next_run')
@@ -6259,7 +6262,7 @@ class WebChatServer:
 
     async def _execute_heartbeat(self, force: bool = False):
         """执行 Heartbeat 任务
-        
+
         Args:
             force: 是否强制执行，跳过 enabled 检查
         """
@@ -6270,6 +6273,9 @@ class WebChatServer:
         config = self.heartbeat_config
         content_file = config.get('content_file', 'heartbeat.md')
         targets = config.get('targets', [])
+        target_session_id = config.get('target_session_id')  # 追加到指定会话
+
+        _log.info(f"[Heartbeat] 配置: targets={targets}, target_session_id={target_session_id}")
 
         # 读取 heartbeat.md 内容
         content = self._load_heartbeat_content(content_file)
@@ -6279,22 +6285,43 @@ class WebChatServer:
 
         _log.info(f"Executing heartbeat with content from {content_file}")
 
-        # 创建或获取 heartbeat 会话
-        session_id = f"heartbeat_{datetime.now().strftime('%Y%m%d%H%M%S')}"
-        session = {
-            'id': session_id,
-            'name': f'Heartbeat {datetime.now().strftime("%Y-%m-%d %H:%M")}',
-            'type': 'heartbeat',
-            'user_id': 'heartbeat',
-            'created_at': datetime.now().isoformat(),
-            'messages': [
-                {"role": "system", "content": "你是一个智能助手，请根据以下任务描述执行相关操作。"},
-                {"role": "user", "content": content}
-            ],
-            'system_prompt': "你是一个智能助手，请根据任务描述执行相关操作。"
-        }
+        # 追加到现有会话或创建新会话
+        is_appended_session = target_session_id and target_session_id in self.sessions
 
-        self.sessions[session_id] = session
+        if is_appended_session:
+            # 追加到现有会话
+            session_id = target_session_id
+            session = self.sessions[session_id]
+
+            # 构建带标记的用户消息
+            hb_user_message = {
+                "role": "user",
+                "content": f"【Heartbeat 任务】\n\n{content}",
+                "timestamp": datetime.now().isoformat(),
+                "sender": "system",
+                "source": "heartbeat",
+                "is_heartbeat": True,
+                "hide_in_web": False  # 追加到现有会话时显示
+            }
+            session['messages'].append(hb_user_message)
+            _log.info(f"Heartbeat: 追加到会话 {session_id}")
+        else:
+            # 创建新的 heartbeat 会话（原有逻辑）
+            session_id = f"heartbeat_{datetime.now().strftime('%Y%m%d%H%M%S')}"
+            session = {
+                'id': session_id,
+                'name': f'Heartbeat {datetime.now().strftime("%Y-%m-%d %H:%M")}',
+                'type': 'heartbeat',
+                'user_id': 'heartbeat',
+                'created_at': datetime.now().isoformat(),
+                'messages': [
+                    {"role": "system", "content": "你是一个智能助手，请根据以下任务描述执行相关操作。"},
+                    {"role": "user", "content": f"【Heartbeat 任务】\n\n{content}"}
+                ],
+                'system_prompt': "你是一个智能助手，请根据任务描述执行相关操作。"
+            }
+            self.sessions[session_id] = session
+            _log.info(f"Heartbeat: 创建新会话 {session_id}")
 
         # 调用 AI 处理
         try:
@@ -6305,23 +6332,39 @@ class WebChatServer:
             if response_text:
                 _log.info(f"Heartbeat AI response: {response_text[:200]}...")
 
-                # 发送响应到目标
+                # 构建带标记的 AI 回复
+                hb_assistant_message = {
+                    "role": "assistant",
+                    "content": response_text,
+                    "timestamp": datetime.now().isoformat(),
+                    "sender": "AI",
+                    "source": "heartbeat",
+                    "is_heartbeat": True,
+                    "hide_in_web": False  # 追加到现有会话时显示
+                }
+
+                # 更新会话
+                self.sessions[session_id]['messages'].append(hb_assistant_message)
+                self._save_data('sessions')
+
+                # 发送响应到目标（仅发送给配置的 targets）
                 for target in targets:
                     try:
                         await self._send_heartbeat_to_target(target, response_text)
                     except Exception as send_error:
                         _log.error(f"Failed to send heartbeat to {target}: {send_error}", exc_info=True)
-
-                # 更新会话
-                self.sessions[session_id]['messages'].append({
-                    "role": "assistant",
-                    "content": response_text
-                })
-                self._save_data('sessions')
             else:
                 _log.warning("Heartbeat AI returned empty response")
         except Exception as e:
             _log.error(f"Error executing heartbeat: {e}", exc_info=True)
+
+        # 通知前端刷新会话（如果有追加到现有会话）
+        if is_appended_session and self.socketio:
+            self.socketio.emit('session_updated', {
+                'session_id': session_id,
+                'action': 'heartbeat_completed'
+            }, room=session_id)
+            _log.info(f"Heartbeat: 已通知前端刷新会话 {session_id}")
 
         # 更新最后运行时间
         self.heartbeat_config['last_run'] = datetime.now().isoformat()
@@ -6367,11 +6410,14 @@ class WebChatServer:
                 # 发送到指定 Web 会话
                 session_id = target.split(':', 1)[1]
                 if self.socketio:
-                    self.socketio.emit('message', {
+                    self.socketio.emit('new_message', {
                         'session_id': session_id,
                         'content': content,
                         'role': 'assistant',
-                        'timestamp': datetime.now().isoformat()
+                        'timestamp': datetime.now().isoformat(),
+                        'sender': 'AI',
+                        'source': 'heartbeat',
+                        'is_heartbeat': True
                     }, room=session_id)
                     _log.info(f"Heartbeat sent to web session {session_id}")
             elif target == 'web':
