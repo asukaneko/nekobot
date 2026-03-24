@@ -2219,6 +2219,31 @@ class WebChatServer:
             
             # 使用人格提示词作为默认系统提示词
             system_prompt = data.get('system_prompt', self.personality.get('prompt', ''))
+            
+            # 获取所有记忆标题并加入系统提示词
+            memory_titles = []
+            try:
+                if PROMPT_MANAGER_AVAILABLE and prompt_manager:
+                    # 从 prompt_manager 获取所有记忆
+                    all_memories = prompt_manager.get_memories()
+                    for mem in all_memories:
+                        key = mem.get('key', '')
+                        if key:
+                            memory_titles.append(key)
+                elif self.memories:
+                    # 从 self.memories 获取
+                    for mem in self.memories:
+                        key = mem.get('key', '')
+                        if key:
+                            memory_titles.append(key)
+            except Exception as e:
+                _log.warning(f"获取记忆标题失败: {e}")
+            
+            # 如果有记忆标题，添加到系统提示词
+            if memory_titles:
+                memory_context = "\n\n【可用记忆主题】\n" + "\n".join([f"- {title}" for title in memory_titles])
+                system_prompt += memory_context
+                _log.info(f"已添加 {len(memory_titles)} 个记忆标题到会话 {session_id[:8]}")
 
             session = {
                 'id': session_id,
@@ -6197,6 +6222,31 @@ class WebChatServer:
         session_id = str(uuid.uuid4())
         
         system_prompt = self.personality.get('prompt', '')
+        
+        # 获取所有记忆标题并加入系统提示词
+        memory_titles = []
+        try:
+            if PROMPT_MANAGER_AVAILABLE and prompt_manager:
+                # 从 prompt_manager 获取所有记忆
+                all_memories = prompt_manager.get_memories()
+                for mem in all_memories:
+                    key = mem.get('key', '')
+                    if key:
+                        memory_titles.append(key)
+            elif self.memories:
+                # 从 self.memories 获取
+                for mem in self.memories:
+                    key = mem.get('key', '')
+                    if key:
+                        memory_titles.append(key)
+        except Exception as e:
+            _log.warning(f"获取记忆标题失败: {e}")
+        
+        # 如果有记忆标题，添加到系统提示词
+        if memory_titles:
+            memory_context = "\n\n【可用记忆主题】\n" + "\n".join([f"- {title}" for title in memory_titles])
+            system_prompt += memory_context
+            _log.info(f"已添加 {len(memory_titles)} 个记忆标题到会话 {session_id[:8]}")
 
         session = {
             'id': session_id,

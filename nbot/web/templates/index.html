@@ -9227,9 +9227,20 @@
                 },
 
                 async loadSessions() {
+                    // 如果正在删除会话，跳过本次刷新
+                    if (this._isDeletingSession) {
+                        return;
+                    }
+                    
                     try {
                         const res = await api.get('/api/sessions');
-                        this.sessions = res.data;
+                        const serverSessions = res.data;
+                        
+                        // 保留本地临时会话
+                        const localTempSessions = this.sessions.filter(s => s._isTemp);
+                        
+                        // 合并：临时会话 + 服务器会话
+                        this.sessions = [...localTempSessions, ...serverSessions];
                     } catch (e) {
                         console.error('Failed to load sessions:', e);
                         this.showToast('加载会话失败', 'error');
@@ -10319,6 +10330,12 @@ def main(params):
                 
                 async loadMessages() {
                     if (!this.currentSession) return;
+                    
+                    // 如果是临时会话，跳过加载消息
+                    if (this.currentSession._isTemp || this.currentSession.id.startsWith('temp_')) {
+                        return;
+                    }
+                    
                     try {
                         const res = await api.get(`/api/sessions/${this.currentSession.id}/messages`);
                         const newMessages = res.data;
@@ -10342,28 +10359,56 @@ def main(params):
                 async createNewSession() {
                     // 显示加载状态
                     this.isLoading = true;
-                    
+
+                    // 创建临时会话（乐观更新）
+                    const tempId = 'temp_' + Date.now();
+                    const tempSession = {
+                        id: tempId,
+                        name: `会话 ${new Date().toLocaleTimeString()}`,
+                        type: 'web',
+                        user_id: this.username,
+                        created_at: new Date().toISOString(),
+                        messages: [],
+                        _isTemp: true  // 标记为临时会话
+                    };
+
+                    // 立即添加到列表底部并切换
+                    this.sessions.push(tempSession);
+                    await this.selectSession(tempSession);
+
                     try {
-                        // 先调用后端API创建真实会话，传递当前人格设置
+                        // 调用后端API创建真实会话
                         const res = await api.post('/api/sessions', {
-                            name: `会话 ${new Date().toLocaleTimeString()}`,
+                            name: tempSession.name,
                             type: 'web',
                             user_id: this.username,
-                            system_prompt: this.personality.prompt  // 传递当前人格提示词
+                            system_prompt: this.personality.prompt
                         });
-                        
-                        // 使用服务器返回的真实session
+
+                        // 获取服务器返回的真实会话
                         const serverSession = res.data.session;
-                        
-                        // 前端添加到会话列表
-                        this.sessions.push(serverSession);
+
+                        // 替换临时会话
+                        const tempIndex = this.sessions.findIndex(s => s.id === tempId);
+                        if (tempIndex !== -1) {
+                            this.sessions.splice(tempIndex, 1, serverSession);
+                        }
+
+                        // 如果当前选中的是临时会话，切换到真实会话
+                        if (this.currentSession && this.currentSession.id === tempId) {
+                            this.currentSession = serverSession;
+                        }
+
                         this.showToast('会话创建成功', 'success');
-                        
-                        // 切换到新会话
-                        await this.selectSession(serverSession);
-                        
+
                     } catch (e) {
                         console.error('创建会话失败:', e);
+                        // 移除临时会话
+                        this.sessions = this.sessions.filter(s => s.id !== tempId);
+                        if (this.currentSession && this.currentSession.id === tempId) {
+                            this.currentSession = null;
+                            this.currentMessages = [];
+                        }
                         this.showToast('创建会话失败: ' + (e.response?.data?.error || e.message), 'error');
                     } finally {
                         this.isLoading = false;
@@ -10663,7 +10708,7 @@ def main(params):
                 
                 async deleteSession() {
                     if (!this.currentSession) return;
-                    
+
                     this.showConfirm({
                         title: '删除会话',
                         message: '确定要删除这个会话吗？此操作不可恢复。',
@@ -10673,21 +10718,37 @@ def main(params):
                         danger: true,
                         action: async () => {
                             const sessionId = this.currentSession.id;
+                            const deletedSession = this.currentSession;
                             const sessionIndex = this.sessions.findIndex(s => s.id === sessionId);
-                            
+
+                            // 设置删除标志，防止定时刷新干扰
+                            this._isDeletingSession = true;
+
+                            // 立即从UI中移除（乐观更新）
                             this.sessions = this.sessions.filter(s => s.id !== sessionId);
                             this.currentSession = null;
                             this.currentMessages = [];
                             this.showToast('会话已删除', 'success');
-                            
+
                             try {
+                                // 调用API删除
                                 await api.delete(`/api/sessions/${sessionId}`);
+                                // 删除成功，延迟清除标志（给服务器同步时间）
+                                setTimeout(() => {
+                                    this._isDeletingSession = false;
+                                }, 3000);
                             } catch (e) {
-                                console.error('同步删除会话失败:', e);
+                                console.error('删除会话失败:', e);
+                                // 恢复会话到原来位置
                                 if (sessionIndex !== -1) {
-                                    this.sessions.splice(sessionIndex, 0, { id: sessionId, name: '已删除的会话' });
+                                    this.sessions.splice(sessionIndex, 0, deletedSession);
+                                } else {
+                                    this.sessions.push(deletedSession);
                                 }
-                                this.showToast('删除同步失败，请刷新页面', 'warning');
+                                this.currentSession = deletedSession;
+                                this.showToast('删除失败，已恢复会话', 'error');
+                                // 失败时立即清除标志
+                                this._isDeletingSession = false;
                             }
                         }
                     });
@@ -12251,8 +12312,8 @@ def main(params):
                                 this.$nextTick(() => this.scrollToBottom());
                             }
 
-                            // 如果是助手消息，取消正在思考动画
-                            if (msg.role === 'assistant') {
+                            // 如果是助手消息且不是进度消息且不是文件消息，取消正在思考动画
+                            if (msg.role === 'assistant' && !msg.is_progress_message && !msg.file) {
                                 this.isTyping = false;
                                 this.isLoading = false;
                             }
