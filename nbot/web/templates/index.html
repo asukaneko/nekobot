@@ -3148,6 +3148,23 @@
             border-color: var(--accent-primary);
         }
 
+        .expand-editor-preview {
+            width: 100%;
+            height: 100%;
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 16px;
+            overflow-y: auto;
+            box-sizing: border-box;
+        }
+
+        .expand-editor-actions .btn.active {
+            background: var(--accent-primary);
+            color: white;
+            border-color: var(--accent-primary);
+        }
+
         .expand-editor-footer {
             display: flex;
             gap: 24px;
@@ -6579,6 +6596,10 @@
                                     <button class="btn btn-secondary" @click="loadSkillsStorage" :disabled="isLoading">
                                         <i class="fas fa-folder"></i> 查看存储空间
                                     </button>
+                                    <label class="btn btn-secondary" :disabled="isLoading" style="cursor: pointer; margin: 0;">
+                                        <i class="fas fa-upload"></i> 上传 Skill 文件夹
+                                        <input type="file" ref="skillFolderInput" @change="handleSkillFolderUpload" webkitdirectory directory multiple style="display: none;">
+                                    </label>
                                     <button class="btn btn-primary" @click="openSkillModal()" :disabled="isLoading">
                                         <i class="fas fa-plus"></i> 新建 Skill
                                     </button>
@@ -7226,14 +7247,22 @@
                         <i class="fas fa-edit"></i> 扩展编辑器
                     </div>
                     <div class="expand-editor-actions">
-                        <button class="btn btn-secondary" @click="closeExpandEditor">取消</button>
-                        <button class="btn btn-primary" @click="applyExpandEditor">
-                            <i class="fas fa-check"></i> 确定并关闭
+                        <button class="btn btn-secondary btn-sm" :class="{ active: expandEditorMode === 'edit' }" @click="expandEditorMode = 'edit'">
+                            <i class="fas fa-edit"></i> 编辑
+                        </button>
+                        <button class="btn btn-secondary btn-sm" :class="{ active: expandEditorMode === 'preview' }" @click="expandEditorMode = 'preview'">
+                            <i class="fas fa-eye"></i> 预览
+                        </button>
+                        <button class="btn btn-secondary btn-sm" @click="closeExpandEditor">取消</button>
+                        <button class="btn btn-primary btn-sm" @click="applyExpandEditor">
+                            <i class="fas fa-check"></i> 确定
                         </button>
                     </div>
                 </div>
                 <div class="expand-editor-content">
+                    <!-- 编辑模式 -->
                     <textarea
+                        v-if="expandEditorMode === 'edit'"
                         v-model="expandEditorContent"
                         ref="expandEditorTextarea"
                         class="expand-editor-textarea"
@@ -7241,6 +7270,12 @@
                         @keydown.ctrl.enter="applyExpandEditor"
                         @keydown.esc="closeExpandEditor"
                     ></textarea>
+                    <!-- 预览模式 -->
+                    <div
+                        v-else
+                        class="expand-editor-preview markdown-body"
+                        v-html="renderMarkdown(expandEditorContent)"
+                    ></div>
                 </div>
                 <div class="expand-editor-footer">
                     <span><kbd>Ctrl</kbd>+<kbd>Enter</kbd> 确认并关闭</span>
@@ -7555,16 +7590,16 @@
                             <div v-for="file in currentSkillStorageFiles" :key="file.path" class="file-item" style="display: flex; justify-content: space-between; align-items: center; padding: 12px; border: 1px solid var(--border-color); border-radius: 8px; margin-bottom: 8px;">
                                 <div>
                                     <i :class="getFileIcon(file.name)" style="margin-right: 8px;"></i>
-                                    <strong>{{ file.name }}</strong>
+                                    <strong>{{ file.path }}</strong>
                                     <span style="color: var(--text-secondary); margin-left: 12px; font-size: 12px;">
                                         {{ formatFileSize(file.size) }}
                                     </span>
                                 </div>
                                 <div style="display: flex; gap: 8px;">
-                                    <button v-if="isTextFile(file.name)" class="btn btn-secondary" @click="viewSkillScript(currentSkillStorageName, file.name)" :disabled="isLoading">
+                                    <button v-if="isTextFile(file.name)" class="btn btn-secondary" @click="viewSkillScript(currentSkillStorageName, file.path)" :disabled="isLoading">
                                         <i class="fas fa-eye"></i> 查看
                                     </button>
-                                    <button v-if="isTextFile(file.name)" class="btn btn-primary" @click="editSkillScript(currentSkillStorageName, file.name)" :disabled="isLoading">
+                                    <button v-if="isTextFile(file.name)" class="btn btn-primary" @click="editSkillScript(currentSkillStorageName, file.path)" :disabled="isLoading">
                                         <i class="fas fa-edit"></i> 编辑
                                     </button>
                                 </div>
@@ -8343,6 +8378,7 @@
                     showConfirmModal: false,
                     showExpandEditor: false,
                     expandEditorContent: '',
+                    expandEditorMode: 'edit',  // 'edit' 或 'preview'
                     expandEditorCallback: null,
                     confirmModalConfig: {
                         title: '确认操作',
@@ -9354,6 +9390,129 @@
                     } catch (e) {
                         console.error('Failed to load skills:', e);
                     }
+                },
+
+                // 处理 Skill 文件夹上传
+                async handleSkillFolderUpload(event) {
+                    const files = event.target.files;
+                    if (!files || files.length === 0) return;
+
+                    // 获取文件夹名称（从第一个文件的路径推断）
+                    const firstFile = files[0];
+                    const pathParts = firstFile.webkitRelativePath.split('/');
+                    const folderName = pathParts[0];
+
+                    // 检查是否包含 SKILL.md 文件
+                    const skillMdFile = Array.from(files).find(f =>
+                        f.webkitRelativePath.endsWith('SKILL.md') ||
+                        f.webkitRelativePath.endsWith('skill.md')
+                    );
+
+                    if (!skillMdFile) {
+                        this.showToast('未找到 SKILL.md 文件，请确保上传的是有效的 Skill 文件夹', 'error');
+                        event.target.value = '';
+                        return;
+                    }
+
+                    this.isLoading = true;
+                    this.showToast(`正在上传 Skill 文件夹: ${folderName}...`, 'info');
+
+                    try {
+                        // 读取 SKILL.md 内容
+                        const skillMdContent = await skillMdFile.text();
+
+                        // 解析 SKILL.md 获取配置信息
+                        const skillConfig = this.parseSkillMd(skillMdContent);
+
+                        // 构建 FormData
+                        const formData = new FormData();
+                        formData.append('folder_name', folderName);
+                        formData.append('skill_md', skillMdContent);
+                        formData.append('skill_config', JSON.stringify(skillConfig));
+
+                        // 添加所有文件
+                        for (const file of files) {
+                            // 保留相对路径
+                            const relativePath = file.webkitRelativePath.substring(folderName.length + 1);
+                            formData.append('files', file, relativePath);
+                        }
+
+                        // 发送到后端
+                        const res = await api.post('/api/skills/upload-folder', formData, {
+                            headers: {
+                                'Content-Type': 'multipart/form-data'
+                            }
+                        });
+
+                        if (res.data.success) {
+                            this.showToast(`Skill "${skillConfig.name || folderName}" 上传成功！`, 'success');
+                            await this.loadSkills();
+                            await this.loadSkillsStorage();
+                        } else {
+                            this.showToast(res.data.error || '上传失败', 'error');
+                        }
+                    } catch (e) {
+                        console.error('上传 Skill 文件夹失败:', e);
+                        this.showToast('上传失败: ' + (e.response?.data?.error || e.message), 'error');
+                    } finally {
+                        this.isLoading = false;
+                        event.target.value = '';
+                    }
+                },
+
+                // 解析 SKILL.md 文件内容
+                parseSkillMd(content) {
+                    const config = {
+                        name: '',
+                        description: '',
+                        aliases: [],
+                        parameters: {}
+                    };
+
+                    try {
+                        // 提取名称（第一个 # 标题）
+                        const titleMatch = content.match(/^#\s+(.+)$/m);
+                        if (titleMatch) {
+                            config.name = titleMatch[1].trim();
+                        }
+
+                        // 提取描述（第一个段落）
+                        const descMatch = content.match(/^#\s+.+\n\n(.+?)(?:\n\n|\n##|$)/s);
+                        if (descMatch) {
+                            config.description = descMatch[1].trim().substring(0, 200);
+                        }
+
+                        // 提取别名（如果有 Aliases 部分）
+                        const aliasesMatch = content.match(/(?:##?\s*(?:别名|Aliases)[\s\S]*?)(?:[-*]\s*(.+)(?:\n|$))+/i);
+                        if (aliasesMatch) {
+                            const aliasesText = content.substring(aliasesMatch.index);
+                            const aliasItems = aliasesText.matchAll(/[-*]\s*(.+)/g);
+                            for (const match of aliasItems) {
+                                const alias = match[1].trim();
+                                if (alias && !alias.startsWith('#')) {
+                                    config.aliases.push(alias);
+                                }
+                            }
+                        }
+
+                        // 提取参数配置（如果有 Parameters 部分）
+                        const paramsMatch = content.match(/(?:##?\s*(?:参数|Parameters)[\s\S]*?)(?:\n##|\n\n#|$)/i);
+                        if (paramsMatch) {
+                            const paramsText = content.substring(paramsMatch.index, paramsMatch.index + paramsMatch[0].length);
+                            const paramMatches = paramsText.matchAll(/[-*]\s*`?(\w+)`?\s*[:\-]\s*(.+)/g);
+                            for (const match of paramMatches) {
+                                const key = match[1].trim();
+                                const value = match[2].trim();
+                                if (key && value) {
+                                    config.parameters[key] = value;
+                                }
+                            }
+                        }
+                    } catch (e) {
+                        console.error('解析 SKILL.md 失败:', e);
+                    }
+
+                    return config;
                 },
 
                 openSkillModal(skill = null) {
@@ -10857,12 +11016,14 @@ def main(params):
                 closeExpandEditor() {
                     this.showExpandEditor = false;
                     this.expandEditorContent = '';
+                    this.expandEditorMode = 'edit';
                 },
 
                 applyExpandEditor() {
                     const content = this.expandEditorContent;
                     this.showExpandEditor = false;
                     this.expandEditorContent = '';
+                    this.expandEditorMode = 'edit';
                     // 将内容设置到主输入框
                     this.inputMessage = content;
                 },

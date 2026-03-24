@@ -6892,4 +6892,87 @@ def create_web_app(config: Dict[str, Any] = None) -> tuple[Flask, SocketIO]:
             _log.error(f"删除 Skill 存储失败: {e}", exc_info=True)
             return jsonify({'error': str(e)}), 500
 
+    @app.route('/api/skills/upload-folder', methods=['POST'])
+    def upload_skill_folder():
+        """上传 Skill 文件夹并自动创建 Skill 配置"""
+        try:
+            from nbot.core.skills_manager import get_skills_storage_manager, SKILLS_ROOT
+            import uuid
+
+            # 获取上传的数据
+            folder_name = request.form.get('folder_name', '')
+            skill_md = request.form.get('skill_md', '')
+            skill_config_str = request.form.get('skill_config', '{}')
+
+            if not folder_name:
+                return jsonify({'error': '文件夹名称不能为空'}), 400
+
+            try:
+                skill_config = json.loads(skill_config_str)
+            except json.JSONDecodeError:
+                skill_config = {}
+
+            # 获取存储管理器
+            manager = get_skills_storage_manager()
+
+            # 检查是否已存在同名 Skill
+            if manager.skill_exists(folder_name):
+                return jsonify({'error': f'Skill "{folder_name}" 已存在，请先删除或重命名'}), 409
+
+            # 创建 Skill 存储空间
+            success = manager.create_skill(folder_name)
+            if not success:
+                return jsonify({'error': '创建 Skill 存储空间失败'}), 500
+
+            # 保存所有上传的文件
+            files = request.files.getlist('files')
+            saved_files = []
+
+            for file in files:
+                if file.filename:
+                    # 确保文件路径安全
+                    file_path = file.filename.replace('..', '').lstrip('/\\')
+                    full_path = os.path.join(SKILLS_ROOT, folder_name, file_path)
+
+                    # 创建目录
+                    os.makedirs(os.path.dirname(full_path), exist_ok=True)
+
+                    # 保存文件
+                    file.save(full_path)
+                    saved_files.append(file_path)
+
+            _log.info(f"已上传 Skill 文件夹: {folder_name}, 包含 {len(saved_files)} 个文件")
+
+            # 使用文件夹名称作为 skill 名称（确保存储空间和配置名称一致）
+            skill_name = folder_name
+
+            # 创建 Skill 配置
+            skill_id = str(uuid.uuid4())
+            skill = {
+                'id': skill_id,
+                'name': skill_name,
+                'description': skill_config.get('description', f'从文件夹 {folder_name} 导入的 Skill'),
+                'aliases': skill_config.get('aliases', []),
+                'enabled': True,
+                'parameters': skill_config.get('parameters', {}),
+                'has_storage': True,
+                'scripts': [f for f in saved_files if f.endswith('.py')],
+                'skill_md': skill_md
+            }
+
+            # 添加到配置
+            server.skills_config.append(skill)
+            server._save_data('skills')
+
+            return jsonify({
+                'success': True,
+                'skill': skill,
+                'message': f'Skill "{skill["name"]}" 上传成功',
+                'files_count': len(saved_files)
+            })
+
+        except Exception as e:
+            _log.error(f"上传 Skill 文件夹失败: {e}", exc_info=True)
+            return jsonify({'error': str(e)}), 500
+
     return app, socketio, server
