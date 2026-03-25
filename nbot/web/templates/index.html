@@ -652,6 +652,55 @@
             background: var(--bg-tertiary);
         }
         
+        .thinking-step.has-thinking {
+            flex-direction: column;
+            align-items: flex-start;
+        }
+        
+        .thinking-content-wrapper {
+            width: 100%;
+            margin-top: 8px;
+            margin-left: 24px;
+        }
+        
+        .thinking-content-toggle {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            color: var(--accent-primary);
+            font-size: 12px;
+            cursor: pointer;
+            padding: 4px 8px;
+            background: var(--bg-tertiary);
+            border-radius: 4px;
+            transition: background 0.2s;
+        }
+        
+        .thinking-content-toggle:hover {
+            background: var(--bg-hover);
+        }
+        
+        .thinking-content {
+            margin-top: 8px;
+            padding: 12px;
+            background: var(--bg-tertiary);
+            border-radius: 6px;
+            border-left: 3px solid var(--accent-primary);
+            max-height: 300px;
+            overflow-y: auto;
+        }
+        
+        .thinking-content pre {
+            margin: 0;
+            padding: 0;
+            font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+            font-size: 12px;
+            line-height: 1.6;
+            white-space: pre-wrap;
+            word-break: break-all;
+            color: var(--text-secondary);
+        }
+        
         /* 代码块样式 */
         .code-block {
             background: var(--bg-tertiary);
@@ -4426,6 +4475,108 @@
             white-space: pre-wrap;
             word-break: break-all;
         }
+
+        /* 代码块复制按钮样式 */
+        .code-wrap {
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            overflow: hidden;
+            margin: 8px 0;
+        }
+        .code-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 6px 12px;
+            background: var(--bg-tertiary);
+            border-bottom: 1px solid var(--border-color);
+            font-size: 12px;
+        }
+        .code-lang {
+            color: var(--accent-primary);
+            font-weight: 500;
+        }
+        .code-copy-btn {
+            background: none;
+            border: none;
+            color: var(--text-muted);
+            cursor: pointer;
+            font-size: 12px;
+            padding: 2px 8px;
+            border-radius: 4px;
+            transition: all .15s;
+        }
+        .code-copy-btn:hover {
+            background: var(--bg-hover);
+            color: var(--text-primary);
+        }
+
+        /* 消息操作栏样式 */
+        .message-content {
+            position: relative;
+        }
+        .msg-actions {
+            display: flex;
+            gap: 4px;
+            margin-top: 6px;
+            opacity: 0;
+            transition: opacity .2s;
+        }
+        .message:hover .msg-actions {
+            opacity: 1;
+        }
+        .msg-action-btn {
+            background: none;
+            border: none;
+            cursor: pointer;
+            color: var(--text-muted);
+            padding: 3px 7px;
+            border-radius: 5px;
+            font-size: 12px;
+            transition: all .15s;
+        }
+        .msg-action-btn:hover {
+            background: var(--bg-hover);
+            color: var(--text-primary);
+        }
+        .msg-action-btn.active {
+            color: var(--accent-primary);
+        }
+
+        /* 进度卡片改进样式 */
+        .thinking-step.done .step-name {
+            opacity: .6;
+        }
+        .step-name {
+            font-size: 13px;
+            background: var(--bg-primary);
+            padding: 2px 8px;
+            border-radius: 4px;
+            border: 1px solid var(--border-color);
+        }
+        .thinking-card.is-complete {
+            cursor: pointer;
+        }
+        .thinking-card.is-complete .thinking-card-steps {
+            max-height: 0;
+            overflow: hidden;
+            transition: max-height .3s ease;
+        }
+        .thinking-card.is-complete:hover .thinking-card-steps {
+            max-height: 500px;
+        }
+
+        /* 骨架屏样式 */
+        .skeleton-line {
+            border-radius: 6px;
+            background: linear-gradient(90deg, var(--bg-tertiary) 25%, var(--bg-hover) 50%, var(--bg-tertiary) 75%);
+            background-size: 200% 100%;
+            animation: shimmer 1.4s infinite;
+        }
+        @keyframes shimmer {
+            0% { background-position: 200% 0; }
+            100% { background-position: -200% 0; }
+        }
     </style>
 </head>
 <body>
@@ -5022,6 +5173,33 @@
                                 </div>
 
                                 <div class="messages-container" ref="messagesContainer" @scroll="handleMessagesScroll">
+                                    <!-- 全局进度卡片（当找不到父消息时显示） -->
+                                    <div v-if="showThinkingCard && thinkingCards.length > 0" class="global-thinking-cards">
+                                        <div v-for="(card, index) in thinkingCards" :key="card.id || index" class="thinking-card" :class="{ 'is-complete': card.is_complete }">
+                                            <div class="thinking-card-header">
+                                                <i :class="card.is_complete ? 'fas fa-check-circle' : 'fas fa-spinner fa-spin'"></i>
+                                                <span>{{ card.content }}</span>
+                                            </div>
+                                            <div class="thinking-card-steps">
+                                                <div v-for="(step, idx) in card.steps" :key="idx" class="thinking-step" :class="[step.type, step.status, (step.arguments || step.full_result) ? 'has-detail' : '', step.thinking_content ? 'has-thinking' : '']" @click="step.arguments || step.full_result ? viewStepDetail(step) : null">
+                                                    <i :class="step.status === 'done' ? 'fas fa-check' : (step.status === 'error' ? 'fas fa-times' : 'fas fa-cog fa-spin')"></i>
+                                                    <span class="step-name">{{ step.name }}</span>
+                                                    <span v-if="step.detail" class="step-detail">{{ step.detail }}</span>
+                                                    <i v-if="step.arguments || step.full_result" class="fas fa-external-link-alt step-detail-icon"></i>
+                                                    <!-- AI思考内容（默认折叠，加载完成后可展开） -->
+                                                    <div v-if="step.thinking_content" class="thinking-content-wrapper">
+                                                        <div class="thinking-content-toggle" @click.stop="step._thinking_expanded = !step._thinking_expanded">
+                                                            <i :class="step._thinking_expanded ? 'fas fa-chevron-up' : 'fas fa-chevron-down'"></i>
+                                                            <span>{{ step._thinking_expanded ? '收起思考' : '查看思考过程' }}</span>
+                                                        </div>
+                                                        <div v-if="step._thinking_expanded" class="thinking-content">
+                                                            <pre>{{ step.thinking_content }}</pre>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
                                     <template v-for="msg in currentMessages.filter(m => !m.hide_in_web)" :key="msg.id">
                                         <!-- 消息主体 -->
                                         <div class="message" :class="msg.role">
@@ -5067,6 +5245,20 @@
                                                     {{ formatFullTime(msg.timestamp) }}
                                                     <span v-if="msg.source === 'qq'"> · <i class="fab fa-qq"></i> QQ</span>
                                                 </div>
+                                                <!-- 消息操作栏（只对 assistant 消息显示） -->
+                                                <div v-if="msg.role === 'assistant'" class="msg-actions">
+                                                    <button class="msg-action-btn" @click="copyMessage(msg)" title="复制">
+                                                        <i class="fas fa-copy"></i>
+                                                    </button>
+                                                    <button class="msg-action-btn" :class="{ active: msg._liked }" 
+                                                            @click="msg._liked = !msg._liked; msg._disliked = false" title="有帮助">
+                                                        <i class="fas fa-thumbs-up"></i>
+                                                    </button>
+                                                    <button class="msg-action-btn" :class="{ active: msg._disliked }"
+                                                            @click="msg._disliked = !msg._disliked; msg._liked = false" title="没帮助">
+                                                        <i class="fas fa-thumbs-down"></i>
+                                                    </button>
+                                                </div>
                                             </div>
                                         </div>
                                         <!-- 该消息关联的进度卡片（在消息下方独立显示） -->
@@ -5078,11 +5270,21 @@
                                                         <span>{{ card.content }}</span>
                                                     </div>
                                                     <div class="thinking-card-steps">
-                                                        <div v-for="(step, idx) in card.steps" :key="idx" class="thinking-step" :class="[step.type, step.status, (step.arguments || step.full_result) ? 'has-detail' : '']" @click="step.arguments || step.full_result ? viewStepDetail(step) : null">
+                                                        <div v-for="(step, idx) in card.steps" :key="idx" class="thinking-step" :class="[step.type, step.status, (step.arguments || step.full_result) ? 'has-detail' : '', step.thinking_content ? 'has-thinking' : '']" @click="step.arguments || step.full_result ? viewStepDetail(step) : null">
                                                             <i :class="step.status === 'done' ? 'fas fa-check' : (step.status === 'error' ? 'fas fa-times' : 'fas fa-cog fa-spin')"></i>
                                                             <span class="step-name">{{ step.name }}</span>
                                                             <span v-if="step.detail" class="step-detail">{{ step.detail }}</span>
                                                             <i v-if="step.arguments || step.full_result" class="fas fa-external-link-alt step-detail-icon"></i>
+                                                            <!-- AI思考内容（默认折叠，加载完成后可展开） -->
+                                                            <div v-if="step.thinking_content" class="thinking-content-wrapper">
+                                                                <div class="thinking-content-toggle" @click.stop="step._thinking_expanded = !step._thinking_expanded">
+                                                                    <i :class="step._thinking_expanded ? 'fas fa-chevron-up' : 'fas fa-chevron-down'"></i>
+                                                                    <span>{{ step._thinking_expanded ? '收起思考' : '查看思考过程' }}</span>
+                                                                </div>
+                                                                <div v-if="step._thinking_expanded" class="thinking-content">
+                                                                    <pre>{{ step.thinking_content }}</pre>
+                                                                </div>
+                                                            </div>
                                                         </div>
                                                     </div>
                                                 </div>
@@ -5115,12 +5317,10 @@
                                     <!-- 机器人正在输入动画（仅在无进度卡片时显示） -->
                                     <div v-if="isTyping && !currentMessages.some(m => m.thinking_cards && m.thinking_cards.length > 0)" class="message assistant">
                                         <div class="message-avatar"><i class="fas fa-robot"></i></div>
-                                        <div class="message-content">
-                                            <div class="loading">
-                                                <div class="loading-dot"></div>
-                                                <div class="loading-dot"></div>
-                                                <div class="loading-dot"></div>
-                                            </div>
+                                        <div class="message-content" style="min-width: 200px;">
+                                            <div class="skeleton-line" style="width: 85%; height: 12px; margin-bottom: 8px;"></div>
+                                            <div class="skeleton-line" style="width: 100%; height: 12px; margin-bottom: 8px;"></div>
+                                            <div class="skeleton-line" style="width: 60%; height: 12px;"></div>
                                         </div>
                                     </div>
                                 </div>
@@ -8048,6 +8248,19 @@
     </div>
 
     <script>
+        // 全局函数：复制代码块
+        function copyCodeBlock(id) {
+            const pre = document.getElementById(id);
+            if (!pre) return;
+            navigator.clipboard.writeText(pre.innerText).then(() => {
+                const btn = pre.previousElementSibling?.querySelector('.code-copy-btn');
+                if (btn) {
+                    btn.innerHTML = '<i class="fas fa-check"></i> 已复制';
+                    setTimeout(() => btn.innerHTML = '<i class="fas fa-copy"></i> 复制', 2000);
+                }
+            });
+        }
+
         const { createApp } = Vue;
 
         const api = axios.create({ baseURL: '', timeout: 60000 });
@@ -12318,11 +12531,12 @@ def main(params):
                                 // 用服务器返回的消息替换本地临时消息
                                 const localIdx = this.currentMessages.findIndex(m => m.id === msg.tempId);
                                 if (localIdx !== -1) {
-                                    // 替换为服务器返回的消息（保留本地附件数据以防服务器没有）
+                                    // 替换为服务器返回的消息（保留本地附件数据和进度卡片以防服务器没有）
                                     const localMsg = this.currentMessages[localIdx];
                                     this.currentMessages.splice(localIdx, 1, {
                                         ...msg,
-                                        attachments: msg.attachments?.length ? msg.attachments : localMsg.attachments
+                                        attachments: msg.attachments?.length ? msg.attachments : localMsg.attachments,
+                                        thinking_cards: localMsg.thinking_cards || []  // 保留进度卡片
                                     });
                                     return;
                                 }
@@ -12349,7 +12563,8 @@ def main(params):
                                         const existingIdx = parentMsg.thinking_cards.findIndex(c => c.id === msg.id);
                                         
                                         if (existingIdx !== -1) {
-                                            parentMsg.thinking_cards[existingIdx] = msg;
+                                            // 使用 Object.assign 合并更新，保留响应式
+                                            Object.assign(parentMsg.thinking_cards[existingIdx], msg);
                                         } else {
                                             parentMsg.thinking_cards.push(msg);
                                         }
@@ -12357,7 +12572,7 @@ def main(params):
                                         // 如果找不到父消息，使用全局存储（兼容旧逻辑）
                                         const existingIdx = this.thinkingCards.findIndex(c => c.id === msg.id);
                                         if (existingIdx !== -1) {
-                                            this.thinkingCards[existingIdx] = msg;
+                                            Object.assign(this.thinkingCards[existingIdx], msg);
                                         } else {
                                             this.thinkingCards.push(msg);
                                         }
@@ -12366,7 +12581,7 @@ def main(params):
                                     // 没有 parent_message_id，使用全局存储
                                     const existingIdx = this.thinkingCards.findIndex(c => c.id === msg.id);
                                     if (existingIdx !== -1) {
-                                        this.thinkingCards[existingIdx] = msg;
+                                        Object.assign(this.thinkingCards[existingIdx], msg);
                                     } else {
                                         this.thinkingCards.push(msg);
                                     }
@@ -12631,7 +12846,28 @@ def main(params):
                     });
                     
                     try {
-                        return marked.parse(content);
+                        let html = marked.parse(content);
+                        
+                        // 给每个代码块包裹 header + 复制按钮
+                        let blockIndex = 0;
+                        html = html.replace(
+                            /<pre><code class="language-(\w+)">([\s\S]*?)<\/code><\/pre>/g,
+                            (match, lang, code) => {
+                                const id = `cb_${Date.now()}_${blockIndex++}`;
+                                return `
+                                  <div class="code-wrap">
+                                    <div class="code-header">
+                                      <span class="code-lang">${lang}</span>
+                                      <button class="code-copy-btn" onclick="copyCodeBlock('${id}')">
+                                        <i class="fas fa-copy"></i> 复制
+                                      </button>
+                                    </div>
+                                    <pre id="${id}"><code class="language-${lang}">${code}</code></pre>
+                                  </div>`;
+                            }
+                        );
+                        
+                        return html;
                     } catch (e) {
                         console.error('Markdown parse error:', e);
                         return content;
@@ -12799,6 +13035,14 @@ def main(params):
                 formatNumber(num) {
                     if (num === undefined || num === null) return '0';
                     return num.toLocaleString('zh-CN');
+                },
+                
+                // 复制消息内容
+                copyMessage(msg) {
+                    const text = msg.content || '';
+                    navigator.clipboard.writeText(text).then(() => {
+                        this.showToast('已复制', 'success');
+                    });
                 },
                 
                 showToast(message, type = 'info') {

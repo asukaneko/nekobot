@@ -2111,6 +2111,12 @@ class WebChatServer:
                 'finish_reason': finish_reason
             }
 
+            # 获取AI思考内容（如果API返回了的话）
+            thinking_content = message.get('thinking_content', '')
+            if thinking_content:
+                result['thinking_content'] = thinking_content
+                _log.debug(f"[AI] 收到思考内容: {len(thinking_content)} 字符")
+
             # 处理工具调用
             if 'tool_calls' in message or finish_reason == 'tool_calls':
                 tool_calls = message['tool_calls']
@@ -2846,6 +2852,16 @@ class WebChatServer:
                         _log.info(f"[Tools] 发送请求到 AI，消息数量: {len(messages_for_ai)}")
                         response = self._get_ai_response_with_tools(messages_for_ai, all_tools)
                         
+                        # 处理AI思考内容（如果API返回了的话）
+                        if 'thinking_content' in response and response['thinking_content']:
+                            thinking_content = response['thinking_content']
+                            _log.debug(f"[ThinkingCard] 收到AI思考内容: {len(thinking_content)} 字符")
+                            # 更新思考内容到进度卡片
+                            try:
+                                update_thinking_stream(thinking_content)
+                            except Exception as e:
+                                _log.warning(f"[ThinkingCard] 更新思考内容失败: {e}")
+                        
                         # 检查是否有工具调用
                         if 'tool_calls' in response and response['tool_calls']:
                             tool_calls = response['tool_calls']
@@ -3076,6 +3092,15 @@ class WebChatServer:
                             _log.info(f"[Tools] 所有工具执行完成，开始第二次 AI 调用获取最终回复...")
                             # 再次调用 AI，获取最终回复（不传递 tools，避免无限循环）
                             response = self._get_ai_response_with_tools(messages_for_ai, [])
+                            
+                            # 处理AI思考内容（如果API返回了的话）
+                            if 'thinking_content' in response and response['thinking_content']:
+                                thinking_content = response['thinking_content']
+                                _log.debug(f"[ThinkingCard] 第二次调用收到AI思考内容: {len(thinking_content)} 字符")
+                                try:
+                                    update_thinking_stream(thinking_content)
+                                except Exception as e:
+                                    _log.warning(f"[ThinkingCard] 更新思考内容失败: {e}")
                         else:
                             # 没有工具调用，直接使用响应内容
                             pass
@@ -5394,7 +5419,10 @@ class WebChatServer:
                     # 触发 AI 回复（传递附件信息和用户消息ID）
                     # 只使用原始内容，附件信息通过卡片显示
                     ai_content = content
-                    self._trigger_ai_response(session_id, ai_content, sender, attachments, message['id'])
+                    # 使用 temp_id 作为 parent_message_id，这样前端可以正确关联进度卡片
+                    # 因为前端先用 temp_id 创建了本地消息
+                    parent_msg_id = temp_id if temp_id else message['id']
+                    self._trigger_ai_response(session_id, ai_content, sender, attachments, parent_msg_id)
             
             except Exception as e:
                 _log.error(f"处理消息时出错: {e}", exc_info=True)
@@ -5752,7 +5780,7 @@ class WebChatServer:
                             
                             _log.info(f"[ThinkingCard] 使用 ProgressCard 系统, session_id={session_id}, card_id={progress_card.card_id if progress_card else 'None'}")
                             
-                            def update_thinking_card(step_type, step_name, step_detail=None, step_result=None, step_arguments=None, step_full_result=None):
+                            def update_thinking_card(step_type, step_name, step_detail=None, step_result=None, step_arguments=None, step_full_result=None, thinking_content=None):
                                 """更新进度卡片 - 使用新的 ProgressCard 系统"""
                                 if not progress_card:
                                     return
@@ -5775,9 +5803,18 @@ class WebChatServer:
                                     }
                                     step_type_enum = step_type_map.get(step_type)
                                     if step_type_enum:
-                                        progress_card.update(step_type_enum, step_name, step_detail, step_result, step_arguments, step_full_result)
+                                        progress_card.update(step_type_enum, step_name, step_detail, step_result, step_arguments, step_full_result, thinking_content)
                                 except Exception as e:
                                     _log.warning(f"[ThinkingCard] 更新进度失败: {e}")
+                            
+                            def update_thinking_stream(thinking_content):
+                                """流式更新AI思考内容"""
+                                if not progress_card:
+                                    return
+                                try:
+                                    progress_card.append_thinking_content(thinking_content)
+                                except Exception as e:
+                                    _log.warning(f"[ThinkingCard] 流式更新思考内容失败: {e}")
                             
                             # 注意：complete_thinking_card 函数已在前面定义
                             

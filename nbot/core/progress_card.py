@@ -71,7 +71,8 @@ class ProgressCard:
         
     def update(self, step_type: StepType, step_name: str, 
                step_detail: str = None, step_result: Any = None,
-               step_arguments: Dict = None, step_full_result: Any = None):
+               step_arguments: Dict = None, step_full_result: Any = None,
+               thinking_content: str = None):
         """
         更新进度卡片
         
@@ -82,6 +83,7 @@ class ProgressCard:
             step_result: 步骤结果（用于完成状态）
             step_arguments: 完整参数（用于工具调用）
             step_full_result: 完整返回值（用于工具调用）
+            thinking_content: AI思考内容（用于展示思考过程）
         """
         if self.is_completed:
             return
@@ -136,12 +138,72 @@ class ProgressCard:
                         break
             
             # 添加新步骤
-            self.steps.append({
+            step_data = {
                 'type': config['type'],
                 'icon': config['icon'],
                 'name': step_name,
                 'status': config['status'],
                 'detail': step_detail
+            }
+            
+            # 如果有思考内容，保存到步骤中
+            if thinking_content:
+                step_data['thinking_content'] = thinking_content
+            
+            self.steps.append(step_data)
+        
+        # 发送更新
+        self._emit_update()
+    
+    def update_thinking_stream(self, thinking_content: str):
+        """
+        流式更新AI思考内容（在思考过程中实时更新）
+        
+        Args:
+            thinking_content: 思考内容
+        """
+        # 找到最后一个thinking类型的步骤
+        for step in reversed(self.steps):
+            if step['type'] == 'thinking':
+                step['thinking_content'] = thinking_content
+                step['status'] = 'active'
+                break
+        else:
+            # 如果没有找到thinking步骤，创建一个
+            self.steps.append({
+                'type': 'thinking',
+                'icon': '💭',
+                'name': 'AI 正在思考...',
+                'status': 'active',
+                'thinking_content': thinking_content
+            })
+        
+        # 发送更新
+        self._emit_update()
+    
+    def append_thinking_content(self, new_content: str):
+        """
+        追加思考内容（用于流式更新）
+        
+        Args:
+            new_content: 新增的思考内容
+        """
+        # 找到最后一个thinking类型的步骤
+        for step in reversed(self.steps):
+            if step['type'] == 'thinking':
+                if 'thinking_content' in step:
+                    step['thinking_content'] += new_content
+                else:
+                    step['thinking_content'] = new_content
+                break
+        else:
+            # 如果没有找到thinking步骤，创建一个
+            self.steps.append({
+                'type': 'thinking',
+                'icon': '💭',
+                'name': 'AI 正在思考...',
+                'status': 'active',
+                'thinking_content': new_content
             })
         
         # 发送更新
@@ -180,7 +242,8 @@ class ProgressCard:
                 session = sessions[self.session_id]
                 if self.parent_message_id:
                     for msg in session.get('messages', []):
-                        if msg.get('id') == self.parent_message_id:
+                        # 同时检查 id 和 tempId，因为 parent_message_id 可能是 temp_id
+                        if msg.get('id') == self.parent_message_id or msg.get('tempId') == self.parent_message_id:
                             if 'thinking_cards' not in msg:
                                 msg['thinking_cards'] = []
                             # 查找是否已存在该卡片
