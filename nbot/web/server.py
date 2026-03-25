@@ -2738,8 +2738,12 @@ class WebChatServer:
             # 获取 AI 回复
             messages_for_ai = session['messages'].copy()
 
-            # 限制历史长度（使用设置中的值）
-            max_context_length = self.settings.get('max_context_length', 20)
+            # 限制历史长度（使用当前激活的 AI 模型配置中的 max_context_length）
+            max_context_length = 30000  # 默认值
+            for model in self.ai_models:
+                if model.get('id') == self.active_model_id:
+                    max_context_length = model.get('max_context_length', 30000)
+                    break
             if len(messages_for_ai) > max_context_length:
                 messages_for_ai = [messages_for_ai[0]] + messages_for_ai[-max_context_length:]
 
@@ -5748,7 +5752,7 @@ class WebChatServer:
                             
                             _log.info(f"[ThinkingCard] 使用 ProgressCard 系统, session_id={session_id}, card_id={progress_card.card_id if progress_card else 'None'}")
                             
-                            def update_thinking_card(step_type, step_name, step_detail=None, step_result=None):
+                            def update_thinking_card(step_type, step_name, step_detail=None, step_result=None, step_arguments=None, step_full_result=None):
                                 """更新进度卡片 - 使用新的 ProgressCard 系统"""
                                 if not progress_card:
                                     return
@@ -5771,7 +5775,7 @@ class WebChatServer:
                                     }
                                     step_type_enum = step_type_map.get(step_type)
                                     if step_type_enum:
-                                        progress_card.update(step_type_enum, step_name, step_detail, step_result)
+                                        progress_card.update(step_type_enum, step_name, step_detail, step_result, step_arguments, step_full_result)
                                 except Exception as e:
                                     _log.warning(f"[ThinkingCard] 更新进度失败: {e}")
                             
@@ -5850,12 +5854,26 @@ class WebChatServer:
                                         # 执行工具，传递 context
                                         tool_result = execute_tool(tool_name, arguments, context=tool_context)
                                         
-                                        # 更新进度卡片 - 工具完成
+                                        # 更新进度卡片 - 工具完成（保存完整参数和返回值）
                                         if tool_result.get('success'):
                                             result_preview = str(tool_result.get('content', tool_result.get('files', tool_result)))[:100]
-                                            update_thinking_card('tool_done', tool_display_name, result_preview)
+                                            update_thinking_card(
+                                                'tool_done', 
+                                                tool_display_name, 
+                                                result_preview,
+                                                None,
+                                                step_arguments=arguments,  # 保存完整参数
+                                                step_full_result=tool_result  # 保存完整返回值
+                                            )
                                         else:
-                                            update_thinking_card('tool_done', tool_display_name, None)
+                                            update_thinking_card(
+                                                'tool_done', 
+                                                tool_display_name, 
+                                                None,
+                                                None,
+                                                step_arguments=arguments,
+                                                step_full_result=tool_result
+                                            )
                                         
                                         # 工作区工具日志
                                         if tool_name.startswith('workspace_'):

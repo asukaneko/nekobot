@@ -7,7 +7,7 @@
     <link rel="icon" type="image/png" href="/static/neko.png">
     <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
     <script src="https://unpkg.com/vue-router@4/dist/vue-router.global.prod.js"></script>
-    <script src="https://unpkg.com/axios/dist/axios.min.js"></script>
+    <script src="https://cdn.bootcdn.net/ajax/libs/axios/1.6.2/axios.min.js"></script>
     <script src="https://unpkg.com/socket.io-client@4.7.2/dist/socket.io.min.js"></script>
     <script src="https://cdn.bootcdn.net/ajax/libs/echarts/5.4.3/echarts.min.js"></script>
     <script src="https://unpkg.com/marked@11.1.1/marked.min.js"></script>
@@ -632,6 +632,39 @@
             color: var(--text-tertiary);
             font-size: 12px;
             margin-left: 8px;
+        }
+        
+        .step-detail-icon {
+            color: var(--accent-primary);
+            font-size: 10px;
+            margin-left: 8px;
+            opacity: 0.7;
+        }
+        
+        .thinking-step.has-detail {
+            cursor: pointer;
+            padding: 4px 8px;
+            border-radius: 4px;
+            transition: background 0.2s;
+        }
+        
+        .thinking-step.has-detail:hover {
+            background: var(--bg-tertiary);
+        }
+        
+        /* 代码块样式 */
+        .code-block {
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 12px;
+            font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+            font-size: 13px;
+            line-height: 1.5;
+            overflow-x: auto;
+            white-space: pre-wrap;
+            word-break: break-all;
+            color: var(--text-primary);
         }
         
         /* 完成状态的进度卡片 */
@@ -5045,10 +5078,11 @@
                                                         <span>{{ card.content }}</span>
                                                     </div>
                                                     <div class="thinking-card-steps">
-                                                        <div v-for="(step, idx) in card.steps" :key="idx" class="thinking-step" :class="[step.type, step.status]">
+                                                        <div v-for="(step, idx) in card.steps" :key="idx" class="thinking-step" :class="[step.type, step.status, (step.arguments || step.full_result) ? 'has-detail' : '']" @click="step.arguments || step.full_result ? viewStepDetail(step) : null">
                                                             <i :class="step.status === 'done' ? 'fas fa-check' : (step.status === 'error' ? 'fas fa-times' : 'fas fa-cog fa-spin')"></i>
                                                             <span class="step-name">{{ step.name }}</span>
                                                             <span v-if="step.detail" class="step-detail">{{ step.detail }}</span>
+                                                            <i v-if="step.arguments || step.full_result" class="fas fa-external-link-alt step-detail-icon"></i>
                                                         </div>
                                                     </div>
                                                 </div>
@@ -5152,7 +5186,7 @@
                                                         </div>
                                                         <div class="stat-item">
                                                             <div class="stat-label">限制Token</div>
-                                                            <div class="stat-value">{{ formatNumber(aiConfig.max_tokens || 8000) }}</div>
+                                                            <div class="stat-value">{{ formatNumber(aiConfig.max_context_length || 30000) }}</div>
                                                         </div>
                                                     </div>
                                                     <button class="compress-btn"
@@ -5954,15 +5988,15 @@
                                             <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
                                                 <span style="font-size: 12px; color: var(--text-secondary);">当前上下文使用</span>
                                                 <span style="font-size: 12px; font-weight: 500;">
-                                                    {{ Math.round((contextTokenEstimate || 0) / (aiConfig.max_tokens || 8000) * 100) }}%
+                                                    {{ Math.round((contextTokenEstimate || 0) / (aiConfig.max_context_length || 30000) * 100) }}%
                                                 </span>
                                             </div>
                                             <div class="progress-bar" style="height: 8px;">
-                                                <div class="progress-fill" :style="{ width: Math.min(100, (contextTokenEstimate || 0) / (aiConfig.max_tokens || 8000) * 100) + '%' }"></div>
+                                                <div class="progress-fill" :style="{ width: Math.min(100, (contextTokenEstimate || 0) / (aiConfig.max_context_length || 30000) * 100) + '%' }"></div>
                                             </div>
                                             <div style="display: flex; justify-content: space-between; margin-top: 6px; font-size: 11px; color: var(--text-secondary);">
                                                 <span>预估 {{ formatNumber(contextTokenEstimate || 0) }} Token</span>
-                                                <span>限制 {{ formatNumber(aiConfig.max_tokens || 8000) }} Token</span>
+                                                <span>限制 {{ formatNumber(aiConfig.max_context_length || 30000) }} Token</span>
                                             </div>
                                         </div>
                                     </div>
@@ -7110,6 +7144,48 @@
             </div>
         </div>
 
+        <!-- 步骤详情模态框 -->
+        <div v-if="showStepDetailModal" class="modal-overlay" @click.self="showStepDetailModal = false">
+            <div class="modal" style="max-width: 700px; max-height: 80vh;">
+                <div class="modal-header">
+                    <span class="modal-title">
+                        <i class="fas fa-terminal"></i> 步骤详情 - {{ stepDetailData.name }}
+                    </span>
+                    <button class="modal-close" @click="showStepDetailModal = false">&times;</button>
+                </div>
+                <div class="modal-body" style="max-height: 60vh; overflow-y: auto;">
+                    <!-- 步骤描述 -->
+                    <div v-if="stepDetailData.detail" style="margin-bottom: 16px;">
+                        <div style="color: var(--text-secondary); font-size: 13px; margin-bottom: 4px;">描述</div>
+                        <div style="background: var(--bg-tertiary); padding: 8px 12px; border-radius: 6px;">{{ stepDetailData.detail }}</div>
+                    </div>
+                    
+                    <!-- 工具参数 -->
+                    <div v-if="stepDetailData.arguments" style="margin-bottom: 16px;">
+                        <div style="color: var(--text-secondary); font-size: 13px; margin-bottom: 4px;">
+                            <i class="fas fa-key"></i> 参数 (Arguments)
+                        </div>
+                        <pre class="code-block">{{ formatJson(stepDetailData.arguments) }}</pre>
+                    </div>
+                    
+                    <!-- 返回结果 -->
+                    <div v-if="stepDetailData.full_result" style="margin-bottom: 16px;">
+                        <div style="color: var(--text-secondary); font-size: 13px; margin-bottom: 4px;">
+                            <i class="fas fa-check-circle" :style="{ color: stepDetailData.full_result.success ? 'var(--success)' : 'var(--error)' }"></i> 
+                            返回结果 (Result)
+                        </div>
+                        <pre class="code-block">{{ formatJson(stepDetailData.full_result) }}</pre>
+                    </div>
+                    
+                    <!-- 无详情提示 -->
+                    <div v-if="!stepDetailData.arguments && !stepDetailData.full_result" style="text-align: center; color: var(--text-muted); padding: 40px;">
+                        <i class="fas fa-info-circle" style="font-size: 48px; margin-bottom: 16px; opacity: 0.5;"></i>
+                        <div>该步骤没有详细信息</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <!-- Add/Edit Memory Modal -->
         <div v-if="showAddMemoryModal" class="modal-overlay" @click.self="showAddMemoryModal = false">
             <div class="modal" style="max-width: 560px;">
@@ -8083,7 +8159,7 @@
                     qqGroups: [],
                     currentQqId: null,
                     currentQqMessages: [],
-                    maxContextLength: 50,
+                    maxContextLength: 30000,
                     
                     // Context Indicator
                     circumference: 2 * Math.PI * 16,  // 圆圈周长 (2πr, r=16)
@@ -8219,7 +8295,7 @@
                         image_model: '',
                         search_api_key: '',
                         embedding_model: '',
-                        max_context_length: 8000
+                        max_context_length: 30000
                     },
                     showApiKey: false,
                     isTesting: false,
@@ -8260,7 +8336,7 @@
                         image_model: '',
                         search_api_key: '',
                         embedding_model: '',
-                        max_context_length: 8000
+                        max_context_length: 30000
                     },
 
                     // Skills 配置
@@ -8395,6 +8471,15 @@
                     },
                     showThemePanel: false,
                     showQqScrollButton: false,
+                    
+                    // 步骤详情模态框
+                    showStepDetailModal: false,
+                    stepDetailData: {
+                        name: '',
+                        detail: '',
+                        arguments: null,
+                        full_result: null
+                    },
                     
                     // Theme Settings
                     themeSettings: {
@@ -8732,8 +8817,8 @@
                         }, 0)
                     );
                     
-                    // 计算使用百分比（基于 Token 数量，使用 max_tokens 作为限制）
-                    const maxTokens = this.aiConfig.max_tokens || 8000;
+                    // 计算使用百分比（基于 Token 数量，使用 max_context_length 作为限制）
+                    const maxTokens = this.aiConfig.max_context_length || 30000;
                     const estimatedTokens = this.contextTokenEstimate || 0;
                     this.contextUsage = Math.min(100, (estimatedTokens / maxTokens) * 100);
                 },
@@ -11725,6 +11810,25 @@ def main(params):
                     return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
                 },
                 
+                formatJson(obj) {
+                    if (!obj) return '';
+                    try {
+                        return JSON.stringify(obj, null, 2);
+                    } catch (e) {
+                        return String(obj);
+                    }
+                },
+                
+                viewStepDetail(step) {
+                    this.stepDetailData = {
+                        name: step.name || '',
+                        detail: step.detail || '',
+                        arguments: step.arguments || null,
+                        full_result: step.full_result || null
+                    };
+                    this.showStepDetailModal = true;
+                },
+                
                 // AI Config Functions
                 getBaseUrlPlaceholder() {
                     const placeholders = {
@@ -11849,7 +11953,7 @@ def main(params):
                             image_model: '',
                             search_api_key: '',
                             embedding_model: '',
-                            max_context_length: 8000
+                            max_context_length: 30000
                         };
                     }
                     this.showModelEditModal = true;

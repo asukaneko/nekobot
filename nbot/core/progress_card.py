@@ -70,7 +70,8 @@ class ProgressCard:
         self.is_completed = False
         
     def update(self, step_type: StepType, step_name: str, 
-               step_detail: str = None, step_result: Any = None):
+               step_detail: str = None, step_result: Any = None,
+               step_arguments: Dict = None, step_full_result: Any = None):
         """
         更新进度卡片
         
@@ -79,6 +80,8 @@ class ProgressCard:
             step_name: 步骤名称
             step_detail: 步骤详情
             step_result: 步骤结果（用于完成状态）
+            step_arguments: 完整参数（用于工具调用）
+            step_full_result: 完整返回值（用于工具调用）
         """
         if self.is_completed:
             return
@@ -100,6 +103,11 @@ class ProgressCard:
                         step['name'] = step_name
                     if step_result and isinstance(step_result, str):
                         step['result'] = step_result[:100]
+                    # 保存完整参数和返回值（用于详情弹窗）
+                    if step_arguments:
+                        step['arguments'] = step_arguments
+                    if step_full_result:
+                        step['full_result'] = step_full_result
                     break
         elif step_type == StepType.DONE:
             # 添加完成步骤前，将所有运行中的步骤标记为完成
