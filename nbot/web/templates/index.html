@@ -4775,13 +4775,11 @@
                                     :key="session.id"
                                     class="session-item"
                                     :class="{ active: currentSession?.id === session.id }"
-                                    @click="selectSession(session)"
-                                    @dblclick="editSession(session)"
                                 >
                                     <div class="session-icon">
                                         <i :class="session.type === 'qq' ? 'fab fa-qq' : 'fas fa-comment'"></i>
                                     </div>
-                                    <div class="session-info">
+                                    <div class="session-info" @click="selectSession(session)">
                                         <input 
                                             v-if="editingSessionId === session.id"
                                             v-model="editingSessionName"
@@ -4795,8 +4793,6 @@
                                         <div 
                                             v-else
                                             class="session-name"
-                                            @dblclick.stop="startEditSessionName(session)"
-                                            @click.stop
                                         >
                                             {{ session.name }}
                                         </div>
