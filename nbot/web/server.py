@@ -710,6 +710,10 @@ class WebChatServer:
         }
         
         _log.info(f"[Auth] 生成登录 Token: username={username}, expires={expires_at}")
+        
+        # 持久化保存 Token
+        self._save_login_tokens()
+        
         return token
 
     def _validate_login_token(self, token: str) -> Optional[str]:
@@ -750,6 +754,17 @@ class WebChatServer:
         
         if expired_tokens:
             _log.info(f"[Auth] 清理了 {len(expired_tokens)} 个过期的 Token")
+            self._save_login_tokens()
+    
+    def _save_login_tokens(self):
+        """保存登录 Token 到文件"""
+        try:
+            login_tokens_file = os.path.join(self.data_dir, 'login_tokens.json')
+            os.makedirs(os.path.dirname(login_tokens_file), exist_ok=True)
+            with open(login_tokens_file, 'w', encoding='utf-8') as f:
+                json.dump(self.login_tokens, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            _log.error(f"[Auth] 保存登录 Token 失败: {e}")
 
     def _load_ai_config(self):
         """从配置文件加载 AI 配置（支持 .env 环境变量）"""
@@ -1295,6 +1310,19 @@ class WebChatServer:
                 with open(settings_file, 'r', encoding='utf-8') as f:
                     saved_settings = json.load(f)
                     self.settings.update(saved_settings)
+            
+            # 加载登录 Token（持久化存储，重启后仍然有效）
+            login_tokens_file = os.path.join(self.data_dir, 'login_tokens.json')
+            if os.path.exists(login_tokens_file):
+                try:
+                    with open(login_tokens_file, 'r', encoding='utf-8') as f:
+                        self.login_tokens = json.load(f)
+                    # 清理已过期的 token
+                    self._cleanup_expired_tokens()
+                    _log.info(f"[Auth] 已加载 {len(self.login_tokens)} 个登录 Token")
+                except Exception as e:
+                    _log.warning(f"[Auth] 加载登录 Token 失败: {e}")
+                    self.login_tokens = {}
             
             # 加载 Heartbeat 配置
             heartbeat_file = os.path.join(self.data_dir, 'heartbeat.json')
@@ -2293,6 +2321,8 @@ class WebChatServer:
             if token and token in self.login_tokens:
                 del self.login_tokens[token]
                 _log.info(f"[Auth] Token 已删除: {token[:8]}...")
+                # 持久化保存
+                self._save_login_tokens()
             
             return jsonify({'success': True, 'message': '已登出'})
 

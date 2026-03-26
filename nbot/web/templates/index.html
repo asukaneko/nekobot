@@ -9113,10 +9113,9 @@
                             localStorage.removeItem('username');
                         }
                     } catch (e) {
-                        // Token 验证失败，清除本地存储
+                        // 网络错误或其他问题，保留 token 稍后重试
                         console.error('Token 验证失败:', e);
-                        localStorage.removeItem('auth_token');
-                        localStorage.removeItem('username');
+                        // 不清除 token，让用户稍后可以重试或重新登录
                     }
                 } else if (this.username) {
                     // 兼容旧版本：使用 sessionStorage 的情况
