@@ -8412,7 +8412,16 @@
         const { createApp } = Vue;
 
         const api = axios.create({ baseURL: '', timeout: 60000 });
-        const socket = io();
+        
+        // Socket.IO 连接配置优化
+        const socket = io({
+            transports: ['polling', 'websocket'],  // 优先使用轮询，失败后切换到 WebSocket
+            reconnection: true,                      // 启用自动重连
+            reconnectionAttempts: 10,                // 最多重连 10 次
+            reconnectionDelay: 1000,                 // 重连延迟 1 秒
+            reconnectionDelayMax: 5000,              // 最大重连延迟 5 秒
+            timeout: 20000                           // 连接超时 20 秒
+        });
 
         // 自定义指令：点击外部关闭
         const clickOutside = {
@@ -8509,6 +8518,7 @@
                     isTyping: false,
                     thinkingCards: [],  // 进度卡片列表
                     showThinkingCard: true,  // 是否显示进度卡片
+                    orphanCards: {},  // 找不到父消息的孤儿卡片（按 parentMsgId 分组）
                     isUserScrolling: false,
                     showScrollToBottom: false,
                     sessionSearch: '',
@@ -9290,6 +9300,9 @@
                     this.isLoggedIn = false;
                     this.username = '';
                     this.password = '';
+                    this.thinkingCards = [];
+                    this.orphanCards = {};
+                    this.currentMessages = [];
                     this.showToast('已登出', 'info');
                 },
                 
@@ -9380,8 +9393,20 @@
                 async refreshData() {
                     this.isLoading = true;
                     try {
-                        await this.loadPageData(this.currentPage);
-                        this.showToast('数据已刷新', 'success');
+                        // 如果在聊天页面且有当前会话，重新加载会话消息
+                        if (this.currentPage === 'chat' && this.currentSession) {
+                            await this.loadMessages();
+                            this.showToast('会话已刷新', 'success');
+                        } else if (this.currentPage === 'chat' && this.currentQqId) {
+                            // 重新加载 QQ 会话消息
+                            const type = this.chatTab === 'qq_private' ? 'private' : 'group';
+                            const res = await api.get(`/api/qq/messages/${type}/${this.currentQqId}`);
+                            this.currentQqMessages = res.data.messages || [];
+                            this.showToast('会话已刷新', 'success');
+                        } else {
+                            await this.loadPageData(this.currentPage);
+                            this.showToast('数据已刷新', 'success');
+                        }
                     } catch (e) {
                         this.showToast('刷新失败', 'error');
                     } finally {
@@ -10733,8 +10758,9 @@ def main(params):
                     this.isTyping = false;
                     this.isLoading = false;
                     
-                    // 必须清空进度卡片，防止跨会话污染
+                    // 必须清空进度卡片和孤儿卡片，防止跨会话污染
                     this.thinkingCards = [];
+                    this.orphanCards = {};
                     
                     // 中断之前的消息加载（如果有）
                     if (this.messageRefreshTimer) {
@@ -12733,13 +12759,35 @@ def main(params):
                                 // 用服务器返回的消息替换本地临时消息
                                 const localIdx = this.currentMessages.findIndex(m => m.id === msg.tempId);
                                 if (localIdx !== -1) {
-                                    // 替换为服务器返回的消息（保留本地附件数据和进度卡片以防服务器没有）
+                                    // 保存原始 tempId，以便后续的 thinking_card 能找到父消息
                                     const localMsg = this.currentMessages[localIdx];
-                                    this.currentMessages.splice(localIdx, 1, {
+                                    
+                                    // 替换为服务器返回的消息
+                                    const newMsg = {
                                         ...msg,
+                                        originalTempId: msg.tempId,  // 保存原始 tempId
                                         attachments: msg.attachments?.length ? msg.attachments : localMsg.attachments,
                                         thinking_cards: localMsg.thinking_cards || []  // 保留进度卡片
-                                    });
+                                    };
+                                    
+                                    this.currentMessages.splice(localIdx, 1, newMsg);
+                                    
+                                    // 将之前暂存的孤儿卡片关联到新消息
+                                    if (this.orphanCards[msg.tempId]) {
+                                        const orphanList = this.orphanCards[msg.tempId];
+                                        orphanList.forEach(orphan => {
+                                            if (!newMsg.thinking_cards.find(c => c.id === orphan.id)) {
+                                                newMsg.thinking_cards.push(orphan);
+                                            }
+                                        });
+                                        // 更新内存中的引用（splice 替换后需要重新获取）
+                                        const updatedMsg = this.currentMessages[localIdx];
+                                        if (updatedMsg) {
+                                            updatedMsg.thinking_cards = newMsg.thinking_cards;
+                                        }
+                                        delete this.orphanCards[msg.tempId];
+                                    }
+                                    
                                     return;
                                 }
                             }
@@ -12753,41 +12801,81 @@ def main(params):
                                 
                                 // 找到关联的用户消息，将卡片存储在该消息中
                                 const parentMsgId = msg.parent_message_id;
+                                let parentMsg = null;
+                                let msgIdx = -1;
                                 
+                                // 首先尝试通过 id 查找
                                 if (parentMsgId) {
-                                    const parentMsg = this.currentMessages.find(m => m.id === parentMsgId);
-                                    
-                                    if (parentMsg) {
-                                        // Vue 3 中直接赋值即可触发响应式更新
-                                        if (!parentMsg.thinking_cards) {
-                                            parentMsg.thinking_cards = [];
-                                        }
-                                        const existingIdx = parentMsg.thinking_cards.findIndex(c => c.id === msg.id);
-                                        
-                                        if (existingIdx !== -1) {
-                                            // 使用 Object.assign 合并更新，保留响应式
-                                            Object.assign(parentMsg.thinking_cards[existingIdx], msg);
-                                        } else {
-                                            parentMsg.thinking_cards.push(msg);
-                                        }
-                                    } else {
-                                        // 如果找不到父消息，使用全局存储（兼容旧逻辑）
-                                        const existingIdx = this.thinkingCards.findIndex(c => c.id === msg.id);
-                                        if (existingIdx !== -1) {
-                                            Object.assign(this.thinkingCards[existingIdx], msg);
-                                        } else {
-                                            this.thinkingCards.push(msg);
-                                        }
-                                    }
-                                } else {
-                                    // 没有 parent_message_id，使用全局存储
-                                    const existingIdx = this.thinkingCards.findIndex(c => c.id === msg.id);
-                                    if (existingIdx !== -1) {
-                                        Object.assign(this.thinkingCards[existingIdx], msg);
-                                    } else {
-                                        this.thinkingCards.push(msg);
+                                    msgIdx = this.currentMessages.findIndex(m => m.id === parentMsgId || m.originalTempId === parentMsgId);
+                                    if (msgIdx !== -1) {
+                                        parentMsg = this.currentMessages[msgIdx];
                                     }
                                 }
+                                
+                                // 如果没找到，尝试在所有消息的 thinking_cards 中查找是否有该卡片（兼容消息已替换的情况）
+                                if (!parentMsg) {
+                                    for (let i = 0; i < this.currentMessages.length; i++) {
+                                        const m = this.currentMessages[i];
+                                        if (m.thinking_cards && m.thinking_cards.find(c => c.id === msg.id)) {
+                                            parentMsg = m;
+                                            msgIdx = i;
+                                            break;
+                                        }
+                                    }
+                                }
+                                
+                                if (parentMsg && msgIdx !== -1) {
+                                    // 确保 thinking_cards 数组存在
+                                    const oldCards = parentMsg.thinking_cards || [];
+                                    const existingIdx = oldCards.findIndex(c => c.id === msg.id);
+                                    
+                                    // 创建新的卡片数组
+                                    let newCards;
+                                    if (existingIdx !== -1) {
+                                        // 替换整个卡片对象：旧数据作为基础，新数据覆盖旧数据
+                                        const oldCard = oldCards[existingIdx];
+                                        const updatedCard = { ...oldCard, ...msg };
+                                        newCards = [...oldCards];
+                                        newCards[existingIdx] = updatedCard;
+                                    } else {
+                                        newCards = [...oldCards, {...msg}];
+                                    }
+                                    
+                                    // 如果之前有暂存的孤儿卡片，合并过来
+                                    if (this.orphanCards[parentMsgId]) {
+                                        const orphanList = this.orphanCards[parentMsgId];
+                                        orphanList.forEach(orphan => {
+                                            if (!newCards.find(c => c.id === orphan.id)) {
+                                                newCards.push({...orphan});
+                                            }
+                                        });
+                                        delete this.orphanCards[parentMsgId];
+                                    }
+                                    
+                                    // 替换整个消息对象以触发 Vue 响应式
+                                    const updatedMsg = { ...parentMsg, thinking_cards: newCards };
+                                    this.currentMessages.splice(msgIdx, 1, updatedMsg);
+                                } else {
+                                    // 找不到父消息，暂存到 orphanCards（按 parentMsgId 分组）
+                                    if (parentMsgId) {
+                                        if (!this.orphanCards[parentMsgId]) {
+                                            this.orphanCards[parentMsgId] = [];
+                                        }
+                                        const existingIdx = this.orphanCards[parentMsgId].findIndex(c => c.id === msg.id);
+                                        if (existingIdx !== -1) {
+                                            // 替换整个卡片对象：旧数据作为基础，新数据覆盖旧数据
+                                            const oldCard = this.orphanCards[parentMsgId][existingIdx];
+                                            const updatedCard = { ...oldCard, ...msg };
+                                            const newList = [...this.orphanCards[parentMsgId]];
+                                            newList[existingIdx] = updatedCard;
+                                            this.orphanCards[parentMsgId] = newList;
+                                        } else {
+                                            this.orphanCards[parentMsgId] = [...this.orphanCards[parentMsgId], {...msg}];
+                                        }
+                                    }
+                                }
+                                // 强制 Vue 更新以确保进度变化能正确渲染
+                                this.$forceUpdate();
                                 this.$nextTick(() => this.scrollToBottom());
                                 return;  // 不添加到消息列表
                             }

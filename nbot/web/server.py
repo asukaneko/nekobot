@@ -6846,8 +6846,19 @@ def create_web_app(config: Dict[str, Any] = None) -> tuple[Flask, SocketIO]:
     app.config['SECRET_KEY'] = 'nbot-secret-key'
     app.config.update(config or {})
 
-    # 增加 SocketIO 消息大小限制到 100MB，并强制使用 threading 模式避免 eventlet 阻塞问题
-    socketio = SocketIO(app, async_mode='threading', cors_allowed_origins="*", max_http_buffer_size=100*1024*1024)
+    # SocketIO 配置优化：增加稳定性
+    # ping_timeout: 心跳超时时间
+    # ping_interval: 心跳间隔
+    # always_connect: 断开后自动重连
+    socketio = SocketIO(
+        app, 
+        async_mode='threading', 
+        cors_allowed_origins="*", 
+        max_http_buffer_size=100*1024*1024,
+        ping_timeout=60,
+        ping_interval=25,
+        always_connect=True
+    )
 
     server = WebChatServer(app, socketio)
 
