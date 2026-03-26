@@ -3512,6 +3512,122 @@
         .badge-danger { background: rgba(218, 54, 51, 0.2); color: #f85149; }
         .badge-info { background: rgba(88, 166, 255, 0.2); color: #58a6ff; }
 
+        /* 滑动开关 */
+        .toggle-switch {
+            position: relative;
+            width: 56px;
+            height: 28px;
+            cursor: pointer;
+        }
+        .toggle-switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+        .toggle-slider {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: var(--bg-tertiary);
+            border-radius: 14px;
+            transition: all 0.3s ease;
+        }
+        .toggle-slider::before {
+            content: '';
+            position: absolute;
+            width: 22px;
+            height: 22px;
+            left: 3px;
+            bottom: 3px;
+            background: white;
+            border-radius: 50%;
+            transition: all 0.3s ease;
+        }
+        .toggle-switch input:checked + .toggle-slider {
+            background: var(--success);
+        }
+        .toggle-switch input:checked + .toggle-slider::before {
+            transform: translateX(28px);
+        }
+
+        /* 工具卡片样式 */
+        .tool-card {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 16px;
+            transition: all 0.2s;
+        }
+        .tool-card:hover {
+            border-color: var(--accent-primary);
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        .tool-card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
+        }
+        .tool-card-name {
+            font-size: 18px;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+        .tool-card-desc {
+            color: var(--text-secondary);
+            font-size: 14px;
+            margin-bottom: 16px;
+            line-height: 1.6;
+        }
+        .tool-card-section {
+            margin-top: 12px;
+            padding-top: 12px;
+            border-top: 1px solid var(--border-color);
+        }
+        .tool-card-section-title {
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 8px;
+        }
+        .tool-param-item {
+            display: flex;
+            align-items: flex-start;
+            gap: 8px;
+            padding: 6px 0;
+            font-size: 13px;
+        }
+        .tool-param-name {
+            color: var(--accent-primary);
+            font-family: monospace;
+            font-weight: 500;
+            min-width: 100px;
+        }
+        .tool-param-type {
+            color: var(--text-muted);
+            font-size: 11px;
+            background: var(--bg-tertiary);
+            padding: 2px 6px;
+            border-radius: 4px;
+        }
+        .tool-param-desc {
+            color: var(--text-secondary);
+            flex: 1;
+        }
+        .tool-builtin-badge {
+            font-size: 10px;
+            background: var(--accent-primary);
+            color: white;
+            padding: 2px 6px;
+            border-radius: 4px;
+            margin-left: 8px;
+        }
+
         /* Forms */
         .form-group { margin-bottom: 20px; }
 
@@ -4975,11 +5091,12 @@
                                     :key="session.id"
                                     class="session-item"
                                     :class="{ active: currentSession?.id === session.id }"
+                                    @click="openSession(session)"
                                 >
                                     <div class="session-icon">
                                         <i :class="session.type === 'qq' ? 'fab fa-qq' : 'fas fa-comment'"></i>
                                     </div>
-                                    <div class="session-info" @click="selectSession(session)">
+                                    <div class="session-info">
                                         <input 
                                             v-if="editingSessionId === session.id"
                                             v-model="editingSessionName"
@@ -6969,41 +7086,40 @@
                     <div v-if="currentPage === 'tools'" class="fade-in">
                         <div class="card">
                             <div class="card-header">
-                                <span class="card-title"><i class="fas fa-toolbox"></i> Tools 配置</span>
-                                <button class="btn btn-primary" @click="openToolModal()" :disabled="isLoading">
-                                    <i class="fas fa-plus"></i> 新建 Tool
-                                </button>
+                                <span class="card-title"><i class="fas fa-toolbox"></i> 工具列表</span>
                             </div>
                             <div class="card-body">
                                 <div v-if="tools.length === 0" class="empty-state">
                                     <i class="fas fa-toolbox" style="font-size: 48px; color: var(--text-secondary); margin-bottom: 16px;"></i>
-                                    <p>暂无 Tools 配置</p>
-                                    <button class="btn btn-primary" @click="openToolModal()" style="margin-top: 12px;">
-                                        <i class="fas fa-plus"></i> 添加第一个 Tool
-                                    </button>
+                                    <p>暂无可用工具</p>
                                 </div>
                                 <div v-else class="tools-list">
-                                    <div v-for="tool in tools" :key="tool.id" class="tool-item" style="border: 1px solid var(--border-color); border-radius: 8px; padding: 16px; margin-bottom: 12px;">
-                                        <div style="display: flex; justify-content: space-between; align-items: start;">
-                                            <div style="flex: 1;">
-                                                <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
-                                                    <h4 style="margin: 0; font-size: 16px;">{{ tool.name }}</h4>
-                                                    <span class="badge" :class="tool.enabled ? 'badge-success' : 'badge-secondary'">
-                                                        {{ tool.enabled ? '启用' : '禁用' }}
-                                                    </span>
-                                                </div>
-                                                <p style="margin: 0; color: var(--text-secondary); font-size: 14px;">{{ tool.description }}</p>
+                                    <div v-for="tool in tools" :key="tool.id" class="tool-card">
+                                        <div class="tool-card-header">
+                                            <div>
+                                                <span class="tool-card-name">
+                                                    {{ tool.name }}
+                                                    <span v-if="tool._builtin" class="tool-builtin-badge">内置</span>
+                                                </span>
                                             </div>
-                                            <div style="display: flex; gap: 8px;">
-                                                <button class="btn btn-secondary" @click="openToolModal(tool)" :disabled="isLoading">
-                                                    <i class="fas fa-edit"></i>
-                                                </button>
-                                                <button class="btn btn-secondary" @click="toggleTool(tool)" :disabled="isLoading">
-                                                    <i :class="tool.enabled ? 'fas fa-pause' : 'fas fa-play'"></i>
-                                                </button>
-                                                <button class="btn btn-danger" @click="deleteTool(tool.id)" :disabled="isLoading">
-                                                    <i class="fas fa-trash"></i>
-                                                </button>
+                                            <label class="toggle-switch">
+                                                <input type="checkbox" :checked="tool.enabled" @change="toggleTool(tool)">
+                                                <span class="toggle-slider"></span>
+                                            </label>
+                                        </div>
+                                        <div class="tool-card-desc">{{ tool.description }}</div>
+                                        
+                                        <!-- 工具参数 -->
+                                        <div v-if="tool.parameters && tool.parameters.properties" class="tool-card-section">
+                                            <div class="tool-card-section-title">输入参数</div>
+                                            <div v-for="(param, key) in tool.parameters.properties" :key="key" class="tool-param-item">
+                                                <span class="tool-param-name">{{ key }}</span>
+                                                <span v-if="param.type" class="tool-param-type">{{ param.type }}</span>
+                                                <span v-if="param.description" class="tool-param-desc">{{ param.description }}</span>
+                                            </div>
+                                            <div v-if="tool.parameters.required" class="tool-param-item" style="margin-top: 8px;">
+                                                <span style="color: var(--text-muted); font-size: 12px;">必填参数:</span>
+                                                <span v-for="req in tool.parameters.required" :key="req" class="tool-param-name" style="color: var(--danger);">{{ req }}</span>
                                             </div>
                                         </div>
                                     </div>
