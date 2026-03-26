@@ -45,12 +45,33 @@ class PromptManager:
             try:
                 with open(memories_file, 'r', encoding='utf-8') as f:
                     self._memories_cache = json.load(f)
+                # 迁移旧格式数据到新格式
+                self._migrate_memories_format()
             except Exception as e:
                 print(f"加载记忆文件失败: {e}")
                 self._memories_cache = []
         else:
             self._memories_cache = []
     
+    def _migrate_memories_format(self):
+        """迁移旧格式记忆到新格式"""
+        migrated = False
+        for mem in self._memories_cache:
+            # 检查是否是旧格式（使用 key 和 value）
+            if 'key' in mem or 'value' in mem:
+                # 迁移到新格式（使用 title, summary, content）
+                mem['title'] = mem.pop('key', mem.get('title', ''))
+                mem['content'] = mem.pop('value', mem.get('content', ''))
+                if 'summary' not in mem:
+                    # 从 content 提取前 100 字作为摘要
+                    content = mem.get('content', '')
+                    mem['summary'] = content[:100] + '...' if len(content) > 100 else content
+                migrated = True
+        
+        if migrated:
+            self._save_memories()
+            print("记忆数据已迁移到新格式")
+
     def _save_memories(self):
         """保存记忆数据"""
         memories_file = os.path.join(self.base_dir, 'data', 'memories.json')
@@ -103,7 +124,7 @@ class PromptManager:
             group_id: 群组ID
             
         Returns:
-            记忆内容字符串
+            记忆内容字符串（包含标题和摘要）
         """
         self._load_memories()
         
@@ -121,9 +142,8 @@ class PromptManager:
             
             mem_type = mem.get('type', 'long')
             
-            if mem_type == 'long':
-                memories.append(f"[{mem.get('key', '')}]: {mem.get('value', '')}")
-            elif mem_type == 'short':
+            # 检查是否过期
+            if mem_type == 'short':
                 created_at = mem.get('created_at', '')
                 expire_days = mem.get('expire_days', 7)
                 
@@ -131,10 +151,20 @@ class PromptManager:
                     try:
                         created = datetime.fromisoformat(created_at)
                         diff_days = (now - created).days
-                        if diff_days <= expire_days:
-                            memories.append(f"[{mem.get('key', '')}]: {mem.get('value', '')}")
+                        if diff_days > expire_days:
+                            continue
                     except:
-                        memories.append(f"[{mem.get('key', '')}]: {mem.get('value', '')}")
+                        pass
+            
+            # 新格式：包含标题、摘要、内容
+            title = mem.get('title', '')
+            summary = mem.get('summary', '')
+            content = mem.get('content', '')
+            
+            if title or content:
+                # 优先使用摘要，如果没有摘要则使用内容的前100字
+                display_text = summary if summary else (content[:100] + '...' if len(content) > 100 else content)
+                memories.append(f"【{title}】{display_text}")
         
         if memories:
             return "\n".join(["【重要记忆】"] + memories)
@@ -250,24 +280,31 @@ class PromptManager:
             print(f"保存提示词失败: {e}")
             return False
     
-    def add_memory(self, key: str, value: str, target_id: str, 
-                   mem_type: str = 'long', expire_days: int = 7) -> bool:
+    def add_memory(self, title: str, content: str, target_id: str, 
+                   summary: str = None, mem_type: str = 'long', 
+                   expire_days: int = 7) -> bool:
         """添加记忆
         
         Args:
-            key: 记忆键
-            value: 记忆值
+            title: 记忆标题
+            content: 记忆内容
             target_id: 目标ID（用户或群组）
+            summary: 记忆摘要（可选，默认从 content 提取）
             mem_type: 记忆类型 ('long' 长期, 'short' 短期)
             expire_days: 短期记忆过期天数
             
         Returns:
             是否添加成功
         """
+        # 如果没有提供摘要，从内容中提取
+        if not summary:
+            summary = content[:100] + '...' if len(content) > 100 else content
+        
         memory = {
             'id': f"mem_{datetime.now().timestamp()}",
-            'key': key,
-            'value': value,
+            'title': title,
+            'summary': summary,
+            'content': content,
             'target_id': target_id,
             'type': mem_type,
             'expire_days': expire_days,
@@ -364,21 +401,23 @@ def load_memories(user_id: str = None, group_id: str = None) -> str:
     return prompt_manager.load_memories(user_id, group_id)
 
 
-def add_memory(key: str, value: str, target_id: str,
-              mem_type: str = 'long', expire_days: int = 7) -> bool:
+def add_memory(title: str, content: str, target_id: str,
+              summary: str = None, mem_type: str = 'long', 
+              expire_days: int = 7) -> bool:
     """便捷函数：添加记忆
     
     Args:
-        key: 记忆键
-        value: 记忆值
+        title: 记忆标题
+        content: 记忆内容
         target_id: 目标ID
+        summary: 记忆摘要
         mem_type: 记忆类型
         expire_days: 过期天数
         
     Returns:
         是否添加成功
     """
-    return prompt_manager.add_memory(key, value, target_id, mem_type, expire_days)
+    return prompt_manager.add_memory(title, content, target_id, summary, mem_type, expire_days)
 
 
 def save_prompt(content: str, user_id: str = None, group_id: str = None) -> bool:

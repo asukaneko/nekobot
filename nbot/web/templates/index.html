@@ -1721,6 +1721,22 @@
             margin: 16px 0;
         }
 
+        .memory-item-summary {
+            background: var(--bg-tertiary);
+            padding: 10px 12px;
+            border-radius: 6px;
+            font-size: 13px;
+            color: var(--text-secondary);
+            line-height: 1.5;
+            margin-top: 12px;
+            border-left: 3px solid var(--accent-color);
+        }
+
+        .memory-item-summary i {
+            margin-right: 6px;
+            color: var(--accent-color);
+        }
+
         .memory-item-meta {
             display: flex;
             flex-wrap: wrap;
@@ -5856,7 +5872,7 @@
                                             <div class="memory-item-icon">
                                                 <i class="fas fa-archive"></i>
                                             </div>
-                                            <div class="memory-item-title">{{ mem.key }}</div>
+                                            <div class="memory-item-title">{{ mem.title || mem.key }}</div>
                                             <div class="memory-item-actions" @click.stop>
                                                 <button class="btn-icon" @click="editMemory(mem)" title="编辑">
                                                     <i class="fas fa-edit"></i>
@@ -5867,7 +5883,10 @@
                                             </div>
                                         </div>
                                         <div class="memory-item-content">
-                                            <p>{{ mem.value }}</p>
+                                            <div v-if="mem.summary" class="memory-item-summary">
+                                                <i class="fas fa-file-alt"></i> {{ mem.summary }}
+                                            </div>
+                                            <p>{{ mem.content || mem.value }}</p>
                                             <div class="memory-item-meta">
                                                 <span><i class="fas fa-calendar"></i> {{ formatFullTime(mem.created_at) }}</span>
                                                 <span><i class="fas fa-sync"></i> {{ formatFullTime(mem.updated_at) }}</span>
@@ -5904,7 +5923,7 @@
                                             <div class="memory-item-icon">
                                                 <i class="fas fa-clock"></i>
                                             </div>
-                                            <div class="memory-item-title">{{ mem.key }}</div>
+                                            <div class="memory-item-title">{{ mem.title || mem.key }}</div>
                                             <div class="memory-item-actions" @click.stop>
                                                 <button class="btn-icon" @click="promoteToLongTerm(mem)" title="转为长期记忆">
                                                     <i class="fas fa-arrow-up"></i>
@@ -5918,7 +5937,10 @@
                                             </div>
                                         </div>
                                         <div class="memory-item-content">
-                                            <p>{{ mem.value }}</p>
+                                            <div v-if="mem.summary" class="memory-item-summary">
+                                                <i class="fas fa-file-alt"></i> {{ mem.summary }}
+                                            </div>
+                                            <p>{{ mem.content || mem.value }}</p>
                                             <div class="memory-item-meta">
                                                 <span><i class="fas fa-calendar"></i> {{ formatFullTime(mem.created_at) }}</span>
                                                 <span><i class="fas fa-hourglass-half"></i> 有效期: {{ mem.expire_days || 7 }}天</span>
@@ -7445,16 +7467,26 @@
                     <div class="form-group">
                         <label class="form-label">记忆标题 <span class="required">*</span></label>
                         <input 
-                            v-model="editingMemory.key" 
+                            v-model="editingMemory.title" 
                             type="text" 
                             class="form-input" 
                             placeholder="输入记忆的标题或关键词"
                         >
                     </div>
                     <div class="form-group">
+                        <label class="form-label">记忆摘要</label>
+                        <input 
+                            v-model="editingMemory.summary" 
+                            type="text" 
+                            class="form-input" 
+                            placeholder="简短描述（选填，将用于提示词中的记忆展示）"
+                        >
+                        <div class="form-hint">留空将自动从内容前100字生成摘要</div>
+                    </div>
+                    <div class="form-group">
                         <label class="form-label">记忆内容 <span class="required">*</span></label>
                         <textarea 
-                            v-model="editingMemory.value" 
+                            v-model="editingMemory.content" 
                             class="form-textarea" 
                             rows="5"
                             placeholder="输入记忆的详细内容"
@@ -8763,8 +8795,8 @@
                                 { name: 'type', type: 'string', desc: '记忆类型: long/short/all' },
                                 { name: 'target_id', type: 'string', desc: '关联目标ID' }
                             ], response: '{"memories": [...], "long_term": [...], "short_term": [...]}' },
-                            { method: 'POST', path: '/api/memory', description: '添加新记忆', body: '{"key": "标题", "value": "内容", "type": "long", "target_id": "用户ID"}', response: '{"success": true}' },
-                            { method: 'PUT', path: '/api/memory/:id', description: '更新记忆', body: '{"key": "新标题", "value": "新内容"}' },
+                            { method: 'POST', path: '/api/memory', description: '添加新记忆', body: '{"title": "标题", "content": "内容", "summary": "摘要(可选)", "type": "long", "target_id": "用户ID"}', response: '{"success": true}' },
+                            { method: 'PUT', path: '/api/memory/:id', description: '更新记忆', body: '{"title": "新标题", "content": "新内容", "summary": "新摘要"}' },
                             { method: 'DELETE', path: '/api/memory/:id', description: '删除记忆' },
                             { method: 'DELETE', path: '/api/memory', description: '清空所有记忆', params: [
                                 { name: 'target_id', type: 'string', desc: '可选，指定目标ID' }
@@ -8926,18 +8958,52 @@
                 // 初始化主题
                 this.initTheme();
 
-                if (this.username) {
+                // 尝试使用保存的 Token 自动登录
+                const savedToken = localStorage.getItem('auth_token');
+                const savedUsername = localStorage.getItem('username');
+                
+                if (savedToken && savedUsername) {
+                    try {
+                        // 验证 Token 是否有效
+                        const res = await api.post('/api/verify-token', { token: savedToken });
+                        
+                        if (res.data.success) {
+                            // Token 有效，自动登录
+                            this.username = res.data.username || savedUsername;
+                            this.isLoggedIn = true;
+                            
+                            // 只加载首页（仪表盘）需要的数据
+                            await Promise.all([
+                                this.loadStats(),
+                                this.loadSessions(),
+                                this.loadSettings(),
+                                this.loadPersonality()
+                            ]);
+                            // 延迟初始化图表
+                            setTimeout(() => this.initCharts(), 100);
+                        } else {
+                            // Token 无效或已过期，清除本地存储
+                            localStorage.removeItem('auth_token');
+                            localStorage.removeItem('username');
+                        }
+                    } catch (e) {
+                        // Token 验证失败，清除本地存储
+                        console.error('Token 验证失败:', e);
+                        localStorage.removeItem('auth_token');
+                        localStorage.removeItem('username');
+                    }
+                } else if (this.username) {
+                    // 兼容旧版本：使用 sessionStorage 的情况
                     this.isLoggedIn = true;
-                    // 只加载首页（仪表盘）需要的数据，而不是全部数据
                     await Promise.all([
                         this.loadStats(),
                         this.loadSessions(),
                         this.loadSettings(),
                         this.loadPersonality()
                     ]);
-                    // 延迟初始化图表
                     setTimeout(() => this.initCharts(), 100);
                 }
+                
                 this.initSocket();
 
                 // 监听窗口大小变化，调整图表
@@ -9071,7 +9137,11 @@
                         });
                         
                         if (res.data.success) {
-                            sessionStorage.setItem('username', this.username);
+                            // 使用 localStorage 存储登录信息（支持长时间免登录）
+                            localStorage.setItem('username', this.username);
+                            if (res.data.token) {
+                                localStorage.setItem('auth_token', res.data.token);
+                            }
                             this.isLoggedIn = true;
                             this.password = ''; // 清空密码
                             await this.loadAllData();
@@ -9086,11 +9156,25 @@
                     }
                 },
 
-                logout() {
-                    sessionStorage.removeItem('username');
+                async logout() {
+                    // 调用后端登出 API 删除 Token
+                    const token = localStorage.getItem('auth_token');
+                    if (token) {
+                        try {
+                            await api.post('/api/logout', { token });
+                        } catch (e) {
+                            console.error('登出失败:', e);
+                        }
+                    }
+                    
+                    // 清除本地存储
+                    localStorage.removeItem('username');
+                    localStorage.removeItem('auth_token');
+                    
                     this.isLoggedIn = false;
                     this.username = '';
                     this.password = '';
+                    this.showToast('已登出', 'info');
                 },
                 
                 navigateTo(page) {
@@ -11768,8 +11852,9 @@ def main(params):
                     this.editingMemory = {
                         id: mem.id,
                         type: mem.type || 'long',
-                        key: mem.key,
-                        value: mem.value,
+                        title: mem.title || mem.key || '',
+                        summary: mem.summary || '',
+                        content: mem.content || mem.value || '',
                         priority: mem.priority || 'normal',
                         expire_days: mem.expire_days || 7,
                         target_id: mem.target_id || ''
@@ -11789,7 +11874,7 @@ def main(params):
                 },
 
                 async saveMemory() {
-                    if (!this.editingMemory.key || !this.editingMemory.value) {
+                    if (!this.editingMemory.title || !this.editingMemory.content) {
                         this.showToast('请填写标题和内容', 'warning');
                         return;
                     }
@@ -11824,8 +11909,9 @@ def main(params):
                     this.editingMemory = {
                         id: null,
                         type: 'long',
-                        key: '',
-                        value: '',
+                        title: '',
+                        summary: '',
+                        content: '',
                         priority: 'normal',
                         expire_days: 7,
                         target_id: ''

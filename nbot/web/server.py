@@ -9,6 +9,8 @@ import os
 import re
 import threading
 import time
+import hashlib
+import secrets
 from datetime import datetime, timedelta
 from typing import Dict, Any, Optional, List
 from flask import Flask, request, jsonify, send_from_directory
@@ -172,13 +174,10 @@ class WebMessageAdapter:
         # 优先使用 prompt_manager（如果可用）
         if PROMPT_MANAGER_AVAILABLE and prompt_manager:
             try:
-                memories = prompt_manager.get_memories(user_id)
-                if memories:
-                    memory_texts = []
-                    for mem in memories:
-                        memory_texts.append(f"[{mem.get('key', '')}]: {mem.get('value', '')}")
-                    if memory_texts:
-                        return "\n".join(["【重要记忆】"] + memory_texts)
+                # 直接使用 prompt_manager 的 load_memories 方法（已包含标题和摘要）
+                memory_text = prompt_manager.load_memories(user_id)
+                if memory_text:
+                    return memory_text
             except Exception as e:
                 _log.error(f"Failed to load memories from prompt_manager: {e}")
         
@@ -194,11 +193,13 @@ class WebMessageAdapter:
             
             mem_type = mem.get('type', 'long')
             
-            if mem_type == 'long':
-                # 长期记忆直接加入
-                memories.append(f"[{mem.get('key', '')}]: {mem.get('value', '')}")
-            elif mem_type == 'short':
-                # 短期记忆检查是否过期
+            # 兼容新旧格式
+            title = mem.get('title', mem.get('key', ''))
+            content = mem.get('content', mem.get('value', ''))
+            summary = mem.get('summary', '')
+            
+            # 检查是否过期
+            if mem_type == 'short':
                 created_at = mem.get('created_at', '')
                 expire_days = mem.get('expire_days', 7)
                 
@@ -206,10 +207,15 @@ class WebMessageAdapter:
                     try:
                         created = datetime.fromisoformat(created_at)
                         diff_days = (now - created).days
-                        if diff_days <= expire_days:
-                            memories.append(f"[{mem.get('key', '')}]: {mem.get('value', '')}")
+                        if diff_days > expire_days:
+                            continue
                     except:
-                        memories.append(f"[{mem.get('key', '')}]: {mem.get('value', '')}")
+                        pass
+            
+            # 新格式：包含标题、摘要、内容
+            if title or content:
+                display_text = summary if summary else (content[:100] + '...' if len(content) > 100 else content)
+                memories.append(f"【{title}】{display_text}")
         
         if memories:
             return "\n".join(["【重要记忆】"] + memories)
@@ -642,6 +648,11 @@ class WebChatServer:
         # 登录密码
         self.web_password = None
 
+        # 登录 Token 管理（用于长时间免登录）
+        # token_store: {token: {'username': str, 'expires_at': datetime, 'created_at': datetime}}
+        self.login_tokens: Dict[str, Dict[str, Any]] = {}
+        self.token_expire_days = 30  # Token 有效期 30 天
+
         # 停止事件字典（用于取消 AI 生成）
         self.stop_events: Dict[str, threading.Event] = {}
 
@@ -674,6 +685,71 @@ class WebChatServer:
             return f"{hours}小时{minutes}分钟"
         else:
             return f"{minutes}分钟"
+
+    def _generate_login_token(self, username: str) -> str:
+        """
+        生成登录 Token
+        
+        Args:
+            username: 用户名
+            
+        Returns:
+            token 字符串
+        """
+        # 生成随机 token
+        token = secrets.token_urlsafe(32)
+        
+        # 存储 token 信息
+        now = datetime.now()
+        expires_at = now + timedelta(days=self.token_expire_days)
+        
+        self.login_tokens[token] = {
+            'username': username,
+            'created_at': now.isoformat(),
+            'expires_at': expires_at.isoformat()
+        }
+        
+        _log.info(f"[Auth] 生成登录 Token: username={username}, expires={expires_at}")
+        return token
+
+    def _validate_login_token(self, token: str) -> Optional[str]:
+        """
+        验证登录 Token
+        
+        Args:
+            token: token 字符串
+            
+        Returns:
+            验证成功返回用户名，失败返回 None
+        """
+        if not token or token not in self.login_tokens:
+            return None
+        
+        token_info = self.login_tokens[token]
+        
+        # 检查是否过期
+        expires_at = datetime.fromisoformat(token_info['expires_at'])
+        if datetime.now() > expires_at:
+            # Token 已过期，删除
+            del self.login_tokens[token]
+            _log.info(f"[Auth] Token 已过期: username={token_info['username']}")
+            return None
+        
+        return token_info['username']
+
+    def _cleanup_expired_tokens(self):
+        """清理过期的 Token"""
+        now = datetime.now()
+        expired_tokens = [
+            token for token, info in self.login_tokens.items()
+            if datetime.fromisoformat(info['expires_at']) < now
+        ]
+        
+        for token in expired_tokens:
+            del self.login_tokens[token]
+        
+        if expired_tokens:
+            _log.info(f"[Auth] 清理了 {len(expired_tokens)} 个过期的 Token")
 
     def _load_ai_config(self):
         """从配置文件加载 AI 配置（支持 .env 环境变量）"""
@@ -1166,8 +1242,12 @@ class WebChatServer:
                     elif self.memories and not prompt_memories:
                         # 如果 self.memories 有数据但 prompt_manager 为空，同步到 prompt_manager
                         for mem in self.memories:
-                            prompt_manager.add_memory(mem.get('key', ''), mem.get('value', ''), 
-                                                    mem.get('target_id', ''), mem.get('type', 'long'),
+                            # 兼容旧格式数据
+                            title = mem.get('title', mem.get('key', ''))
+                            content = mem.get('content', mem.get('value', ''))
+                            summary = mem.get('summary', None)
+                            prompt_manager.add_memory(title, content, mem.get('target_id', ''), 
+                                                    summary, mem.get('type', 'long'),
                                                     mem.get('expire_days', 7))
                 except Exception as e:
                     _log.error(f"Failed to sync memories with prompt_manager: {e}")
@@ -2167,8 +2247,54 @@ class WebChatServer:
                 if password != self.web_password:
                     return jsonify({'success': False, 'message': '密码错误'}), 401
             
+            # 生成登录 Token（用于长时间免登录）
+            token = self._generate_login_token(username)
+            
             # 登录成功
-            return jsonify({'success': True, 'message': '登录成功'})
+            return jsonify({
+                'success': True, 
+                'message': '登录成功',
+                'token': token,
+                'expires_days': self.token_expire_days
+            })
+
+        @self.app.route('/api/verify-token', methods=['POST'])
+        def verify_token():
+            """验证登录 Token"""
+            data = request.json
+            token = data.get('token', '').strip()
+            
+            if not token:
+                return jsonify({'success': False, 'message': 'Token 不能为空'}), 400
+            
+            # 验证 Token
+            username = self._validate_login_token(token)
+            
+            if username:
+                # Token 有效，返回用户名
+                return jsonify({
+                    'success': True,
+                    'username': username,
+                    'message': 'Token 验证成功'
+                })
+            else:
+                return jsonify({
+                    'success': False,
+                    'message': 'Token 无效或已过期'
+                }), 401
+
+        @self.app.route('/api/logout', methods=['POST'])
+        def logout():
+            """登出（删除 Token）"""
+            data = request.json
+            token = data.get('token', '').strip()
+            
+            # 删除 Token
+            if token and token in self.login_tokens:
+                del self.login_tokens[token]
+                _log.info(f"[Auth] Token 已删除: {token[:8]}...")
+            
+            return jsonify({'success': True, 'message': '已登出'})
 
         # ==================== 会话管理 API ====================
         @self.app.route('/api/sessions')
@@ -2226,30 +2352,38 @@ class WebChatServer:
             # 使用人格提示词作为默认系统提示词
             system_prompt = data.get('system_prompt', self.personality.get('prompt', ''))
             
-            # 获取所有记忆标题并加入系统提示词
-            memory_titles = []
+            # 获取所有记忆（标题+摘要）并加入系统提示词
+            memory_items = []
             try:
                 if PROMPT_MANAGER_AVAILABLE and prompt_manager:
                     # 从 prompt_manager 获取所有记忆
                     all_memories = prompt_manager.get_memories()
                     for mem in all_memories:
-                        key = mem.get('key', '')
-                        if key:
-                            memory_titles.append(key)
+                        # 兼容新旧格式：获取标题和摘要
+                        title = mem.get('title', mem.get('key', ''))
+                        summary = mem.get('summary', '')
+                        content = mem.get('content', mem.get('value', ''))
+                        if title:
+                            # 优先使用摘要，否则使用内容前100字
+                            display = summary if summary else (content[:100] + '...' if len(content) > 100 else content)
+                            memory_items.append(f"【{title}】{display}")
                 elif self.memories:
                     # 从 self.memories 获取
                     for mem in self.memories:
-                        key = mem.get('key', '')
-                        if key:
-                            memory_titles.append(key)
+                        title = mem.get('title', mem.get('key', ''))
+                        summary = mem.get('summary', '')
+                        content = mem.get('content', mem.get('value', ''))
+                        if title:
+                            display = summary if summary else (content[:100] + '...' if len(content) > 100 else content)
+                            memory_items.append(f"【{title}】{display}")
             except Exception as e:
-                _log.warning(f"获取记忆标题失败: {e}")
+                _log.warning(f"获取记忆失败: {e}")
             
-            # 如果有记忆标题，添加到系统提示词
-            if memory_titles:
-                memory_context = "\n\n【可用记忆主题】\n" + "\n".join([f"- {title}" for title in memory_titles])
+            # 如果有记忆，添加到系统提示词
+            if memory_items:
+                memory_context = "\n\n【可用记忆主题】\n" + "\n".join([f"- {item}" for item in memory_items])
                 system_prompt += memory_context
-                _log.info(f"已添加 {len(memory_titles)} 个记忆标题到会话 {session_id[:8]}")
+                _log.info(f"已添加 {len(memory_items)} 个记忆到会话 {session_id[:8]}")
 
             session = {
                 'id': session_id,
@@ -3916,12 +4050,16 @@ class WebChatServer:
         def add_memory():
             data = request.json
             target_id = data.get('target_id', '')
-            key = data.get('key', '')
-            value = data.get('value', '')
+            title = data.get('title', '')
+            content = data.get('content', '')
+            summary = data.get('summary', None)
             mem_type = data.get('type', 'long')
             expire_days = data.get('expire_days', 7)
             
-            success = prompt_manager.add_memory(key, value, target_id, mem_type, expire_days)
+            if not title or not content:
+                return jsonify({'success': False, 'error': '标题和内容不能为空'}), 400
+            
+            success = prompt_manager.add_memory(title, content, target_id, summary, mem_type, expire_days)
             if success:
                 memories = prompt_manager.get_memories(target_id)
                 if memories:
@@ -3934,16 +4072,41 @@ class WebChatServer:
         @self.app.route('/api/memory/<memory_id>', methods=['PUT'])
         def update_memory(memory_id):
             data = request.json
+            
+            # 查找记忆
             for mem in self.memories:
                 if mem.get('id') == memory_id:
+                    # 支持新格式
+                    if 'title' in data:
+                        mem['title'] = data.get('title', mem.get('title', ''))
+                    elif 'key' in data:
+                        # 兼容旧格式
+                        mem['title'] = data.get('key', mem.get('title', ''))
+                    
+                    if 'content' in data:
+                        mem['content'] = data.get('content', mem.get('content', ''))
+                    elif 'value' in data:
+                        # 兼容旧格式
+                        mem['content'] = data.get('value', mem.get('content', ''))
+                    
+                    mem['summary'] = data.get('summary', mem.get('summary', ''))
                     mem['type'] = data.get('type', mem.get('type', 'long'))
-                    mem['key'] = data.get('key', mem['key'])
-                    mem['value'] = data.get('value', mem['value'])
                     mem['priority'] = data.get('priority', mem.get('priority', 'normal'))
                     mem['expire_days'] = data.get('expire_days', mem.get('expire_days', 7))
                     mem['target_id'] = data.get('target_id', mem.get('target_id', ''))
                     mem['updated_at'] = datetime.now().isoformat()
                     self._save_data('memories')
+                    
+                    # 同时更新 prompt_manager 中的记忆
+                    try:
+                        pm_memories = prompt_manager.get_memories()
+                        for pm_mem in pm_memories:
+                            if pm_mem.get('id') == memory_id:
+                                pm_mem.update(mem)
+                                break
+                    except:
+                        pass
+                    
                     return jsonify({'success': True, 'memory': mem})
             return jsonify({'error': 'Memory not found'}), 404
 
@@ -6278,30 +6441,38 @@ class WebChatServer:
         
         system_prompt = self.personality.get('prompt', '')
         
-        # 获取所有记忆标题并加入系统提示词
-        memory_titles = []
+        # 获取所有记忆（标题+摘要）并加入系统提示词
+        memory_items = []
         try:
             if PROMPT_MANAGER_AVAILABLE and prompt_manager:
                 # 从 prompt_manager 获取所有记忆
                 all_memories = prompt_manager.get_memories()
                 for mem in all_memories:
-                    key = mem.get('key', '')
-                    if key:
-                        memory_titles.append(key)
+                    # 兼容新旧格式：获取标题和摘要
+                    title = mem.get('title', mem.get('key', ''))
+                    summary = mem.get('summary', '')
+                    content = mem.get('content', mem.get('value', ''))
+                    if title:
+                        # 优先使用摘要，否则使用内容前100字
+                        display = summary if summary else (content[:100] + '...' if len(content) > 100 else content)
+                        memory_items.append(f"【{title}】{display}")
             elif self.memories:
                 # 从 self.memories 获取
                 for mem in self.memories:
-                    key = mem.get('key', '')
-                    if key:
-                        memory_titles.append(key)
+                    title = mem.get('title', mem.get('key', ''))
+                    summary = mem.get('summary', '')
+                    content = mem.get('content', mem.get('value', ''))
+                    if title:
+                        display = summary if summary else (content[:100] + '...' if len(content) > 100 else content)
+                        memory_items.append(f"【{title}】{display}")
         except Exception as e:
-            _log.warning(f"获取记忆标题失败: {e}")
+            _log.warning(f"获取记忆失败: {e}")
         
-        # 如果有记忆标题，添加到系统提示词
-        if memory_titles:
-            memory_context = "\n\n【可用记忆主题】\n" + "\n".join([f"- {title}" for title in memory_titles])
+        # 如果有记忆，添加到系统提示词
+        if memory_items:
+            memory_context = "\n\n【可用记忆主题】\n" + "\n".join([f"- {item}" for item in memory_items])
             system_prompt += memory_context
-            _log.info(f"已添加 {len(memory_titles)} 个记忆标题到会话 {session_id[:8]}")
+            _log.info(f"已添加 {len(memory_items)} 个记忆到会话 {session_id[:8]}")
 
         session = {
             'id': session_id,
