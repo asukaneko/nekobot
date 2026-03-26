@@ -71,41 +71,78 @@ class AIClient:
             "messages": messages,
             "stream": stream
         }
-        resp = requests.post(url, json=payload, headers=headers)
-        resp.raise_for_status()
-        data = resp.json()
+        
+        if stream:
+            # 流式响应模式
+            resp = requests.post(url, json=payload, headers=headers, stream=True, timeout=300)
+            resp.raise_for_status()
+            return self._stream_response(resp)
+        else:
+            # 非流式响应模式
+            resp = requests.post(url, json=payload, headers=headers)
+            resp.raise_for_status()
+            data = resp.json()
 
-        if not data.get("choices"):
-            print(f"[DEBUG] API响应没有choices: {data}")
+            if not data.get("choices"):
+                print(f"[DEBUG] API响应没有choices: {data}")
 
-        content = ""
-        try:
-            content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
-        except Exception:
             content = ""
+            try:
+                content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+            except Exception:
+                content = ""
 
-        # 获取 usage 信息
-        usage = data.get("usage") or {}
-        prompt_tokens = usage.get("prompt_tokens", 0) if usage else 0
-        completion_tokens = usage.get("completion_tokens", 0) if usage else 0
-        total_tokens = usage.get("total_tokens", prompt_tokens + completion_tokens) if usage else prompt_tokens + completion_tokens
+            # 获取 usage 信息
+            usage = data.get("usage") or {}
+            prompt_tokens = usage.get("prompt_tokens", 0) if usage else 0
+            completion_tokens = usage.get("completion_tokens", 0) if usage else 0
+            total_tokens = usage.get("total_tokens", prompt_tokens + completion_tokens) if usage else prompt_tokens + completion_tokens
 
-        Message = type("Message", (), {})
-        Choice = type("Choice", (), {})
-        Usage = type("Usage", (), {})
-        Resp = type("Resp", (), {})
-        msg_obj = Message()
-        msg_obj.content = content
-        choice_obj = Choice()
-        choice_obj.message = msg_obj
-        usage_obj = Usage()
-        usage_obj.prompt_tokens = prompt_tokens
-        usage_obj.completion_tokens = completion_tokens
-        usage_obj.total_tokens = total_tokens
-        resp_obj = Resp()
-        resp_obj.choices = [choice_obj]
-        resp_obj.usage = usage_obj
-        return resp_obj
+            Message = type("Message", (), {})
+            Choice = type("Choice", (), {})
+            Usage = type("Usage", (), {})
+            Resp = type("Resp", (), {})
+            msg_obj = Message()
+            msg_obj.content = content
+            choice_obj = Choice()
+            choice_obj.message = msg_obj
+            usage_obj = Usage()
+            usage_obj.prompt_tokens = prompt_tokens
+            usage_obj.completion_tokens = completion_tokens
+            usage_obj.total_tokens = total_tokens
+            resp_obj = Resp()
+            resp_obj.choices = [choice_obj]
+            resp_obj.usage = usage_obj
+            return resp_obj
+    
+    def _stream_response(self, resp):
+        """处理流式响应，返回一个生成器"""
+        import json
+        
+        for line in resp.iter_lines():
+            if not line:
+                continue
+            
+            line_text = line.decode('utf-8') if isinstance(line, bytes) else line
+            
+            # 跳过 ping/pong 等非数据行
+            if not line_text.startswith('data: '):
+                continue
+            
+            data_str = line_text[6:].strip()
+            if data_str == '[DONE]':
+                break
+            
+            try:
+                data = json.loads(data_str)
+                choices = data.get("choices", [])
+                if choices:
+                    delta = choices[0].get("delta", {})
+                    content = delta.get("content", "")
+                    if content:
+                        yield content
+            except json.JSONDecodeError:
+                continue
 
     def summarize_text(self, system_prompt: str, user_prompt: str, model: str = None) -> str:
         response = self.chat_completion(

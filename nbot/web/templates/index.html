@@ -12924,6 +12924,41 @@ def main(params):
                         }
                     });
                     
+                    // 流式响应事件处理
+                    socket.on('ai_stream_start', (data) => {
+                        console.log('[Stream] AI stream start:', data);
+                        console.log('[Stream] currentSession.id:', this.currentSession?.id);
+                        this.isTyping = false;
+                        if (this.currentSession && data.session_id === this.currentSession.id) {
+                            // 添加消息到列表
+                            const msg = {...data.message, content: ''};
+                            this.currentMessages.push(msg);
+                            console.log('[Stream] 消息已添加，当前消息数:', this.currentMessages.length);
+                            this.$nextTick(() => this.scrollToBottom());
+                        } else {
+                            console.log('[Stream] 会话不匹配，忽略事件');
+                        }
+                    });
+                    
+                    socket.on('ai_stream_chunk', (data) => {
+                        console.log('[Stream] AI stream chunk:', data.chunk);
+                        if (this.currentSession && data.session_id === this.currentSession.id) {
+                            // 找到对应的消息并追加内容
+                            const msgIdx = this.currentMessages.findIndex(m => m.id === data.message_id);
+                            if (msgIdx !== -1) {
+                                this.currentMessages[msgIdx].content += data.chunk;
+                                this.$nextTick(() => this.scrollToBottom());
+                            } else {
+                                console.log('[Stream] 未找到消息:', data.message_id);
+                            }
+                        }
+                    });
+                    
+                    socket.on('ai_stream_end', (data) => {
+                        console.log('[Stream] AI stream end:', data);
+                        this.isLoading = false;
+                    });
+                    
                     socket.on('ai_response', (data) => {
                         console.log('Received ai_response:', data);
                         this.isTyping = false;

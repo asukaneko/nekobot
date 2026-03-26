@@ -1962,6 +1962,89 @@ class WebChatServer:
             _log.error(f"AI response error: {e}", exc_info=True)
             return f"AI 服务出错: {str(e)}"
 
+    def _stream_ai_response(self, messages: List[Dict], session_id: str, callback):
+        """流式获取 AI 回复，通过回调逐段发送内容
+        
+        Args:
+            messages: 消息列表
+            session_id: 会话 ID
+            callback: 回调函数，接收 (chunk: str) 参数
+        """
+        if not self.ai_client:
+            _log.warning("AI client not initialized")
+            callback("AI 服务未配置，请在 AI 配置页面设置 API Key 和 Base URL。")
+            return
+
+        try:
+            # 获取流式响应
+            for chunk in self.ai_client.chat_completion(
+                model=self.ai_model,
+                messages=messages,
+                stream=True
+            ):
+                # 清理内容
+                chunk = chunk.strip()
+                if chunk:
+                    callback(chunk)
+                    
+        except Exception as e:
+             _log.error(f"AI stream error: {e}", exc_info=True)
+             callback(f"\n\nAI 服务出错: {str(e)}")
+
+    def _stream_send_response(self, session_id: str, message: Dict, thinking_content: str = None):
+        """通过 WebSocket 发送流式响应
+        
+        Args:
+            session_id: 会话 ID
+            message: 消息对象（包含完整的 content）
+            thinking_content: AI 思考内容
+        """
+        try:
+            content = message.get('content', '')
+            _log.info(f"[Stream] 开始流式发送, session={session_id[:8]}, content长度={len(content)}")
+            
+            # 发送开始事件
+            self.socketio.emit('ai_stream_start', {
+                'session_id': session_id,
+                'message': message,
+                'thinking_content': thinking_content
+            }, room=session_id)
+            _log.info(f"[Stream] 已发送 ai_stream_start")
+            
+            # 清理并分割内容
+            content = content.strip()
+            
+            # 发送内容片段（每10个字符一段）
+            chunk_size = 10
+            chunk_count = 0
+            for i in range(0, len(content), chunk_size):
+                chunk = content[i:i+chunk_size]
+                self.socketio.emit('ai_stream_chunk', {
+                    'session_id': session_id,
+                    'message_id': message['id'],
+                    'chunk': chunk,
+                    'is_end': False
+                }, room=session_id)
+                chunk_count += 1
+            
+            _log.info(f"[Stream] 已发送 {chunk_count} 个 chunk")
+            
+            # 发送结束事件
+            self.socketio.emit('ai_stream_end', {
+                'session_id': session_id,
+                'message_id': message['id'],
+                'is_end': True
+            }, room=session_id)
+            _log.info(f"[Stream] 流式发送完成")
+            
+        except Exception as e:
+            _log.error(f"Stream send error: {e}", exc_info=True)
+            # 降级为普通发送
+            self.socketio.emit('ai_response', {
+                'session_id': session_id,
+                'message': message
+            }, room=session_id)
+
     def _get_ai_response_with_images(self, messages: List[Dict], image_urls: List[str], user_question: str = None) -> str:
         """获取带图片的 AI 回复（多模态）"""
         if not self.ai_client:
@@ -3275,7 +3358,9 @@ class WebChatServer:
                         # 如果工具不可用，回退到普通 AI 调用
                         _log.info("[Tools] 工具不可用，使用普通 AI 调用")
                         assistant_content = self._get_ai_response(messages_for_ai)
+                        thinking_content = None
                     
+                    # 创建 AI 消息对象
                     assistant_message = {
                         'id': str(uuid.uuid4()),
                         'role': 'assistant',
@@ -3284,6 +3369,12 @@ class WebChatServer:
                         'sender': 'AI'
                     }
                     
+                    _log.info(f"[Stream] 准备发送流式响应, message_id={assistant_message['id']}")
+                    
+                    # 使用流式发送（前端可以实时看到内容逐字出现）
+                    self._stream_send_response(session_id, assistant_message, thinking_content)
+                    
+                    # 保存消息到会话
                     session['messages'].append(assistant_message)
                     
                     # 更新 Token 统计（估算）
@@ -3322,11 +3413,7 @@ class WebChatServer:
                         sessions_stats[session_id]['total'] = sessions_stats[session_id].get('total', 0) + estimated_tokens
                         self.token_stats['sessions'] = sessions_stats
                     
-                    # 通过 WebSocket 发送回复
-                    self.socketio.emit('ai_response', {
-                        'session_id': session_id,
-                        'message': assistant_message
-                    }, room=session_id)
+                    # 注意：ai_response 现在通过 _stream_send_response 在第 3373 行流式发送了，不再单独发送
                     
                     # 自动重命名会话（如果是默认名称且对话轮数达到一定数量）
                     try:
@@ -6335,6 +6422,10 @@ class WebChatServer:
                     'sender': 'AI'
                 }
                 
+                # 使用流式发送
+                _log.info(f"[Stream] _trigger_ai_response 准备发送流式响应")
+                self._stream_send_response(session_id, assistant_message)
+                
                 session['messages'].append(assistant_message)
                 
                 # 更新 Token 统计
@@ -6373,11 +6464,7 @@ class WebChatServer:
                     sessions_stats[session_id]['total'] = sessions_stats[session_id].get('total', 0) + estimated_tokens
                     self.token_stats['sessions'] = sessions_stats
                 
-                # 通过 WebSocket 发送回复
-                self.socketio.emit('ai_response', {
-                    'session_id': session_id,
-                    'message': assistant_message
-                }, room=session_id)
+                # 注意：ai_response 现在通过 _stream_send_response 流式发送了，不再单独发送
                 
                 # 记录日志
                 self.log_message('info', f'AI回复完成 for session {session_id[:8]}, tokens: {estimated_tokens}')
