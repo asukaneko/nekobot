@@ -25,10 +25,12 @@ CORE_INSTRUCTIONS = """【重要】你必须严格遵循以下要求：
 2. 你的回答应该是自然的对话形式
 3. 如果需要执行操作（如搜索新闻、查询天气、保存记忆等），请使用可用的工具
 
-【工具调用规则】
-- 当需要使用工具时，必须通过 tool_calls 格式调用，不要把工具信息作为普通文本输出
+【工具调用规则 - 非常重要】
+- 当需要使用工具时，**必须通过 tool_calls 格式调用**，不要把工具信息作为普通文本输出
+- **绝对不要**输出类似 `[TOOL_CALL]` 或 `minimax:tool_call` 这样的格式
 - 工具调用由系统自动处理，你只需要描述你需要执行的操作
 - 工具返回结果后，用自然的语言向用户解释结果
+- 如果你不确定如何调用工具，直接回答用户问题而不是尝试使用工具
 
 【文件写入规则】
 - 调用 write_file 工具写入文件内容时，每次写入的内容不宜过长（建议不超过 2000 字符）
@@ -515,7 +517,8 @@ class WebMessageAdapter:
                 'is_video': is_video,
                 'is_audio': is_audio,
                 'extension': ext,
-                'download_url': download_url  # 下载链接
+                'download_url': download_url,  # 下载链接
+                'url': download_url  # 供前端使用
             }
         }
 
@@ -1676,7 +1679,7 @@ class WebChatServer:
                     'session_type': 'workflow'
                 }
 
-                max_iterations = 10  # 最大迭代次数，防止无限循环
+                max_iterations = 50  # 最大迭代次数，防止无限循环
                 final_response = None
 
                 for iteration in range(max_iterations):
@@ -2387,6 +2390,21 @@ class WebChatServer:
                         'name': function_name,
                         'arguments': arguments
                     })
+            else:
+                # 检查 content 中是否包含 [TOOL_CALL] 格式（备用工具调用格式）
+                content = result.get('content', '')
+                if '[TOOL_CALL]' in content and '[/TOOL_CALL]' in content:
+                    _log.info(f"[AI] 检测到 [TOOL_CALL] 格式，content 前200字符: {content[:200]}...")
+                    parsed_calls = self._parse_tool_call_from_text(content)
+                    _log.info(f"[AI] 解析结果: {len(parsed_calls)} 个工具调用, 内容: {parsed_calls}")
+                    if parsed_calls:
+                        result['tool_calls'] = parsed_calls
+                        # 移除原始的 [TOOL_CALL] 内容
+                        import re
+                        cleaned = re.sub(r'\[TOOL_CALL\]\s*.*?\s*\[/TOOL_CALL\]\s*', '', content, flags=re.DOTALL)
+                        cleaned = re.sub(r'\n{3,}', '\n\n', cleaned)
+                        result['content'] = cleaned.strip()
+                        _log.info(f"[AI] 成功解析 {len(parsed_calls)} 个工具调用")
 
             return result
 
@@ -2400,6 +2418,103 @@ class WebChatServer:
             # 回退到普通 AI 调用
             content = self._get_ai_response(messages)
             return {'content': content}
+
+    def _parse_tool_call_from_text(self, content: str) -> list:
+        """解析 [TOOL_CALL] 格式的工具调用
+        
+        支持的格式：
+        [TOOL_CALL]
+        {tool => "exec_command", args => {
+        --command ls -la
+        --timeout 15
+        }}
+        [/TOOL_CALL]
+        """
+        import re
+        tool_calls = []
+        
+        # 首先查找所有 [TOOL_CALL]...[/TOOL_CALL] 块
+        # 使用简单的标记来分割
+        pattern = r'\[TOOL_CALL\](.*?)\[/TOOL_CALL\]'
+        matches = re.finditer(pattern, content, re.DOTALL)
+        
+        for match in matches:
+            block = match.group(1).strip()
+            
+            # 提取工具名称
+            name_match = re.search(r'tool\s*=>\s*["\']([^"\']+)["\']', block)
+            if not name_match:
+                # 尝试另一种格式: tool_name => "xxx" 或 "tool": "xxx"
+                name_match = re.search(r'tool_name\s*=>\s*["\']([^"\']+)["\']', block)
+                if not name_match:
+                    name_match = re.search(r'"tool":\s*"([^"]+)"', block)
+            
+            if not name_match:
+                continue
+            tool_name = name_match.group(1)
+            
+            # 提取参数块 { ... }
+            # 找到 args => { 开始的位置
+            args_start = block.find('args')
+            if args_start == -1:
+                continue
+            
+            # 找到第一个 {
+            brace_start = block.find('{', args_start)
+            if brace_start == -1:
+                continue
+            
+            # 计算嵌套的括号，找到匹配的 }
+            depth = 0
+            args_end = brace_start
+            for i in range(brace_start, len(block)):
+                if block[i] == '{':
+                    depth += 1
+                elif block[i] == '}':
+                    depth -= 1
+                    if depth == 0:
+                        args_end = i
+                        break
+            
+            args_block = block[brace_start + 1:args_end]
+            
+            # 解析参数（--key value 格式）
+            arguments = {}
+            # 将参数按行分割
+            lines = args_block.strip().split('\n')
+            current_key = None
+            current_value_lines = []
+            
+            for line in lines:
+                line = line.strip()
+                if not line:
+                    continue
+                
+                # 检查是否是 --key 开头
+                if line.startswith('--'):
+                    # 保存上一个参数
+                    if current_key is not None:
+                        arguments[current_key] = '\n'.join(current_value_lines).strip()
+                    
+                    # 解析新的 key
+                    parts = line[2:].split(None, 1)  # 分割一次，空格前是key，后面是value
+                    current_key = parts[0] if parts else None
+                    current_value_lines = [parts[1]] if len(parts) > 1 else []
+                elif current_key:
+                    # continuation of previous value
+                    current_value_lines.append(line)
+            
+            # 保存最后一个参数
+            if current_key is not None:
+                arguments[current_key] = '\n'.join(current_value_lines).strip()
+            
+            tool_calls.append({
+                'id': f'tool_call_{len(tool_calls) + 1}',
+                'name': tool_name,
+                'arguments': arguments
+            })
+        
+        return tool_calls
 
     def _register_routes(self):
         """注册 HTTP 路由"""
@@ -2977,7 +3092,10 @@ class WebChatServer:
             """获取会话工作区的文件列表"""
             if not WORKSPACE_AVAILABLE:
                 return jsonify({'error': 'Workspace not available'}), 503
-            result = workspace_manager.list_files(session_id)
+            
+            # 支持 path 参数来列出子目录
+            path = request.args.get('path', '')
+            result = workspace_manager.list_files(session_id, path)
             return jsonify(result)
 
         @self.app.route('/api/sessions/<session_id>/workspace/upload', methods=['POST'])
@@ -3033,6 +3151,100 @@ class WebChatServer:
             result = workspace_manager.delete_file(session_id, filename)
             return jsonify(result)
 
+        @self.app.route('/api/sessions/<session_id>/workspace/folders', methods=['POST'])
+        def create_workspace_folder(session_id):
+            """在工作区创建文件夹"""
+            if not WORKSPACE_AVAILABLE:
+                return jsonify({'error': 'Workspace not available'}), 503
+            
+            data = request.json or {}
+            folder_name = data.get('name', '').strip()
+            path = data.get('path', '')  # 可选，上级路径
+            
+            if not folder_name:
+                return jsonify({'success': False, 'error': '文件夹名称不能为空'}), 400
+            
+            # 安全检查：禁止特殊字符
+            import re
+            if not re.match(r'^[\w\-\. ]+$', folder_name):
+                return jsonify({'success': False, 'error': '文件夹名称包含非法字符'}), 400
+            
+            ws_path = workspace_manager.get_workspace(session_id)
+            if not ws_path:
+                return jsonify({'success': False, 'error': '工作区不存在'}), 404
+            
+            # 构建完整路径
+            if path:
+                folder_path = os.path.join(ws_path, path, folder_name)
+            else:
+                folder_path = os.path.join(ws_path, folder_name)
+            
+            try:
+                if os.path.exists(folder_path):
+                    return jsonify({'success': False, 'error': '文件夹已存在'}), 400
+                
+                os.makedirs(folder_path, exist_ok=True)
+                return jsonify({'success': True, 'name': folder_name, 'path': path + '/' + folder_name if path else folder_name})
+            except Exception as e:
+                return jsonify({'success': False, 'error': str(e)}), 500
+
+        @self.app.route('/api/sessions/<session_id>/workspace/files/<path:filename>/move', methods=['POST'])
+        def move_workspace_file(session_id, filename):
+            """移动工作区中的文件或文件夹到指定目录"""
+            if not WORKSPACE_AVAILABLE:
+                return jsonify({'success': False, 'error': 'Workspace not available'}), 503
+            
+            data = request.json or {}
+            target_path = data.get('target', '')  # 目标目录路径
+            
+            result = workspace_manager.move_file(session_id, filename, target_path)
+            if result.get('success'):
+                return jsonify(result)
+            else:
+                return jsonify(result), 400
+
+        @self.app.route('/api/sessions/<session_id>/workspace/files/<path:filename>/preview', methods=['GET'])
+        def preview_workspace_file(session_id, filename):
+            """预览工作区中的文件内容（文本、图片等）"""
+            if not WORKSPACE_AVAILABLE:
+                return jsonify({'error': 'Workspace not available'}), 503
+            
+            file_path = workspace_manager.get_file_path(session_id, filename)
+            if not file_path:
+                return jsonify({'error': 'File not found'}), 404
+            
+            import os
+            ext = os.path.splitext(filename.lower())[1]
+            
+            # 图片文件直接返回 URL
+            image_exts = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.svg']
+            if ext in image_exts:
+                return jsonify({
+                    'success': True,
+                    'type': 'image',
+                    'url': f'/api/sessions/{session_id}/workspace/files/{filename}'
+                })
+            
+            # 文本文件、代码文件、文档等使用 file_parser 解析
+            from nbot.core.file_parser import FileParser
+            parse_result = FileParser.parse_file(file_path, filename, max_chars=50000)
+            
+            if not parse_result or not parse_result.get('success'):
+                return jsonify({
+                    'success': False,
+                    'error': parse_result.get('error', 'Failed to parse file') if parse_result else 'File not found'
+                }), 400
+            
+            return jsonify({
+                'success': True,
+                'type': parse_result.get('type', 'text'),
+                'content': parse_result.get('content', ''),
+                'filename': filename,
+                'extracted_length': parse_result.get('extracted_length', 0),
+                'original_length': parse_result.get('original_length', 0),
+                'truncated': parse_result.get('truncated', False)
+            })
+
         @self.app.route('/api/sessions/<session_id>/chat', methods=['POST'])
         def chat_with_ai(session_id):
             """与 AI 对话"""
@@ -3061,14 +3273,20 @@ class WebChatServer:
             # 获取 AI 回复
             messages_for_ai = session['messages'].copy()
 
-            # 限制历史长度（使用当前激活的 AI 模型配置中的 max_context_length）
-            max_context_length = 30000  # 默认值
-            for model in self.ai_models:
-                if model.get('id') == self.active_model_id:
-                    max_context_length = model.get('max_context_length', 30000)
-                    break
-            if len(messages_for_ai) > max_context_length:
-                messages_for_ai = [messages_for_ai[0]] + messages_for_ai[-max_context_length:]
+            # 限制消息总字符数
+            MAX_TOTAL_CHARS = 30000
+            MAX_MESSAGE_COUNT = 50  # 最多保留的消息数
+            
+            total_chars = sum(len(str(m.get('content', ''))) for m in messages_for_ai)
+            if total_chars > MAX_TOTAL_CHARS or len(messages_for_ai) > MAX_MESSAGE_COUNT:
+                # 保留系统消息，只保留最近的 MAX_MESSAGE_COUNT 条
+                system_msg = messages_for_ai[0] if messages_for_ai and messages_for_ai[0].get('role') == 'system' else None
+                recent_msgs = messages_for_ai[-MAX_MESSAGE_COUNT:]
+                if system_msg:
+                    messages_for_ai = [system_msg] + recent_msgs
+                else:
+                    messages_for_ai = recent_msgs
+                _log.info(f"[Context] 消息已压缩: {total_chars} 字符, {len(messages_for_ai)} 条消息")
 
             # 在系统提示词后添加核心指令（确保JSON输出功能不丢失）
             if messages_for_ai and messages_for_ai[0].get('role') == 'system':
@@ -3339,7 +3557,8 @@ class WebChatServer:
                                                             'size': file_size,
                                                             'is_image': is_image,
                                                             'extension': ext,
-                                                            'download_url': download_url
+                                                            'download_url': download_url,
+                                                            'url': download_url
                                                         }
                                                     }
                                                     
@@ -5696,12 +5915,14 @@ class WebChatServer:
                 if attachments and isinstance(attachments, list):
                     for att in attachments:
                         if isinstance(att, dict):
-                            # 只保留元数据，排除data字段（文件内容）
+                            # 保留元数据和URL，用于预览
                             processed_att = {
                                 'name': att.get('name', 'unknown'),
                                 'type': att.get('type', ''),
                                 'size': att.get('size', 0),
-                                'preview': att.get('preview') if att.get('type', '').startswith('image/') else None
+                                'url': att.get('url', att.get('path', '')),
+                                'content': att.get('content'),  # 文本内容
+                                'preview': att.get('preview') if att.get('type', '').startswith('image/') else att.get('url', att.get('path', ''))
                             }
                             processed_attachments.append(processed_att)
                 
@@ -5833,8 +6054,23 @@ class WebChatServer:
                 
                 # 限制历史长度
                 MAX_HISTORY = 20
+                MAX_TOTAL_CHARS = 30000  # 限制消息总字符数（大约）
+                
+                # 如果消息太多，只保留最近的
                 if len(messages_for_ai) > MAX_HISTORY:
                     messages_for_ai = [messages_for_ai[0]] + messages_for_ai[-MAX_HISTORY:]
+                
+                # 计算消息总字符数
+                total_chars = sum(len(str(m.get('content', ''))) for m in messages_for_ai)
+                if total_chars > MAX_TOTAL_CHARS:
+                    # 保留系统消息和最近的消息
+                    system_msg = messages_for_ai[0] if messages_for_ai and messages_for_ai[0].get('role') == 'system' else None
+                    recent_msgs = messages_for_ai[-MAX_HISTORY:] if messages_for_ai else []
+                    if system_msg:
+                        messages_for_ai = [system_msg] + recent_msgs
+                    else:
+                        messages_for_ai = recent_msgs
+                    _log.warning(f"[Context] 消息过长，已压缩: 总字符数 {total_chars} -> {MAX_TOTAL_CHARS}")
                 
                 # 添加知识库内容到系统消息
                 if knowledge_text and messages_for_ai:
@@ -5877,7 +6113,7 @@ class WebChatServer:
                     progress_card = progress_card_manager.create_card(
                         session_id=session_id,
                         parent_message_id=parent_message_id,
-                        max_iterations=30
+                        max_iterations=50
                     )
                     _log.info(f"[ProgressCard] 创建进度卡片: {progress_card.card_id}")
                     # 立即显示"AI 正在思考..."
@@ -6020,6 +6256,46 @@ class WebChatServer:
                                         else:
                                             progress_card.update(StepType.FILE_DONE, f"文件读取失败: {att_name}", False)
                                 
+                                # 工作区文件 - 从 URL 中提取路径并读取内容
+                                elif att_type == 'workspace/file' or (att_path and '/workspace/files/' in str(att_path)):
+                                    # 更新进度：正在读取工作区文件
+                                    if progress_card:
+                                        progress_card.update(StepType.FILE, f"正在读取工作区文件: {att_name}")
+                                    
+                                    text_content = None
+                                    file_read_success = False
+                                    
+                                    # 尝试从 URL 中提取工作区文件路径
+                                    try:
+                                        import re
+                                        url = att.get('url', '')
+                                        # 匹配 /api/sessions/{session_id}/workspace/files/{path}
+                                        match = re.search(r'/workspace/files/([^?]+)', url)
+                                        if match:
+                                            ws_file_path = match.group(1)
+                                            if WORKSPACE_AVAILABLE and workspace_manager:
+                                                # 使用 workspace_manager 读取文件
+                                                ws_path = workspace_manager.get_workspace(session_id)
+                                                if ws_path:
+                                                    full_path = os.path.join(ws_path, ws_file_path)
+                                                    if os.path.exists(full_path) and os.path.isfile(full_path):
+                                                        with open(full_path, 'r', encoding='utf-8', errors='ignore') as f:
+                                                            text_content = f.read()
+                                                            file_read_success = True
+                                                            _log.info(f"工作区文件已读取: {ws_file_path}")
+                                    except Exception as e:
+                                        _log.warning(f"读取工作区文件失败: {att_name}, {e}")
+                                    
+                                    if text_content:
+                                        file_contents.append(f"【文件 {att_name} 内容】:\n{text_content[:10000]}")
+                                    
+                                    # 更新完成状态
+                                    if progress_card:
+                                        if file_read_success:
+                                            progress_card.update(StepType.FILE_DONE, f"工作区文件已读取: {att_name}", True)
+                                        else:
+                                            progress_card.update(StepType.FILE_DONE, f"工作区文件读取失败: {att_name}", False)
+                                
                                 # 使用本地解析器解析的文件类型
                                 elif any(att_name.lower().endswith(ext) for ext in ['.pdf', '.doc', '.docx', '.ppt', '.pptx', '.xls', '.xlsx']) and att_path:
                                     try:
@@ -6125,7 +6401,7 @@ class WebChatServer:
                             if file_contents and tool_messages and tool_messages[-1].get('role') == 'user':
                                 tool_messages[-1]['content'] = enhanced_content
                             
-                            max_iterations = 30
+                            max_iterations = 50
                             final_content = None
                             
                             _log.info(f"[ThinkingCard] 使用 ProgressCard 系统, session_id={session_id}, card_id={progress_card.card_id if progress_card else 'None'}")
@@ -6396,7 +6672,8 @@ class WebChatServer:
                                                                 'size': file_size,
                                                                 'is_image': is_image,
                                                                 'extension': ext,
-                                                                'download_url': download_url
+                                                                'download_url': download_url,
+                                                                'url': download_url
                                                             }
                                                         }
                                                         
@@ -7142,6 +7419,7 @@ def create_web_app(config: Dict[str, Any] = None) -> tuple[Flask, SocketIO]:
                     'success': True,
                     'filename': ws_result.get('filename', file.filename),
                     'path': ws_result.get('path', ''),
+                    'url': f'/api/sessions/{session_id}/workspace/files/{ws_result.get("filename", file.filename)}',
                     'size': ws_result.get('size', file_size),
                     'content': content,
                     'in_workspace': True
@@ -7183,6 +7461,7 @@ def create_web_app(config: Dict[str, Any] = None) -> tuple[Flask, SocketIO]:
                 'filename': file.filename,
                 'unique_name': unique_name,
                 'path': f'/static/uploads/{unique_name}',
+                'url': f'/static/uploads/{unique_name}',
                 'size': os.path.getsize(file_path),
                 'content': content,
                 'in_workspace': False

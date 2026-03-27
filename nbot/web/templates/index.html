@@ -14,6 +14,9 @@
     <link rel="stylesheet" href="https://unpkg.com/@highlightjs/cdn-assets@11.9.0/styles/github-dark.min.css">
     <script src="https://unpkg.com/@highlightjs/cdn-assets@11.9.0/highlight.min.js"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- 文档预览库 -->
+    <script src="https://cdn.jsdelivr.net/npm/mammoth@1.6.0/mammoth.browser.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
     <style>
         /* 深色主题（默认） */
         :root {
@@ -22,6 +25,7 @@
             --bg-tertiary: #21262d;
             --bg-hover: #30363d;
             --bg-card: rgba(22, 27, 34, 0.8);
+            --text-color: #e6edf3;
             --text-primary: #e6edf3;
             --text-secondary: #8b949e;
             --text-muted: #6e7681;
@@ -40,18 +44,19 @@
 
         /* 浅色主题 */
         [data-theme="light"] {
-            --bg-primary: #f0f2f5;
+            --bg-primary: linear-gradient(135deg, #fef0f5 0%, #e8f4fd 50%, #f0f5ff 100%);
             --bg-secondary: #ffffff;
-            --bg-tertiary: #f5f7fa;
-            --bg-hover: #e8ecf1;
-            --bg-card: rgba(255, 255, 255, 0.9);
-            --text-primary: #1a1a2e;
+            --bg-tertiary: #f8faff;
+            --bg-hover: #f0f5fa;
+            --bg-card: rgba(255, 255, 255, 0.85);
+            --text-color: #2d3748;
+            --text-primary: #2d3748;
             --text-secondary: #4a5568;
             --text-muted: #718096;
-            --border-color: #e2e8f0;
-            --shadow-color: rgba(0, 0, 0, 0.08);
+            --border-color: #e2eaf0;
+            --shadow-color: rgba(100, 150, 200, 0.1);
             --glass-bg: rgba(255, 255, 255, 0.7);
-            --glass-border: rgba(226, 232, 240, 0.6);
+            --glass-border: rgba(200, 220, 240, 0.4);
         }
 
         /* 动态背景 */
@@ -325,6 +330,7 @@
             display: flex;
             flex-direction: column;
             overflow: hidden;
+            background: var(--bg-primary);
         }
 
         .top-bar {
@@ -335,6 +341,7 @@
             align-items: center;
             justify-content: space-between;
             padding: 0 20px;
+            flex-shrink: 0;
         }
 
         .page-title {
@@ -1978,6 +1985,7 @@
             margin-bottom: 4px;
             height: 64px;
             box-sizing: border-box;
+            background: var(--bg-secondary);
         }
 
         .session-item:hover { background: var(--bg-tertiary); }
@@ -2078,6 +2086,7 @@
             padding: 20px;
             position: relative;
             min-height: 0;
+            background: var(--bg-primary);
         }
 
         .scroll-to-bottom-btn {
@@ -3076,10 +3085,321 @@
             object-fit: cover;
             border-radius: 6px;
         }
+        
+        /* 文件预览模态框 */
+        .file-preview-modal {
+            width: 90%;
+            max-width: 900px;
+            max-height: 85vh;
+            background: var(--bg-secondary);
+            border-radius: 12px;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            transition: all 0.3s ease;
+        }
+        
+        .file-preview-modal.is-maximized {
+            width: 98%;
+            max-width: 98%;
+            height: 95vh;
+            max-height: 95vh;
+        }
+        
+        .file-preview-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 12px 16px;
+            border-bottom: 1px solid var(--border-color);
+            background: var(--bg-tertiary);
+            flex-shrink: 0;
+        }
+        
+        .file-preview-title {
+            font-weight: 600;
+            font-size: 14px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            max-width: 60%;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        
+        .file-preview-actions {
+            display: flex;
+            gap: 6px;
+        }
+        
+        .file-preview-actions .btn.active {
+            background: var(--primary);
+            color: white;
+        }
+        
+        .file-preview-content {
+            flex: 1;
+            overflow: auto;
+            padding: 16px;
+        }
+        
+        .file-preview-image {
+            text-align: center;
+            height: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .file-preview-image img {
+            max-width: 100%;
+            max-height: 100%;
+            object-fit: contain;
+            border-radius: 8px;
+        }
+        
+        .file-preview-text {
+            background: var(--bg-primary);
+            border-radius: 8px;
+            padding: 16px;
+            height: 100%;
+            box-sizing: border-box;
+        }
+        
+        .file-preview-pre {
+            margin: 0;
+            white-space: pre-wrap;
+            word-break: break-all;
+            font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+            font-size: 13px;
+            line-height: 1.6;
+            max-height: calc(85vh - 120px);
+            overflow: auto;
+        }
+        
+        .is-maximized .file-preview-pre {
+            max-height: calc(95vh - 120px);
+        }
+        
+        .file-preview-loading,
+        .file-preview-error {
+            text-align: center;
+            padding: 40px;
+            color: var(--text-muted);
+        }
+        
+        .file-preview-error {
+            color: var(--error);
+        }
+        
+        .file-preview-warning {
+            margin-top: 12px;
+            padding: 10px;
+            background: rgba(255, 193, 7, 0.1);
+            border-radius: 6px;
+            font-size: 12px;
+            color: #ffc107;
+        }
+        
+        .file-preview-markdown {
+            background: var(--bg-primary);
+            border-radius: 8px;
+            padding: 20px;
+            height: 100%;
+            overflow: auto;
+            box-sizing: border-box;
+        }
+        
+        .file-preview-markdown h1,
+        .file-preview-markdown h2,
+        .file-preview-markdown h3,
+        .file-preview-markdown h4,
+        .file-preview-markdown h5,
+        .file-preview-markdown h6 {
+            margin-top: 1.5em;
+            margin-bottom: 0.5em;
+            font-weight: 600;
+        }
+        
+        .file-preview-markdown h1 { font-size: 1.8em; border-bottom: 1px solid var(--border-color); padding-bottom: 0.3em; }
+        .file-preview-markdown h2 { font-size: 1.5em; border-bottom: 1px solid var(--border-color); padding-bottom: 0.3em; }
+        .file-preview-markdown h3 { font-size: 1.25em; }
+        .file-preview-markdown h4 { font-size: 1.1em; }
+        
+        .file-preview-markdown p {
+            margin: 1em 0;
+            line-height: 1.7;
+        }
+        
+        .file-preview-markdown code {
+            background: rgba(0,0,0,0.2);
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+            font-size: 0.9em;
+        }
+        
+        .file-preview-markdown pre {
+            background: rgba(0,0,0,0.3);
+            padding: 12px;
+            border-radius: 6px;
+            overflow: auto;
+            margin: 1em 0;
+        }
+        
+        .file-preview-markdown pre code {
+            background: none;
+            padding: 0;
+        }
+        
+        .file-preview-markdown ul,
+        .file-preview-markdown ol {
+            margin: 1em 0;
+            padding-left: 2em;
+        }
+        
+        .file-preview-markdown li {
+            margin: 0.3em 0;
+        }
+        
+        .file-preview-markdown blockquote {
+            border-left: 4px solid var(--primary);
+            margin: 1em 0;
+            padding: 0.5em 1em;
+            background: rgba(0,0,0,0.1);
+            border-radius: 0 6px 6px 0;
+        }
+        
+        .file-preview-markdown table {
+            border-collapse: collapse;
+            width: 100%;
+            margin: 1em 0;
+        }
+        
+        .file-preview-markdown th,
+        .file-preview-markdown td {
+            border: 1px solid var(--border-color);
+            padding: 8px 12px;
+            text-align: left;
+        }
+        
+        .file-preview-markdown th {
+            background: rgba(0,0,0,0.2);
+        }
+        
+        .file-preview-markdown img {
+            max-width: 100%;
+            border-radius: 6px;
+        }
+        
+        .file-preview-markdown a {
+            color: var(--primary);
+            text-decoration: none;
+        }
+        
+        .file-preview-markdown a:hover {
+            text-decoration: underline;
+        }
+        
+        /* Word 文档预览 */
+        .file-preview-docx {
+            height: 100%;
+            overflow: auto;
+            background: var(--bg-primary);
+            border-radius: 8px;
+        }
+        
+        .docx-preview-container {
+            padding: 20px;
+            color: var(--text-color, #333);
+            font-family: 'Calibri', 'Arial', sans-serif;
+            font-size: 14px;
+            line-height: 1.6;
+        }
+        
+        .docx-preview-container h1 { font-size: 2em; font-weight: bold; margin: 0.5em 0; }
+        .docx-preview-container h2 { font-size: 1.5em; font-weight: bold; margin: 0.5em 0; }
+        .docx-preview-container h3 { font-size: 1.17em; font-weight: bold; margin: 0.5em 0; }
+        .docx-preview-container p { margin: 0.5em 0; }
+        .docx-preview-container table { border-collapse: collapse; width: 100%; margin: 1em 0; }
+        .docx-preview-container td, .docx-preview-container th { border: 1px solid var(--border-color, #ddd); padding: 8px; }
+        .docx-preview-container th { background: var(--bg-secondary); }
+        
+        /* docx 文本内容样式 */
+        .docx-text-content {
+            padding: 20px;
+            color: var(--text-color, #333);
+            font-family: 'Calibri', 'Arial', sans-serif;
+            font-size: 14px;
+            line-height: 1.8;
+        }
+        
+        .docx-text-content h3 {
+            margin-top: 1.2em;
+            margin-bottom: 0.5em;
+            color: var(--text-color, #333);
+            font-size: 1.2em;
+        }
+        
+        .docx-text-content p {
+            margin: 0.5em 0;
+        }
+        
+        /* Excel 预览 */
+        .file-preview-excel {
+            height: 100%;
+            overflow: auto;
+            background: var(--bg-primary);
+            border-radius: 8px;
+        }
+        
+        .excel-preview-container {
+            padding: 10px;
+        }
+        
+        .excel-preview-container table {
+            border-collapse: collapse;
+            font-family: 'Calibri', Arial, sans-serif;
+            font-size: 12px;
+            color: var(--text-color, #333);
+        }
+        
+        .excel-preview-container td, .excel-preview-container th {
+            border: 1px solid var(--border-color, #ddd);
+            padding: 4px 8px;
+            white-space: nowrap;
+            text-align: left;
+        }
+        
+        .excel-preview-container th {
+            background: var(--bg-secondary);
+            font-weight: bold;
+        }
+        
+        .excel-preview-container tr:nth-child(even) {
+            background: rgba(128, 128, 128, 0.1);
+        }
+        
+        /* HTML 预览 */
+        .file-preview-html {
+            height: 100%;
+            overflow: auto;
+            background: white;
+            border-radius: 8px;
+        }
+        
+        .html-preview-container {
+            width: 100%;
+            height: 100%;
+            border: none;
+            background: white;
+        }
 
         .chat-input-area {
             padding: 16px 20px;
             border-top: 1px solid var(--border-color);
+            background: var(--bg-secondary);
         }
 
         .chat-input-wrapper {
@@ -3230,6 +3550,152 @@
         .file-menu-item-desc {
             font-size: 12px;
             color: var(--text-secondary);
+        }
+
+        /* 工作区浏览器模态框 */
+        .workspace-browser-modal {
+            width: 600px;
+            max-width: 90vw;
+            max-height: 80vh;
+            background: var(--bg-secondary);
+            border-radius: 12px;
+            display: flex;
+            flex-direction: column;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+        }
+
+        .workspace-browser-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 16px 20px;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .workspace-browser-title {
+            font-size: 16px;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+
+        .workspace-browser-actions {
+            display: flex;
+            gap: 8px;
+        }
+
+        .workspace-browser-path {
+            padding: 12px 20px;
+            border-bottom: 1px solid var(--border-color);
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            flex-wrap: wrap;
+            background: var(--bg-tertiary);
+            font-family: monospace;
+            font-size: 13px;
+        }
+
+        .workspace-current-path {
+            color: var(--text-muted);
+            margin-left: 4px;
+        }
+
+        .workspace-browser-content {
+            flex: 1;
+            overflow-y: auto;
+            padding: 12px;
+        }
+
+        .workspace-browser-empty {
+            text-align: center;
+            padding: 40px;
+            color: var(--text-muted);
+        }
+
+        .workspace-browser-empty i {
+            font-size: 48px;
+            margin-bottom: 16px;
+        }
+
+        .workspace-browser-loading {
+            text-align: center;
+            padding: 40px;
+            color: var(--text-secondary);
+        }
+
+        .workspace-file-list {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .workspace-file-item {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 10px 12px;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        .workspace-file-item:hover {
+            background: var(--bg-hover);
+        }
+
+        .workspace-file-item.is-folder {
+            cursor: pointer;
+        }
+
+        .workspace-file-icon {
+            width: 32px;
+            height: 32px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 20px;
+            color: var(--text-secondary);
+        }
+
+        .workspace-file-item.is-folder .workspace-file-icon {
+            color: #f0883e;
+        }
+
+        .workspace-file-item.drag-over {
+            background: var(--accent-primary);
+            background: rgba(0, 123, 255, 0.2);
+            border: 2px dashed var(--accent-primary);
+        }
+
+        .workspace-file-item.dragging {
+            opacity: 0.5;
+        }
+
+        .workspace-file-info {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .workspace-file-name {
+            font-size: 14px;
+            color: var(--text-primary);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .workspace-file-meta {
+            font-size: 12px;
+            color: var(--text-muted);
+        }
+
+        .workspace-file-actions {
+            opacity: 0;
+            transition: opacity 0.2s;
+        }
+
+        .workspace-file-item:hover .workspace-file-actions {
+            opacity: 1;
         }
 
         /* 扩展编辑器模态框 */
@@ -4050,6 +4516,10 @@
             justify-content: center;
             z-index: 1000;
             padding: 20px;
+        }
+
+        .confirm-modal-overlay {
+            z-index: 2000;
         }
 
         .modal {
@@ -5404,7 +5874,7 @@
                                                 </div>
                                                 <!-- 机器人发送的文件 -->
                                                 <div v-if="msg.file" class="message-attachments">
-                                                    <div class="attachment-card" @click="downloadFile(msg.file)">
+                                                    <div class="attachment-card" @click.stop="msg.session_id && msg.file.name ? previewFile(msg.session_id, msg.file.name) : downloadFile(msg.file)">
                                                         <!-- 图片直接显示 -->
                                                         <img v-if="msg.file.is_image" :src="msg.file.data || msg.file.url || msg.file.preview" class="attachment-preview" style="max-width: 200px; max-height: 150px; object-fit: cover;" @error="handleImageError">
                                                         <!-- 文本文件显示预览 -->
@@ -5599,6 +6069,13 @@
                                                         <div class="file-menu-item-info">
                                                             <span class="file-menu-item-title">上传到工作区</span>
                                                             <span class="file-menu-item-desc">仅上传文件，不触发AI</span>
+                                                        </div>
+                                                    </div>
+                                                    <div class="file-menu-item" @click="openWorkspaceBrowser">
+                                                        <i class="fas fa-folder-tree"></i>
+                                                        <div class="file-menu-item-info">
+                                                            <span class="file-menu-item-title">查看工作区</span>
+                                                            <span class="file-menu-item-desc">浏览工作区中的文件</span>
                                                         </div>
                                                     </div>
                                                 </div>
@@ -7694,7 +8171,7 @@
         </div>
 
         <!-- Confirm Modal -->
-        <div v-if="showConfirmModal" class="modal-overlay" @click.self="cancelConfirm">
+        <div v-if="showConfirmModal" class="modal-overlay confirm-modal-overlay" @click.self="cancelConfirm">
             <div class="modal" style="max-width: 400px;">
                 <div class="modal-header">
                     <span class="modal-title">
@@ -7718,6 +8195,188 @@
                     >
                         <span v-if="isLoading"><div class="spinner" style="display: inline-block; margin-right: 8px;"></div>处理中...</span>
                         <span v-else>{{ confirmModalConfig.confirmText || '确认' }}</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 文件预览模态框 -->
+        <div v-if="showFilePreview" class="modal-overlay" @click.self="closeFilePreview">
+            <div class="file-preview-modal" :class="{ 'is-maximized': filePreviewMaximized }">
+                <div class="file-preview-header">
+                    <div class="file-preview-title">
+                        <i class="fas fa-file-alt"></i> {{ filePreviewData.filename || '文件预览' }}
+                    </div>
+                    <div class="file-preview-actions">
+                        <button class="btn btn-secondary btn-sm" :class="{ active: filePreviewMaximized }" @click="filePreviewMaximized = !filePreviewMaximized" :title="filePreviewMaximized ? '还原' : '最大化'">
+                            <i :class="filePreviewMaximized ? 'fas fa-compress-alt' : 'fas fa-expand-alt'"></i>
+                        </button>
+                        <button class="btn btn-secondary btn-sm" @click="downloadFile(filePreviewData)" title="下载">
+                            <i class="fas fa-download"></i>
+                        </button>
+                        <button class="btn btn-secondary btn-sm" @click="closeFilePreview">
+                            <i class="fas fa-times"></i>
+                        </button>
+                    </div>
+                </div>
+                <div class="file-preview-content">
+                    <!-- 图片预览 -->
+                    <div v-if="filePreviewData.type === 'image'" class="file-preview-image">
+                        <img :src="filePreviewData.url" :alt="filePreviewData.filename">
+                    </div>
+                    <!-- Word 文档预览 (docx) -->
+                    <div v-else-if="isDocxFile(filePreviewData.filename)" class="file-preview-docx">
+                        <div v-if="filePreviewData.loading" class="file-preview-loading">
+                            <i class="fas fa-spinner fa-spin"></i> 正在加载文档...
+                        </div>
+                        <div v-else-if="filePreviewData.error" class="file-preview-error">
+                            <i class="fas fa-exclamation-triangle"></i> {{ filePreviewData.error }}
+                        </div>
+                        <div v-else ref="docxContainer" class="docx-preview-container"></div>
+                    </div>
+                    <!-- Excel 预览 (xlsx) -->
+                    <div v-else-if="isExcelFile(filePreviewData.filename)" class="file-preview-excel">
+                        <div v-if="filePreviewData.loading" class="file-preview-loading">
+                            <i class="fas fa-spinner fa-spin"></i> 正在加载表格...
+                        </div>
+                        <div v-else-if="filePreviewData.error" class="file-preview-error">
+                            <i class="fas fa-exclamation-triangle"></i> {{ filePreviewData.error }}
+                        </div>
+                        <div v-else ref="excelContainer" class="excel-preview-container"></div>
+                    </div>
+                    <!-- HTML 预览 -->
+                    <div v-else-if="isHtmlFile(filePreviewData.filename)" class="file-preview-html">
+                        <div v-if="filePreviewData.loading" class="file-preview-loading">
+                            <i class="fas fa-spinner fa-spin"></i> 正在加载页面...
+                        </div>
+                        <div v-else-if="filePreviewData.error" class="file-preview-error">
+                            <i class="fas fa-exclamation-triangle"></i> {{ filePreviewData.error }}
+                        </div>
+                        <div v-else ref="htmlContainer" class="html-preview-container"></div>
+                    </div>
+                    <!-- Markdown 预览 -->
+                    <div v-else-if="isMarkdownFile(filePreviewData.filename)" class="file-preview-markdown markdown-body">
+                        <div v-if="filePreviewData.loading" class="file-preview-loading">
+                            <i class="fas fa-spinner fa-spin"></i> 正在加载...
+                        </div>
+                        <div v-else-if="filePreviewData.error" class="file-preview-error">
+                            <i class="fas fa-exclamation-triangle"></i> {{ filePreviewData.error }}
+                        </div>
+                        <div v-else v-html="renderMarkdown(filePreviewData.content)"></div>
+                        <div v-if="filePreviewData.truncated" class="file-preview-warning">
+                            <i class="fas fa-exclamation-circle"></i> 内容过长，已截断（显示 {{ filePreviewData.extracted_length }} / {{ filePreviewData.original_length }} 字符）
+                        </div>
+                    </div>
+                    <!-- 文本内容预览 -->
+                    <div v-else class="file-preview-text">
+                        <div v-if="filePreviewData.loading" class="file-preview-loading">
+                            <i class="fas fa-spinner fa-spin"></i> 正在加载...
+                        </div>
+                        <div v-else-if="filePreviewData.error" class="file-preview-error">
+                            <i class="fas fa-exclamation-triangle"></i> {{ filePreviewData.error }}
+                        </div>
+                        <pre v-else class="file-preview-pre">{{ filePreviewData.content }}</pre>
+                        <div v-if="filePreviewData.truncated" class="file-preview-warning">
+                            <i class="fas fa-exclamation-circle"></i> 内容过长，已截断（显示 {{ filePreviewData.extracted_length }} / {{ filePreviewData.original_length }} 字符）
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 工作区浏览器模态框 -->
+        <div v-if="showWorkspaceBrowser && !showFilePreview" class="modal-overlay" @click.self="closeWorkspaceBrowser">
+            <div class="workspace-browser-modal">
+                <div class="workspace-browser-header">
+                    <div class="workspace-browser-title">
+                        <i class="fas fa-folder-tree"></i> 工作区文件
+                    </div>
+                    <div class="workspace-browser-actions">
+                        <button class="btn btn-secondary btn-sm" @click="showCreateFolderModal = true" :disabled="loadingWorkspaceFiles">
+                            <i class="fas fa-folder-plus"></i>
+                        </button>
+                        <button class="btn btn-secondary btn-sm" @click="refreshWorkspaceFiles" :disabled="loadingWorkspaceFiles">
+                            <i class="fas fa-sync-alt" :class="{ 'fa-spin': loadingWorkspaceFiles }"></i>
+                        </button>
+                        <button class="btn btn-secondary btn-sm" @click="closeWorkspaceBrowser">
+                            <i class="fas fa-times"></i>
+                        </button>
+                    </div>
+                </div>
+                <div class="workspace-browser-path">
+                    <button class="btn btn-link btn-sm" @click="navigateToFolder('')" title="返回根目录">
+                        <i class="fas fa-home"></i> ./</button>
+                    <template v-for="(part, idx) in workspacePathParts" :key="idx">
+                        <i class="fas fa-chevron-right" style="color: var(--text-muted);"></i>
+                        <button class="btn btn-link btn-sm" @click="navigateToFolder(workspacePathParts.slice(0, idx + 1).join('/'))">
+                            {{ part }}
+                        </button>
+                    </template>
+                    <span v-if="workspaceCurrentPath" class="workspace-current-path">/</span>
+                </div>
+                <div class="workspace-browser-content" v-if="!loadingWorkspaceFiles">
+                    <div v-if="workspaceFiles.length === 0" class="workspace-browser-empty">
+                        <i class="fas fa-folder-open"></i>
+                        <p>该目录为空</p>
+                    </div>
+                    <div v-else class="workspace-file-list">
+                        <div v-for="item in workspaceFiles" :key="item.name" 
+                             class="workspace-file-item" 
+                             :class="{ 'is-folder': item.type === 'directory', 'drag-over': dragOverItem === item.path }"
+                             :draggable="item.type === 'file'"
+                             @click="item.type === 'directory' ? navigateToFolder(item.path) : previewWorkspaceFile(item)"
+                             @dragstart="onDragFileStart($event, item)"
+                             @dragend="onDragFileEnd"
+                             @dragover.prevent="onDragOver($event, item)"
+                             @dragenter.prevent="onDragEnter($event, item)"
+                             @dragleave="onDragLeave($event, item)"
+                             @drop.prevent="onWorkspaceDrop($event, item)">
+                            <div class="workspace-file-icon">
+                                <i :class="item.type === 'directory' ? 'fas fa-folder' : getFileIcon(item.name)"></i>
+                            </div>
+                            <div class="workspace-file-info">
+                                <div class="workspace-file-name">{{ item.name }}</div>
+                                <div class="workspace-file-meta">
+                                    <span v-if="item.type === 'file'">{{ formatFileSize(item.size) }}</span>
+                                    <span v-if="item.type === 'directory'">文件夹</span>
+                                </div>
+                            </div>
+                            <div class="workspace-file-actions">
+                                <button v-if="item.type === 'file'" class="btn btn-icon btn-sm" @click.stop="insertWorkspaceFile(item)" title="插入到输入框">
+                                    <i class="fas fa-plus"></i>
+                                </button>
+                                <button class="btn btn-icon btn-sm" @click.stop="deleteWorkspaceItem(item)" title="删除" style="color: var(--danger);">
+                                    <i class="fas fa-trash"></i>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div v-else class="workspace-browser-loading">
+                    <i class="fas fa-spinner fa-spin"></i> 加载中...
+                </div>
+            </div>
+        </div>
+
+        <!-- 创建文件夹模态框 -->
+        <div v-if="showCreateFolderModal" class="modal-overlay" @click.self="showCreateFolderModal = false">
+            <div class="modal" style="max-width: 400px;">
+                <div class="modal-header">
+                    <span class="modal-title">
+                        <i class="fas fa-folder-plus"></i> 创建文件夹
+                    </span>
+                    <button class="modal-close" @click="showCreateFolderModal = false">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <div class="form-group">
+                        <label class="form-label">文件夹名称</label>
+                        <input type="text" class="form-input" v-model="newFolderName" placeholder="请输入文件夹名称" @keyup.enter="createFolder">
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary" @click="showCreateFolderModal = false">取消</button>
+                    <button class="btn btn-primary" @click="createFolder" :disabled="!newFolderName.trim()">
+                        <i class="fas fa-folder-plus"></i> 创建
                     </button>
                 </div>
             </div>
@@ -8927,6 +9586,30 @@
                     expandEditorContent: '',
                     expandEditorMode: 'edit',  // 'edit' 或 'preview'
                     expandEditorCallback: null,
+                    // 工作区浏览器
+                    showWorkspaceBrowser: false,
+                    workspaceFiles: [],
+                    workspaceCurrentPath: '',
+                    loadingWorkspaceFiles: false,
+                    showCreateFolderModal: false,
+                    newFolderName: '',
+                    draggingFile: null,  // 当前拖动的文件
+                    dragOverItem: null,  // 拖动经过的目标项
+                    // 文件预览
+                    showFilePreview: false,
+                    filePreviewMaximized: false,
+                    filePreviewData: {
+                        sessionId: '',
+                        filename: '',
+                        type: '',
+                        content: '',
+                        url: '',
+                        loading: false,
+                        error: '',
+                        truncated: false,
+                        extracted_length: 0,
+                        original_length: 0
+                    },
                     confirmModalConfig: {
                         title: '确认操作',
                         message: '确定要执行这个操作吗？',
@@ -11223,6 +11906,7 @@ def main(params):
                                     type: file.type,
                                     size: res.data.size,
                                     path: res.data.path,
+                                    url: res.data.url || res.data.path,  // 用于预览
                                     content: res.data.content,  // 文件文本内容
                                     preview: file.preview || res.data.path  // 使用服务器路径作为预览
                                 });
@@ -11242,14 +11926,17 @@ def main(params):
                         content: content,
                         timestamp: new Date().toISOString(),
                         source: 'web',
-                        attachments: uploadedFilesInfo.map(f => ({
+                        attachments: [...uploadedFilesInfo.map(f => ({
                             name: f.name,
                             type: f.type,
                             size: f.size,
                             path: f.path,
-                            preview: f.preview
-                        }))
+                            url: f.url || f.path,
+                            preview: f.preview,
+                            content: f.content
+                        }))]
                     };
+                    
                     this.currentMessages.push(userMessage);
                     this.$nextTick(() => this.scrollToBottom());
                     
@@ -11259,18 +11946,11 @@ def main(params):
                     
                     try {
                         // 通过 WebSocket 发送消息
-                        // 只发送原始内容，文件内容通过后端读取并传递给AI
                         socket.emit('send_message', {
                             session_id: this.currentSession.id,
-                            content: content,  // 只发送原始内容
+                            content: userMessage.content,
                             sender: this.username,
-                            attachments: uploadedFilesInfo.map(f => ({
-                                name: f.name,
-                                type: f.type,
-                                size: f.size,
-                                path: f.path,
-                                preview: f.preview
-                            })),
+                            attachments: uploadedFilesInfo,
                             tempId: tempId
                         });
                         
@@ -11871,6 +12551,192 @@ def main(params):
                     this.expandEditorMode = 'edit';
                 },
 
+                // 工作区浏览器
+                openWorkspaceBrowser() {
+                    this.showWorkspaceBrowser = true;
+                    this.workspaceCurrentPath = '';
+                    this.workspaceFiles = [];
+                    this.closeFileMenu();
+                    this.loadWorkspaceFiles();
+                },
+                
+                closeWorkspaceBrowser() {
+                    this.showWorkspaceBrowser = false;
+                },
+                
+                async loadWorkspaceFiles() {
+                    if (!this.currentSession?.id) return;
+                    
+                    this.loadingWorkspaceFiles = true;
+                    try {
+                        const sessionId = this.currentSession.id;
+                        const path = this.workspaceCurrentPath;
+                        const url = path 
+                            ? `/api/sessions/${sessionId}/workspace/files?path=${encodeURIComponent(path)}`
+                            : `/api/sessions/${sessionId}/workspace/files`;
+                        
+                        const res = await api.get(url);
+                        if (res.data.files) {
+                            this.workspaceFiles = res.data.files.map(f => ({
+                                name: f.name,
+                                type: f.type,
+                                size: f.size,
+                                path: f.path
+                            }));
+                        }
+                    } catch (e) {
+                        console.error('加载工作区文件失败:', e);
+                        this.workspaceFiles = [];
+                    } finally {
+                        this.loadingWorkspaceFiles = false;
+                    }
+                },
+                
+                navigateToFolder(path) {
+                    this.workspaceCurrentPath = path;
+                    this.loadWorkspaceFiles();
+                },
+                
+                get workspacePathParts() {
+                    if (!this.workspaceCurrentPath) return [];
+                    return this.workspaceCurrentPath.split('/').filter(p => p);
+                },
+                
+                previewWorkspaceFile(item) {
+                    // 不关闭工作区浏览器，直接打开文件预览
+                    this.previewFile(this.currentSession?.id, item.name);
+                },
+                
+                insertWorkspaceFile(item) {
+                    // 把文件路径直接插入到输入框
+                    const path = this.workspaceCurrentPath 
+                        ? `${this.workspaceCurrentPath}/${item.name}`
+                        : item.name;
+                    
+                    if (this.inputMessage) {
+                        this.inputMessage += '\n' + path;
+                    } else {
+                        this.inputMessage = path;
+                    }
+                    
+                    this.closeWorkspaceBrowser();
+                },
+                
+                refreshWorkspaceFiles() {
+                    this.loadWorkspaceFiles();
+                },
+                
+                async createFolder() {
+                    if (!this.newFolderName.trim() || !this.currentSession?.id) return;
+                    
+                    try {
+                        const res = await api.post(`/api/sessions/${this.currentSession.id}/workspace/folders`, {
+                            name: this.newFolderName.trim(),
+                            path: this.workspaceCurrentPath
+                        });
+                        
+                        if (res.data.success) {
+                            this.showToast('文件夹创建成功', 'success');
+                            this.showCreateFolderModal = false;
+                            this.newFolderName = '';
+                            this.loadWorkspaceFiles();
+                        } else {
+                            this.showToast(res.data.error || '创建失败', 'error');
+                        }
+                    } catch (e) {
+                        this.showToast('创建文件夹失败', 'error');
+                    }
+                },
+                
+                async deleteWorkspaceItem(item) {
+                    this.showConfirm({
+                        title: '删除' + (item.type === 'directory' ? '文件夹' : '文件'),
+                        message: `确定要删除 "${item.name}" ${item.type === 'directory' ? '及其所有内容' : ''} 吗？此操作不可恢复。`,
+                        confirmText: '删除',
+                        icon: 'fa-trash',
+                        iconColor: 'var(--danger)',
+                        danger: true,
+                        action: async () => {
+                            try {
+                                const filename = item.path;
+                                const res = await api.delete(`/api/sessions/${this.currentSession.id}/workspace/files/${encodeURIComponent(filename)}`);
+                                
+                                if (res.data.success) {
+                                    this.showToast('删除成功', 'success');
+                                    this.loadWorkspaceFiles();
+                                } else {
+                                    this.showToast(res.data.error || '删除失败', 'error');
+                                }
+                            } catch (e) {
+                                this.showToast('删除失败', 'error');
+                            }
+                        }
+                    });
+                },
+                
+                onDragFileStart(event, item) {
+                    this.draggingFile = item;
+                    event.dataTransfer.effectAllowed = 'move';
+                    event.dataTransfer.setData('text/plain', item.path);
+                    event.target.classList.add('dragging');
+                },
+                
+                onDragFileEnd(event) {
+                    this.draggingFile = null;
+                    this.dragOverItem = null;
+                    event.target.classList.remove('dragging');
+                },
+                
+                onDragOver(event, item) {
+                    if (item.type !== 'directory') return;
+                    if (!this.draggingFile || this.draggingFile.path === item.path) return;
+                    event.dataTransfer.dropEffect = 'move';
+                },
+                
+                onDragEnter(event, item) {
+                    if (item.type !== 'directory') return;
+                    if (!this.draggingFile || this.draggingFile.path === item.path) return;
+                    this.dragOverItem = item.path;
+                },
+                
+                onDragLeave(event, item) {
+                    if (this.dragOverItem === item.path) {
+                        this.dragOverItem = null;
+                    }
+                },
+                
+                async onWorkspaceDrop(event, targetItem) {
+                    this.dragOverItem = null;
+                    
+                    if (targetItem.type !== 'directory' || !this.draggingFile) return;
+                    if (this.draggingFile.path === targetItem.path) return;
+                    
+                    // 不能移动到自身目录
+                    if (targetItem.path.startsWith(this.draggingFile.path + '/')) {
+                        this.showToast('不能将文件夹移动到自身目录下', 'error');
+                        return;
+                    }
+                    
+                    try {
+                        const filename = this.draggingFile.path;
+                        const target = targetItem.path;
+                        const res = await api.post(`/api/sessions/${this.currentSession.id}/workspace/files/${encodeURIComponent(filename)}/move`, {
+                            target: target
+                        });
+                        
+                        if (res.data.success) {
+                            this.showToast('文件已移动', 'success');
+                            this.loadWorkspaceFiles();
+                        } else {
+                            this.showToast(res.data.error || '移动失败', 'error');
+                        }
+                    } catch (e) {
+                        this.showToast('移动失败', 'error');
+                    }
+                    
+                    this.draggingFile = null;
+                },
+                
                 applyExpandEditor() {
                     const content = this.expandEditorContent;
                     this.showExpandEditor = false;
@@ -11878,6 +12744,277 @@ def main(params):
                     this.expandEditorMode = 'edit';
                     // 将内容设置到主输入框
                     this.inputMessage = content;
+                },
+                
+                // 文件预览
+                async previewFile(sessionId, filename) {
+                    this.showFilePreview = true;
+                    this.filePreviewData = {
+                        sessionId: sessionId,
+                        filename: filename,
+                        type: '',
+                        content: '',
+                        url: '',
+                        loading: true,
+                        error: '',
+                        truncated: false,
+                        extracted_length: 0,
+                        original_length: 0
+                    };
+                    
+                    try {
+                        const encodedFilename = encodeURIComponent(filename);
+                        
+                        // docx 文件特殊处理：获取 blob 并在前端渲染
+                        if (this.isDocxFile(filename)) {
+                            const res = await api.get(`/api/sessions/${sessionId}/workspace/files/${encodedFilename}`, {
+                                responseType: 'blob'
+                            });
+                            if (res.data) {
+                                this.filePreviewData.loading = false;
+                                this.$nextTick(() => {
+                                    this.renderDocx(res.data);
+                                });
+                            } else {
+                                this.filePreviewData.error = '无法加载文档';
+                                this.filePreviewData.loading = false;
+                            }
+                            return;
+                        }
+                        
+                        // excel 文件特殊处理：获取 blob 并在前端渲染
+                        if (this.isExcelFile(filename)) {
+                            const res = await api.get(`/api/sessions/${sessionId}/workspace/files/${encodedFilename}`, {
+                                responseType: 'blob'
+                            });
+                            if (res.data) {
+                                this.filePreviewData.loading = false;
+                                this.$nextTick(() => {
+                                    this.renderExcel(res.data);
+                                });
+                            } else {
+                                this.filePreviewData.error = '无法加载表格';
+                                this.filePreviewData.loading = false;
+                            }
+                            return;
+                        }
+                        
+                        // HTML 文件特殊处理：获取文本内容并渲染
+                        if (this.isHtmlFile(filename)) {
+                            const res = await api.get(`/api/sessions/${sessionId}/workspace/files/${encodedFilename}`, {
+                                responseType: 'text'
+                            });
+                            if (res.data) {
+                                this.filePreviewData.content = res.data;
+                                this.filePreviewData.loading = false;
+                                this.$nextTick(() => {
+                                    this.renderHtml(res.data);
+                                });
+                            } else {
+                                this.filePreviewData.error = '无法加载页面';
+                                this.filePreviewData.loading = false;
+                            }
+                            return;
+                        }
+                        
+                        // 其他文件使用后端解析
+                        const res = await api.get(`/api/sessions/${sessionId}/workspace/files/${encodedFilename}/preview`);
+                        if (res.data.success) {
+                            this.filePreviewData = {
+                                ...this.filePreviewData,
+                                ...res.data,
+                                loading: false
+                            };
+                        } else {
+                            this.filePreviewData.error = res.data.error || '预览失败';
+                            this.filePreviewData.loading = false;
+                        }
+                    } catch (e) {
+                        console.error('文件预览失败:', e);
+                        this.filePreviewData.error = '预览失败: ' + (e.response?.data?.error || e.message);
+                        this.filePreviewData.loading = false;
+                    }
+                },
+                
+                // 渲染 docx 文件 (使用 mammoth)
+                renderDocx(blob) {
+                    this.$nextTick(() => {
+                        const container = this.$refs.docxContainer;
+                        if (!container) {
+                            console.error('docx 容器未找到');
+                            this.filePreviewData.error = '预览容器未就绪，请重试';
+                            return;
+                        }
+                        container.innerHTML = '<p style="text-align:center;color:var(--text-muted);">正在解析文档...</p>';
+                        
+                        // 检查 mammoth 库
+                        const mammothLib = window.mammoth;
+                        if (typeof mammothLib !== 'undefined') {
+                            mammothLib.extractRawText({ arrayBuffer: blob })
+                                .then(result => {
+                                    const text = result.value;
+                                    if (!text || text.trim() === '') {
+                                        container.innerHTML = '<p style="text-align:center;color:var(--text-muted);">文档内容为空</p>';
+                                        return;
+                                    }
+                                    
+                                    // 将纯文本分段显示
+                                    const paragraphs = text.split(/\n\n+/).filter(p => p.trim());
+                                    const html = paragraphs.map(p => {
+                                        const trimmed = p.trim();
+                                        // 检测是否为标题（简短全大写行）
+                                        if (trimmed.length < 50 && trimmed.length > 3 && trimmed === trimmed.toUpperCase() && /[A-Z]/.test(trimmed)) {
+                                            return `<h3 style="margin-top:1em;color:var(--text-color);">${this.escapeHtml(trimmed)}</h3>`;
+                                        }
+                                        return `<p style="margin:0.5em 0;line-height:1.6;">${this.escapeHtml(trimmed).replace(/\n/g, '<br>')}</p>`;
+                                    }).join('');
+                                    
+                                    container.innerHTML = `<div class="docx-text-content">${html}</div>`;
+                                })
+                                .catch(err => {
+                                    console.error('mammoth 解析失败:', err);
+                                    // 尝试直接读取 blob 文本内容（作为最后的降级方案）
+                                    blob.text().then(text => {
+                                        if (text && text.length > 0) {
+                                            // 检查是否看起来像 docx/xml 内容
+                                            if (text.includes('<?xml') || text.includes('<w:') || text.includes('PK')) {
+                                                container.innerHTML = `<p style="color:var(--text-muted);text-align:center;">此文件可能不是有效的 .docx 格式<br><small>（文件可能是旧的 .doc 格式或已损坏）</small></p>`;
+                                            } else {
+                                                // 尝试直接显示文本
+                                                const paragraphs = text.split(/\n\n+/).filter(p => p.trim());
+                                                const html = paragraphs.map(p => 
+                                                    `<p style="margin:0.5em 0;line-height:1.6;">${this.escapeHtml(p.trim()).replace(/\n/g, '<br>')}</p>`
+                                                ).join('');
+                                                container.innerHTML = `<div class="docx-text-content">${html}</div>`;
+                                            }
+                                        } else {
+                                            this.filePreviewData.error = '无法读取文档内容';
+                                        }
+                                    }).catch(() => {
+                                        this.filePreviewData.error = '文档解析失败，请尝试下载后查看';
+                                    });
+                                });
+                        } else {
+                            console.error('mammoth 库未加载');
+                            this.filePreviewData.error = '文档预览库未加载，请刷新页面重试';
+                        }
+                    });
+                },
+                
+                // HTML 转义辅助方法
+                escapeHtml(text) {
+                    if (!text) return '';
+                    const div = document.createElement('div');
+                    div.textContent = text;
+                    return div.innerHTML;
+                },
+                
+                // 渲染 excel 文件
+                renderExcel(blob) {
+                    this.$nextTick(() => {
+                        const container = this.$refs.excelContainer;
+                        if (!container) {
+                            console.error('excel 容器未找到');
+                            this.filePreviewData.error = '预览容器未就绪，请重试';
+                            return;
+                        }
+                        container.innerHTML = '';
+                        
+                        // 检查 xlsx 库
+                        const XLSXLib = window.XLSX || XLSX;
+                        if (typeof XLSXLib !== 'undefined') {
+                            try {
+                                // XLSX.read 需要 ArrayBuffer 或二进制字符串
+                                const arrayBuffer = blob.arrayBuffer();
+                                arrayBuffer.then(ab => {
+                                    const workbook = XLSXLib.read(ab, { type: 'array' });
+                                    const sheetNames = workbook.SheetNames;
+                                    if (sheetNames.length === 0) {
+                                        container.innerHTML = '<p>表格为空</p>';
+                                        return;
+                                    }
+                                    
+                                    // 渲染第一个工作表
+                                    const sheetName = sheetNames[0];
+                                    const sheet = workbook.Sheets[sheetName];
+                                    const html = XLSXLib.utils.sheet_to_html(sheet, {
+                                        header: '',
+                                        footer: ''
+                                    });
+                                    container.innerHTML = html;
+                                    
+                                    // 如果有多个工作表，添加切换按钮
+                                    if (sheetNames.length > 1) {
+                                        const tabs = document.createElement('div');
+                                        tabs.className = 'excel-tabs';
+                                        tabs.style.cssText = 'margin-bottom: 10px; border-bottom: 1px solid #ddd; padding: 5px;';
+                                        sheetNames.forEach((name, idx) => {
+                                            const btn = document.createElement('button');
+                                            btn.textContent = name;
+                                            btn.style.cssText = 'padding: 5px 15px; margin-right: 5px; border: none; background: ' + (idx === 0 ? '#007bff; color: white;' : '#f0f0f0; color: #333;') + '; border-radius: 4px 4px 0 0; cursor: pointer;';
+                                            btn.onclick = () => {
+                                                const s = workbook.Sheets[name];
+                                                container.innerHTML = XLSXLib.utils.sheet_to_html(s);
+                                            };
+                                            tabs.appendChild(btn);
+                                        });
+                                        container.insertBefore(tabs, container.firstChild);
+                                    }
+                                });
+                            } catch (err) {
+                                console.error('excel 解析失败:', err);
+                                this.filePreviewData.error = '表格解析失败: ' + err.message;
+                            }
+                        } else {
+                            console.error('xlsx 库未加载, window.XLSX:', typeof window.XLSX);
+                            this.filePreviewData.error = '表格预览库未加载，请刷新页面重试';
+                        }
+                    });
+                },
+                
+                // 渲染 HTML 文件
+                renderHtml(content) {
+                    this.$nextTick(() => {
+                        const container = this.$refs.htmlContainer;
+                        if (!container) {
+                            console.error('html 容器未找到');
+                            this.filePreviewData.error = '预览容器未就绪，请重试';
+                            return;
+                        }
+                        container.innerHTML = content;
+                    });
+                },
+                
+                closeFilePreview() {
+                    this.showFilePreview = false;
+                    this.filePreviewMaximized = false;
+                },
+                
+                downloadFile(fileData) {
+                    // 如果有 URL，使用 fetch + Blob 下载并指定文件名
+                    if (fileData && fileData.url) {
+                        const filename = fileData.filename || fileData.name || 'download.txt';
+                        fetch(fileData.url)
+                            .then(response => {
+                                if (!response.ok) throw new Error('下载失败');
+                                return response.blob();
+                            })
+                            .then(blob => {
+                                const url = window.URL.createObjectURL(blob);
+                                const link = document.createElement('a');
+                                link.href = url;
+                                link.download = filename;
+                                document.body.appendChild(link);
+                                link.click();
+                                document.body.removeChild(link);
+                                window.URL.revokeObjectURL(url);
+                            })
+                            .catch(err => {
+                                console.error('下载失败:', err);
+                                // 降级方案：直接打开链接
+                                window.open(fileData.url, '_blank');
+                            });
+                    }
                 },
                 
                 // Workflow Functions
@@ -13410,6 +14547,34 @@ def main(params):
                     return content;
                 },
 
+                // 判断是否为 Markdown 文件
+                isMarkdownFile(filename) {
+                    if (!filename) return false;
+                    const ext = filename.toLowerCase().split('.').pop();
+                    return ext === 'md' || ext === 'markdown';
+                },
+                
+                // 判断是否为 Word 文档
+                isDocxFile(filename) {
+                    if (!filename) return false;
+                    const ext = filename.toLowerCase().split('.').pop();
+                    return ext === 'docx' || ext === 'doc';
+                },
+                
+                // 判断是否为 Excel 文件
+                isExcelFile(filename) {
+                    if (!filename) return false;
+                    const ext = filename.toLowerCase().split('.').pop();
+                    return ext === 'xlsx' || ext === 'xls';
+                },
+                
+                // 判断是否为 HTML 文件
+                isHtmlFile(filename) {
+                    if (!filename) return false;
+                    const ext = filename.toLowerCase().split('.').pop();
+                    return ext === 'html' || ext === 'htm';
+                },
+
                 // 渲染 Markdown 内容
                 renderMarkdown(content) {
                     if (!content) return '';
@@ -13561,11 +14726,135 @@ def main(params):
                 
                 previewAttachment(att) {
                     const imageUrl = att.url || att.data || att.preview;
-                    if (att.url) {
-                        window.open(att.url, '_blank');
-                    } else if (imageUrl && att.type && att.type.startsWith('image/')) {
+                    
+                    // 图片文件直接在新窗口打开
+                    if (imageUrl && att.type && att.type.startsWith('image/')) {
                         const win = window.open('', '_blank');
                         win.document.write('<img src="' + imageUrl + '" style="max-width:100%;max-height:100vh;margin:auto;display:block;">');
+                        return;
+                    }
+                    
+                    // 其他文件类型使用预览模态框
+                    // 所有文件都尝试用 previewUserFile 处理
+                    this.previewUserFile(att);
+                },
+                
+                async previewUserFile(att) {
+                    // 使用预览模态框预览用户上传的文件
+                    this.showFilePreview = true;
+                    this.filePreviewMaximized = false;
+                    this.filePreviewData = {
+                        sessionId: att.session_id || this.currentSession?.id || '',
+                        filename: att.name || '文件预览',
+                        type: att.type || '',
+                        content: '',
+                        url: att.url || '',
+                        loading: true,
+                        error: '',
+                        truncated: false,
+                        extracted_length: 0,
+                        original_length: 0
+                    };
+                    
+                    // 如果是图片，直接显示
+                    if (att.type && att.type.startsWith('image/')) {
+                        this.filePreviewData.type = 'image';
+                        this.filePreviewData.url = att.url || att.data || att.preview;
+                        this.filePreviewData.loading = false;
+                        return;
+                    }
+                    
+                    // docx 文件特殊处理
+                    if (this.isDocxFile(att.name)) {
+                        try {
+                            const response = await fetch(att.url);
+                            if (response.ok) {
+                                const blob = await response.blob();
+                                this.filePreviewData.loading = false;
+                                this.$nextTick(() => {
+                                    this.renderDocx(blob);
+                                });
+                            } else {
+                                this.filePreviewData.error = '无法加载文档';
+                                this.filePreviewData.loading = false;
+                            }
+                        } catch (e) {
+                            this.filePreviewData.error = '文档加载失败';
+                            this.filePreviewData.loading = false;
+                        }
+                        return;
+                    }
+                    
+                    // excel 文件特殊处理
+                    if (this.isExcelFile(att.name)) {
+                        try {
+                            const response = await fetch(att.url);
+                            if (response.ok) {
+                                const blob = await response.blob();
+                                this.filePreviewData.loading = false;
+                                this.$nextTick(() => {
+                                    this.renderExcel(blob);
+                                });
+                            } else {
+                                this.filePreviewData.error = '无法加载表格';
+                                this.filePreviewData.loading = false;
+                            }
+                        } catch (e) {
+                            this.filePreviewData.error = '表格加载失败';
+                            this.filePreviewData.loading = false;
+                        }
+                        return;
+                    }
+                    
+                    // HTML 文件特殊处理
+                    if (this.isHtmlFile(att.name)) {
+                        try {
+                            const response = await fetch(att.url);
+                            if (response.ok) {
+                                const text = await response.text();
+                                this.filePreviewData.content = text;
+                                this.filePreviewData.loading = false;
+                                this.$nextTick(() => {
+                                    this.renderHtml(text);
+                                });
+                            } else {
+                                this.filePreviewData.error = '无法加载页面';
+                                this.filePreviewData.loading = false;
+                            }
+                        } catch (e) {
+                            this.filePreviewData.error = '页面加载失败';
+                            this.filePreviewData.loading = false;
+                        }
+                        return;
+                    }
+                    
+                    // 如果有内嵌内容（文本文件），直接显示
+                    if (att.content) {
+                        this.filePreviewData.content = att.content;
+                        this.filePreviewData.loading = false;
+                        return;
+                    }
+                    
+                    // 如果有 URL 但没有内容，尝试通过 API 获取
+                    if (att.url) {
+                        try {
+                            // 尝试直接 fetch 内容
+                            const response = await fetch(att.url);
+                            if (response.ok && response.status !== 206) {
+                                const text = await response.text();
+                                this.filePreviewData.content = text;
+                                this.filePreviewData.loading = false;
+                                return;
+                            }
+                        } catch (e) {
+                            console.log('无法直接 fetch 文件:', e);
+                        }
+                    }
+                    
+                    // 如果无法获取内容，显示提示
+                    if (!this.filePreviewData.content) {
+                        this.filePreviewData.loading = false;
+                        this.filePreviewData.error = '无法预览此文件，请下载后查看';
                     }
                 },
 

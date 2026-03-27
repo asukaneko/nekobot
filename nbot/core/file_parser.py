@@ -238,8 +238,44 @@ class FileParser:
         """解析 Word 文档"""
         try:
             from docx import Document
+            from pathlib import Path
             
-            doc = Document(file_path)
+            # 使用 pathlib 处理路径，更好的跨平台支持
+            file_path = Path(file_path)
+            
+            _log.info(f"[_parse_docx] 尝试解析文件: {file_path}, exists={file_path.exists()}")
+            
+            if not file_path.exists():
+                return {
+                    'success': False,
+                    'error': f'文件不存在: {file_path}',
+                    'filename': filename
+                }
+            
+            # 检查文件大小
+            file_size = file_path.stat().st_size
+            _log.info(f"[_parse_docx] 文件大小: {file_size} bytes")
+            
+            # 检查是否为有效的 zip 文件（docx 实际上是 zip）
+            try:
+                import zipfile
+                with zipfile.ZipFile(str(file_path), 'r') as zf:
+                    namelist = zf.namelist()
+                    _log.info(f"[_parse_docx] zip 内容: {namelist[:5]}...")
+                    if 'word/document.xml' not in namelist:
+                        return {
+                            'success': False,
+                            'error': '无效的 docx 文件：缺少 word/document.xml',
+                            'filename': filename
+                        }
+            except zipfile.BadZipFile:
+                return {
+                    'success': False,
+                    'error': '无效的 docx 文件：不是有效的 zip 压缩包',
+                    'filename': filename
+                }
+            
+            doc = Document(str(file_path))
             paragraphs = []
             
             # 提取段落

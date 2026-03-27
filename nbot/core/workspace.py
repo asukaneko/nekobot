@@ -471,7 +471,7 @@ class WorkspaceManager:
 
     def delete_file(self, session_id: str, filename: str) -> Dict[str, Any]:
         """
-        删除工作区中的文件（供 AI 工具调用）
+        删除工作区中的文件或文件夹（供 AI 工具调用）
         """
         ws_path = self.get_workspace(session_id)
         if not ws_path:
@@ -485,38 +485,126 @@ class WorkspaceManager:
             return {'success': False, 'error': f'文件不存在: {filename}'}
 
         try:
-            os.remove(file_path)
+            if os.path.isdir(file_path):
+                # 删除文件夹及其所有内容
+                import shutil
+                shutil.rmtree(file_path)
+            else:
+                os.remove(file_path)
             return {'success': True, 'filename': filename}
         except Exception as e:
             return {'success': False, 'error': str(e)}
 
-    def list_files(self, session_id: str) -> Dict[str, Any]:
+    def list_files(self, session_id: str, path: str = '') -> Dict[str, Any]:
         """
-        列出工作区中的所有文件（供 AI 工具调用）
+        列出工作区中的文件
+        
+        Args:
+            session_id: 会话ID
+            path: 子目录路径（可选），为空则列出根目录
         """
         ws_path = self.get_workspace(session_id)
         if not ws_path:
             return {'success': True, 'files': [], 'message': '工作区为空'}
 
+        # 如果指定了路径，列出该目录的内容
+        if path:
+            target_path = os.path.join(ws_path, path)
+            if not os.path.exists(target_path) or not os.path.isdir(target_path):
+                return {'success': False, 'error': '目录不存在'}
+            
+            files = []
+            try:
+                for name in os.listdir(target_path):
+                    full_path = os.path.join(target_path, name)
+                    if os.path.isdir(full_path):
+                        files.append({
+                            'name': name,
+                            'type': 'directory',
+                            'size': 0,
+                            'path': path + '/' + name if path else name
+                        })
+                    else:
+                        mime_type, _ = mimetypes.guess_type(full_path)
+                        files.append({
+                            'name': name,
+                            'type': 'file',
+                            'size': os.path.getsize(full_path),
+                            'mime_type': mime_type or 'application/octet-stream',
+                            'path': path + '/' + name if path else name
+                        })
+            except Exception as e:
+                return {'success': False, 'error': str(e)}
+            
+            return {'success': True, 'files': files, 'count': len(files)}
+
+        # 列出根目录
         files = []
         try:
-            for root, dirs, filenames in os.walk(ws_path):
-                for fname in filenames:
-                    full_path = os.path.join(root, fname)
-                    rel_path = os.path.relpath(full_path, ws_path)
+            for name in os.listdir(ws_path):
+                full_path = os.path.join(ws_path, name)
+                if os.path.isdir(full_path):
+                    files.append({
+                        'name': name,
+                        'type': 'directory',
+                        'size': 0,
+                        'path': name
+                    })
+                else:
                     mime_type, _ = mimetypes.guess_type(full_path)
                     files.append({
-                        'name': rel_path.replace('\\', '/'),
+                        'name': name,
+                        'type': 'file',
                         'size': os.path.getsize(full_path),
                         'mime_type': mime_type or 'application/octet-stream',
-                        'modified': datetime.fromtimestamp(
-                            os.path.getmtime(full_path)
-                        ).isoformat()
+                        'path': name
                     })
         except Exception as e:
             return {'success': False, 'error': str(e)}
 
         return {'success': True, 'files': files, 'count': len(files)}
+
+    def move_file(self, session_id: str, filename: str, target_path: str = '') -> Dict[str, Any]:
+        """
+        移动工作区中的文件或文件夹到指定目录
+        
+        Args:
+            session_id: 会话ID
+            filename: 要移动的文件或文件夹路径
+            target_path: 目标目录路径（相对于工作区根目录）
+        """
+        ws_path = self.get_workspace(session_id)
+        if not ws_path:
+            return {'success': False, 'error': '工作区不存在'}
+        
+        src_path = os.path.normpath(os.path.join(ws_path, filename))
+        if not src_path.startswith(os.path.normpath(ws_path)):
+            return {'success': False, 'error': '路径不合法'}
+        
+        if not os.path.exists(src_path):
+            return {'success': False, 'error': f'文件不存在: {filename}'}
+        
+        # 构建目标路径
+        if target_path:
+            dst_dir = os.path.join(ws_path, target_path)
+        else:
+            dst_dir = ws_path
+        
+        if not os.path.exists(dst_dir) or not os.path.isdir(dst_dir):
+            return {'success': False, 'error': '目标目录不存在'}
+        
+        # 检查是否移动到自身目录下
+        dst_path = os.path.join(dst_dir, os.path.basename(filename))
+        if dst_path.startswith(src_path + os.sep) or dst_path == src_path:
+            return {'success': False, 'error': '不能将文件夹移动到自身目录下'}
+        
+        try:
+            import shutil
+            shutil.move(src_path, dst_path)
+            new_path = os.path.join(target_path, os.path.basename(filename)) if target_path else os.path.basename(filename)
+            return {'success': True, 'new_path': new_path.replace('\\', '/')}
+        except Exception as e:
+            return {'success': False, 'error': str(e)}
 
     def get_file_path(self, session_id: str, filename: str) -> Optional[str]:
         """
