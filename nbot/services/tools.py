@@ -940,17 +940,21 @@ TOOL_DEFINITIONS = [
         "type": "function",
         "function": {
             "name": "save_to_memory",
-            "description": "将重要信息保存到记忆管理系统。当用户要求记住某些信息、保存重要内容、记录关键事项时使用此工具。可以保存为长期记忆（永久保存）或短期记忆（自动过期）。",
+            "description": "将重要信息保存到记忆管理系统。当用户要求记住某些信息、保存重要内容、记录关键事项时使用此工具。可以保存为长期记忆（永久保存）或短期记忆（自动过期）。记忆包含标题（简短概括）、摘要（内容要点）和完整内容。",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "key": {
+                    "title": {
                         "type": "string",
-                        "description": "记忆的标题/关键词，用于标识这段记忆，如'用户的喜好'、'项目需求'、'重要日期'等"
+                        "description": "记忆的标题，简短概括记忆的主题，如'用户喜好'、'项目需求'、'重要日期'等"
                     },
-                    "value": {
+                    "content": {
                         "type": "string",
-                        "description": "要保存的记忆内容，详细描述需要记住的信息"
+                        "description": "要保存的完整记忆内容，详细描述需要记住的信息"
+                    },
+                    "summary": {
+                        "type": "string",
+                        "description": "内容摘要，简短描述内容的要点，方便快速回顾（如果不提供，系统会自动从content提取前100字作为摘要）"
                     },
                     "mem_type": {
                         "type": "string",
@@ -964,7 +968,7 @@ TOOL_DEFINITIONS = [
                         "default": 7
                     }
                 },
-                "required": ["key", "value"]
+                "required": ["title", "content"]
             }
         }
     },
@@ -972,7 +976,7 @@ TOOL_DEFINITIONS = [
         "type": "function",
         "function": {
             "name": "read_memory",
-            "description": "读取已保存的记忆内容。当用户询问之前记住的内容、查询保存的信息、确认记忆中的内容时使用此工具。",
+            "description": "读取已保存的记忆内容。当用户询问之前记住的内容、查询保存的信息、确认记忆中的内容时使用此工具。返回的记忆包含标题、摘要和完整内容。",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -1464,13 +1468,14 @@ def _execute_save_to_memory(arguments: Dict[str, Any], context: Dict = None) -> 
         if not prompt_manager:
             return {"success": False, "error": "记忆管理系统不可用"}
         
-        key = arguments.get('key', '')
-        value = arguments.get('value', '')
+        title = arguments.get('title', '')
+        content = arguments.get('content', '')
+        summary = arguments.get('summary', '')  # 可选，如果为空会让 prompt_manager 自动生成
         mem_type = arguments.get('mem_type', 'long')
         expire_days = arguments.get('expire_days', 7)
         
-        if not key or not value:
-            return {"success": False, "error": "缺少必需的参数: key 和 value"}
+        if not title or not content:
+            return {"success": False, "error": "缺少必需的参数: title 和 content"}
         
         # 从 context 获取目标ID（用户ID或群ID）
         target_id = ''
@@ -1478,15 +1483,16 @@ def _execute_save_to_memory(arguments: Dict[str, Any], context: Dict = None) -> 
             # 优先使用 user_id，然后是 group_id
             target_id = context.get('user_id', '') or context.get('group_id', '')
         
-        # 添加记忆
-        success = prompt_manager.add_memory(key, value, target_id, mem_type, expire_days)
+        # 添加记忆（使用新格式：title, summary, content）
+        # 参数顺序：title, content, target_id, summary, mem_type, expire_days
+        success = prompt_manager.add_memory(title, content, target_id, summary, mem_type, expire_days)
         
         if success:
             mem_type_desc = "长期记忆" if mem_type == "long" else f"短期记忆（{expire_days}天）"
             return {
                 "success": True,
                 "message": f"已成功保存到{mem_type_desc}",
-                "key": key,
+                "title": title,
                 "type": mem_type
             }
         else:
@@ -1526,15 +1532,16 @@ def _execute_read_memory(arguments: Dict[str, Any], context: Dict = None) -> Dic
                 "memories": []
             }
         
-        # 格式化返回
+        # 格式化返回（新格式：title, summary, content）
         formatted_memories = []
         for mem in memories:
             mem_type_val = mem.get('type', 'long')
             mem_type_desc = "长期记忆" if mem_type_val == "long" else "短期记忆"
             created_at = mem.get('created_at', '未知时间')
             formatted_memories.append({
-                "key": mem.get('key', ''),
-                "value": mem.get('value', ''),
+                "title": mem.get('title', ''),
+                "summary": mem.get('summary', ''),
+                "content": mem.get('content', ''),
                 "type": mem_type_desc,
                 "created_at": created_at
             })
