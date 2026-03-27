@@ -23,7 +23,18 @@ CORE_INSTRUCTIONS = """【重要】你必须严格遵循以下要求：
 
 1. 直接回复用户的问题，不要使用任何特殊格式
 2. 你的回答应该是自然的对话形式
-3. 如果需要执行操作（如搜索新闻、查询天气等），请使用可用的工具
+3. 如果需要执行操作（如搜索新闻、查询天气、保存记忆等），请使用可用的工具
+
+【工具调用规则】
+- 当需要使用工具时，必须通过 tool_calls 格式调用，不要把工具信息作为普通文本输出
+- 工具调用由系统自动处理，你只需要描述你需要执行的操作
+- 工具返回结果后，用自然的语言向用户解释结果
+
+【文件写入规则】
+- 调用 write_file 工具写入文件内容时，每次写入的内容不宜过长（建议不超过 2000 字符）
+- 如果需要写入大量内容，应该分多次调用 write_file 工具，每次写入一部分
+- 例如要写入 5000 字的内容，应该分 3 次写入，每次数百到一千多字
+- 不要尝试一次性写入过长的内容，这会导致写入失败
 
 【文件处理指南】
 当用户上传文件时，会显示文件元数据（类型、大小、页数等）。
@@ -2159,8 +2170,12 @@ class WebChatServer:
             timeout = self.settings.get('api_timeout', 120)
             max_retries = self.settings.get('api_retry_count', 3)
             
-            # 使用较短的超时以便更频繁地检查停止事件
-            short_timeout = min(timeout, 10)
+            # 使用适当的超时：有工具时至少 60 秒，无工具时至少 30 秒
+            # 这样可以更频繁地检查停止事件，同时不会因为太短而频繁超时
+            if tools:
+                api_timeout = max(timeout, 60)  # 有工具调用时至少 60 秒
+            else:
+                api_timeout = max(timeout, 30)  # 无工具调用时至少 30 秒
             
             # 检查是否应该使用 Silicon API
             # 只有在明确指定 use_silicon=True 且有 Silicon API key 时才使用
@@ -2190,13 +2205,22 @@ class WebChatServer:
                 model = "Qwen/Qwen2.5-72B-Instruct"
                 
                 # 检查消息总长度，必要时截断工具结果
-                MAX_CONTENT_LENGTH = 8000
+                MAX_CONTENT_LENGTH = 12000  # 每个消息内容的最大长度
                 processed_messages = []
                 for msg in messages:
                     msg_copy = msg.copy()
                     if 'content' in msg_copy and isinstance(msg_copy['content'], str):
-                        if len(msg_copy['content']) > MAX_CONTENT_LENGTH:
-                            msg_copy['content'] = msg_copy['content'][:MAX_CONTENT_LENGTH] + "\n...[内容已截断]"
+                        content_len = len(msg_copy['content'])
+                        if content_len > MAX_CONTENT_LENGTH:
+                            # 尝试保留 JSON 的完整性
+                            truncated = msg_copy['content'][:MAX_CONTENT_LENGTH]
+                            # 如果看起来像 JSON，尝试找到最后一个完整的括号
+                            if truncated.strip().startswith('{') or truncated.strip().startswith('['):
+                                # 找到最后一个完整的 JSON 对象/数组
+                                last_brace = max(truncated.rfind('}'), truncated.rfind(']'))
+                                if last_brace > MAX_CONTENT_LENGTH - 500:  # 如果最后一个括号位置还合理
+                                    truncated = truncated[:last_brace + 1]
+                            msg_copy['content'] = truncated + f"\n... [内容过长，已截断，原始长度: {content_len} 字符]"
                     processed_messages.append(msg_copy)
                 
                 payload = {
@@ -2212,7 +2236,7 @@ class WebChatServer:
                     check_stop()  # 检查是否停止
                     try:
                         _log.info(f"[AI] Silicon API 调用 (尝试 {attempt + 1}/{max_retries})")
-                        resp = requests.post(url, json=payload, headers=headers, timeout=short_timeout)
+                        resp = requests.post(url, json=payload, headers=headers, timeout=api_timeout)
                         resp.raise_for_status()
                         data = resp.json()
                         break
@@ -2250,13 +2274,33 @@ class WebChatServer:
                 }
 
                 # 检查消息总长度，必要时截断工具结果
-                MAX_CONTENT_LENGTH = 8000  # 每个消息内容的最大长度
+                MAX_CONTENT_LENGTH = 12000  # 每个消息内容的最大长度
+                MAX_ARGUMENTS_LENGTH = 50000  # tool_calls arguments 的最大长度
                 processed_messages = []
                 for msg in messages:
                     msg_copy = msg.copy()
                     if 'content' in msg_copy and isinstance(msg_copy['content'], str):
-                        if len(msg_copy['content']) > MAX_CONTENT_LENGTH:
-                            msg_copy['content'] = msg_copy['content'][:MAX_CONTENT_LENGTH] + "\n...[内容已截断]"
+                        content_len = len(msg_copy['content'])
+                        if content_len > MAX_CONTENT_LENGTH:
+                            # 尝试保留 JSON 的完整性
+                            truncated = msg_copy['content'][:MAX_CONTENT_LENGTH]
+                            # 如果看起来像 JSON，尝试找到最后一个完整的括号
+                            if truncated.strip().startswith('{') or truncated.strip().startswith('['):
+                                # 找到最后一个完整的 JSON 对象/数组
+                                last_brace = max(truncated.rfind('}'), truncated.rfind(']'))
+                                if last_brace > MAX_CONTENT_LENGTH - 500:  # 如果最后一个括号位置还合理
+                                    truncated = truncated[:last_brace + 1]
+                            msg_copy['content'] = truncated + f"\n... [内容过长，已截断，原始长度: {content_len} 字符]"
+                    
+                    # 检查 tool_calls arguments 长度
+                    if 'tool_calls' in msg_copy and msg_copy['tool_calls']:
+                        for tc in msg_copy['tool_calls']:
+                            if 'function' in tc and 'arguments' in tc['function']:
+                                args_str = tc['function']['arguments']
+                                if isinstance(args_str, str) and len(args_str) > MAX_ARGUMENTS_LENGTH:
+                                    tc['function']['arguments'] = args_str[:MAX_ARGUMENTS_LENGTH] + f'\n... [参数过长已截断，原始长度: {len(args_str)}]'
+                                    _log.warning(f"[AI] 工具 {tc.get('function', {}).get('name')} 的 arguments 过长，已截断")
+                    
                     processed_messages.append(msg_copy)
                 
                 payload = {
@@ -2266,13 +2310,21 @@ class WebChatServer:
                     "tool_choice": "auto"
                 }
                 
+                # 记录 payload 大小
+                import json
+                payload_size = len(json.dumps(payload, ensure_ascii=False))
+                _log.info(f"[AI] 发送请求到 {url}, 模型={self.ai_model}, 工具数={len(tools) if tools else 0}, payload大小={payload_size} bytes")
+                
+                if payload_size > 500000:  # 超过 500KB
+                    _log.warning(f"[AI] Payload 过大 ({payload_size} bytes)，可能导致 API 拒绝")
+                
                 # 重试机制
                 last_error = None
                 for attempt in range(max_retries):
                     check_stop()  # 检查是否停止
                     try:
                         _log.info(f"[AI] 主 API 调用 (尝试 {attempt + 1}/{max_retries})")
-                        resp = requests.post(url, json=payload, headers=headers, timeout=short_timeout)
+                        resp = requests.post(url, json=payload, headers=headers, timeout=api_timeout)
                         resp.raise_for_status()
                         data = resp.json()
                         break
@@ -2302,6 +2354,13 @@ class WebChatServer:
             choice = choices[0]
             message = choice.get("message", {})
             finish_reason = choice.get('finish_reason', '')
+
+            _log.info(f"[AI] API 响应: finish_reason={finish_reason}, has_tool_calls={'tool_calls' in message}")
+            _log.debug(f"[AI] 工具数量: {len(tools) if tools else 0}")
+            
+            # 记录完整响应用于调试
+            if 'tool_calls' not in message and message.get('content', ''):
+                _log.warning(f"[AI] 工具未生效，content 前100字符: {message.get('content', '')[:100]}")
 
             result = {
                 'content': message.get('content', ''),

@@ -8457,13 +8457,47 @@
         function copyCodeBlock(id) {
             const pre = document.getElementById(id);
             if (!pre) return;
-            navigator.clipboard.writeText(pre.innerText).then(() => {
-                const btn = pre.previousElementSibling?.querySelector('.code-copy-btn');
-                if (btn) {
+            
+            const text = pre.innerText;
+            const btn = pre.previousElementSibling?.querySelector('.code-copy-btn');
+            
+            // 优先使用现代 API
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(text).then(() => {
+                    if (btn) {
+                        btn.innerHTML = '<i class="fas fa-check"></i> 已复制';
+                        setTimeout(() => btn.innerHTML = '<i class="fas fa-copy"></i> 复制', 2000);
+                    }
+                }).catch(() => {
+                    fallbackCopyText(text, btn);
+                });
+            } else {
+                fallbackCopyText(text, btn);
+            }
+        }
+        
+        // 降级复制方案
+        function fallbackCopyText(text, btn) {
+            const textarea = document.createElement('textarea');
+            textarea.value = text;
+            textarea.style.position = 'fixed';
+            textarea.style.left = '-9999px';
+            textarea.style.top = '-9999px';
+            document.body.appendChild(textarea);
+            textarea.focus();
+            textarea.select();
+            
+            try {
+                const successful = document.execCommand('copy');
+                if (successful && btn) {
                     btn.innerHTML = '<i class="fas fa-check"></i> 已复制';
                     setTimeout(() => btn.innerHTML = '<i class="fas fa-copy"></i> 复制', 2000);
                 }
-            });
+            } catch (err) {
+                console.error('复制失败:', err);
+            }
+            
+            document.body.removeChild(textarea);
         }
 
         const { createApp } = Vue;
@@ -11717,12 +11751,7 @@ def main(params):
                     if (!this.viewingSession) return;
                     
                     const data = JSON.stringify(this.viewingSession, null, 2);
-                    navigator.clipboard.writeText(data).then(() => {
-                        this.showToast('原始数据已复制到剪贴板', 'success');
-                    }).catch(err => {
-                        console.error('复制失败:', err);
-                        this.showToast('复制失败', 'error');
-                    });
+                    this.copyToClipboard(data);
                 },
                 
                 startEditSessionName(session) {
@@ -13600,9 +13629,48 @@ def main(params):
                 // 复制消息内容
                 copyMessage(msg) {
                     const text = msg.content || '';
-                    navigator.clipboard.writeText(text).then(() => {
-                        this.showToast('已复制', 'success');
-                    });
+                    this.copyToClipboard(text);
+                },
+                
+                copyToClipboard(text) {
+                    // 优先使用现代 API，失败则降级
+                    if (navigator.clipboard && navigator.clipboard.writeText) {
+                        navigator.clipboard.writeText(text).then(() => {
+                            this.showToast('已复制', 'success');
+                        }).catch(() => {
+                            // 降级方案：使用 textarea
+                            this.fallbackCopy(text);
+                        });
+                    } else {
+                        // 降级方案：使用 textarea
+                        this.fallbackCopy(text);
+                    }
+                },
+                
+                fallbackCopy(text) {
+                    // 降级复制方案，兼容 Docker 等无剪贴板环境
+                    const textarea = document.createElement('textarea');
+                    textarea.value = text;
+                    textarea.style.position = 'fixed';
+                    textarea.style.left = '-9999px';
+                    textarea.style.top = '-9999px';
+                    document.body.appendChild(textarea);
+                    textarea.focus();
+                    textarea.select();
+                    
+                    try {
+                        const successful = document.execCommand('copy');
+                        if (successful) {
+                            this.showToast('已复制', 'success');
+                        } else {
+                            this.showToast('复制失败', 'error');
+                        }
+                    } catch (err) {
+                        console.error('复制失败:', err);
+                        this.showToast('复制失败', 'error');
+                    }
+                    
+                    document.body.removeChild(textarea);
                 },
                 
                 showToast(message, type = 'info') {
