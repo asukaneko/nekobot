@@ -1982,6 +1982,41 @@
 
         .session-item:hover { background: var(--bg-tertiary); }
         .session-item.active { background: rgba(236, 72, 153, 0.15); }
+        
+        /* 拖动排序样式 */
+        .session-item[draggable="true"] {
+            cursor: grab;
+        }
+        .session-item[draggable="true"]:active {
+            cursor: grabbing;
+        }
+        .session-item.dragging {
+            opacity: 0.5;
+            background: var(--bg-tertiary);
+        }
+        .session-item.drag-over {
+            border-top: 2px solid var(--accent-primary);
+        }
+        .session-item.drag-over-bottom {
+            border-bottom: 2px solid var(--accent-primary);
+            border-top: none;
+        }
+        .session-item .drag-handle {
+            color: var(--text-muted);
+            cursor: grab;
+            padding: 2px 4px;
+            margin-right: -4px;
+            opacity: 0;
+            transition: opacity 0.2s;
+            flex-shrink: 0;
+            font-size: 12px;
+        }
+        .session-item:hover .drag-handle {
+            opacity: 1;
+        }
+        .session-item .drag-handle:active {
+            cursor: grabbing;
+        }
 
         .session-icon {
             width: 40px;
@@ -5090,9 +5125,22 @@
                                     v-for="session in filteredSessions" 
                                     :key="session.id"
                                     class="session-item"
-                                    :class="{ active: currentSession?.id === session.id }"
+                                    :class="{ 
+                                        active: currentSession?.id === session.id,
+                                        'drag-over': dragOverSessionId === session.id && dragPosition === 'top',
+                                        'drag-over-bottom': dragOverSessionId === session.id && dragPosition === 'bottom'
+                                    }"
+                                    draggable="true"
                                     @click="openSession(session)"
+                                    @dragstart="onDragStart($event, session)"
+                                    @dragend="onDragEnd($event)"
+                                    @dragover="onDragOver($event, session)"
+                                    @dragleave="onDragLeave($event)"
+                                    @drop="onDrop($event, session)"
                                 >
+                                    <div class="drag-handle" @click.stop>
+                                        <i class="fas fa-grip-vertical"></i>
+                                    </div>
                                     <div class="session-icon">
                                         <i :class="session.type === 'qq' ? 'fab fa-qq' : 'fas fa-comment'"></i>
                                     </div>
@@ -5574,7 +5622,7 @@
                         <div class="card">
                             <div class="card-header">
                                 <span class="card-title">会话管理</span>
-                                <div style="display: flex; gap: 8px;">
+                                <div style="display: flex; gap: 8px; align-items: center;">
                                     <div class="search-box" style="width: 240px;">
                                         <i class="fas fa-search"></i>
                                         <input v-model="sessionSearch" type="text" placeholder="搜索会话...">
@@ -5582,12 +5630,18 @@
                                     <button class="btn btn-primary" @click="createNewSession" :disabled="isLoading">
                                         <i class="fas fa-plus"></i> 新建
                                     </button>
+                                    <button v-if="selectedSessions.length > 0" class="btn btn-danger" @click="batchDeleteSessions" :disabled="isLoading">
+                                        <i class="fas fa-trash"></i> 删除选中 ({{ selectedSessions.length }})
+                                    </button>
                                 </div>
                             </div>
                             <div class="card-body" style="padding: 0;">
                                 <table class="data-table">
                                     <thead>
                                         <tr>
+                                            <th style="width: 40px;">
+                                                <input type="checkbox" @change="toggleSelectAllSessions" :checked="isAllSessionsSelected && filteredSessions.length > 0" :indeterminate="selectedSessions.length > 0 && !isAllSessionsSelected">
+                                            </th>
                                             <th>会话名称</th>
                                             <th>类型</th>
                                             <th>消息数</th>
@@ -5597,6 +5651,9 @@
                                     </thead>
                                     <tbody>
                                         <tr v-for="session in filteredSessions" :key="session.id">
+                                            <td>
+                                                <input type="checkbox" :value="session.id" v-model="selectedSessions">
+                                            </td>
                                             <td>
                                                 <div style="display: flex; align-items: center; gap: 10px;">
                                                     <div style="width: 32px; height: 32px; background: var(--bg-tertiary); border-radius: 8px; display: flex; align-items: center; justify-content: center;">
@@ -8415,12 +8472,12 @@
         
         // Socket.IO 连接配置优化
         const socket = io({
-            transports: ['polling', 'websocket'],  // 优先使用轮询，失败后切换到 WebSocket
-            reconnection: true,                      // 启用自动重连
-            reconnectionAttempts: 10,                // 最多重连 10 次
-            reconnectionDelay: 1000,                 // 重连延迟 1 秒
-            reconnectionDelayMax: 5000,              // 最大重连延迟 5 秒
-            timeout: 20000                           // 连接超时 20 秒
+            transports: ['websocket'],  // 使用 WebSocket
+            reconnection: true,         // 启用自动重连
+            reconnectionAttempts: 10,   // 最多重连 10 次
+            reconnectionDelay: 1000,   // 重连延迟 1 秒
+            reconnectionDelayMax: 5000, // 最大重连延迟 5 秒
+            timeout: 20000             // 连接超时 20 秒
         });
 
         // 自定义指令：点击外部关闭
@@ -8522,7 +8579,13 @@
                     isUserScrolling: false,
                     showScrollToBottom: false,
                     sessionSearch: '',
+                    selectedSessions: [],  // 批量选择的会话
                     showFileMenu: false,  // 文件上传菜单显示状态
+                    
+                    // 拖动排序
+                    draggedSession: null,  // 当前被拖动的会话
+                    dragOverSessionId: null,  // 拖动覆盖的会话 ID
+                    dragPosition: 'top',  // 放置位置：top 或 bottom
                     
                     // QQ Chat
                     chatTab: 'web',  // web, qq_private, qq_group
@@ -9029,6 +9092,11 @@
                     return this.sessions.filter(s => s.name.toLowerCase().includes(search));
                 },
                 
+                isAllSessionsSelected() {
+                    if (this.filteredSessions.length === 0) return false;
+                    return this.filteredSessions.every(s => this.selectedSessions.includes(s.id));
+                },
+                
                 filteredLogs() {
                     if (this.logLevel === 'all') return this.logs;
                     return this.logs.filter(l => l.level === this.logLevel);
@@ -9170,6 +9238,118 @@
             },
             
             methods: {
+                // 拖动排序方法
+                onDragStart(event, session) {
+                    this.draggedSession = session;
+                    event.dataTransfer.effectAllowed = 'move';
+                    event.dataTransfer.setData('text/plain', session.id);
+                    // 添加视觉反馈
+                    setTimeout(() => {
+                        event.target.classList.add('dragging');
+                    }, 0);
+                },
+                
+                onDragEnd(event) {
+                    event.target.classList.remove('dragging');
+                    this.draggedSession = null;
+                    this.dragOverSessionId = null;
+                    this.dragPosition = 'top';
+                },
+                
+                onDragOver(event, session) {
+                    if (!this.draggedSession || this.draggedSession.id === session.id) {
+                        return;
+                    }
+                    
+                    event.preventDefault();
+                    event.dataTransfer.dropEffect = 'move';
+                    
+                    // 计算放置位置
+                    const rect = event.currentTarget.getBoundingClientRect();
+                    const midY = rect.top + rect.height / 2;
+                    this.dragPosition = event.clientY < midY ? 'top' : 'bottom';
+                    this.dragOverSessionId = session.id;
+                },
+                
+                onDragLeave(event) {
+                    // 只在真正离开时清除
+                    if (!event.currentTarget.contains(event.relatedTarget)) {
+                        this.dragOverSessionId = null;
+                    }
+                },
+                
+                onDrop(event, targetSession) {
+                    event.preventDefault();
+                    
+                    if (!this.draggedSession || this.draggedSession.id === targetSession.id) {
+                        return;
+                    }
+                    
+                    // 获取当前会话列表
+                    const sessions = [...this.sessions];
+                    const draggedIdx = sessions.findIndex(s => s.id === this.draggedSession.id);
+                    const targetIdx = sessions.findIndex(s => s.id === targetSession.id);
+                    
+                    if (draggedIdx === -1 || targetIdx === -1) {
+                        return;
+                    }
+                    
+                    // 移除被拖动的会话
+                    sessions.splice(draggedIdx, 1);
+                    
+                    // 计算新的插入位置
+                    let newIdx = this.dragPosition === 'top' ? targetIdx : targetIdx + 1;
+                    // 如果拖动位置在目标位置之后，插入时要调整
+                    if (draggedIdx < targetIdx && this.dragPosition === 'bottom') {
+                        newIdx = targetIdx;
+                    } else if (draggedIdx > targetIdx && this.dragPosition === 'top') {
+                        newIdx = targetIdx;
+                    } else if (draggedIdx > targetIdx && this.dragPosition === 'bottom') {
+                        newIdx = targetIdx + 1;
+                    }
+                    
+                    // 插入到新位置
+                    sessions.splice(newIdx, 0, this.draggedSession);
+                    
+                    // 更新会话列表
+                    this.sessions = sessions;
+                    
+                    // 保存排序到 localStorage
+                    this.saveSessionOrder();
+                    
+                    // 清除状态
+                    this.draggedSession = null;
+                    this.dragOverSessionId = null;
+                    this.dragPosition = 'top';
+                },
+                
+                saveSessionOrder() {
+                    // 保存会话排序到 localStorage
+                    const order = this.sessions.map(s => s.id);
+                    localStorage.setItem('session_order', JSON.stringify(order));
+                },
+                
+                loadSessionOrder() {
+                    // 从 localStorage 加载会话排序
+                    try {
+                        const order = JSON.parse(localStorage.getItem('session_order') || '[]');
+                        if (order.length > 0 && this.sessions.length > 0) {
+                            // 按排序重新排列会话
+                            const orderMap = new Map(order.map((id, idx) => [id, idx]));
+                            this.sessions.sort((a, b) => {
+                                const orderA = orderMap.get(a.id);
+                                const orderB = orderMap.get(b.id);
+                                if (orderA === undefined && orderB === undefined) return 0;
+                                if (orderA === undefined) return 1;
+                                if (orderB === undefined) return -1;
+                                return orderA - orderB;
+                            });
+                        }
+                    } catch (e) {
+                        console.error('加载会话排序失败:', e);
+                    }
+                },
+                
                 // 文件上传菜单方法
                 toggleFileMenu() {
                     this.showFileMenu = !this.showFileMenu;
@@ -9759,6 +9939,9 @@
                         
                         // 合并：临时会话 + 服务器会话
                         this.sessions = [...localTempSessions, ...serverSessions];
+                        
+                        // 恢复排序
+                        this.loadSessionOrder();
                     } catch (e) {
                         console.error('Failed to load sessions:', e);
                         this.showToast('加载会话失败', 'error');
@@ -11451,6 +11634,59 @@ def main(params):
                                     this.sessions.splice(sessionIndex, 0, { id: sessionId, name: '已删除的会话' });
                                 }
                                 this.showToast('删除同步失败，请刷新页面', 'warning');
+                            }
+                        }
+                    });
+                },
+                
+                toggleSelectAllSessions(event) {
+                    if (event.target.checked) {
+                        this.selectedSessions = this.filteredSessions.map(s => s.id);
+                    } else {
+                        this.selectedSessions = [];
+                    }
+                },
+                
+                batchDeleteSessions() {
+                    if (this.selectedSessions.length === 0) return;
+                    
+                    const count = this.selectedSessions.length;
+                    this.showConfirm({
+                        title: '批量删除会话',
+                        message: `确定要删除选中的 ${count} 个会话吗？此操作不可恢复。`,
+                        confirmText: `删除 ${count} 个会话`,
+                        icon: 'fa-trash',
+                        iconColor: 'var(--error)',
+                        danger: true,
+                        action: async () => {
+                            const deletedIds = [...this.selectedSessions];
+                            const deletedSessions = this.sessions.filter(s => deletedIds.includes(s.id));
+                            
+                            // 从列表中移除
+                            this.sessions = this.sessions.filter(s => !deletedIds.includes(s.id));
+                            this.selectedSessions = [];
+                            
+                            // 如果当前会话被删除，清空
+                            if (this.currentSession && deletedIds.includes(this.currentSession.id)) {
+                                this.currentSession = null;
+                                this.currentMessages = [];
+                            }
+                            
+                            this.showToast(`已删除 ${count} 个会话`, 'success');
+                            
+                            // 逐个删除后端会话
+                            let failedCount = 0;
+                            for (const sessionId of deletedIds) {
+                                try {
+                                    await api.delete(`/api/sessions/${sessionId}`);
+                                } catch (e) {
+                                    failedCount++;
+                                    console.error(`删除会话 ${sessionId} 失败:`, e);
+                                }
+                            }
+                            
+                            if (failedCount > 0) {
+                                this.showToast(`部分会话删除同步失败，请刷新页面`, 'warning');
                             }
                         }
                     });

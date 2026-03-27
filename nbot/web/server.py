@@ -2140,14 +2140,23 @@ class WebChatServer:
                 return self._get_ai_response(temp_messages)
             return f"处理图片时出错: {str(e)}"
 
-    def _get_ai_response_with_tools(self, messages: List[Dict], tools: List[Dict], use_silicon: bool = False) -> Dict:
+    def _get_ai_response_with_tools(self, messages: List[Dict], tools: List[Dict], use_silicon: bool = False, stop_event=None) -> Dict:
         """调用 AI 并支持工具
 
         Args:
             messages: 消息列表
             tools: 工具定义列表
             use_silicon: 是否使用 Silicon API（默认 False，使用主 API）
+            stop_event: 可选的停止事件，用于立即停止
         """
+        # 如果传入了 stop_event 且已设置，立即返回
+        if stop_event and stop_event.is_set():
+            raise StopIteration("用户停止生成")
+        
+        def check_stop():
+            if stop_event and stop_event.is_set():
+                raise StopIteration("用户停止生成")
+        
         try:
             if not self.ai_client:
                 return {'content': 'AI 服务未配置'}
@@ -2157,6 +2166,9 @@ class WebChatServer:
             # 从设置中获取超时时间，默认 120 秒
             timeout = self.settings.get('api_timeout', 120)
             max_retries = self.settings.get('api_retry_count', 3)
+            
+            # 使用较短的超时以便更频繁地检查停止事件
+            short_timeout = min(timeout, 10)
             
             # 检查是否应该使用 Silicon API
             # 只有在明确指定 use_silicon=True 且有 Silicon API key 时才使用
@@ -2205,9 +2217,10 @@ class WebChatServer:
                 # 重试机制
                 last_error = None
                 for attempt in range(max_retries):
+                    check_stop()  # 检查是否停止
                     try:
                         _log.info(f"[AI] Silicon API 调用 (尝试 {attempt + 1}/{max_retries})")
-                        resp = requests.post(url, json=payload, headers=headers, timeout=timeout)
+                        resp = requests.post(url, json=payload, headers=headers, timeout=short_timeout)
                         resp.raise_for_status()
                         data = resp.json()
                         break
@@ -2215,13 +2228,13 @@ class WebChatServer:
                         last_error = e
                         _log.warning(f"[AI] Silicon API 超时 (尝试 {attempt + 1}/{max_retries}): {e}")
                         if attempt < max_retries - 1:
-                            time.sleep(2 ** attempt)  # 指数退避
+                            time.sleep(min(2 ** attempt, 2))  # 限制最大等待2秒
                         continue
                     except requests.exceptions.RequestException as e:
                         last_error = e
                         _log.error(f"[AI] Silicon API 错误 (尝试 {attempt + 1}/{max_retries}): {e}")
                         if attempt < max_retries - 1:
-                            time.sleep(2 ** attempt)
+                            time.sleep(min(2 ** attempt, 2))
                         continue
                 else:
                     # 所有重试都失败
@@ -2264,9 +2277,10 @@ class WebChatServer:
                 # 重试机制
                 last_error = None
                 for attempt in range(max_retries):
+                    check_stop()  # 检查是否停止
                     try:
                         _log.info(f"[AI] 主 API 调用 (尝试 {attempt + 1}/{max_retries})")
-                        resp = requests.post(url, json=payload, headers=headers, timeout=timeout)
+                        resp = requests.post(url, json=payload, headers=headers, timeout=short_timeout)
                         resp.raise_for_status()
                         data = resp.json()
                         break
@@ -2274,13 +2288,13 @@ class WebChatServer:
                         last_error = e
                         _log.warning(f"[AI] 主 API 超时 (尝试 {attempt + 1}/{max_retries}): {e}")
                         if attempt < max_retries - 1:
-                            time.sleep(2 ** attempt)
+                            time.sleep(min(2 ** attempt, 2))  # 限制最大等待2秒
                         continue
                     except requests.exceptions.RequestException as e:
                         last_error = e
                         _log.error(f"[AI] 主 API 错误 (尝试 {attempt + 1}/{max_retries}): {e}")
                         if attempt < max_retries - 1:
-                            time.sleep(2 ** attempt)
+                            time.sleep(min(2 ** attempt, 2))
                         continue
                 else:
                     raise last_error or Exception("API 调用失败")
@@ -2325,6 +2339,11 @@ class WebChatServer:
 
             return result
 
+        except StopIteration as e:
+            # 用户停止生成
+            _log.info(f"[AI] 停止生成: {e}")
+            raise  # 重新抛出，让调用者处理
+        
         except Exception as e:
             _log.error(f"AI with tools error: {e}")
             # 回退到普通 AI 调用
@@ -6108,7 +6127,14 @@ class WebChatServer:
                                 # 更新进度卡片迭代计数
                                 if progress_card:
                                     progress_card.increment_iteration()
-                                response = self._get_ai_response_with_tools(tool_messages, enabled_tools)
+                                
+                                try:
+                                    response = self._get_ai_response_with_tools(tool_messages, enabled_tools, stop_event=stop_event)
+                                except StopIteration:
+                                    # 用户停止生成
+                                    _log.info(f"[Stop] 检测到停止信号，终止生成")
+                                    final_content = "【生成已停止】"
+                                    break
                                 
                                 if 'tool_calls' in response and response['tool_calls']:
                                     tool_calls = response['tool_calls']
@@ -6966,15 +6992,11 @@ def create_web_app(config: Dict[str, Any] = None) -> tuple[Flask, SocketIO]:
     # SocketIO 配置优化：增加稳定性
     # ping_timeout: 心跳超时时间
     # ping_interval: 心跳间隔
-    # always_connect: 断开后自动重连
     socketio = SocketIO(
         app, 
         async_mode='threading', 
         cors_allowed_origins="*", 
-        max_http_buffer_size=100*1024*1024,
-        ping_timeout=60,
-        ping_interval=25,
-        always_connect=True
+        max_http_buffer_size=100*1024*1024
     )
 
     server = WebChatServer(app, socketio)
