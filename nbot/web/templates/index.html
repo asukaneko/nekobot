@@ -13236,8 +13236,11 @@ def main(params):
                 },
                 
                 downloadFile(fileData) {
+                    console.log('downloadFile called with:', fileData);
+                    
                     // 优先使用缓存的 blob 数据
                     if (fileData && fileData.blob) {
+                        console.log('Using cached blob, filename:', fileData.filename);
                         const url = window.URL.createObjectURL(fileData.blob);
                         const link = document.createElement('a');
                         link.href = url;
@@ -13252,22 +13255,21 @@ def main(params):
                     // 工作区文件下载
                     if (fileData && fileData.sessionId && fileData.filename) {
                         const token = localStorage.getItem('token');
-                        const filename = encodeURIComponent(fileData.filename);
+                        const originalFilename = fileData.filename;
+                        const filename = encodeURIComponent(originalFilename);
                         let url = `/api/sessions/${fileData.sessionId}/workspace/files/${filename}`;
                         if (token) {
                             url += (url.includes('?') ? '&' : '?') + 'token=' + encodeURIComponent(token);
                         }
                         
-                        fetch(url)
+                        // 使用 axios 的 api 对象下载，自动处理认证
+                        api.get(url, { responseType: 'blob' })
                             .then(response => {
-                                if (!response.ok) throw new Error('下载失败');
-                                return response.blob();
-                            })
-                            .then(blob => {
+                                const blob = response.data;
                                 const blobUrl = window.URL.createObjectURL(blob);
                                 const link = document.createElement('a');
                                 link.href = blobUrl;
-                                link.download = fileData.filename;
+                                link.download = originalFilename;
                                 document.body.appendChild(link);
                                 link.click();
                                 document.body.removeChild(link);
@@ -13275,7 +13277,7 @@ def main(params):
                             })
                             .catch(e => {
                                 console.error('下载失败:', e);
-                                this.showToast('下载失败，请重试', 'error');
+                                this.showToast('下载失败: ' + (e.message || '未知错误'), 'error');
                             });
                         return;
                     }

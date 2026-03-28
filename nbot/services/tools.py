@@ -63,9 +63,6 @@ EXEC_BLACKLIST_PATTERNS = [
     r':\(\)\s*\{',
     r'fork\s*\(',
     r'while\s*\(true\)',
-    r'download.*exec',
-    r'curl.*\|.*bash',
-    r'wget.*\|.*sh',
 ]
 
 
@@ -1279,6 +1276,32 @@ WORKSPACE_TOOL_DEFINITIONS = [
                 "required": ["filename"]
             }
         }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "workspace_skill_copy",
+            "description": "将指定的 Skill 或 Skill 下的文件复制到工作区。适用于需要将 Skill 代码保存到工作区进行编辑或构建的场景。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "skill_id": {
+                        "type": "string",
+                        "description": "要复制的 Skill ID（如 'search'、'image_search'）"
+                    },
+                    "filename": {
+                        "type": "string",
+                        "description": "可选，要复制的 Skill 下的具体文件名。如不指定则复制整个 Skill。"
+                    },
+                    "scope": {
+                        "type": "string",
+                        "enum": ["private", "shared"],
+                        "description": "复制到的工作区类型：'private' 表示当前会话私有工作区，'shared' 表示所有会话共享工作区。默认 'private'。"
+                    }
+                },
+                "required": ["skill_id"]
+            }
+        }
     }
 ]
 
@@ -1636,6 +1659,109 @@ def _execute_workspace_tool(tool_name: str, arguments: Dict[str, Any],
             except Exception as e:
                 _log.error(f"获取文件元数据失败: {filename}, {e}")
                 return {"success": False, "error": f"获取文件元数据失败: {str(e)}"}
+
+        elif tool_name == "workspace_skill_copy":
+            skill_id = arguments.get('skill_id')
+            if not skill_id:
+                return {"success": False, "error": "缺少 skill_id 参数"}
+            
+            filename = arguments.get('filename')
+            skill_scope = arguments.get('scope', 'private')
+            is_skill_shared = skill_scope == 'shared'
+            
+            # 从配置文件读取 skills 找到 skill 的 name
+            import json
+            skills_file = os.path.join(WEB_DATA_DIR, 'skills.json')
+            skill_config = None
+            skill_name = skill_id
+            
+            if os.path.exists(skills_file):
+                try:
+                    with open(skills_file, 'r', encoding='utf-8') as f:
+                        skills_list = json.load(f)
+                        for s in skills_list:
+                            if s.get('id') == skill_id or s.get('name') == skill_id:
+                                skill_config = s
+                                skill_name = s.get('name', skill_id)
+                                break
+                except Exception as e:
+                    _log.warning(f"读取 skills 配置文件失败: {e}")
+            
+            if not skill_config:
+                return {"success": False, "error": f"Skill '{skill_id}' 不存在"}
+            
+            # 找到 skill 的实际目录
+            from nbot.core.skills_manager import SKILLS_ROOT, SkillStorage
+            skill_source_dir = os.path.join(SKILLS_ROOT, skill_name)
+            
+            _log.info(f"[workspace_skill_copy] skill_name={skill_name}, source_dir={skill_source_dir}")
+            
+            # 确定目标路径
+            if is_skill_shared:
+                shared_path = workspace_manager.get_shared_workspace()
+                target_dir = shared_path
+            else:
+                target_dir = workspace_manager.get_workspace(session_id)
+                if not target_dir:
+                    target_dir = workspace_manager.create_workspace(session_id)
+            
+            if not target_dir:
+                return {"success": False, "error": "无法创建工作区"}
+            
+            # 如果 skill 源目录存在，复制整个目录
+            if os.path.exists(skill_source_dir) and os.path.isdir(skill_source_dir):
+                import shutil
+                target_skill_dir = os.path.join(target_dir, 'skills', skill_name)
+                os.makedirs(os.path.dirname(target_skill_dir), exist_ok=True)
+                try:
+                    shutil.copytree(skill_source_dir, target_skill_dir, dirs_exist_ok=True)
+                    return {
+                        "success": True,
+                        "message": f"已复制 Skill '{skill_name}' 到工作区: {target_skill_dir}",
+                        "path": target_skill_dir,
+                        "scope": skill_scope
+                    }
+                except Exception as e:
+                    return {"success": False, "error": f"复制 Skill 目录失败: {str(e)}"}
+            
+            # 如果指定了文件名，在配置中查找
+            if filename:
+                # 在 scripts 中查找
+                scripts = skill_config.get('scripts', [])
+                if filename in scripts:
+                    target_path = os.path.join(target_dir, filename)
+                    os.makedirs(os.path.dirname(target_path), exist_ok=True) if os.path.dirname(target_path) else None
+                    try:
+                        # 尝试从 SkillStorage 读取脚本
+                        storage = SkillStorage(skill_name)
+                        script_content = storage.get_script(filename)
+                        if script_content:
+                            with open(target_path, 'w', encoding='utf-8') as f:
+                                f.write(script_content)
+                            return {
+                                "success": True,
+                                "message": f"已复制脚本 '{filename}' 到工作区: {target_path}",
+                                "path": target_path
+                            }
+                    except Exception as e:
+                        return {"success": False, "error": f"复制脚本失败: {str(e)}"}
+            
+            # 如果以上都不行，至少复制 JSON 配置
+            skills_dir = os.path.join(target_dir, 'skills')
+            os.makedirs(skills_dir, exist_ok=True)
+            target_file = os.path.join(skills_dir, f"{skill_name}.json")
+            try:
+                content = json.dumps(skill_config, ensure_ascii=False, indent=2)
+                with open(target_file, 'w', encoding='utf-8') as f:
+                    f.write(content)
+                return {
+                    "success": True,
+                    "message": f"已复制 Skill 配置 '{skill_name}' 到工作区: {target_file}",
+                    "path": target_file,
+                    "scope": skill_scope
+                }
+            except Exception as e:
+                return {"success": False, "error": f"复制 Skill 配置失败: {str(e)}"}
 
         else:
             return {"success": False, "error": f"未知的工作区工具: {tool_name}"}

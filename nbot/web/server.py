@@ -555,8 +555,20 @@ class WebMessageAdapter:
 
 class WebChatServer:
     """Web 聊天服务器"""
-
+    
+    _instance = None
+    
+    @classmethod
+    def get_instance(cls):
+        """获取单例实例"""
+        return cls._instance
+    
     def __init__(self, app: Flask, socketio: SocketIO):
+        cls = self.__class__
+        if cls._instance is not None:
+            raise RuntimeError("WebChatServer 只能有一个实例，请使用 get_instance() 获取")
+        cls._instance = self
+        
         self.app = app
         self.socketio = socketio
         self.static_folder = os.path.join(os.path.dirname(__file__), 'static')
