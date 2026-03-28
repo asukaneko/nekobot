@@ -3827,10 +3827,11 @@ class WebChatServer:
                     if session_id:
                         sessions_stats = self.token_stats.get('sessions', {})
                         if session_id not in sessions_stats:
-                            sessions_stats[session_id] = {'input': 0, 'output': 0, 'total': 0}
+                            sessions_stats[session_id] = {'input': 0, 'output': 0, 'total': 0, 'message_count': 0}
                         sessions_stats[session_id]['input'] = sessions_stats[session_id].get('input', 0) + input_tokens
                         sessions_stats[session_id]['output'] = sessions_stats[session_id].get('output', 0) + output_tokens
                         sessions_stats[session_id]['total'] = sessions_stats[session_id].get('total', 0) + estimated_tokens
+                        sessions_stats[session_id]['message_count'] = sessions_stats[session_id].get('message_count', 0) + 2  # 用户消息 + AI回复
                         self.token_stats['sessions'] = sessions_stats
                     
                     # 注意：ai_response 现在通过 _stream_send_response 在第 3373 行流式发送了，不再单独发送
@@ -4598,12 +4599,10 @@ class WebChatServer:
             
             success = prompt_manager.add_memory(title, content, target_id, summary, mem_type, expire_days)
             if success:
-                memories = prompt_manager.get_memories(target_id)
-                if memories:
-                    latest_memory = memories[-1]
-                    self.memories.append(latest_memory)
-                    self._save_data('memories')
-                return jsonify({'success': True, 'memories': memories})
+                # 重新加载 prompt_manager 的记忆并同步到 self.memories
+                self.memories = prompt_manager.get_memories()
+                self._save_data('memories')
+                return jsonify({'success': True})
             return jsonify({'success': False, 'error': 'Failed to add memory'}), 500
 
         @self.app.route('/api/memory/<memory_id>', methods=['PUT'])
@@ -5254,17 +5253,55 @@ class WebChatServer:
                 except:
                     real_stats = {}
             
-            # 会话排行（使用真实的token统计）
+            # 从会话文件获取会话名称映射
+            sessions_file = os.path.join(self.data_dir, 'sessions.json')
+            session_names = {}
+            if os.path.exists(sessions_file):
+                try:
+                    with open(sessions_file, 'r', encoding='utf-8') as f:
+                        sessions_data = json.load(f)
+                        for sid, session in sessions_data.items():
+                            name = session.get('name', f'会话 {sid[:8]}')
+                            session_names[sid] = name
+                except:
+                    pass
+            
+            # 合并内存中的会话名称
+            for sid, session in self.sessions.items():
+                if sid not in session_names:
+                    name = session.get('name', f'会话 {sid[:8]}')
+                    session_names[sid] = name
+            
+            # 会话排行（使用真实的token统计和会话名称）
             sessions_data = real_stats.get('sessions', {})
             session_rankings = []
+            total_tokens = 0
+            total_messages = 0
+            
             for session_id, data in sessions_data.items():
+                # 获取会话名称
+                session_name = session_names.get(session_id, f'会话 {session_id[:8]}')
+                total = data.get('total', 0)
+                total_tokens += total
+                
+                # 计算消息数（如果有记录）
+                message_count = data.get('message_count', 0)
+                total_messages += message_count
+                
                 session_rankings.append({
-                    'name': session_id,
-                    'value': data.get('total', 0),
+                    'id': session_id,
+                    'name': session_name,
+                    'value': total,
                     'input': data.get('input', 0),
-                    'output': data.get('output', 0)
+                    'output': data.get('output', 0),
+                    'message_count': message_count
                 })
             session_rankings.sort(key=lambda x: x['value'], reverse=True)
+            
+            # 计算平均 Token/消息
+            avg_tokens_per_message = 0
+            if total_messages > 0:
+                avg_tokens_per_message = round(total_tokens / total_messages, 2)
             
             # 模型排行
             model_rankings = [
@@ -5277,7 +5314,7 @@ class WebChatServer:
                 session_type = data.get('type', 'web')
                 if session_type in ['private', 'group']:
                     user_rankings.append({
-                        'name': session_id,
+                        'name': session_names.get(session_id, session_id),
                         'value': data.get('total', 0)
                     })
             user_rankings.sort(key=lambda x: x['value'], reverse=True)
@@ -5285,7 +5322,10 @@ class WebChatServer:
             return jsonify({
                 'sessions': session_rankings[:10],
                 'models': model_rankings,
-                'users': user_rankings[:10]
+                'users': user_rankings[:10],
+                'total_tokens': total_tokens,
+                'total_messages': total_messages,
+                'avg_tokens_per_message': avg_tokens_per_message
             })
 
         @self.app.route('/api/tokens/record', methods=['POST'])
@@ -6943,10 +6983,11 @@ class WebChatServer:
                 if session_id:
                     sessions_stats = self.token_stats.get('sessions', {})
                     if session_id not in sessions_stats:
-                        sessions_stats[session_id] = {'input': 0, 'output': 0, 'total': 0}
+                        sessions_stats[session_id] = {'input': 0, 'output': 0, 'total': 0, 'message_count': 0}
                     sessions_stats[session_id]['input'] = sessions_stats[session_id].get('input', 0) + input_tokens
                     sessions_stats[session_id]['output'] = sessions_stats[session_id].get('output', 0) + output_tokens
                     sessions_stats[session_id]['total'] = sessions_stats[session_id].get('total', 0) + estimated_tokens
+                    sessions_stats[session_id]['message_count'] = sessions_stats[session_id].get('message_count', 0) + 2  # 用户消息 + AI回复
                     self.token_stats['sessions'] = sessions_stats
                 
                 # 注意：ai_response 现在通过 _stream_send_response 流式发送了，不再单独发送

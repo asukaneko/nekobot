@@ -61,7 +61,11 @@
 
         /* 动态背景 */
         body.has-bg-image {
-            background: var(--bg-primary) var(--bg-image, none) no-repeat center center fixed;
+            background-color: var(--bg-primary);
+            background-image: var(--bg-image);
+            background-repeat: no-repeat;
+            background-position: center center;
+            background-attachment: fixed;
             background-size: cover;
         }
 
@@ -8186,7 +8190,7 @@
                 </div>
                 <div class="modal-footer">
                     <button class="btn btn-secondary" @click="showAddMemoryModal = false">取消</button>
-                    <button class="btn btn-primary" @click="saveMemory" :disabled="!editingMemory.key || !editingMemory.value">
+                    <button class="btn btn-primary" @click="saveMemory" :disabled="!editingMemory.title || !editingMemory.content">
                         <i class="fas fa-save"></i> 保存
                     </button>
                 </div>
@@ -11516,7 +11520,7 @@ def main(params):
                         const res = await api.get('/api/tokens/rankings');
                         const rankings = res.data;
 
-                        // 处理会话排行
+                        // 会话排行已包含会话名称
                         const sessions = rankings.sessions || [];
                         const maxSession = sessions[0]?.value || 1;
                         this.tokenRankings.sessions = sessions.map(s => ({

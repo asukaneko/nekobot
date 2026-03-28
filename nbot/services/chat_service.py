@@ -606,11 +606,13 @@ def _update_token_stats(user_id, group_id, prompt_tokens, completion_tokens, tot
                 'input': 0,
                 'output': 0,
                 'total': 0,
-                'type': 'private' if user_id else 'group'
+                'type': 'private' if user_id else 'group',
+                'message_count': 0
             }
         stats['sessions'][session_id]['input'] += prompt_tokens
         stats['sessions'][session_id]['output'] += completion_tokens
         stats['sessions'][session_id]['total'] += total_tokens
+        stats['sessions'][session_id]['message_count'] = stats['sessions'][session_id].get('message_count', 0) + 2  # 用户消息 + AI回复
 
         # 保存统计
         with open(stats_file, 'w', encoding='utf-8') as f:
