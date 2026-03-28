@@ -9647,7 +9647,8 @@
                         error: '',
                         truncated: false,
                         extracted_length: 0,
-                        original_length: 0
+                        original_length: 0,
+                        blob: null
                     },
                     confirmModalConfig: {
                         title: '确认操作',
@@ -13014,6 +13015,7 @@ def main(params):
                             });
                             if (res.data) {
                                 this.filePreviewData.loading = false;
+                                this.filePreviewData.blob = res.data;
                                 this.$nextTick(() => {
                                     this.renderDocx(res.data);
                                 });
@@ -13031,6 +13033,7 @@ def main(params):
                             });
                             if (res.data) {
                                 this.filePreviewData.loading = false;
+                                this.filePreviewData.blob = res.data;
                                 this.$nextTick(() => {
                                     this.renderExcel(res.data);
                                 });
@@ -13233,29 +13236,65 @@ def main(params):
                 },
                 
                 downloadFile(fileData) {
-                    // 如果有 URL，使用 fetch + Blob 下载并指定文件名
-                    if (fileData && fileData.url) {
-                        const filename = fileData.filename || fileData.name || 'download.txt';
-                        fetch(fileData.url)
+                    // 优先使用缓存的 blob 数据
+                    if (fileData && fileData.blob) {
+                        const url = window.URL.createObjectURL(fileData.blob);
+                        const link = document.createElement('a');
+                        link.href = url;
+                        link.download = fileData.filename || fileData.name || 'download';
+                        document.body.appendChild(link);
+                        link.click();
+                        document.body.removeChild(link);
+                        window.URL.revokeObjectURL(url);
+                        return;
+                    }
+                    
+                    // 工作区文件下载
+                    if (fileData && fileData.sessionId && fileData.filename) {
+                        const token = localStorage.getItem('token');
+                        const filename = encodeURIComponent(fileData.filename);
+                        let url = `/api/sessions/${fileData.sessionId}/workspace/files/${filename}`;
+                        if (token) {
+                            url += (url.includes('?') ? '&' : '?') + 'token=' + encodeURIComponent(token);
+                        }
+                        
+                        fetch(url)
                             .then(response => {
                                 if (!response.ok) throw new Error('下载失败');
                                 return response.blob();
                             })
                             .then(blob => {
-                                const url = window.URL.createObjectURL(blob);
+                                const blobUrl = window.URL.createObjectURL(blob);
                                 const link = document.createElement('a');
-                                link.href = url;
-                                link.download = filename;
+                                link.href = blobUrl;
+                                link.download = fileData.filename;
                                 document.body.appendChild(link);
                                 link.click();
                                 document.body.removeChild(link);
-                                window.URL.revokeObjectURL(url);
+                                window.URL.revokeObjectURL(blobUrl);
                             })
-                            .catch(err => {
-                                console.error('下载失败:', err);
-                                // 降级方案：直接打开链接
-                                window.open(fileData.url, '_blank');
+                            .catch(e => {
+                                console.error('下载失败:', e);
+                                this.showToast('下载失败，请重试', 'error');
                             });
+                        return;
+                    }
+                    
+                    // 其他下载
+                    if (fileData && fileData.download_url) {
+                        window.open(fileData.download_url, '_blank');
+                    } else if (fileData && fileData.url) {
+                        window.open(fileData.url, '_blank');
+                    } else if (fileData && fileData.content) {
+                        const blob = new Blob([fileData.content], { type: 'text/plain;charset=utf-8' });
+                        const url = window.URL.createObjectURL(blob);
+                        const link = document.createElement('a');
+                        link.href = url;
+                        link.download = fileData.filename || fileData.name || 'download.txt';
+                        document.body.appendChild(link);
+                        link.click();
+                        document.body.removeChild(link);
+                        window.URL.revokeObjectURL(url);
                     }
                 },
                 

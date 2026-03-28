@@ -2682,6 +2682,31 @@ class WebChatServer:
                 memory_context = "\n\n【可用记忆主题】\n" + "\n".join([f"- {item}" for item in memory_items])
                 system_prompt += memory_context
                 _log.info(f"已添加 {len(memory_items)} 个记忆到会话 {session_id[:8]}")
+            
+            # 添加 Skills 到系统提示词
+            skills = self.skills_config
+            enabled_skills = [s for s in skills if s.get("enabled", True)]
+            
+            skills_desc = "\n\n## 可用技能 (Skills)\n"
+            skills_desc += "你可以使用以下技能来帮助用户：\n\n"
+            
+            if enabled_skills:
+                for skill in enabled_skills:
+                    skills_desc += f"### {skill['name']}\n"
+                    skills_desc += f"- 描述: {skill['description']}\n"
+                    if skill.get("aliases"):
+                        skills_desc += f"- 别名: {', '.join(skill['aliases'])}\n"
+                    skills_desc += "\n"
+            else:
+                skills_desc += "（暂无可用技能）\n\n"
+            
+            skills_desc += """
+**使用规则：**
+1. 当用户需要使用或了解某个技能时，使用 `skill_get_info` 工具获取该技能的详细信息
+2. 使用 `skill_list` 工具可以列出所有可用的 Skills
+"""
+            system_prompt += skills_desc
+            _log.info(f"已添加 {len(enabled_skills)} 个技能到会话 {session_id[:8]}")
 
             session = {
                 'id': session_id,
@@ -2716,14 +2741,36 @@ class WebChatServer:
                             sessions_data = json.load(f)
                             session = sessions_data.get(session_id)
                             if session:
-                                # 添加 message_count
+                                # 检查并更新 system_prompt 中的 skills 部分
+                                session = self._update_session_skills(session)
                                 session['message_count'] = len(session.get('messages', []))
                                 return jsonify(session)
                     except:
                         pass
                 return jsonify({'error': 'Session not found'}), 404
             
-            # 添加 message_count
+            # 检查并更新 system_prompt 中的 skills 部分
+            if '## 可用技能' not in session.get('system_prompt', ''):
+                skills = self.skills_config
+                enabled_skills = [s for s in skills if s.get("enabled", True)]
+                
+                skills_desc = "\n\n## 可用技能 (Skills)\n你可以使用以下技能来帮助用户：\n\n"
+                if enabled_skills:
+                    for skill in enabled_skills:
+                        skills_desc += f"### {skill['name']}\n- 描述: {skill['description']}\n\n"
+                else:
+                    skills_desc += "（暂无可用技能）\n\n"
+                skills_desc += """**使用规则：**
+1. 当用户需要使用或了解某个技能时，使用 `skill_get_info` 工具获取该技能的详细信息
+2. 使用 `skill_list` 工具可以列出所有可用的 Skills
+"""
+                session['system_prompt'] += skills_desc
+                if session.get('messages') and session['messages'][0].get('role') == 'system':
+                    session['messages'][0]['content'] = session['system_prompt']
+                self.sessions[session['id']] = session
+                self._save_data('sessions')
+                _log.info(f"已为会话 {session_id[:8]} 更新技能列表")
+            
             session['message_count'] = len(session.get('messages', []))
             return jsonify(session)
 
@@ -3134,14 +3181,17 @@ class WebChatServer:
             """下载工作区中的文件"""
             if not WORKSPACE_AVAILABLE:
                 return jsonify({'error': 'Workspace not available'}), 503
-
+            
             file_path = workspace_manager.get_file_path(session_id, filename)
             if not file_path:
                 return jsonify({'error': 'File not found'}), 404
-
+            
             directory = os.path.dirname(file_path)
             fname = os.path.basename(file_path)
-            return send_from_directory(directory, fname, as_attachment=True)
+            response = send_from_directory(directory, fname, as_attachment=True)
+            response.headers['Access-Control-Allow-Origin'] = '*'
+            response.headers['Access-Control-Expose-Headers'] = 'Content-Disposition'
+            return response
 
         @self.app.route('/api/sessions/<session_id>/workspace/files/<path:filename>', methods=['DELETE'])
         def delete_workspace_file(session_id, filename):
@@ -7116,6 +7166,30 @@ class WebChatServer:
             memory_context = "\n\n【可用记忆主题】\n" + "\n".join([f"- {item}" for item in memory_items])
             system_prompt += memory_context
             _log.info(f"已添加 {len(memory_items)} 个记忆到会话 {session_id[:8]}")
+        
+        # 添加 Skills 到系统提示词
+        skills = self.skills_config
+        enabled_skills = [s for s in skills if s.get("enabled", True)]
+        
+        skills_desc = "\n\n## 可用技能 (Skills)\n"
+        skills_desc += "你可以使用以下技能来帮助用户：\n\n"
+        
+        if enabled_skills:
+            for skill in enabled_skills:
+                skills_desc += f"### {skill['name']}\n"
+                skills_desc += f"- 描述: {skill['description']}\n"
+                if skill.get("aliases"):
+                    skills_desc += f"- 别名: {', '.join(skill['aliases'])}\n"
+                skills_desc += "\n"
+        else:
+            skills_desc += "（暂无可用技能）\n\n"
+        
+        skills_desc += """
+**使用规则：**
+1. 当用户需要使用或了解某个技能时，使用 `skill_get_info` 工具获取该技能的详细信息
+2. 使用 `skill_list` 工具可以列出所有可用的 Skills
+"""
+        system_prompt += skills_desc
 
         session = {
             'id': session_id,

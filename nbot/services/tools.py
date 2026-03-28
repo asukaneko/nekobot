@@ -1573,7 +1573,6 @@ def _execute_workspace_tool(tool_name: str, arguments: Dict[str, Any],
                 return {"success": False, "error": "缺少文件名参数 (filename 或 file_path)"}
             
             if is_shared:
-                import os
                 shared_path = workspace_manager.get_shared_workspace()
                 file_path = os.path.join(shared_path, filename)
             else:
@@ -1596,7 +1595,6 @@ def _execute_workspace_tool(tool_name: str, arguments: Dict[str, Any],
                 return {"success": False, "error": "缺少文件名参数 (filename)"}
             
             if is_shared:
-                import os
                 shared_path = workspace_manager.get_shared_workspace()
                 file_path = os.path.join(shared_path, filename)
                 if not os.path.exists(file_path):
@@ -1621,7 +1619,6 @@ def _execute_workspace_tool(tool_name: str, arguments: Dict[str, Any],
                 return {"success": False, "error": "缺少文件名参数 (filename)"}
             
             if is_shared:
-                import os
                 shared_path = workspace_manager.get_shared_workspace()
                 file_path = os.path.join(shared_path, filename)
                 if not os.path.exists(file_path):
