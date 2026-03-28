@@ -8331,33 +8331,38 @@
                         </button>
                     </div>
                 </div>
-                <div class="workspace-browser-path">
-                    <button class="btn btn-link btn-sm" @click="navigateToFolder('')" title="返回根目录">
-                        <i class="fas fa-home"></i> ./</button>
-                    <template v-for="(part, idx) in workspacePathParts" :key="idx">
-                        <i class="fas fa-chevron-right" style="color: var(--text-muted);"></i>
-                        <button class="btn btn-link btn-sm" @click="navigateToFolder(workspacePathParts.slice(0, idx + 1).join('/'))">
-                            {{ part }}
-                        </button>
-                    </template>
-                    <span v-if="workspaceCurrentPath" class="workspace-current-path">/</span>
-                </div>
                 <div class="workspace-browser-content" v-if="!loadingWorkspaceFiles">
-                    <div v-if="workspaceFiles.length === 0" class="workspace-browser-empty">
+                    <div v-if="workspaceFiles.length === 0 && !workspaceCurrentPath" class="workspace-browser-empty">
                         <i class="fas fa-folder-open"></i>
                         <p>该目录为空</p>
                     </div>
                     <div v-else class="workspace-file-list">
+                        <!-- 返回上级目录 -->
+                        <div v-if="workspaceCurrentPath" 
+                             class="workspace-file-item is-folder parent-folder"
+                             :class="{ 'drag-over': dragOverItem === '__parent__' }"
+                             @click="navigateToParent"
+                             @dragover.prevent="onDragOverParent"
+                             @dragenter.prevent="onDragEnterParent"
+                             @dragleave="onDragLeaveParent"
+                             @drop.prevent="onDropToParent">
+                            <div class="workspace-file-icon">
+                                <i class="fas fa-folder-open" style="color: var(--accent-primary);"></i>
+                            </div>
+                            <div class="workspace-file-info">
+                                <div class="workspace-file-name">.. 返回上级目录</div>
+                            </div>
+                        </div>
                         <div v-for="item in workspaceFiles" :key="item.name" 
                              class="workspace-file-item" 
                              :class="{ 'is-folder': item.type === 'directory', 'drag-over': dragOverItem === item.path }"
-                             :draggable="item.type === 'file'"
+                             :draggable="item.type === 'file' || item.type === 'directory'"
                              @click="item.type === 'directory' ? navigateToFolder(item.path) : previewWorkspaceFile(item)"
                              @dragstart="onDragFileStart($event, item)"
                              @dragend="onDragFileEnd"
-                             @dragover.prevent="onDragOver($event, item)"
-                             @dragenter.prevent="onDragEnter($event, item)"
-                             @dragleave="onDragLeave($event, item)"
+                             @dragover.prevent="onWorkspaceDragOver($event, item)"
+                             @dragenter.prevent="onWorkspaceDragEnter($event, item)"
+                             @dragleave="onWorkspaceDragLeave($event, item)"
                              @drop.prevent="onWorkspaceDrop($event, item)">
                             <div class="workspace-file-icon">
                                 <i :class="item.type === 'directory' ? 'fas fa-folder' : getFileIcon(item.name)"></i>
@@ -9623,6 +9628,7 @@
                     showCreateFolderModal: false,
                     newFolderName: '',
                     draggingFile: null,  // 当前拖动的文件
+                    draggingFileScope: null,  // 拖动文件的来源工作区 ('private' 或 'shared')
                     dragOverItem: null,  // 拖动经过的目标项
                     // 文件预览
                     showFilePreview: false,
@@ -12661,9 +12667,78 @@ def main(params):
                     this.loadWorkspaceFiles();
                 },
                 
-                get workspacePathParts() {
-                    if (!this.workspaceCurrentPath) return [];
-                    return this.workspaceCurrentPath.split('/').filter(p => p);
+                navigateToParent() {
+                    if (!this.workspaceCurrentPath) return;
+                    const parts = this.workspaceCurrentPath.split('/').filter(p => p);
+                    parts.pop();
+                    this.workspaceCurrentPath = parts.join('/');
+                    this.loadWorkspaceFiles();
+                },
+                
+                onDragOverParent(event) {
+                    if (!this.draggingFile) return;
+                    event.dataTransfer.dropEffect = 'move';
+                },
+                
+                onDragEnterParent(event) {
+                    if (!this.draggingFile) return;
+                    this.dragOverItem = '__parent__';
+                },
+                
+                onDragLeaveParent(event) {
+                    if (this.dragOverItem === '__parent__') {
+                        this.dragOverItem = null;
+                    }
+                },
+                
+                async onDropToParent(event) {
+                    this.dragOverItem = null;
+                    if (!this.draggingFile) return;
+                    
+                    // 计算上级目录
+                    const parts = this.workspaceCurrentPath.split('/').filter(p => p);
+                    parts.pop();
+                    const parentPath = parts.join('/');
+                    
+                    try {
+                        const filename = this.draggingFile.path;
+                        const fromScope = this.draggingFileScope || this.workspaceScope;
+                        const toScope = this.workspaceScope;
+                        let url, requestData;
+                        
+                        // 跨工作区移动到上级
+                        if (fromScope !== toScope) {
+                            if (fromScope === 'private' && toScope === 'shared') {
+                                url = `/api/sessions/${this.currentSession.id}/workspace/files/${encodeURIComponent(filename)}/move-to-shared`;
+                                requestData = { target: parentPath };
+                            } else if (fromScope === 'shared' && toScope === 'private') {
+                                url = `/api/workspace/shared/files/${encodeURIComponent(filename)}/move-to-private`;
+                                requestData = { session_id: this.currentSession.id, target: parentPath };
+                            }
+                        } else {
+                            // 同工作区移动
+                            if (this.workspaceScope === 'shared') {
+                                url = `/api/workspace/shared/files/${encodeURIComponent(filename)}/move`;
+                            } else {
+                                url = `/api/sessions/${this.currentSession.id}/workspace/files/${encodeURIComponent(filename)}/move`;
+                            }
+                            requestData = { target: parentPath };
+                        }
+                        
+                        const res = await api.post(url, requestData);
+                        
+                        if (res.data.success) {
+                            this.showToast('文件已移动到上级目录', 'success');
+                            this.loadWorkspaceFiles();
+                        } else {
+                            this.showToast(res.data.error || '移动失败', 'error');
+                        }
+                    } catch (e) {
+                        this.showToast('移动失败', 'error');
+                    }
+                    
+                    this.draggingFile = null;
+                    this.draggingFileScope = null;
                 },
                 
                 previewWorkspaceFile(item) {
@@ -12813,6 +12888,7 @@ def main(params):
                 
                 onDragFileStart(event, item) {
                     this.draggingFile = item;
+                    this.draggingFileScope = item.scope || this.workspaceScope;
                     event.dataTransfer.effectAllowed = 'move';
                     event.dataTransfer.setData('text/plain', item.path);
                     event.target.classList.add('dragging');
@@ -12820,23 +12896,24 @@ def main(params):
                 
                 onDragFileEnd(event) {
                     this.draggingFile = null;
+                    this.draggingFileScope = null;
                     this.dragOverItem = null;
                     event.target.classList.remove('dragging');
                 },
                 
-                onDragOver(event, item) {
+                onWorkspaceDragOver(event, item) {
                     if (item.type !== 'directory') return;
                     if (!this.draggingFile || this.draggingFile.path === item.path) return;
                     event.dataTransfer.dropEffect = 'move';
                 },
                 
-                onDragEnter(event, item) {
+                onWorkspaceDragEnter(event, item) {
                     if (item.type !== 'directory') return;
                     if (!this.draggingFile || this.draggingFile.path === item.path) return;
                     this.dragOverItem = item.path;
                 },
                 
-                onDragLeave(event, item) {
+                onWorkspaceDragLeave(event, item) {
                     if (this.dragOverItem === item.path) {
                         this.dragOverItem = null;
                     }
@@ -12857,15 +12934,32 @@ def main(params):
                     try {
                         const filename = this.draggingFile.path;
                         const target = targetItem.path;
-                        let url;
-                        if (this.workspaceScope === 'shared') {
-                            url = `/api/workspace/shared/files/${encodeURIComponent(filename)}/move`;
+                        const fromScope = this.draggingFileScope || this.workspaceScope;
+                        const toScope = this.workspaceScope;
+                        let url, requestData;
+                        
+                        // 跨工作区移动
+                        if (fromScope !== toScope) {
+                            if (fromScope === 'private' && toScope === 'shared') {
+                                // 私有 -> 共享
+                                url = `/api/sessions/${this.currentSession.id}/workspace/files/${encodeURIComponent(filename)}/move-to-shared`;
+                                requestData = { target: target };
+                            } else if (fromScope === 'shared' && toScope === 'private') {
+                                // 共享 -> 私有
+                                url = `/api/workspace/shared/files/${encodeURIComponent(filename)}/move-to-private`;
+                                requestData = { session_id: this.currentSession.id, target: target };
+                            }
                         } else {
-                            url = `/api/sessions/${this.currentSession.id}/workspace/files/${encodeURIComponent(filename)}/move`;
+                            // 同工作区移动
+                            if (this.workspaceScope === 'shared') {
+                                url = `/api/workspace/shared/files/${encodeURIComponent(filename)}/move`;
+                            } else {
+                                url = `/api/sessions/${this.currentSession.id}/workspace/files/${encodeURIComponent(filename)}/move`;
+                            }
+                            requestData = { target: target };
                         }
-                        const res = await api.post(url, {
-                            target: target
-                        });
+                        
+                        const res = await api.post(url, requestData);
                         
                         if (res.data.success) {
                             this.showToast('文件已移动', 'success');
@@ -12878,6 +12972,7 @@ def main(params):
                     }
                     
                     this.draggingFile = null;
+                    this.draggingFileScope = null;
                 },
                 
                 applyExpandEditor() {

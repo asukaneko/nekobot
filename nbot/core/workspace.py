@@ -258,6 +258,90 @@ class WorkspaceManager:
         except Exception as e:
             return {'success': False, 'error': str(e)}
 
+    def move_to_shared(self, session_id: str, filename: str, target_path: str = '') -> Dict[str, Any]:
+        """将私有工作区的文件移动到共享工作区"""
+        src_path = self.get_file_path(session_id, filename)
+        if not src_path:
+            return {'success': False, 'error': f'文件不存在: {filename}'}
+        
+        if not os.path.exists(src_path):
+            return {'success': False, 'error': f'文件不存在: {filename}'}
+        
+        if target_path:
+            dst_dir = os.path.normpath(os.path.join(self.shared_workspace_dir, target_path))
+            if not dst_dir.startswith(os.path.normpath(self.shared_workspace_dir)):
+                return {'success': False, 'error': '目标路径不合法'}
+        else:
+            dst_dir = self.shared_workspace_dir
+        
+        if not os.path.exists(dst_dir):
+            return {'success': False, 'error': '目标目录不存在'}
+        
+        try:
+            filename_only = os.path.basename(filename)
+            dst_path = os.path.join(dst_dir, filename_only)
+            
+            # 如果目标已存在，添加后缀
+            if os.path.exists(dst_path):
+                name, ext = os.path.splitext(filename_only)
+                counter = 1
+                while os.path.exists(dst_path):
+                    dst_path = os.path.join(dst_dir, f"{name}_{counter}{ext}")
+                    counter += 1
+            
+            shutil.move(src_path, dst_path)
+            new_path = os.path.join(target_path, os.path.basename(dst_path)) if target_path else os.path.basename(dst_path)
+            return {
+                'success': True, 
+                'new_path': new_path.replace('\\', '/'),
+                'scope': 'shared'
+            }
+        except Exception as e:
+            return {'success': False, 'error': str(e)}
+
+    def move_from_shared(self, session_id: str, filename: str, target_path: str = '') -> Dict[str, Any]:
+        """将共享工作区的文件移动到私有工作区"""
+        src_path = os.path.normpath(os.path.join(self.shared_workspace_dir, filename))
+        if not src_path.startswith(os.path.normpath(self.shared_workspace_dir)):
+            return {'success': False, 'error': '路径不合法'}
+        
+        if not os.path.exists(src_path):
+            return {'success': False, 'error': f'文件不存在: {filename}'}
+        
+        ws_path = self.get_or_create(session_id, 'web')
+        
+        if target_path:
+            dst_dir = os.path.normpath(os.path.join(ws_path, target_path))
+            if not dst_dir.startswith(os.path.normpath(ws_path)):
+                return {'success': False, 'error': '目标路径不合法'}
+        else:
+            dst_dir = ws_path
+        
+        if not os.path.exists(dst_dir):
+            return {'success': False, 'error': '目标目录不存在'}
+        
+        try:
+            filename_only = os.path.basename(filename)
+            dst_path = os.path.join(dst_dir, filename_only)
+            
+            # 如果目标已存在，添加后缀
+            if os.path.exists(dst_path):
+                name, ext = os.path.splitext(filename_only)
+                counter = 1
+                while os.path.exists(dst_path):
+                    dst_path = os.path.join(dst_dir, f"{name}_{counter}{ext}")
+                    counter += 1
+            
+            shutil.move(src_path, dst_path)
+            new_path = os.path.join(target_path, os.path.basename(dst_path)) if target_path else os.path.basename(dst_path)
+            return {
+                'success': True, 
+                'new_path': new_path.replace('\\', '/'),
+                'scope': 'private'
+            }
+        except Exception as e:
+            return {'success': False, 'error': str(e)}
+
     def _load_meta(self):
         """加载工作区元数据，并修复跨平台路径问题"""
         if os.path.exists(self.meta_file):

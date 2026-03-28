@@ -3300,6 +3300,40 @@ class WebChatServer:
             else:
                 return jsonify(result), 400
 
+        @self.app.route('/api/sessions/<session_id>/workspace/files/<path:filename>/move-to-shared', methods=['POST'])
+        def move_file_to_shared(session_id, filename):
+            """将私有工作区的文件移动到共享工作区"""
+            if not WORKSPACE_AVAILABLE:
+                return jsonify({'error': 'Workspace not available'}), 503
+            
+            data = request.json or {}
+            target_path = data.get('target', '')
+            
+            result = workspace_manager.move_to_shared(session_id, filename, target_path)
+            if result.get('success'):
+                return jsonify(result)
+            else:
+                return jsonify(result), 400
+
+        @self.app.route('/api/workspace/shared/files/<path:filename>/move-to-private', methods=['POST'])
+        def move_shared_file_to_private(filename):
+            """将共享工作区的文件移动到私有工作区"""
+            if not WORKSPACE_AVAILABLE:
+                return jsonify({'error': 'Workspace not available'}), 503
+            
+            data = request.json or {}
+            session_id = data.get('session_id')
+            target_path = data.get('target', '')
+            
+            if not session_id:
+                return jsonify({'error': '缺少 session_id'}), 400
+            
+            result = workspace_manager.move_from_shared(session_id, filename, target_path)
+            if result.get('success'):
+                return jsonify(result)
+            else:
+                return jsonify(result), 400
+
         @self.app.route('/api/sessions/<session_id>/workspace/files/<path:filename>/preview', methods=['GET'])
         def preview_workspace_file(session_id, filename):
             """预览工作区中的文件内容（文本、图片等）"""
