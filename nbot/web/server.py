@@ -2846,6 +2846,41 @@ class WebChatServer:
                 _log.error(f"Error in get_qq_groups: {e}")
                 return jsonify({'error': str(e)}), 500
 
+        @self.app.route('/api/workspace/download')
+        def workspace_download():
+            """通过路径下载工作区文件"""
+            import os
+            from flask import send_file
+            
+            file_path = request.args.get('path', '')
+            if not file_path:
+                return jsonify({'error': '缺少 path 参数'}), 400
+            
+            # 安全检查：只允许访问 workspace 目录和 static/files 目录
+            file_path = os.path.abspath(file_path)
+            base_dir = os.path.abspath(self.base_dir)
+            allowed_dirs = [
+                os.path.join(base_dir, 'data', 'workspace'),
+                os.path.join(base_dir, 'data', 'web'),
+                os.path.join(base_dir, 'static', 'files'),
+            ]
+            
+            is_allowed = False
+            for allowed_dir in allowed_dirs:
+                if file_path.startswith(os.path.abspath(allowed_dir)):
+                    is_allowed = True
+                    break
+            
+            if not is_allowed:
+                _log.warning(f"Workspace download blocked: {file_path} 不在允许目录内")
+                return jsonify({'error': '路径不在允许范围内'}), 403
+            
+            if not os.path.exists(file_path) or not os.path.isfile(file_path):
+                return jsonify({'error': '文件不存在'}), 404
+            
+            filename = os.path.basename(file_path)
+            return send_file(file_path, as_attachment=True, download_name=filename)
+
         @self.app.route('/api/qq/messages/<qq_type>/<qq_id>')
         def get_qq_messages(qq_type, qq_id):
             """获取 QQ 消息

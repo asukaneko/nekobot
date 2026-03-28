@@ -1694,8 +1694,6 @@ def _execute_workspace_tool(tool_name: str, arguments: Dict[str, Any],
             from nbot.core.skills_manager import SKILLS_ROOT, SkillStorage
             skill_source_dir = os.path.join(SKILLS_ROOT, skill_name)
             
-            _log.info(f"[workspace_skill_copy] skill_name={skill_name}, source_dir={skill_source_dir}")
-            
             # 确定目标路径
             if is_skill_shared:
                 shared_path = workspace_manager.get_shared_workspace()

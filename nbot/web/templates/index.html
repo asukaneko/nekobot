@@ -13236,11 +13236,11 @@ def main(params):
                 },
                 
                 downloadFile(fileData) {
-                    console.log('downloadFile called with:', fileData);
+                    console.log('downloadFile called:', JSON.stringify(fileData));
+                    // 优先级：blob缓存 > download_url > url > path > content > 其他
                     
-                    // 优先使用缓存的 blob 数据
+                    // 1. 优先使用缓存的 blob 数据
                     if (fileData && fileData.blob) {
-                        console.log('Using cached blob, filename:', fileData.filename);
                         const url = window.URL.createObjectURL(fileData.blob);
                         const link = document.createElement('a');
                         link.href = url;
@@ -13252,20 +13252,94 @@ def main(params):
                         return;
                     }
                     
-                    // 工作区文件下载
-                    if (fileData && fileData.sessionId && fileData.filename) {
-                        const token = localStorage.getItem('token');
-                        const originalFilename = fileData.filename;
-                        const filename = encodeURIComponent(originalFilename);
-                        let url = `/api/sessions/${fileData.sessionId}/workspace/files/${filename}`;
-                        if (token) {
-                            url += (url.includes('?') ? '&' : '?') + 'token=' + encodeURIComponent(token);
-                        }
-                        
-                        // 使用 axios 的 api 对象下载，自动处理认证
-                        api.get(url, { responseType: 'blob' })
+                    // 2. download_url → fetch + Blob 下载
+                    if (fileData && fileData.download_url) {
+                        api.get(fileData.download_url, { responseType: 'blob' })
                             .then(response => {
                                 const blob = response.data;
+                                const blobUrl = window.URL.createObjectURL(blob);
+                                const link = document.createElement('a');
+                                link.href = blobUrl;
+                                link.download = fileData.filename || fileData.name || 'download';
+                                document.body.appendChild(link);
+                                link.click();
+                                document.body.removeChild(link);
+                                window.URL.revokeObjectURL(blobUrl);
+                            })
+                            .catch(e => {
+                                console.error('下载失败:', e);
+                                this.showToast('下载失败', 'error');
+                            });
+                        return;
+                    }
+                    
+                    // 3. url → 直接 fetch 附件 URL 下载
+                    if (fileData && fileData.url) {
+                        const filename = fileData.filename || fileData.name || 'download';
+                        api.get(fileData.url, { responseType: 'blob' })
+                            .then(response => {
+                                const blob = new Blob([response.data]);
+                                const blobUrl = window.URL.createObjectURL(blob);
+                                const link = document.createElement('a');
+                                link.href = blobUrl;
+                                link.download = filename;
+                                document.body.appendChild(link);
+                                link.click();
+                                document.body.removeChild(link);
+                                window.URL.revokeObjectURL(blobUrl);
+                            })
+                            .catch(e => {
+                                console.error('下载失败:', e);
+                                this.showToast('下载失败', 'error');
+                            });
+                        return;
+                    }
+                    
+                    // 4. path / file_path → 调用后端 API 下载
+                    if (fileData && (fileData.path || fileData.file_path)) {
+                        const filePath = encodeURIComponent(fileData.path || fileData.file_path);
+                        const filename = fileData.filename || fileData.name || 'download';
+                        api.get(`/api/workspace/download?path=${filePath}`, { responseType: 'blob' })
+                            .then(response => {
+                                const blob = new Blob([response.data]);
+                                const blobUrl = window.URL.createObjectURL(blob);
+                                const link = document.createElement('a');
+                                link.href = blobUrl;
+                                link.download = filename;
+                                document.body.appendChild(link);
+                                link.click();
+                                document.body.removeChild(link);
+                                window.URL.revokeObjectURL(blobUrl);
+                            })
+                            .catch(e => {
+                                console.error('下载失败:', e);
+                                this.showToast('下载失败', 'error');
+                            });
+                        return;
+                    }
+                    
+                    // 5. content → Blob 下载
+                    if (fileData && fileData.content) {
+                        const blob = new Blob([fileData.content], { type: 'text/plain;charset=utf-8' });
+                        const url = window.URL.createObjectURL(blob);
+                        const link = document.createElement('a');
+                        link.href = url;
+                        link.download = fileData.filename || fileData.name || 'download.txt';
+                        document.body.appendChild(link);
+                        link.click();
+                        document.body.removeChild(link);
+                        window.URL.revokeObjectURL(url);
+                        return;
+                    }
+                    
+                    // 6. 其他情况：尝试用 sessionId + filename
+                    if (fileData && fileData.sessionId && fileData.filename) {
+                        const filename = encodeURIComponent(fileData.filename);
+                        const originalFilename = fileData.filename;
+                        const url = `/api/sessions/${fileData.sessionId}/workspace/files/${filename}`;
+                        api.get(url, { responseType: 'blob' })
+                            .then(response => {
+                                const blob = new Blob([response.data]);
                                 const blobUrl = window.URL.createObjectURL(blob);
                                 const link = document.createElement('a');
                                 link.href = blobUrl;
@@ -13277,27 +13351,12 @@ def main(params):
                             })
                             .catch(e => {
                                 console.error('下载失败:', e);
-                                this.showToast('下载失败: ' + (e.message || '未知错误'), 'error');
+                                this.showToast('下载失败', 'error');
                             });
                         return;
                     }
                     
-                    // 其他下载
-                    if (fileData && fileData.download_url) {
-                        window.open(fileData.download_url, '_blank');
-                    } else if (fileData && fileData.url) {
-                        window.open(fileData.url, '_blank');
-                    } else if (fileData && fileData.content) {
-                        const blob = new Blob([fileData.content], { type: 'text/plain;charset=utf-8' });
-                        const url = window.URL.createObjectURL(blob);
-                        const link = document.createElement('a');
-                        link.href = url;
-                        link.download = fileData.filename || fileData.name || 'download.txt';
-                        document.body.appendChild(link);
-                        link.click();
-                        document.body.removeChild(link);
-                        window.URL.revokeObjectURL(url);
-                    }
+                    this.showToast('文件下载链接不可用', 'error');
                 },
                 
                 // Workflow Functions
@@ -15138,58 +15197,6 @@ def main(params):
                     if (!this.filePreviewData.content) {
                         this.filePreviewData.loading = false;
                         this.filePreviewData.error = '无法预览此文件，请下载后查看';
-                    }
-                },
-
-                async downloadFile(file) {
-                    // 处理机器人发送的文件下载
-                    if (file.download_url) {
-                        // 使用 fetch 获取文件并强制下载到本地
-                        try {
-                            this.showToast('正在下载文件...', 'info');
-                            const response = await fetch(file.download_url);
-                            if (!response.ok) throw new Error('下载失败');
-                            
-                            const blob = await response.blob();
-                            const url = window.URL.createObjectURL(blob);
-                            
-                            const link = document.createElement('a');
-                            link.href = url;
-                            link.download = file.name || 'download';
-                            document.body.appendChild(link);
-                            link.click();
-                            document.body.removeChild(link);
-                            
-                            window.URL.revokeObjectURL(url);
-                            this.showToast('下载完成', 'success');
-                        } catch (error) {
-                            console.error('下载失败:', error);
-                            // 降级方案：直接打开链接
-                            const link = document.createElement('a');
-                            link.href = file.download_url;
-                            link.download = file.name || 'download';
-                            link.target = '_blank';
-                            document.body.appendChild(link);
-                            link.click();
-                            document.body.removeChild(link);
-                        }
-                    } else if (file.is_image && file.data) {
-                        // 图片在新窗口打开
-                        const win = window.open('', '_blank');
-                        win.document.write('<img src="' + file.data + '" style="max-width:100%;max-height:100vh;margin:auto;display:block;">');
-                    } else if (file.content) {
-                        // 文本文件创建 Blob 下载
-                        const blob = new Blob([file.content], { type: 'text/plain;charset=utf-8' });
-                        const url = window.URL.createObjectURL(blob);
-                        const link = document.createElement('a');
-                        link.href = url;
-                        link.download = file.name || 'download.txt';
-                        document.body.appendChild(link);
-                        link.click();
-                        document.body.removeChild(link);
-                        window.URL.revokeObjectURL(url);
-                    } else {
-                        this.showToast('文件下载链接不可用', 'error');
                     }
                 },
 
