@@ -117,6 +117,54 @@ class WorkspaceManager:
 
         return {'success': True, 'files': files, 'count': len(files), 'scope': 'shared'}
 
+    def list_shared_files_recursive(self, path: str = '') -> Dict[str, Any]:
+        """递归列出共享工作区中所有子目录的文件"""
+        target_path = os.path.join(self.shared_workspace_dir, path) if path else self.shared_workspace_dir
+
+        if not os.path.exists(target_path) or not os.path.isdir(target_path):
+            return {'success': False, 'error': '目录不存在'}
+
+        all_items = []
+        
+        def scan_directory(current_path: str, relative_prefix: str = ''):
+            try:
+                for name in os.listdir(current_path):
+                    full_path = os.path.join(current_path, name)
+                    relative_path = relative_prefix + '/' + name if relative_prefix else name
+                    
+                    if os.path.isdir(full_path):
+                        # 先添加文件夹，然后递归扫描其内容
+                        all_items.append({
+                            'name': name,
+                            'type': 'directory',
+                            'size': 0,
+                            'path': relative_path,
+                            'scope': 'shared'
+                        })
+                        scan_directory(full_path, relative_path)
+                    else:
+                        mime_type, _ = mimetypes.guess_type(full_path)
+                        all_items.append({
+                            'name': name,
+                            'type': 'file',
+                            'size': os.path.getsize(full_path),
+                            'mime_type': mime_type or 'application/octet-stream',
+                            'path': relative_path,
+                            'scope': 'shared'
+                        })
+            except Exception:
+                pass
+        
+        scan_directory(target_path, path)
+        
+        return {
+            'success': True,
+            'files': all_items,
+            'count': len(all_items),
+            'scope': 'shared',
+            'recursive': True
+        }
+
     def read_shared_file(self, filename: str, start_line: int = None, end_line: int = None,
                          char_count: int = None, start_char: int = None) -> Dict[str, Any]:
         """读取共享工作区中的文件"""
@@ -876,6 +924,57 @@ class WorkspaceManager:
             return {'success': False, 'error': str(e)}
 
         return {'success': True, 'files': files, 'count': len(files)}
+
+    def list_files_recursive(self, session_id: str, path: str = '') -> Dict[str, Any]:
+        """递归列出工作区中所有子目录的文件"""
+        ws_path = self.get_workspace(session_id)
+        if not ws_path:
+            return {'success': True, 'files': [], 'message': '工作区为空'}
+
+        target_path = os.path.join(ws_path, path) if path else ws_path
+        if not os.path.exists(target_path) or not os.path.isdir(target_path):
+            return {'success': False, 'error': '目录不存在'}
+
+        all_items = []
+        
+        def scan_directory(current_path: str, relative_prefix: str = ''):
+            try:
+                for name in os.listdir(current_path):
+                    full_path = os.path.join(current_path, name)
+                    relative_path = relative_prefix + '/' + name if relative_prefix else name
+                    
+                    if os.path.isdir(full_path):
+                        # 先添加文件夹，然后递归扫描其内容
+                        all_items.append({
+                            'name': name,
+                            'type': 'directory',
+                            'size': 0,
+                            'path': relative_path,
+                            'scope': 'private'
+                        })
+                        scan_directory(full_path, relative_path)
+                    else:
+                        mime_type, _ = mimetypes.guess_type(full_path)
+                        all_items.append({
+                            'name': name,
+                            'type': 'file',
+                            'size': os.path.getsize(full_path),
+                            'mime_type': mime_type or 'application/octet-stream',
+                            'path': relative_path,
+                            'scope': 'private'
+                        })
+            except Exception:
+                pass
+        
+        scan_directory(target_path, path)
+        
+        return {
+            'success': True,
+            'files': all_items,
+            'count': len(all_items),
+            'scope': 'private',
+            'recursive': True
+        }
 
     def move_file(self, session_id: str, filename: str, target_path: str = '') -> Dict[str, Any]:
         """

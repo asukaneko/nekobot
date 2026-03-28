@@ -4,7 +4,7 @@
 
 ![Python](https://img.shields.io/badge/Python-3.11+-blue?style=flat&logo=python)
 ![License](https://img.shields.io/badge/License-MIT-green?style=flat)
-![Version](https://img.shields.io/badge/Version-2.0.0-purple?style=flat)
+![Version](https://img.shields.io/badge/Version-2.1.0-purple?style=flat)
 
 **一个可以下载本子和 AI 聊天的 QQ 猫娘机器人**
 
@@ -27,6 +27,7 @@
 - 🎵 **多媒体** - 音乐、图片、视频识别
 - 📖 **轻小说** - 搜索和下载轻小说
 - 🎮 **娱乐功能** - 随机图片、表情包、抽卡
+- 📁 **工作区** - 私有和共享文件管理
 
 </td>
 <td valign="top">
@@ -38,6 +39,7 @@
 - 📚 **知识库** - RAG 智能问答
 - ⚡ **工作流** - 自动化任务编排
 - 🌐 **Web 界面** - 在线聊天和配置
+- 🔄 **私有/共享工作区** - AI 工具区分文件来源
 
 </td>
 </tr>
@@ -88,6 +90,35 @@ python bot.py --web
 
 ---
 
+## 📁 工作区系统
+
+项目包含完整的文件管理工作区系统：
+
+### 私有工作区
+- 每个会话独立的文件存储空间
+- AI 工具可创建、读取、编辑、删除文件
+- 支持拖拽移动文件
+
+### 共享工作区
+- 所有会话共享的工作区 (`data/workspaces/_shared`)
+- AI 工具通过 `scope` 参数区分
+- 适合存放通用配置文件、素材等
+
+### AI 工具使用
+
+```python
+# 列出文件（支持递归）
+workspace_list_files(scope="all", recursive=true)
+
+# 读取文件（区分来源）
+workspace_read_file(filename="config.json", scope="shared")
+
+# 创建文件
+workspace_create_file(filename="notes.txt", content="...", scope="private")
+```
+
+---
+
 ## 📖 文档
 
 | 文档 | 说明 |
@@ -107,28 +138,31 @@ Ncatbot-comic-QQbot/
 │
 ├── nbot/                     # 核心模块
 │   ├── commands.py          # 命令处理
-│   ├── chat.py             # 聊天服务
-│   ├── config.py           # 配置加载
-│   ├── web/                # Web 界面
-│   ├── core/               # 核心功能
-│   │   ├── heartbeat.py   # 心跳
-│   │   ├── memory.py      # 记忆系统
-│   │   ├── knowledge.py   # 知识库
-│   │   └── workflow.py    # 工作流
-│   ├── plugins/            # 插件系统
-│   └── services/           # 服务层
+│   ├── chat.py              # 聊天服务
+│   ├── config.py            # 配置加载
+│   ├── web/                 # Web 界面
+│   ├── core/                # 核心功能
+│   │   ├── heartbeat.py     # 心跳
+│   │   ├── memory.py        # 记忆系统
+│   │   ├── knowledge.py      # 知识库
+│   │   ├── workflow.py      # 工作流
+│   │   └── workspace.py      # 工作区管理
+│   ├── plugins/             # 插件系统
+│   └── services/            # 服务层
+│       └── tools.py         # AI 工具
+│
+├── data/                    # 数据目录
+│   ├── sessions/           # 会话数据
+│   ├── memories/           # 记忆数据
+│   ├── workspaces/        # 工作区
+│   │   └── _shared/       # 共享工作区
+│   └── web/               # Web 数据
 │
 ├── resources/               # 静态资源
-│   ├── config/             # 配置文件
-│   └── prompts/            # 提示词
+│   ├── config/            # 配置文件
+│   └── prompts/           # 提示词
 │
-├── docs/                    # 详细文档
-│   ├── README.md           # 英文文档
-│   ├── Chinese.md          # 中文文档
-│   ├── CHANGELOG.md        # 更新日志
-│   └── docs/               # VitePress 文档
-│
-└── tools/                   # 工具脚本
+└── tools/                  # 工具脚本
 ```
 
 ---
@@ -140,7 +174,6 @@ Ncatbot-comic-QQbot/
 | `/jm <ID>` | 下载漫画 |
 | `/search <关键词>` | 搜索漫画 |
 | `/chat` 或 `@机器人` | AI 对话 |
-| `/st <标签>` | 随机涩图 |
 | `/gf <描述>` | AI 生成图片 |
 | `/help` | 查看帮助 |
 
@@ -149,8 +182,8 @@ Ncatbot-comic-QQbot/
 ## 💡 提示
 
 - 登录后在 `napcat/logs` 文件夹可找到 WebUI 登录地址
-- 默认使用硅基流动 API，新用户免费赠送 15 元
 - 可修改 `resources/prompts/neko.txt` 定制角色
+- 工作区工具支持 `scope` 参数区分私有/共享文件
 - 详细功能说明请查看 [docs](./docs/) 目录
 
 ---

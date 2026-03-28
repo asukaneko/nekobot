@@ -1188,7 +1188,7 @@ WORKSPACE_TOOL_DEFINITIONS = [
         "type": "function",
         "function": {
             "name": "workspace_list_files",
-            "description": "列出工作区中的所有文件。支持列出私有工作区和共享工作区的文件。",
+            "description": "列出工作区中的所有文件。支持列出私有工作区和共享工作区的文件。支持递归列出子目录中的所有文件。",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -1200,6 +1200,10 @@ WORKSPACE_TOOL_DEFINITIONS = [
                     "path": {
                         "type": "string",
                         "description": "要列出的子目录路径（可选）。例如：'docs' 或 'docs/src'。"
+                    },
+                    "recursive": {
+                        "type": "boolean",
+                        "description": "是否递归列出所有子目录中的文件。默认为 false。设置为 true 时，会列出 path 下所有文件夹中的文件，并标注完整路径。"
                     }
                 }
             }
@@ -1486,9 +1490,13 @@ def _execute_workspace_tool(tool_name: str, arguments: Dict[str, Any],
         elif tool_name == "workspace_list_files":
             list_scope = arguments.get('scope', 'all')
             path = arguments.get('path', '')
+            recursive = arguments.get('recursive', False)
             
             if list_scope == 'private':
-                private_result = workspace_manager.list_files(session_id, path)
+                if recursive:
+                    private_result = workspace_manager.list_files_recursive(session_id, path)
+                else:
+                    private_result = workspace_manager.list_files(session_id, path)
                 files = []
                 if private_result.get('success') and private_result.get('files'):
                     for f in private_result['files']:
@@ -1498,12 +1506,16 @@ def _execute_workspace_tool(tool_name: str, arguments: Dict[str, Any],
                     'success': True,
                     'scope': 'private',
                     'path': path,
+                    'recursive': recursive,
                     'files': files,
                     'count': len(files),
-                    'message': f'私有工作区 {f"/{path}" if path else ""} 包含 {len(files)} 个文件/文件夹'
+                    'message': f'私有工作区 {f"/{path}" if path else ""} {"(递归)" if recursive else ""} 包含 {len(files)} 个文件/文件夹'
                 }
             elif list_scope == 'shared':
-                shared_result = workspace_manager.list_shared_files(path)
+                if recursive:
+                    shared_result = workspace_manager.list_shared_files_recursive(path)
+                else:
+                    shared_result = workspace_manager.list_shared_files(path)
                 files = []
                 if shared_result.get('success') and shared_result.get('files'):
                     for f in shared_result['files']:
@@ -1513,14 +1525,19 @@ def _execute_workspace_tool(tool_name: str, arguments: Dict[str, Any],
                     'success': True,
                     'scope': 'shared',
                     'path': path,
+                    'recursive': recursive,
                     'files': files,
                     'count': len(files),
-                    'message': f'共享工作区 {f"/{path}" if path else ""} 包含 {len(files)} 个文件/文件夹'
+                    'message': f'共享工作区 {f"/{path}" if path else ""} {"(递归)" if recursive else ""} 包含 {len(files)} 个文件/文件夹'
                 }
             else:
                 # 返回所有
-                private_result = workspace_manager.list_files(session_id, path)
-                shared_result = workspace_manager.list_shared_files(path)
+                if recursive:
+                    private_result = workspace_manager.list_files_recursive(session_id, path)
+                    shared_result = workspace_manager.list_shared_files_recursive(path)
+                else:
+                    private_result = workspace_manager.list_files(session_id, path)
+                    shared_result = workspace_manager.list_shared_files(path)
                 
                 all_files = []
                 private_count = 0
@@ -1543,8 +1560,9 @@ def _execute_workspace_tool(tool_name: str, arguments: Dict[str, Any],
                     'success': True,
                     'scope': 'all',
                     'path': path,
-                    'private_workspace': f'当前会话私有工作区 {path_info} ({private_count} 个文件)',
-                    'shared_workspace': f'所有会话共享的工作区 {path_info} ({shared_count} 个文件)',
+                    'recursive': recursive,
+                    'private_workspace': f'当前会话私有工作区 {path_info} {"(递归)" if recursive else ""} ({private_count} 个文件)',
+                    'shared_workspace': f'所有会话共享的工作区 {path_info} {"(递归)" if recursive else ""} ({shared_count} 个文件)',
                     'files': all_files,
                     'count': len(all_files),
                     'message': f'工作区 {path_info} 包含 {private_count} 个私有文件和 {shared_count} 个共享文件。使用 scope 和 path 参数指定要操作的工作区和目录。'
