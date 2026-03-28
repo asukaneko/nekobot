@@ -69,7 +69,194 @@ class WorkspaceManager:
         self._meta: Dict[str, Dict[str, Any]] = {}
         self._load_meta()
 
-    # ========== 元数据管理 ==========
+        # 共享工作区（所有会话共用）
+        self.shared_workspace_dir = os.path.join(self.workspaces_dir, '_shared')
+        try:
+            os.makedirs(self.shared_workspace_dir, exist_ok=True)
+            _log.info(f"共享工作区目录已就绪: {self.shared_workspace_dir}")
+        except Exception as e:
+            _log.error(f"创建共享工作区目录失败: {e}")
+
+    # ========== 共享工作区 ==========
+
+    def get_shared_workspace(self) -> str:
+        """获取共享工作区路径（所有会话共用）"""
+        return self.shared_workspace_dir
+
+    def list_shared_files(self, path: str = '') -> Dict[str, Any]:
+        """列出共享工作区中的文件"""
+        target_path = os.path.join(self.shared_workspace_dir, path) if path else self.shared_workspace_dir
+
+        if not os.path.exists(target_path) or not os.path.isdir(target_path):
+            return {'success': False, 'error': '目录不存在'}
+
+        files = []
+        try:
+            for name in os.listdir(target_path):
+                full_path = os.path.join(target_path, name)
+                if os.path.isdir(full_path):
+                    files.append({
+                        'name': name,
+                        'type': 'directory',
+                        'size': 0,
+                        'path': path + '/' + name if path else name,
+                        'scope': 'shared'
+                    })
+                else:
+                    mime_type, _ = mimetypes.guess_type(full_path)
+                    files.append({
+                        'name': name,
+                        'type': 'file',
+                        'size': os.path.getsize(full_path),
+                        'mime_type': mime_type or 'application/octet-stream',
+                        'path': path + '/' + name if path else name,
+                        'scope': 'shared'
+                    })
+        except Exception as e:
+            return {'success': False, 'error': str(e)}
+
+        return {'success': True, 'files': files, 'count': len(files), 'scope': 'shared'}
+
+    def read_shared_file(self, filename: str, start_line: int = None, end_line: int = None,
+                         char_count: int = None, start_char: int = None) -> Dict[str, Any]:
+        """读取共享工作区中的文件"""
+        file_path = os.path.normpath(os.path.join(self.shared_workspace_dir, filename))
+        if not file_path.startswith(os.path.normpath(self.shared_workspace_dir)):
+            return {'success': False, 'error': '路径不合法'}
+
+        if not os.path.exists(file_path):
+            return {'success': False, 'error': f'文件不存在: {filename}'}
+
+        if os.path.isdir(file_path):
+            return {'success': False, 'error': f'这是一个文件夹，不是文件: {filename}'}
+
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+
+            # 应用行范围限制
+            if start_line is not None or end_line is not None:
+                lines = content.split('\n')
+                start = start_line - 1 if start_line else 0
+                end = end_line if end_line else len(lines)
+                content = '\n'.join(lines[start:end])
+
+            # 应用字符范围限制
+            if start_char is not None or char_count is not None:
+                start = start_char if start_char else 0
+                end = start + char_count if char_count else len(content)
+                content = content[start:end]
+
+            return {
+                'success': True,
+                'filename': filename,
+                'content': content,
+                'size': len(content),
+                'scope': 'shared'
+            }
+        except Exception as e:
+            return {'success': False, 'error': str(e)}
+
+    def create_shared_folder(self, folder_name: str, path: str = '') -> Dict[str, Any]:
+        """在共享工作区创建文件夹"""
+        if not folder_name.strip():
+            return {'success': False, 'error': '文件夹名称不能为空'}
+
+        import re
+        if not re.match(r'^[\w\-\. ]+$', folder_name):
+            return {'success': False, 'error': '文件夹名称包含非法字符'}
+
+        if path:
+            # 检查路径是否在共享工作区内
+            check_path = os.path.normpath(os.path.join(self.shared_workspace_dir, path))
+            if not check_path.startswith(os.path.normpath(self.shared_workspace_dir)):
+                return {'success': False, 'error': '路径不合法，不能超出共享工作区'}
+            folder_path = os.path.join(self.shared_workspace_dir, path, folder_name)
+        else:
+            folder_path = os.path.join(self.shared_workspace_dir, folder_name)
+
+        try:
+            if os.path.exists(folder_path):
+                return {'success': False, 'error': '文件夹已存在'}
+
+            os.makedirs(folder_path, exist_ok=True)
+            return {'success': True, 'name': folder_name, 'path': path + '/' + folder_name if path else folder_name}
+        except Exception as e:
+            return {'success': False, 'error': str(e)}
+
+    def edit_shared_file(self, filename: str, old_content: str, new_content: str) -> Dict[str, Any]:
+        """修改共享工作区中的文件（查找替换方式）"""
+        file_path = os.path.normpath(os.path.join(self.shared_workspace_dir, filename))
+        if not file_path.startswith(os.path.normpath(self.shared_workspace_dir)):
+            return {'success': False, 'error': '路径不合法'}
+
+        if not os.path.exists(file_path):
+            return {'success': False, 'error': f'文件不存在: {filename}'}
+
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+
+            if old_content not in content:
+                return {'success': False, 'error': '未找到要替换的内容'}
+
+            new_file_content = content.replace(old_content, new_content, 1)
+            with open(file_path, 'w', encoding='utf-8') as f:
+                f.write(new_file_content)
+
+            return {
+                'success': True,
+                'filename': filename,
+                'scope': 'shared',
+                'size': len(new_file_content.encode('utf-8'))
+            }
+        except Exception as e:
+            return {'success': False, 'error': str(e)}
+
+    def delete_shared_file(self, filename: str) -> Dict[str, Any]:
+        """删除共享工作区中的文件或文件夹"""
+        file_path = os.path.normpath(os.path.join(self.shared_workspace_dir, filename))
+        if not file_path.startswith(os.path.normpath(self.shared_workspace_dir)):
+            return {'success': False, 'error': '路径不合法'}
+
+        if not os.path.exists(file_path):
+            return {'success': False, 'error': f'文件不存在: {filename}'}
+
+        try:
+            if os.path.isdir(file_path):
+                shutil.rmtree(file_path)
+            else:
+                os.remove(file_path)
+            return {'success': True, 'filename': filename}
+        except Exception as e:
+            return {'success': False, 'error': str(e)}
+
+    def move_shared_file(self, filename: str, target_path: str = '') -> Dict[str, Any]:
+        """移动共享工作区中的文件"""
+        src_path = os.path.normpath(os.path.join(self.shared_workspace_dir, filename))
+        if not src_path.startswith(os.path.normpath(self.shared_workspace_dir)):
+            return {'success': False, 'error': '路径不合法'}
+
+        if not os.path.exists(src_path):
+            return {'success': False, 'error': f'文件不存在: {filename}'}
+
+        if target_path:
+            dst_dir = os.path.normpath(os.path.join(self.shared_workspace_dir, target_path))
+            # 检查目标路径是否在共享工作区内
+            if not dst_dir.startswith(os.path.normpath(self.shared_workspace_dir)):
+                return {'success': False, 'error': '目标路径不合法，不能超出共享工作区'}
+        else:
+            dst_dir = self.shared_workspace_dir
+
+        if not os.path.exists(dst_dir) or not os.path.isdir(dst_dir):
+            return {'success': False, 'error': '目标目录不存在'}
+
+        try:
+            shutil.move(src_path, dst_dir)
+            new_path = os.path.join(target_path, os.path.basename(filename)) if target_path else os.path.basename(filename)
+            return {'success': True, 'new_path': new_path.replace('\\', '/')}
+        except Exception as e:
+            return {'success': False, 'error': str(e)}
 
     def _load_meta(self):
         """加载工作区元数据，并修复跨平台路径问题"""
@@ -321,16 +508,58 @@ class WorkspaceManager:
         if not file_path.startswith(os.path.normpath(ws_path)):
             return {'success': False, 'error': '路径不合法，不能超出工作区范围'}
 
-        # 确保父目录存在
-        os.makedirs(os.path.dirname(file_path), exist_ok=True)
+        # 确保父目录存在（必须在工作区内）
+        parent_dir = os.path.dirname(file_path)
+        if not parent_dir.startswith(os.path.normpath(ws_path)):
+            return {'success': False, 'error': '路径不合法，不能超出工作区范围'}
 
         try:
+            if parent_dir != ws_path:
+                os.makedirs(parent_dir, exist_ok=True)
             with open(file_path, 'w', encoding='utf-8') as f:
                 f.write(content)
             return {
                 'success': True,
                 'filename': safe_name,
                 'path': file_path,
+                'size': len(content.encode('utf-8'))
+            }
+        except Exception as e:
+            return {'success': False, 'error': str(e)}
+
+    def create_shared_file(self, filename: str, content: str) -> Dict[str, Any]:
+        """
+        在共享工作区中创建/覆盖文本文件
+
+        Args:
+            filename: 文件名
+            content: 文件内容
+
+        Returns:
+            操作结果
+        """
+        safe_name = self._safe_filename(filename)
+
+        # 支持子目录，但限制在共享工作区内
+        file_path = os.path.normpath(os.path.join(self.shared_workspace_dir, safe_name))
+        if not file_path.startswith(os.path.normpath(self.shared_workspace_dir)):
+            return {'success': False, 'error': '路径不合法，不能超出共享工作区范围'}
+
+        # 确保父目录存在（必须在共享工作区内）
+        parent_dir = os.path.dirname(file_path)
+        if not parent_dir.startswith(os.path.normpath(self.shared_workspace_dir)):
+            return {'success': False, 'error': '路径不合法，不能超出共享工作区范围'}
+
+        try:
+            if parent_dir != self.shared_workspace_dir:
+                os.makedirs(parent_dir, exist_ok=True)
+            with open(file_path, 'w', encoding='utf-8') as f:
+                f.write(content)
+            return {
+                'success': True,
+                'filename': safe_name,
+                'path': file_path,
+                'scope': 'shared',
                 'size': len(content.encode('utf-8'))
             }
         except Exception as e:

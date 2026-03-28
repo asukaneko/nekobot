@@ -1072,7 +1072,7 @@ WORKSPACE_TOOL_DEFINITIONS = [
         "type": "function",
         "function": {
             "name": "workspace_create_file",
-            "description": "在当前会话的工作区中创建或覆盖一个文件。适用于为用户生成代码、文档、配置文件等场景。",
+            "description": "在工作区中创建或覆盖一个文件。适用于为用户生成代码、文档、配置文件等场景。",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -1083,6 +1083,11 @@ WORKSPACE_TOOL_DEFINITIONS = [
                     "content": {
                         "type": "string",
                         "description": "文件的文本内容"
+                    },
+                    "scope": {
+                        "type": "string",
+                        "enum": ["private", "shared"],
+                        "description": "工作区类型：'private' 表示当前会话私有工作区，'shared' 表示所有会话共享工作区。默认 'private'。"
                     }
                 },
                 "required": ["filename", "content"]
@@ -1093,13 +1098,18 @@ WORKSPACE_TOOL_DEFINITIONS = [
         "type": "function",
         "function": {
             "name": "workspace_read_file",
-            "description": "读取当前会话工作区中的文件内容。用于查看用户上传的文件或之前创建的文件。支持按行范围或字符范围读取。",
+            "description": "读取工作区中的文件内容。用于查看用户上传的文件或之前创建的文件。支持按行范围或字符范围读取。",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "filename": {
                         "type": "string",
                         "description": "要读取的文件名"
+                    },
+                    "scope": {
+                        "type": "string",
+                        "enum": ["private", "shared"],
+                        "description": "工作区类型：'private' 表示当前会话私有工作区，'shared' 表示所有会话共享工作区。默认 'private'。"
                     },
                     "start_line": {
                         "type": "integer",
@@ -1134,6 +1144,11 @@ WORKSPACE_TOOL_DEFINITIONS = [
                         "type": "string",
                         "description": "要修改的文件名"
                     },
+                    "scope": {
+                        "type": "string",
+                        "enum": ["private", "shared"],
+                        "description": "工作区类型：'private' 表示当前会话私有工作区，'shared' 表示所有会话共享工作区。默认 'private'。"
+                    },
                     "old_content": {
                         "type": "string",
                         "description": "要被替换的原始内容片段"
@@ -1158,6 +1173,11 @@ WORKSPACE_TOOL_DEFINITIONS = [
                     "filename": {
                         "type": "string",
                         "description": "要删除的文件名"
+                    },
+                    "scope": {
+                        "type": "string",
+                        "enum": ["private", "shared"],
+                        "description": "工作区类型：'private' 表示当前会话私有工作区，'shared' 表示所有会话共享工作区。默认 'private'。"
                     }
                 },
                 "required": ["filename"]
@@ -1168,10 +1188,20 @@ WORKSPACE_TOOL_DEFINITIONS = [
         "type": "function",
         "function": {
             "name": "workspace_list_files",
-            "description": "列出当前会话工作区中的所有文件。用于查看工作区内有哪些文件。",
+            "description": "列出工作区中的所有文件。支持列出私有工作区和共享工作区的文件。",
             "parameters": {
                 "type": "object",
-                "properties": {}
+                "properties": {
+                    "scope": {
+                        "type": "string",
+                        "enum": ["private", "shared", "all"],
+                        "description": "工作区类型：'private' 仅列出当前会话私有工作区，'shared' 仅列出共享工作区，'all' 同时列出两者（默认）。"
+                    },
+                    "path": {
+                        "type": "string",
+                        "description": "要列出的子目录路径（可选）。例如：'docs' 或 'docs/src'。"
+                    }
+                }
             }
         }
     },
@@ -1186,6 +1216,11 @@ WORKSPACE_TOOL_DEFINITIONS = [
                     "filename": {
                         "type": "string",
                         "description": "要发送的文件名"
+                    },
+                    "scope": {
+                        "type": "string",
+                        "enum": ["private", "shared"],
+                        "description": "工作区类型：'private' 表示当前会话私有工作区，'shared' 表示所有会话共享工作区。默认 'private'。"
                     }
                 },
                 "required": ["filename"]
@@ -1203,6 +1238,11 @@ WORKSPACE_TOOL_DEFINITIONS = [
                     "filename": {
                         "type": "string",
                         "description": "要解析的文件名"
+                    },
+                    "scope": {
+                        "type": "string",
+                        "enum": ["private", "shared"],
+                        "description": "工作区类型：'private' 表示当前会话私有工作区，'shared' 表示所有会话共享工作区。默认 'private'。"
                     },
                     "max_chars": {
                         "type": "integer",
@@ -1225,6 +1265,11 @@ WORKSPACE_TOOL_DEFINITIONS = [
                     "filename": {
                         "type": "string",
                         "description": "要查询的文件名"
+                    },
+                    "scope": {
+                        "type": "string",
+                        "enum": ["private", "shared"],
+                        "description": "工作区类型：'private' 表示当前会话私有工作区，'shared' 表示所有会话共享工作区。默认 'private'。"
                     }
                 },
                 "required": ["filename"]
@@ -1370,67 +1415,184 @@ def _execute_workspace_tool(tool_name: str, arguments: Dict[str, Any],
         # 兼容 file_path 和 filename 两种参数名
         filename = arguments.get('filename') or arguments.get('file_path')
         
+        # 获取 scope 参数，默认 'private'
+        scope = arguments.get('scope', 'private')
+        is_shared = (scope == 'shared')
+        
         if tool_name == "workspace_create_file":
             if not filename:
                 return {"success": False, "error": "缺少文件名参数 (filename 或 file_path)"}
-            return workspace_manager.create_file(
-                session_id, filename, arguments['content'], session_type)
+            if 'content' not in arguments:
+                return {"success": False, "error": "缺少 content 参数"}
+            
+            if is_shared:
+                result = workspace_manager.create_shared_file(filename, arguments['content'])
+            else:
+                result = workspace_manager.create_file(
+                    session_id, filename, arguments['content'], session_type)
+            result['scope'] = scope
+            return result
 
         elif tool_name == "workspace_read_file":
             if not filename:
                 return {"success": False, "error": "缺少文件名参数 (filename 或 file_path)"}
-            return workspace_manager.read_file(
-                session_id, 
-                filename,
-                start_line=arguments.get('start_line'),
-                end_line=arguments.get('end_line'),
-                char_count=arguments.get('char_count'),
-                start_char=arguments.get('start_char')
-            )
+            
+            if is_shared:
+                result = workspace_manager.read_shared_file(
+                    filename,
+                    start_line=arguments.get('start_line'),
+                    end_line=arguments.get('end_line'),
+                    char_count=arguments.get('char_count'),
+                    start_char=arguments.get('start_char')
+                )
+            else:
+                result = workspace_manager.read_file(
+                    session_id, 
+                    filename,
+                    start_line=arguments.get('start_line'),
+                    end_line=arguments.get('end_line'),
+                    char_count=arguments.get('char_count'),
+                    start_char=arguments.get('start_char')
+                )
+            result['scope'] = scope
+            return result
 
         elif tool_name == "workspace_edit_file":
             if not filename:
                 return {"success": False, "error": "缺少文件名参数 (filename 或 file_path)"}
-            return workspace_manager.edit_file(
-                session_id, filename,
-                arguments['old_content'], arguments['new_content'])
+            
+            if is_shared:
+                result = workspace_manager.edit_shared_file(
+                    filename,
+                    arguments['old_content'], arguments['new_content'])
+            else:
+                result = workspace_manager.edit_file(
+                    session_id, filename,
+                    arguments['old_content'], arguments['new_content'])
+            result['scope'] = scope
+            return result
 
         elif tool_name == "workspace_delete_file":
             if not filename:
                 return {"success": False, "error": "缺少文件名参数 (filename 或 file_path)"}
-            return workspace_manager.delete_file(session_id, filename)
+            
+            if is_shared:
+                result = workspace_manager.delete_shared_file(filename)
+            else:
+                result = workspace_manager.delete_file(session_id, filename)
+            result['scope'] = scope
+            return result
 
         elif tool_name == "workspace_list_files":
-            return workspace_manager.list_files(session_id)
+            list_scope = arguments.get('scope', 'all')
+            path = arguments.get('path', '')
+            
+            if list_scope == 'private':
+                private_result = workspace_manager.list_files(session_id, path)
+                files = []
+                if private_result.get('success') and private_result.get('files'):
+                    for f in private_result['files']:
+                        f['scope'] = 'private'
+                        files.append(f)
+                return {
+                    'success': True,
+                    'scope': 'private',
+                    'path': path,
+                    'files': files,
+                    'count': len(files),
+                    'message': f'私有工作区 {f"/{path}" if path else ""} 包含 {len(files)} 个文件/文件夹'
+                }
+            elif list_scope == 'shared':
+                shared_result = workspace_manager.list_shared_files(path)
+                files = []
+                if shared_result.get('success') and shared_result.get('files'):
+                    for f in shared_result['files']:
+                        f['scope'] = 'shared'
+                        files.append(f)
+                return {
+                    'success': True,
+                    'scope': 'shared',
+                    'path': path,
+                    'files': files,
+                    'count': len(files),
+                    'message': f'共享工作区 {f"/{path}" if path else ""} 包含 {len(files)} 个文件/文件夹'
+                }
+            else:
+                # 返回所有
+                private_result = workspace_manager.list_files(session_id, path)
+                shared_result = workspace_manager.list_shared_files(path)
+                
+                all_files = []
+                private_count = 0
+                shared_count = 0
+                
+                if private_result.get('success') and private_result.get('files'):
+                    for f in private_result['files']:
+                        f['scope'] = 'private'
+                        all_files.append(f)
+                        private_count += 1
+                
+                if shared_result.get('success') and shared_result.get('files'):
+                    for f in shared_result['files']:
+                        f['scope'] = 'shared'
+                        all_files.append(f)
+                        shared_count += 1
+                
+                path_info = f"/{path}" if path else ""
+                return {
+                    'success': True,
+                    'scope': 'all',
+                    'path': path,
+                    'private_workspace': f'当前会话私有工作区 {path_info} ({private_count} 个文件)',
+                    'shared_workspace': f'所有会话共享的工作区 {path_info} ({shared_count} 个文件)',
+                    'files': all_files,
+                    'count': len(all_files),
+                    'message': f'工作区 {path_info} 包含 {private_count} 个私有文件和 {shared_count} 个共享文件。使用 scope 和 path 参数指定要操作的工作区和目录。'
+                }
 
         elif tool_name == "workspace_send_file":
             if not filename:
                 return {"success": False, "error": "缺少文件名参数 (filename 或 file_path)"}
-            # 返回文件路径，由调用方负责实际发送
-            file_path = workspace_manager.get_file_path(session_id, filename)
-            if file_path:
+            
+            if is_shared:
+                import os
+                shared_path = workspace_manager.get_shared_workspace()
+                file_path = os.path.join(shared_path, filename)
+            else:
+                file_path = workspace_manager.get_file_path(session_id, filename)
+            
+            if file_path and os.path.exists(file_path):
                 return {
                     "success": True,
                     "action": "send_file",
                     "filename": filename,
+                    "scope": scope,
                     "path": file_path,
                     "size": os.path.getsize(file_path),
-                    "message": f"文件 '{filename}' 已发送给用户，无需再次提及文件路径或内容。"
+                    "message": f"文件 '{filename}' ({'共享工作区' if is_shared else '私有工作区'}) 已发送给用户，无需再次提及文件路径或内容。"
                 }
-            return {"success": False, "error": f"文件不存在: {arguments['filename']}"}
+            return {"success": False, "error": f"文件不存在: {filename}"}
 
         elif tool_name == "workspace_parse_file":
             if not filename:
                 return {"success": False, "error": "缺少文件名参数 (filename)"}
-            file_path = workspace_manager.get_file_path(session_id, filename)
-            if not file_path:
-                return {"success": False, "error": f"文件不存在: {filename}"}
             
-            # 使用文件解析器解析文件
+            if is_shared:
+                import os
+                shared_path = workspace_manager.get_shared_workspace()
+                file_path = os.path.join(shared_path, filename)
+                if not os.path.exists(file_path):
+                    return {"success": False, "error": f"共享文件不存在: {filename}"}
+            else:
+                file_path = workspace_manager.get_file_path(session_id, filename)
+                if not file_path:
+                    return {"success": False, "error": f"私有文件不存在: {filename}"}
+            
             try:
                 from nbot.core.file_parser import file_parser
                 max_chars = arguments.get('max_chars', 50000)
                 result = file_parser.parse_file(file_path, filename, max_chars)
+                result['scope'] = scope
                 return result
             except Exception as e:
                 _log.error(f"解析文件失败: {filename}, {e}")
@@ -1439,14 +1601,22 @@ def _execute_workspace_tool(tool_name: str, arguments: Dict[str, Any],
         elif tool_name == "workspace_file_info":
             if not filename:
                 return {"success": False, "error": "缺少文件名参数 (filename)"}
-            file_path = workspace_manager.get_file_path(session_id, filename)
-            if not file_path:
-                return {"success": False, "error": f"文件不存在: {filename}"}
             
-            # 使用文件解析器获取元数据
+            if is_shared:
+                import os
+                shared_path = workspace_manager.get_shared_workspace()
+                file_path = os.path.join(shared_path, filename)
+                if not os.path.exists(file_path):
+                    return {"success": False, "error": f"共享文件不存在: {filename}"}
+            else:
+                file_path = workspace_manager.get_file_path(session_id, filename)
+                if not file_path:
+                    return {"success": False, "error": f"私有文件不存在: {filename}"}
+            
             try:
                 from nbot.core.file_parser import file_parser
                 result = file_parser.get_file_metadata(file_path, filename)
+                result['scope'] = scope
                 return result
             except Exception as e:
                 _log.error(f"获取文件元数据失败: {filename}, {e}")

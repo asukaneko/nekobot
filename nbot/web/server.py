@@ -3203,6 +3203,103 @@ class WebChatServer:
             else:
                 return jsonify(result), 400
 
+        # ==================== 共享工作区 API ====================
+        @self.app.route('/api/workspace/shared/files', methods=['GET'])
+        def get_shared_workspace_files():
+            """获取共享工作区的文件列表"""
+            if not WORKSPACE_AVAILABLE:
+                return jsonify({'error': 'Workspace not available'}), 503
+            
+            path = request.args.get('path', '')
+            result = workspace_manager.list_shared_files(path)
+            return jsonify(result)
+
+        @self.app.route('/api/workspace/shared/files/<path:filename>', methods=['GET'])
+        def get_shared_workspace_file(filename):
+            """获取共享工作区中的文件内容"""
+            if not WORKSPACE_AVAILABLE:
+                return jsonify({'error': 'Workspace not available'}), 503
+            
+            import os
+            from urllib.parse import unquote
+            filename = unquote(filename)
+            file_path = os.path.join(workspace_manager.get_shared_workspace(), filename)
+            if not os.path.exists(file_path):
+                return jsonify({'error': 'File not found'}), 404
+            
+            ext = os.path.splitext(filename.lower())[1]
+            
+            # 图片文件直接返回 URL
+            image_exts = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.svg']
+            if ext in image_exts:
+                return jsonify({
+                    'success': True,
+                    'type': 'image',
+                    'filename': filename,
+                    'url': f'/api/workspace/shared/files/{filename}'
+                })
+            
+            # 其他文件使用 file_parser 解析
+            from nbot.core.file_parser import FileParser
+            parse_result = FileParser.parse_file(file_path, filename, max_chars=50000)
+            
+            if parse_result and parse_result.get('success'):
+                return jsonify({
+                    'success': True,
+                    'type': parse_result.get('type', 'text'),
+                    'content': parse_result.get('content', ''),
+                    'filename': filename,
+                    'extracted_length': parse_result.get('extracted_length', 0),
+                    'original_length': parse_result.get('original_length', 0),
+                    'truncated': parse_result.get('truncated', False)
+                })
+            else:
+                error_msg = parse_result.get('error', 'Failed to parse file') if parse_result else 'File not found'
+                return jsonify({'success': False, 'error': error_msg}), 400
+
+        @self.app.route('/api/workspace/shared/files/<path:filename>', methods=['DELETE'])
+        def delete_shared_workspace_file(filename):
+            """删除共享工作区中的文件"""
+            if not WORKSPACE_AVAILABLE:
+                return jsonify({'error': 'Workspace not available'}), 503
+            
+            result = workspace_manager.delete_shared_file(filename)
+            if result.get('success'):
+                return jsonify(result)
+            else:
+                return jsonify(result), 400
+
+        @self.app.route('/api/workspace/shared/folders', methods=['POST'])
+        def create_shared_workspace_folder():
+            """在共享工作区创建文件夹"""
+            if not WORKSPACE_AVAILABLE:
+                return jsonify({'error': 'Workspace not available'}), 503
+            
+            data = request.json or {}
+            folder_name = data.get('name', '').strip()
+            path = data.get('path', '')
+            
+            result = workspace_manager.create_shared_folder(folder_name, path)
+            if result.get('success'):
+                return jsonify(result)
+            else:
+                return jsonify(result), 400
+
+        @self.app.route('/api/workspace/shared/files/<path:filename>/move', methods=['POST'])
+        def move_shared_workspace_file(filename):
+            """移动共享工作区中的文件"""
+            if not WORKSPACE_AVAILABLE:
+                return jsonify({'error': 'Workspace not available'}), 503
+            
+            data = request.json or {}
+            target_path = data.get('target', '')
+            
+            result = workspace_manager.move_shared_file(filename, target_path)
+            if result.get('success'):
+                return jsonify(result)
+            else:
+                return jsonify(result), 400
+
         @self.app.route('/api/sessions/<session_id>/workspace/files/<path:filename>/preview', methods=['GET'])
         def preview_workspace_file(session_id, filename):
             """预览工作区中的文件内容（文本、图片等）"""

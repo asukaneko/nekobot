@@ -3568,14 +3568,37 @@
             display: flex;
             justify-content: space-between;
             align-items: center;
-            padding: 16px 20px;
+            padding: 12px 16px;
             border-bottom: 1px solid var(--border-color);
         }
 
-        .workspace-browser-title {
-            font-size: 16px;
-            font-weight: 600;
+        .workspace-browser-tabs {
+            display: flex;
+            gap: 4px;
+        }
+
+        .workspace-tab {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 8px 16px;
+            background: transparent;
+            border: none;
+            border-radius: 6px;
+            color: var(--text-secondary);
+            font-size: 13px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .workspace-tab:hover {
+            background: var(--bg-hover);
             color: var(--text-primary);
+        }
+
+        .workspace-tab.active {
+            background: var(--accent-primary);
+            color: white;
         }
 
         .workspace-browser-actions {
@@ -8288,8 +8311,13 @@
         <div v-if="showWorkspaceBrowser && !showFilePreview" class="modal-overlay" @click.self="closeWorkspaceBrowser">
             <div class="workspace-browser-modal">
                 <div class="workspace-browser-header">
-                    <div class="workspace-browser-title">
-                        <i class="fas fa-folder-tree"></i> 工作区文件
+                    <div class="workspace-browser-tabs">
+                        <button class="workspace-tab" :class="{ active: workspaceScope === 'private' }" @click="switchWorkspaceScope('private')">
+                            <i class="fas fa-user"></i> 私有工作区
+                        </button>
+                        <button class="workspace-tab" :class="{ active: workspaceScope === 'shared' }" @click="switchWorkspaceScope('shared')">
+                            <i class="fas fa-users"></i> 共享工作区
+                        </button>
                     </div>
                     <div class="workspace-browser-actions">
                         <button class="btn btn-secondary btn-sm" @click="showCreateFolderModal = true" :disabled="loadingWorkspaceFiles">
@@ -9590,6 +9618,7 @@
                     showWorkspaceBrowser: false,
                     workspaceFiles: [],
                     workspaceCurrentPath: '',
+                    workspaceScope: 'private',  // 'private' 或 'shared'
                     loadingWorkspaceFiles: false,
                     showCreateFolderModal: false,
                     newFolderName: '',
@@ -12564,31 +12593,66 @@ def main(params):
                     this.showWorkspaceBrowser = false;
                 },
                 
+                switchWorkspaceScope(scope) {
+                    this.workspaceScope = scope;
+                    this.workspaceCurrentPath = '';
+                    this.loadWorkspaceFiles();
+                },
+                
                 async loadWorkspaceFiles() {
-                    if (!this.currentSession?.id) return;
-                    
-                    this.loadingWorkspaceFiles = true;
-                    try {
-                        const sessionId = this.currentSession.id;
-                        const path = this.workspaceCurrentPath;
-                        const url = path 
-                            ? `/api/sessions/${sessionId}/workspace/files?path=${encodeURIComponent(path)}`
-                            : `/api/sessions/${sessionId}/workspace/files`;
-                        
-                        const res = await api.get(url);
-                        if (res.data.files) {
-                            this.workspaceFiles = res.data.files.map(f => ({
-                                name: f.name,
-                                type: f.type,
-                                size: f.size,
-                                path: f.path
-                            }));
+                    if (this.workspaceScope === 'shared') {
+                        // 加载共享工作区
+                        this.loadingWorkspaceFiles = true;
+                        try {
+                            const path = this.workspaceCurrentPath;
+                            const url = path 
+                                ? `/api/workspace/shared/files?path=${encodeURIComponent(path)}`
+                                : `/api/workspace/shared/files`;
+                            
+                            const res = await api.get(url);
+                            if (res.data.files) {
+                                this.workspaceFiles = res.data.files.map(f => ({
+                                    name: f.name,
+                                    type: f.type,
+                                    size: f.size,
+                                    path: f.path,
+                                    scope: 'shared'
+                                }));
+                            }
+                        } catch (e) {
+                            console.error('加载共享工作区文件失败:', e);
+                            this.workspaceFiles = [];
+                        } finally {
+                            this.loadingWorkspaceFiles = false;
                         }
-                    } catch (e) {
-                        console.error('加载工作区文件失败:', e);
-                        this.workspaceFiles = [];
-                    } finally {
-                        this.loadingWorkspaceFiles = false;
+                    } else {
+                        // 加载私有工作区
+                        if (!this.currentSession?.id) return;
+                        
+                        this.loadingWorkspaceFiles = true;
+                        try {
+                            const sessionId = this.currentSession.id;
+                            const path = this.workspaceCurrentPath;
+                            const url = path 
+                                ? `/api/sessions/${sessionId}/workspace/files?path=${encodeURIComponent(path)}`
+                                : `/api/sessions/${sessionId}/workspace/files`;
+                            
+                            const res = await api.get(url);
+                            if (res.data.files) {
+                                this.workspaceFiles = res.data.files.map(f => ({
+                                    name: f.name,
+                                    type: f.type,
+                                    size: f.size,
+                                    path: f.path,
+                                    scope: 'private'
+                                }));
+                            }
+                        } catch (e) {
+                            console.error('加载工作区文件失败:', e);
+                            this.workspaceFiles = [];
+                        } finally {
+                            this.loadingWorkspaceFiles = false;
+                        }
                     }
                 },
                 
@@ -12604,19 +12668,73 @@ def main(params):
                 
                 previewWorkspaceFile(item) {
                     // 不关闭工作区浏览器，直接打开文件预览
-                    this.previewFile(this.currentSession?.id, item.name);
+                    const path = item.path;
+                    
+                    if (this.workspaceScope === 'shared') {
+                        // 共享工作区文件预览
+                        this.showFilePreview = true;
+                        this.filePreviewData = {
+                            filename: item.name,
+                            path: path,
+                            type: '',
+                            content: '',
+                            url: `/api/workspace/shared/files/${encodeURIComponent(path)}`,
+                            loading: true,
+                            error: '',
+                            truncated: false,
+                            extracted_length: 0,
+                            original_length: 0
+                        };
+                        this.loadSharedFilePreview(path);
+                    } else {
+                        // 私有工作区文件预览
+                        this.previewFile(this.currentSession?.id, path);
+                    }
+                },
+                
+                async loadSharedFilePreview(path) {
+                    try {
+                        const res = await api.get(`/api/workspace/shared/files/${encodeURIComponent(path)}`);
+                        this.filePreviewData.loading = false;
+                        
+                        if (res.data) {
+                            if (res.data.type === 'image') {
+                                // 图片文件
+                                this.filePreviewData.type = 'image';
+                                this.filePreviewData.url = res.data.url;
+                            } else if (res.data.content !== undefined) {
+                                // 文本内容
+                                this.filePreviewData.content = res.data.content;
+                            } else if (res.data.error) {
+                                this.filePreviewData.error = res.data.error;
+                            }
+                        }
+                    } catch (e) {
+                        console.error('加载共享文件预览失败:', e);
+                        this.filePreviewData.error = '加载失败: ' + (e.message || '未知错误');
+                        this.filePreviewData.loading = false;
+                    }
                 },
                 
                 insertWorkspaceFile(item) {
-                    // 把文件路径直接插入到输入框
+                    // 把文件路径直接插入到输入框，区分共享和私有
+                    let prefix = '';
+                    if (this.workspaceScope === 'shared') {
+                        prefix = '[共享] ';
+                    } else {
+                        prefix = '[私有] ';
+                    }
+                    
                     const path = this.workspaceCurrentPath 
                         ? `${this.workspaceCurrentPath}/${item.name}`
                         : item.name;
                     
+                    const fullPath = prefix + path;
+                    
                     if (this.inputMessage) {
-                        this.inputMessage += '\n' + path;
+                        this.inputMessage += '\n' + fullPath;
                     } else {
-                        this.inputMessage = path;
+                        this.inputMessage = fullPath;
                     }
                     
                     this.closeWorkspaceBrowser();
@@ -12627,13 +12745,26 @@ def main(params):
                 },
                 
                 async createFolder() {
-                    if (!this.newFolderName.trim() || !this.currentSession?.id) return;
+                    if (!this.newFolderName.trim()) return;
                     
                     try {
-                        const res = await api.post(`/api/sessions/${this.currentSession.id}/workspace/folders`, {
-                            name: this.newFolderName.trim(),
-                            path: this.workspaceCurrentPath
-                        });
+                        let url, data;
+                        if (this.workspaceScope === 'shared') {
+                            url = '/api/workspace/shared/folders';
+                            data = {
+                                name: this.newFolderName.trim(),
+                                path: this.workspaceCurrentPath
+                            };
+                        } else {
+                            if (!this.currentSession?.id) return;
+                            url = `/api/sessions/${this.currentSession.id}/workspace/folders`;
+                            data = {
+                                name: this.newFolderName.trim(),
+                                path: this.workspaceCurrentPath
+                            };
+                        }
+                        
+                        const res = await api.post(url, data);
                         
                         if (res.data.success) {
                             this.showToast('文件夹创建成功', 'success');
@@ -12659,7 +12790,13 @@ def main(params):
                         action: async () => {
                             try {
                                 const filename = item.path;
-                                const res = await api.delete(`/api/sessions/${this.currentSession.id}/workspace/files/${encodeURIComponent(filename)}`);
+                                let url;
+                                if (this.workspaceScope === 'shared') {
+                                    url = `/api/workspace/shared/files/${encodeURIComponent(filename)}`;
+                                } else {
+                                    url = `/api/sessions/${this.currentSession.id}/workspace/files/${encodeURIComponent(filename)}`;
+                                }
+                                const res = await api.delete(url);
                                 
                                 if (res.data.success) {
                                     this.showToast('删除成功', 'success');
@@ -12720,7 +12857,13 @@ def main(params):
                     try {
                         const filename = this.draggingFile.path;
                         const target = targetItem.path;
-                        const res = await api.post(`/api/sessions/${this.currentSession.id}/workspace/files/${encodeURIComponent(filename)}/move`, {
+                        let url;
+                        if (this.workspaceScope === 'shared') {
+                            url = `/api/workspace/shared/files/${encodeURIComponent(filename)}/move`;
+                        } else {
+                            url = `/api/sessions/${this.currentSession.id}/workspace/files/${encodeURIComponent(filename)}/move`;
+                        }
+                        const res = await api.post(url, {
                             target: target
                         });
                         
