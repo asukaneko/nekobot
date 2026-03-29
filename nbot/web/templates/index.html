@@ -3385,6 +3385,19 @@
             background: rgba(128, 128, 128, 0.1);
         }
         
+        /* PDF 预览 */
+        .file-preview-pdf {
+            height: 100%;
+            overflow: auto;
+            padding: 20px;
+            background: var(--bg-color);
+        }
+        
+        .pdf-preview-container {
+            max-width: 900px;
+            margin: 0 auto;
+        }
+        
         /* HTML 预览 */
         .file-preview-html {
             height: 100%;
@@ -8271,6 +8284,16 @@
                         </div>
                         <div v-else ref="excelContainer" class="excel-preview-container"></div>
                     </div>
+                    <!-- PDF 预览 -->
+                    <div v-else-if="isPdfFile(filePreviewData.filename)" class="file-preview-pdf">
+                        <div v-if="filePreviewData.loading" class="file-preview-loading">
+                            <i class="fas fa-spinner fa-spin"></i> 正在加载 PDF...
+                        </div>
+                        <div v-else-if="filePreviewData.error" class="file-preview-error">
+                            <i class="fas fa-exclamation-triangle"></i> {{ filePreviewData.error }}
+                        </div>
+                        <div v-else ref="pdfContainer" class="pdf-preview-container"></div>
+                    </div>
                     <!-- HTML 预览 -->
                     <div v-else-if="isHtmlFile(filePreviewData.filename)" class="file-preview-html">
                         <div v-if="filePreviewData.loading" class="file-preview-loading">
@@ -13044,6 +13067,24 @@ def main(params):
                             return;
                         }
                         
+                        // PDF 文件特殊处理：获取 blob 并在前端渲染
+                        if (this.isPdfFile(filename)) {
+                            const res = await api.get(`/api/sessions/${sessionId}/workspace/files/${encodedFilename}`, {
+                                responseType: 'blob'
+                            });
+                            if (res.data) {
+                                this.filePreviewData.loading = false;
+                                this.filePreviewData.blob = res.data;
+                                this.$nextTick(() => {
+                                    this.renderPdf(res.data);
+                                });
+                            } else {
+                                this.filePreviewData.error = '无法加载 PDF';
+                                this.filePreviewData.loading = false;
+                            }
+                            return;
+                        }
+                        
                         // HTML 文件特殊处理：获取文本内容并渲染
                         if (this.isHtmlFile(filename)) {
                             const res = await api.get(`/api/sessions/${sessionId}/workspace/files/${encodedFilename}`, {
@@ -13081,69 +13122,68 @@ def main(params):
                     }
                 },
                 
-                // 渲染 docx 文件 (使用 mammoth)
-                renderDocx(blob) {
+                // docx 渲染器缓存
+                _docxRenderer: null,
+                
+                // 获取 docx 渲染器（ESM 动态加载）
+                async getDocxRenderer() {
+                    if (this._docxRenderer) return this._docxRenderer;
+                    
+                    const cdns = [
+                        'https://esm.sh/docx-preview@0.3.3',
+                        'https://cdn.jsdelivr.net/npm/docx-preview@0.3.3/+esm',
+                        'https://unpkg.com/docx-preview@0.3.3/dist/docx-preview.esm.js',
+                    ];
+                    
+                    let lastErr;
+                    for (const url of cdns) {
+                        try {
+                            const mod = await import(url);
+                            if (typeof mod.renderAsync === 'function') {
+                                this._docxRenderer = mod.renderAsync;
+                                return this._docxRenderer;
+                            }
+                        } catch (e) { lastErr = e; }
+                    }
+                    throw new Error('无法加载 docx-preview 库');
+                },
+                
+                // 渲染 docx 文件 (使用 docx-preview)
+                async renderDocx(blob) {
                     this.$nextTick(() => {
                         const container = this.$refs.docxContainer;
                         if (!container) {
-                            console.error('docx 容器未找到');
-                            this.filePreviewData.error = '预览容器未就绪，请重试';
+                            this.filePreviewData.error = '预览容器未就绪';
                             return;
                         }
-                        container.innerHTML = '<p style="text-align:center;color:var(--text-muted);">正在解析文档...</p>';
-                        
-                        // 检查 mammoth 库
-                        const mammothLib = window.mammoth;
-                        if (typeof mammothLib !== 'undefined') {
-                            mammothLib.extractRawText({ arrayBuffer: blob })
-                                .then(result => {
-                                    const text = result.value;
-                                    if (!text || text.trim() === '') {
-                                        container.innerHTML = '<p style="text-align:center;color:var(--text-muted);">文档内容为空</p>';
-                                        return;
-                                    }
-                                    
-                                    // 将纯文本分段显示
-                                    const paragraphs = text.split(/\n\n+/).filter(p => p.trim());
-                                    const html = paragraphs.map(p => {
-                                        const trimmed = p.trim();
-                                        // 检测是否为标题（简短全大写行）
-                                        if (trimmed.length < 50 && trimmed.length > 3 && trimmed === trimmed.toUpperCase() && /[A-Z]/.test(trimmed)) {
-                                            return `<h3 style="margin-top:1em;color:var(--text-color);">${this.escapeHtml(trimmed)}</h3>`;
-                                        }
-                                        return `<p style="margin:0.5em 0;line-height:1.6;">${this.escapeHtml(trimmed).replace(/\n/g, '<br>')}</p>`;
-                                    }).join('');
-                                    
-                                    container.innerHTML = `<div class="docx-text-content">${html}</div>`;
-                                })
-                                .catch(err => {
-                                    console.error('mammoth 解析失败:', err);
-                                    // 尝试直接读取 blob 文本内容（作为最后的降级方案）
-                                    blob.text().then(text => {
-                                        if (text && text.length > 0) {
-                                            // 检查是否看起来像 docx/xml 内容
-                                            if (text.includes('<?xml') || text.includes('<w:') || text.includes('PK')) {
-                                                container.innerHTML = `<p style="color:var(--text-muted);text-align:center;">此文件可能不是有效的 .docx 格式<br><small>（文件可能是旧的 .doc 格式或已损坏）</small></p>`;
-                                            } else {
-                                                // 尝试直接显示文本
-                                                const paragraphs = text.split(/\n\n+/).filter(p => p.trim());
-                                                const html = paragraphs.map(p => 
-                                                    `<p style="margin:0.5em 0;line-height:1.6;">${this.escapeHtml(p.trim()).replace(/\n/g, '<br>')}</p>`
-                                                ).join('');
-                                                container.innerHTML = `<div class="docx-text-content">${html}</div>`;
-                                            }
-                                        } else {
-                                            this.filePreviewData.error = '无法读取文档内容';
-                                        }
-                                    }).catch(() => {
-                                        this.filePreviewData.error = '文档解析失败，请尝试下载后查看';
-                                    });
-                                });
-                        } else {
-                            console.error('mammoth 库未加载');
-                            this.filePreviewData.error = '文档预览库未加载，请刷新页面重试';
-                        }
+                        container.innerHTML = '<p style="text-align:center;color:var(--text-muted);padding:40px;">正在加载预览...</p>';
                     });
+                    
+                    try {
+                        const renderAsync = await this.getDocxRenderer();
+                        this.$nextTick(() => {
+                            const container = this.$refs.docxContainer;
+                            container.innerHTML = '';
+                            
+                            blob.arrayBuffer().then(ab => {
+                                renderAsync(ab, container, null, {
+                                    className: 'docx',
+                                    inWrapper: true,
+                                    breakPages: true,
+                                    useBase64URL: true,
+                                    renderChanges: false,
+                                    renderHeaders: true,
+                                    renderFooters: true,
+                                }).then(() => {
+                                    // 成功渲染
+                                }).catch(err => {
+                                    container.innerHTML = '<p style="color:red;text-align:center;padding:40px;">渲染失败: ' + err.message + '</p>';
+                                });
+                            });
+                        });
+                    } catch (err) {
+                        this.filePreviewData.error = '无法加载预览库: ' + err.message;
+                    }
                 },
                 
                 // HTML 转义辅助方法
@@ -13154,66 +13194,217 @@ def main(params):
                     return div.innerHTML;
                 },
                 
-                // 渲染 excel 文件
+                // 渲染 excel 文件 (使用 xlsx 库)
                 renderExcel(blob) {
                     this.$nextTick(() => {
                         const container = this.$refs.excelContainer;
                         if (!container) {
-                            console.error('excel 容器未找到');
-                            this.filePreviewData.error = '预览容器未就绪，请重试';
+                            this.filePreviewData.error = '预览容器未就绪';
                             return;
                         }
                         container.innerHTML = '';
                         
                         // 检查 xlsx 库
-                        const XLSXLib = window.XLSX || XLSX;
-                        if (typeof XLSXLib !== 'undefined') {
-                            try {
-                                // XLSX.read 需要 ArrayBuffer 或二进制字符串
-                                const arrayBuffer = blob.arrayBuffer();
-                                arrayBuffer.then(ab => {
-                                    const workbook = XLSXLib.read(ab, { type: 'array' });
-                                    const sheetNames = workbook.SheetNames;
-                                    if (sheetNames.length === 0) {
-                                        container.innerHTML = '<p>表格为空</p>';
-                                        return;
-                                    }
-                                    
-                                    // 渲染第一个工作表
-                                    const sheetName = sheetNames[0];
-                                    const sheet = workbook.Sheets[sheetName];
-                                    const html = XLSXLib.utils.sheet_to_html(sheet, {
-                                        header: '',
-                                        footer: ''
-                                    });
-                                    container.innerHTML = html;
-                                    
-                                    // 如果有多个工作表，添加切换按钮
-                                    if (sheetNames.length > 1) {
-                                        const tabs = document.createElement('div');
-                                        tabs.className = 'excel-tabs';
-                                        tabs.style.cssText = 'margin-bottom: 10px; border-bottom: 1px solid #ddd; padding: 5px;';
-                                        sheetNames.forEach((name, idx) => {
-                                            const btn = document.createElement('button');
-                                            btn.textContent = name;
-                                            btn.style.cssText = 'padding: 5px 15px; margin-right: 5px; border: none; background: ' + (idx === 0 ? '#007bff; color: white;' : '#f0f0f0; color: #333;') + '; border-radius: 4px 4px 0 0; cursor: pointer;';
-                                            btn.onclick = () => {
-                                                const s = workbook.Sheets[name];
-                                                container.innerHTML = XLSXLib.utils.sheet_to_html(s);
-                                            };
-                                            tabs.appendChild(btn);
-                                        });
-                                        container.insertBefore(tabs, container.firstChild);
-                                    }
-                                });
-                            } catch (err) {
-                                console.error('excel 解析失败:', err);
-                                this.filePreviewData.error = '表格解析失败: ' + err.message;
-                            }
+                        const XLSXLib = window.XLSX || window.XLSX;
+                        if (typeof XLSXLib === 'undefined') {
+                            // 动态加载 xlsx 库
+                            this.loadXlsxLibrary().then(() => {
+                                this.doRenderExcel(blob, this.$refs.excelContainer);
+                            }).catch(err => {
+                                this.filePreviewData.error = '无法加载 xlsx 库: ' + err.message;
+                            });
                         } else {
-                            console.error('xlsx 库未加载, window.XLSX:', typeof window.XLSX);
-                            this.filePreviewData.error = '表格预览库未加载，请刷新页面重试';
+                            this.doRenderExcel(blob, container);
                         }
+                    });
+                },
+                
+                // 动态加载 xlsx 库
+                async loadXlsxLibrary() {
+                    if (window.XLSX) return;
+                    
+                    const script = document.createElement('script');
+                    script.src = 'https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js';
+                    document.head.appendChild(script);
+                    
+                    return new Promise((resolve, reject) => {
+                        script.onload = () => resolve();
+                        script.onerror = () => reject(new Error('xlsx 库加载失败'));
+                    });
+                },
+                
+                // 执行 excel 渲染
+                doRenderExcel(blob, container) {
+                    const XLSXLib = window.XLSX;
+                    
+                    blob.arrayBuffer().then(ab => {
+                        const workbook = XLSXLib.read(new Uint8Array(ab), { type: 'array' });
+                        const sheetNames = workbook.SheetNames;
+                        
+                        if (sheetNames.length === 0) {
+                            container.innerHTML = '<p>表格为空</p>';
+                            return;
+                        }
+                        
+                        // 渲染第一个工作表
+                        this.renderExcelSheet(workbook, sheetNames[0], container);
+                        
+                        // 如果有多个工作表，添加切换按钮
+                        if (sheetNames.length > 1) {
+                            const tabsWrapper = document.createElement('div');
+                            tabsWrapper.id = 'excel-tabs-wrapper';
+                            tabsWrapper.style.cssText = 'margin-bottom: 10px; display: flex; gap: 5px; flex-wrap: wrap;';
+                            
+                            sheetNames.forEach((name, idx) => {
+                                const btn = document.createElement('button');
+                                btn.textContent = name;
+                                btn.dataset.sheet = name;
+                                btn.style.cssText = 'padding: 5px 15px; border: 1px solid #ddd; background: ' + (idx === 0 ? '#1e4060; color: white;' : '#fff; color: #333;') + '; border-radius: 4px; cursor: pointer;';
+                                btn.onclick = () => {
+                                    // 切换到对应工作表
+                                    this.doRenderExcelSwitchSheet(workbook, name, container, tabsWrapper, sheetNames);
+                                };
+                                tabsWrapper.appendChild(btn);
+                            });
+                            container.insertBefore(tabsWrapper, container.firstChild);
+                        }
+                    }).catch(err => {
+                        this.filePreviewData.error = '表格解析失败: ' + err.message;
+                    });
+                },
+                
+                // 切换 Excel 工作表
+                doRenderExcelSwitchSheet(workbook, sheetName, container, tabsWrapper, sheetNames) {
+                    // 更新 tab 样式
+                    tabsWrapper.querySelectorAll('button').forEach((btn, idx) => {
+                        const isActive = btn.dataset.sheet === sheetName;
+                        btn.style.background = isActive ? '#1e4060' : '#fff';
+                        btn.style.color = isActive ? 'white' : '#333';
+                    });
+                    
+                    // 渲染工作表
+                    this.renderExcelSheet(workbook, sheetName, container);
+                },
+                
+                // 渲染单个 excel 工作表
+                renderExcelSheet(workbook, sheetName, container) {
+                    const XLSXLib = window.XLSX;
+                    const sheet = workbook.Sheets[sheetName];
+                    const ref = sheet['!ref'];
+                    
+                    if (!ref) {
+                        container.innerHTML = '<div style="padding:24px;color:var(--text-muted);">该 Sheet 为空</div>';
+                        return;
+                    }
+                    
+                    const rng = XLSX.utils.decode_range(ref);
+                    const rows = rng.e.r, cols = rng.e.c;
+                    const letters = Array.from({length: cols + 1}, (_, c) => XLSX.utils.encode_col(c));
+                    
+                    let html = '<div style="overflow:auto;background:#fff;border:1px solid var(--border);border-radius:4px;"><table style="border-collapse:collapse;font-family:var(--mono);font-size:12px;min-width:100%;white-space:nowrap;">';
+                    html += '<thead><tr><th style="background:#edf1f5;color:#1e4060;font-weight:600;padding:7px 14px;text-align:center;border-bottom:1.5px solid #c8d8e8;border-right:1.5px solid #c8d8e8;position:sticky;top:0;z-index:1;min-width:48px;">#</th>';
+                    letters.forEach(l => { html += `<th style="background:#edf1f5;color:#1e4060;font-weight:600;padding:7px 14px;text-align:center;border-bottom:1.5px solid #c8d8e8;border-right:1px solid var(--border-light);position:sticky;top:0;z-index:1;">${l}</th>`; });
+                    html += '</tr></thead><tbody>';
+                    
+                    for (let r = 0; r <= rows; r++) {
+                        html += `<tr><td style="padding:6px 14px;background:#f4f5f7;color:#1e4060;font-weight:500;text-align:center;border-bottom:1px solid var(--border-light);border-right:1.5px solid #c8d8e8;font-size:11px;min-width:48px;">${r + 1}</td>`;
+                        for (let c = 0; c <= cols; c++) {
+                            const cell = sheet[XLSX.utils.encode_cell({r, c})];
+                            const val = cell ? XLSX.utils.format_cell(cell) : '';
+                            html += `<td style="padding:6px 14px;border-bottom:1px solid var(--border-light);border-right:1px solid var(--border-light);max-width:320px;overflow:hidden;text-overflow:ellipsis;color:#1a1814;" title="${this.escapeHtml(String(val ?? ''))}">${this.escapeHtml(String(val ?? ''))}</td>`;
+                        }
+                        html += '</tr>';
+                    }
+                    html += '</tbody></table></div>';
+                    container.innerHTML = html;
+                },
+                
+                // PDF.js 渲染器缓存
+                _pdfJsLib: null,
+                
+                // 加载 PDF.js 库
+                async loadPdfJs() {
+                    if (this._pdfJsLib) return this._pdfJsLib;
+                    
+                    return new Promise((resolve, reject) => {
+                        const script = document.createElement('script');
+                        script.src = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js';
+                        script.onload = () => {
+                            // 设置 worker
+                            window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js';
+                            this._pdfJsLib = window.pdfjsLib;
+                            resolve(this._pdfJsLib);
+                        };
+                        script.onerror = () => reject(new Error('PDF.js 库加载失败'));
+                        document.head.appendChild(script);
+                    });
+                },
+                
+                // 渲染 PDF 文件
+                async renderPdf(blob) {
+                    this.$nextTick(() => {
+                        const container = this.$refs.pdfContainer;
+                        if (!container) {
+                            this.filePreviewData.error = '预览容器未就绪';
+                            return;
+                        }
+                        container.innerHTML = '<p style="text-align:center;color:var(--text-muted);padding:40px;">正在加载 PDF...</p>';
+                    });
+                    
+                    try {
+                        const pdfjsLib = await this.loadPdfJs();
+                        
+                        blob.arrayBuffer().then(ab => {
+                            pdfjsLib.getDocument({ data: ab }).promise.then(pdf => {
+                                const numPages = pdf.numPages;
+                                const container = this.$refs.pdfContainer;
+                                container.innerHTML = '';
+                                
+                                // 渲染每一页
+                                const renderPromises = [];
+                                for (let i = 1; i <= numPages; i++) {
+                                    renderPromises.push(this.renderPdfPage(pdf, i, container));
+                                }
+                                
+                                Promise.all(renderPromises).catch(err => {
+                                    container.innerHTML = '<p style="color:red;text-align:center;padding:40px;">渲染失败: ' + err.message + '</p>';
+                                });
+                            }).catch(err => {
+                                container.innerHTML = '<p style="color:red;text-align:center;padding:40px;">PDF 加载失败: ' + err.message + '</p>';
+                            });
+                        });
+                    } catch (err) {
+                        this.filePreviewData.error = '无法加载 PDF 预览库: ' + err.message;
+                    }
+                },
+                
+                // 渲染单个 PDF 页面
+                renderPdfPage(pdf, pageNum, container) {
+                    return pdf.getPage(pageNum).then(page => {
+                        const scale = 1.5;
+                        const viewport = page.getViewport({ scale });
+                        
+                        const canvas = document.createElement('canvas');
+                        const context = canvas.getContext('2d');
+                        canvas.height = viewport.height;
+                        canvas.width = viewport.width;
+                        canvas.style.display = 'block';
+                        canvas.style.margin = '0 auto 16px';
+                        canvas.style.boxShadow = '0 2px 8px rgba(0,0,0,0.1)';
+                        
+                        const pageDiv = document.createElement('div');
+                        pageDiv.style.cssText = 'text-align:center;margin-bottom:16px;';
+                        const pageLabel = document.createElement('div');
+                        pageLabel.textContent = `第 ${pageNum} 页`;
+                        pageLabel.style.cssText = 'font-family:var(--mono);font-size:12px;color:var(--text-muted);margin-bottom:8px;';
+                        pageDiv.appendChild(pageLabel);
+                        pageDiv.appendChild(canvas);
+                        container.appendChild(pageDiv);
+                        
+                        return page.render({
+                            canvasContext: context,
+                            viewport: viewport
+                        }).promise;
                     });
                 },
                 
@@ -14910,6 +15101,13 @@ def main(params):
                     return ext === 'xlsx' || ext === 'xls';
                 },
                 
+                // 判断是否为 PDF 文件
+                isPdfFile(filename) {
+                    if (!filename) return false;
+                    const ext = filename.toLowerCase().split('.').pop();
+                    return ext === 'pdf';
+                },
+                
                 // 判断是否为 HTML 文件
                 isHtmlFile(filename) {
                     if (!filename) return false;
@@ -15113,6 +15311,7 @@ def main(params):
                             if (response.ok) {
                                 const blob = await response.blob();
                                 this.filePreviewData.loading = false;
+                                this.filePreviewData.blob = blob;
                                 this.$nextTick(() => {
                                     this.renderDocx(blob);
                                 });
@@ -15134,6 +15333,7 @@ def main(params):
                             if (response.ok) {
                                 const blob = await response.blob();
                                 this.filePreviewData.loading = false;
+                                this.filePreviewData.blob = blob;
                                 this.$nextTick(() => {
                                     this.renderExcel(blob);
                                 });
@@ -15143,6 +15343,28 @@ def main(params):
                             }
                         } catch (e) {
                             this.filePreviewData.error = '表格加载失败';
+                            this.filePreviewData.loading = false;
+                        }
+                        return;
+                    }
+                    
+                    // PDF 文件特殊处理
+                    if (this.isPdfFile(att.name)) {
+                        try {
+                            const response = await fetch(att.url);
+                            if (response.ok) {
+                                const blob = await response.blob();
+                                this.filePreviewData.loading = false;
+                                this.filePreviewData.blob = blob;
+                                this.$nextTick(() => {
+                                    this.renderPdf(blob);
+                                });
+                            } else {
+                                this.filePreviewData.error = '无法加载 PDF';
+                                this.filePreviewData.loading = false;
+                            }
+                        } catch (e) {
+                            this.filePreviewData.error = 'PDF 加载失败';
                             this.filePreviewData.loading = false;
                         }
                         return;
