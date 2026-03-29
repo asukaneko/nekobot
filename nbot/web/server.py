@@ -2881,6 +2881,138 @@ class WebChatServer:
             filename = os.path.basename(file_path)
             return send_file(file_path, as_attachment=True, download_name=filename)
 
+        @self.app.route('/api/workspace/convert/pptx-to-pdf', methods=['POST'])
+        def convert_pptx_to_pdf():
+            """将 PPTX 文件转换为 PDF（支持缓存）
+            
+            上传 PPTX 文件，计算文件 hash 作为缓存键
+            如果缓存存在直接返回，否则转换后缓存结果
+            需要系统安装 LibreOffice
+            """
+            import subprocess
+            import tempfile
+            import shutil
+            import sys
+            import hashlib
+            from flask import send_file
+            
+            # 缓存目录
+            cache_dir = os.path.join(self.base_dir, 'data', 'workspace', 'pptx_cache')
+            os.makedirs(cache_dir, exist_ok=True)
+            
+            def get_file_hash(file_path):
+                """计算文件 MD5 hash"""
+                hash_md5 = hashlib.md5()
+                with open(file_path, 'rb') as f:
+                    for chunk in iter(lambda: f.read(4096), b""):
+                        hash_md5.update(chunk)
+                return hash_md5.hexdigest()
+            
+            def get_soffice_path():
+                """获取 soffice 可执行文件路径"""
+                import glob
+                
+                # Windows 常见安装路径
+                windows_paths = [
+                    r'C:\Program Files\LibreOffice\program\soffice.exe',
+                    r'C:\Program Files (x86)\LibreOffice\program\soffice.exe',
+                    os.path.expanduser(r'~\AppData\Local\Programs\LibreOffice\program\soffice.exe'),
+                ]
+                
+                # 搜索 Program Files 下的 LibreOffice
+                program_files = os.environ.get('ProgramFiles', r'C:\Program Files')
+                program_files_x86 = os.environ.get('ProgramFiles(x86)', r'C:\Program Files (x86)')
+                
+                for pf in [program_files, program_files_x86]:
+                    pattern = os.path.join(pf, 'LibreOffice*', 'program', 'soffice.exe')
+                    matches = glob.glob(pattern)
+                    if matches:
+                        windows_paths.insert(0, matches[0])
+                
+                # 检查环境变量 PATH 中的 soffice
+                import shutil
+                for name in ['soffice', 'soffice.exe']:
+                    soffice_in_path = shutil.which(name)
+                    if soffice_in_path:
+                        return soffice_in_path
+                
+                # 检查 Windows 常见安装路径
+                if sys.platform == 'win32':
+                    for path in windows_paths:
+                        if os.path.exists(path):
+                            return path
+                
+                return 'soffice'  # 默认尝试 PATH 中的 soffice
+            
+            if 'file' not in request.files:
+                return jsonify({'error': '没有上传文件'}), 400
+            
+            file = request.files['file']
+            if not file.filename or not file.filename.lower().endswith('.pptx'):
+                return jsonify({'error': '只支持 .pptx 文件'}), 400
+            
+            try:
+                # 创建临时目录
+                with tempfile.TemporaryDirectory() as tmpdir:
+                    input_path = os.path.join(tmpdir, 'input.pptx')
+                    
+                    # 保存上传的文件
+                    file.save(input_path)
+                    
+                    # 计算文件 hash 作为缓存键
+                    file_hash = get_file_hash(input_path)
+                    cached_pdf_path = os.path.join(cache_dir, f'{file_hash}.pdf')
+                    
+                    # 如果缓存存在，直接返回
+                    if os.path.exists(cached_pdf_path):
+                        _log.info(f"[PPTX->PDF] 使用缓存: {cached_pdf_path}")
+                        return send_file(cached_pdf_path, mimetype='application/pdf')
+                    
+                    # 获取 soffice 路径
+                    soffice_cmd = get_soffice_path()
+                    _log.info(f"[PPTX->PDF] 使用 soffice: {soffice_cmd}")
+                    
+                    # 尝试使用 LibreOffice 转换
+                    try:
+                        cmd_args = [soffice_cmd, '--headless', '--norestore', '--nofirststartwizard', '--convert-to', 'pdf', '--outdir', tmpdir, input_path]
+                        _log.info(f"[PPTX->PDF] 执行命令: {' '.join(cmd_args)}")
+                        
+                        result = subprocess.run(
+                            cmd_args,
+                            capture_output=True,
+                            text=True,
+                            timeout=120
+                        )
+                        
+                        _log.info(f"[PPTX->PDF] 结果: returncode={result.returncode}")
+                        
+                        # LibreOffice 输出文件与输入文件同名，只是扩展名变为 .pdf
+                        pdf_path = os.path.join(tmpdir, 'input.pdf')
+                        
+                        if result.returncode == 0 and os.path.exists(pdf_path):
+                            # 保存到缓存
+                            shutil.copy2(pdf_path, cached_pdf_path)
+                            _log.info(f"[PPTX->PDF] 已缓存: {cached_pdf_path}")
+                            return send_file(pdf_path, mimetype='application/pdf')
+                        else:
+                            return jsonify({
+                                'error': 'PDF 转换失败',
+                                'detail': result.stderr or 'LibreOffice 转换失败'
+                            }), 500
+                    except subprocess.TimeoutExpired:
+                        _log.error("[PPTX->PDF] 转换超时 (120秒)")
+                        return jsonify({'error': '转换超时 (120秒)'}), 500
+                    except FileNotFoundError:
+                        _log.error(f"[PPTX->PDF] 文件未找到: {soffice_cmd}")
+                        return jsonify({
+                            'error': 'LibreOffice 未找到',
+                            'detail': f'请安装 LibreOffice，当前尝试: {soffice_cmd}'
+                        }), 500
+                        
+            except Exception as e:
+                _log.error(f"PPTX 转 PDF 失败: {e}")
+                return jsonify({'error': str(e)}), 500
+
         @self.app.route('/api/qq/messages/<qq_type>/<qq_id>')
         def get_qq_messages(qq_type, qq_id):
             """获取 QQ 消息

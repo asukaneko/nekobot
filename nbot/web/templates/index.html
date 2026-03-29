@@ -3092,32 +3092,54 @@
         
         /* 文件预览模态框 */
         .file-preview-modal {
-            width: 90%;
-            max-width: 900px;
+            position: relative;
+            width: 900px;
+            height: 700px;
             max-height: 85vh;
             background: var(--bg-secondary);
             border-radius: 12px;
             display: flex;
             flex-direction: column;
             overflow: hidden;
-            transition: all 0.3s ease;
+            transition: width 0s, height 0s;
         }
         
         .file-preview-modal.is-maximized {
-            width: 98%;
+            width: 98% !important;
             max-width: 98%;
             height: 95vh;
             max-height: 95vh;
         }
         
+        .file-preview-resize-handle {
+            position: absolute;
+            right: 0;
+            bottom: 0;
+            width: 20px;
+            height: 20px;
+            cursor: se-resize;
+            z-index: 10;
+        }
+        
+        .file-preview-resize-handle::before {
+            content: '';
+            position: absolute;
+            right: 4px;
+            bottom: 4px;
+            width: 10px;
+            height: 10px;
+            border-right: 2px solid var(--text-muted);
+            border-bottom: 2px solid var(--text-muted);
+        }
+        
         .file-preview-header {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
             padding: 12px 16px;
             border-bottom: 1px solid var(--border-color);
             background: var(--bg-tertiary);
             flex-shrink: 0;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
         }
         
         .file-preview-title {
@@ -3395,6 +3417,19 @@
         
         .pdf-preview-container {
             max-width: 900px;
+            margin: 0 auto;
+        }
+        
+        /* PPTX 预览 */
+        .file-preview-pptx {
+            height: 100%;
+            overflow: auto;
+            padding: 20px;
+            background: var(--bg-color);
+        }
+        
+        .pptx-preview-container {
+            max-width: 100%;
             margin: 0 auto;
         }
         
@@ -8241,8 +8276,9 @@
         </div>
 
         <!-- 文件预览模态框 -->
-        <div v-if="showFilePreview" class="modal-overlay" @click.self="closeFilePreview">
-            <div class="file-preview-modal" :class="{ 'is-maximized': filePreviewMaximized }">
+        <div v-if="showFilePreview" class="modal-overlay">
+            <div class="file-preview-modal" :class="{ 'is-maximized': filePreviewMaximized }" ref="filePreviewModal" :style="filePreviewMaximized ? {} : { width: filePreviewWidth + 'px', height: filePreviewHeight + 'px' }">
+                <div class="file-preview-resize-handle" @mousedown="startResize"></div>
                 <div class="file-preview-header">
                     <div class="file-preview-title">
                         <i class="fas fa-file-alt"></i> {{ filePreviewData.filename || '文件预览' }}
@@ -8293,6 +8329,16 @@
                             <i class="fas fa-exclamation-triangle"></i> {{ filePreviewData.error }}
                         </div>
                         <div v-else ref="pdfContainer" class="pdf-preview-container"></div>
+                    </div>
+                    <!-- PPTX 预览 -->
+                    <div v-else-if="isPptxFile(filePreviewData.filename)" class="file-preview-pptx">
+                        <div v-if="filePreviewData.loading" class="file-preview-loading">
+                            <i class="fas fa-spinner fa-spin"></i> 正在加载 PPTX...
+                        </div>
+                        <div v-else-if="filePreviewData.error" class="file-preview-error">
+                            <i class="fas fa-exclamation-triangle"></i> {{ filePreviewData.error }}
+                        </div>
+                        <div v-else ref="pptxContainer" class="pptx-preview-container"></div>
                     </div>
                     <!-- HTML 预览 -->
                     <div v-else-if="isHtmlFile(filePreviewData.filename)" class="file-preview-html">
@@ -9660,6 +9706,8 @@
                     // 文件预览
                     showFilePreview: false,
                     filePreviewMaximized: false,
+                    filePreviewWidth: 900,
+                    filePreviewHeight: 700,
                     filePreviewData: {
                         sessionId: '',
                         filename: '',
@@ -13085,6 +13133,24 @@ def main(params):
                             return;
                         }
                         
+                        // PPTX 文件特殊处理：获取 blob 并在前端渲染
+                        if (this.isPptxFile(filename)) {
+                            const res = await api.get(`/api/sessions/${sessionId}/workspace/files/${encodedFilename}`, {
+                                responseType: 'blob'
+                            });
+                            if (res.data) {
+                                this.filePreviewData.loading = false;
+                                this.filePreviewData.blob = res.data;
+                                this.$nextTick(() => {
+                                    this.renderPptx(res.data);
+                                });
+                            } else {
+                                this.filePreviewData.error = '无法加载 PPTX';
+                                this.filePreviewData.loading = false;
+                            }
+                            return;
+                        }
+                        
                         // HTML 文件特殊处理：获取文本内容并渲染
                         if (this.isHtmlFile(filename)) {
                             const res = await api.get(`/api/sessions/${sessionId}/workspace/files/${encodedFilename}`, {
@@ -13408,6 +13474,116 @@ def main(params):
                     });
                 },
                 
+                // PPTX.js 渲染器缓存
+                _pptxJsLib: null,
+                
+                // 加载 pptx-preview 库
+                async loadPptxJs() {
+                    if (this._pptxJsLib) return this._pptxJsLib;
+                    
+                    const cdns = [
+                        'https://esm.sh/pptx-preview@1.0.4',
+                        'https://cdn.jsdelivr.net/npm/pptx-preview@1.0.4/+esm',
+                    ];
+                    
+                    let lastErr;
+                    for (const url of cdns) {
+                        console.log('[PPTX] 尝试从 CDN 加载:', url);
+                        try {
+                            const mod = await import(url);
+                            console.log('[PPTX] 模块加载成功:', url, '导出:', Object.keys(mod));
+                            if (mod.init) {
+                                this._pptxJsLib = mod.init;
+                                return this._pptxJsLib;
+                            }
+                            if (mod.default && typeof mod.default === 'function') {
+                                this._pptxJsLib = mod.default;
+                                return this._pptxJsLib;
+                            }
+                        } catch (e) { 
+                            console.error('[PPTX] 加载失败:', url, e);
+                            lastErr = e; 
+                        }
+                    }
+                    throw new Error('无法加载 pptx-preview 库');
+                },
+                
+                // PPTX 渲染（通过后端转换为 PDF）
+                async renderPptx(blob) {
+                    this.$nextTick(() => {
+                        const container = this.$refs.pptxContainer;
+                        if (!container) {
+                            this.filePreviewData.error = '预览容器未就绪';
+                            return;
+                        }
+                        container.innerHTML = '<p style="text-align:center;color:var(--text-muted);padding:40px;">正在将 PPTX 转换为 PDF...</p>';
+                    });
+                    
+                    try {
+                        // 上传到后端转换为 PDF
+                        const formData = new FormData();
+                        formData.append('file', blob, this.filePreviewData.filename || 'presentation.pptx');
+                        
+                        const response = await fetch('/api/workspace/convert/pptx-to-pdf', {
+                            method: 'POST',
+                            body: formData
+                        });
+                        
+                        if (response.ok) {
+                            const pdfBlob = await response.blob();
+                            const container = this.$refs.pptxContainer;
+                            container.innerHTML = '<p style="text-align:center;color:var(--text-muted);padding:40px;">正在渲染 PDF...</p>';
+                            
+                            // 直接渲染 PDF 到 pptxContainer
+                            try {
+                                const pdfjsLib = await this.loadPdfJs();
+                                pdfBlob.arrayBuffer().then(ab => {
+                                    pdfjsLib.getDocument({ data: ab }).promise.then(pdf => {
+                                        container.innerHTML = '';
+                                        const renderPromises = [];
+                                        for (let i = 1; i <= pdf.numPages; i++) {
+                                            renderPromises.push(this.renderPdfPage(pdf, i, container));
+                                        }
+                                        Promise.all(renderPromises).catch(err => {
+                                            container.innerHTML = '<p style="color:red;text-align:center;padding:40px;">渲染失败: ' + err.message + '</p>';
+                                        });
+                                        this.filePreviewData.loading = false;
+                                    }).catch(err => {
+                                        container.innerHTML = '<p style="color:red;text-align:center;padding:40px;">PDF 加载失败: ' + err.message + '</p>';
+                                        this.filePreviewData.loading = false;
+                                    });
+                                });
+                            } catch (err) {
+                                container.innerHTML = '<p style="color:red;text-align:center;padding:40px;">PDF 渲染库加载失败: ' + err.message + '</p>';
+                                this.filePreviewData.loading = false;
+                            }
+                        } else {
+                            const data = await response.json();
+                            const container = this.$refs.pptxContainer;
+                            const blob = this.filePreviewData.blob;
+                            const filename = this.filePreviewData.filename || 'presentation.pptx';
+                            container.innerHTML = '<p style="color:var(--text-muted);text-align:center;padding:40px;">' +
+                                'PPTX 预览需要服务器安装 LibreOffice<br>' +
+                                '<small style="color:#999;">' + (data.detail || data.error) + '</small><br><br>' +
+                                '<button id="btn-download-pptx" style="padding:8px 16px;cursor:pointer;">下载 PPTX 文件</button>' +
+                                '</p>';
+                            document.getElementById('btn-download-pptx').onclick = () => {
+                                const url = URL.createObjectURL(blob);
+                                const link = document.createElement('a');
+                                link.href = url;
+                                link.download = filename;
+                                link.click();
+                                URL.revokeObjectURL(url);
+                            };
+                            this.filePreviewData.loading = false;
+                        }
+                    } catch (err) {
+                        const container = this.$refs.pptxContainer;
+                        container.innerHTML = '<p style="color:red;text-align:center;padding:40px;">PPTX 转换失败: ' + err.message + '</p>';
+                        this.filePreviewData.loading = false;
+                    }
+                },
+                
                 // 渲染 HTML 文件
                 renderHtml(content) {
                     this.$nextTick(() => {
@@ -13424,6 +13600,30 @@ def main(params):
                 closeFilePreview() {
                     this.showFilePreview = false;
                     this.filePreviewMaximized = false;
+                },
+                
+                startResize(e) {
+                    if (this.filePreviewMaximized) return;
+                    e.preventDefault();
+                    this._resizeStartX = e.clientX;
+                    this._resizeStartY = e.clientY;
+                    this._resizeStartWidth = this.filePreviewWidth;
+                    this._resizeStartHeight = this.filePreviewHeight;
+                    
+                    const onMouseMove = (e) => {
+                        const dx = e.clientX - this._resizeStartX;
+                        const dy = e.clientY - this._resizeStartY;
+                        this.filePreviewWidth = Math.max(400, this._resizeStartWidth + dx);
+                        this.filePreviewHeight = Math.max(300, this._resizeStartHeight + dy);
+                    };
+                    
+                    const onMouseUp = () => {
+                        document.removeEventListener('mousemove', onMouseMove);
+                        document.removeEventListener('mouseup', onMouseUp);
+                    };
+                    
+                    document.addEventListener('mousemove', onMouseMove);
+                    document.addEventListener('mouseup', onMouseUp);
                 },
                 
                 downloadFile(fileData) {
@@ -15108,6 +15308,13 @@ def main(params):
                     return ext === 'pdf';
                 },
                 
+                // 判断是否为 PPTX 文件
+                isPptxFile(filename) {
+                    if (!filename) return false;
+                    const ext = filename.toLowerCase().split('.').pop();
+                    return ext === 'pptx';
+                },
+                
                 // 判断是否为 HTML 文件
                 isHtmlFile(filename) {
                     if (!filename) return false;
@@ -15251,6 +15458,7 @@ def main(params):
                         'gif': 'fas fa-file-image',
                         'svg': 'fas fa-file-image',
                         'pdf': 'fas fa-file-pdf',
+                        'pptx': 'fas fa-file-powerpoint',
                         'zip': 'fas fa-file-archive',
                         'rar': 'fas fa-file-archive',
                         '7z': 'fas fa-file-archive',
@@ -15365,6 +15573,28 @@ def main(params):
                             }
                         } catch (e) {
                             this.filePreviewData.error = 'PDF 加载失败';
+                            this.filePreviewData.loading = false;
+                        }
+                        return;
+                    }
+                    
+                    // PPTX 文件特殊处理
+                    if (this.isPptxFile(att.name)) {
+                        try {
+                            const response = await fetch(att.url);
+                            if (response.ok) {
+                                const blob = await response.blob();
+                                this.filePreviewData.loading = false;
+                                this.filePreviewData.blob = blob;
+                                this.$nextTick(() => {
+                                    this.renderPptx(blob);
+                                });
+                            } else {
+                                this.filePreviewData.error = '无法加载 PPTX';
+                                this.filePreviewData.loading = false;
+                            }
+                        } catch (e) {
+                            this.filePreviewData.error = 'PPTX 加载失败';
                             this.filePreviewData.loading = false;
                         }
                         return;
