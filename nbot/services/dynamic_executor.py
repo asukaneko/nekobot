@@ -8,7 +8,6 @@ import re
 import requests
 import datetime
 from typing import Dict, Any, Optional
-from string import Template
 
 _log = logging.getLogger(__name__)
 
@@ -194,17 +193,15 @@ class DynamicExecutor:
         }
     
     def _execute_minimax_search(self, implementation: Dict, params: Dict, context: Dict) -> Dict[str, Any]:
-        """执行 MiniMax Web Search"""
+        """执行 MiniMax Web Search（使用专门的搜索 API）"""
         api_key_template = implementation.get('api_key', '')
-        model_template = implementation.get('model', 'MiniMax-Text-01')
         
         variables = self._prepare_variables(params, context)
         api_key = self._render_template(api_key_template, variables)
-        model = self._render_template(model_template, variables)
         query = params.get('query', '')
         
         if not api_key:
-            return {'success': False, 'error': 'MiniMax API key not configured'}
+            return {'success': False, 'error': 'MiniMax API key 未配置，请检查 config.ini 中的 api_key'}
         
         if not query:
             return {'success': False, 'error': 'Query is empty'}
@@ -215,44 +212,41 @@ class DynamicExecutor:
                 "Authorization": f"Bearer {api_key}"
             }
             
-            payload = {
-                "model": model,
-                "messages": [
-                    {"role": "system", "content": "你是一个 helpful assistant。"},
-                    {"role": "user", "content": query}
-                ],
-                "tools": [{"type": "web_search"}],
-                "max_tokens": 4096
-            }
+            # MiniMax 专门的搜索 API
+            search_url = "https://api.minimaxi.com/v1/coding_plan/search"
+            payload = {"q": query}
             
-            response = requests.post(
-                "https://api.minimaxi.com/v1/text/chatcompletion_v2",
-                headers=headers,
-                json=payload,
-                timeout=30
-            )
+            response = requests.post(search_url, headers=headers, json=payload, timeout=30)
             response.raise_for_status()
             
             result = response.json()
             
-            # 提取搜索结果
-            choices = result.get('choices', [])
-            if choices and 'messages' in choices[0]:
-                messages = choices[0]['messages']
-                for msg in messages:
-                    if msg.get('role') == 'tool':
-                        return {
-                            'success': True,
-                            'content': msg.get('content', ''),
-                            'data': result
-                        }
+            # 解析搜索结果
+            answer = ""
+            if "content" in result:
+                answer = result.get("content", "")
+            elif "answer" in result:
+                answer = result.get("answer", "")
+            
+            if answer:
+                return {
+                    'success': True,
+                    'content': answer,
+                    'data': result
+                }
             
             return {
                 'success': True,
-                'content': '搜索完成',
+                'content': json.dumps(result, ensure_ascii=False)[:2000],
                 'data': result
             }
             
+        except requests.exceptions.RequestException as e:
+            _log.error(f"MiniMax search request failed: {e}")
+            return {
+                'success': False,
+                'error': f'搜索请求失败: {str(e)}'
+            }
         except Exception as e:
             _log.error(f"MiniMax search failed: {e}")
             return {
@@ -336,14 +330,23 @@ class DynamicExecutor:
         return variables
     
     def _render_template(self, template: str, variables: Dict) -> str:
-        """渲染模板字符串"""
+        """渲染模板字符串，支持 {{var}} 和 ${var} 语法"""
         if not template:
             return ''
         
+        if not variables:
+            return template
+        
         try:
-            # 使用 string.Template 进行变量替换
-            t = Template(template)
-            return t.safe_substitute(variables)
+            # 使用正则表达式替换 {{var}} 格式的变量
+            import re
+            result = template
+            for key, value in variables.items():
+                # 替换 {{key}} 格式
+                result = result.replace('{{' + key + '}}', str(value))
+                # 替换 ${key} 格式
+                result = result.replace('${' + key + '}', str(value))
+            return result
         except Exception as e:
             _log.error(f"Template rendering failed: {e}")
             return template

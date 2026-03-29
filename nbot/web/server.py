@@ -1040,20 +1040,9 @@ class WebChatServer:
                     }
                 },
                 "implementation": {
-                    "type": "http",
-                    "method": "POST",
-                    "url": "{{search_api_url}}",
-                    "headers": {
-                        "Content-Type": "application/json",
-                        "Authorization": "Bearer {{search_api_key}}"
-                    },
-                    "body": {
-                        "query": "{{query}}",
-                        "query_rewrite": True,
-                        "top_k": "{{count}}"
-                    },
-                    "response_path": "result.search_result",
-                    "error_message": "搜索服务未配置"
+                    "type": "minimax_web_search",
+                    "api_key": "{{minimax_api_key}}",
+                    "model": "{{minimax_model}}"
                 }
             },
             {
