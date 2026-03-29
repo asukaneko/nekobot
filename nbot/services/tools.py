@@ -816,6 +816,157 @@ class ToolExecutor:
                 "error": str(e)
             }
 
+    def get_session_thinking_history(limit: int = 10, session_id: str = None) -> Dict[str, Any]:
+        """
+        查询当前会话的历史思考记录（thinking_cards）
+
+        Args:
+            limit: 返回的历史记录数量限制
+            session_id: 会话 ID（从 context 自动获取）
+
+        Returns:
+            历史思考记录列表
+        """
+        try:
+            import os
+            import json
+            from datetime import datetime
+
+            if not session_id:
+                return {
+                    "success": False,
+                    "error": "未提供 session_id"
+                }
+
+            _log.info(f"[ThinkingHistory] 查询会话 {session_id[:8]}... 的历史思考记录，limit={limit}")
+
+            # 尝试从 WebServer 实例获取会话数据
+            sessions = None
+            try:
+                from nbot.web.server import WebServer
+                web_server = WebServer.get_instance()
+                if web_server:
+                    sessions = web_server.sessions
+            except:
+                pass
+
+            # 如果没有实例化的 WebServer，从文件读取
+            if not sessions:
+                sessions_file = 'data/web/sessions.json'
+                if os.path.exists(sessions_file):
+                    with open(sessions_file, 'r', encoding='utf-8') as f:
+                        sessions_data = json.load(f)
+                        sessions = sessions_data
+
+            if not sessions:
+                return {
+                    "success": False,
+                    "error": "无法获取会话数据"
+                }
+
+            # 获取会话
+            session = sessions.get(session_id)
+            if not session:
+                # 尝试在 sessions_data 中查找
+                if isinstance(sessions, dict):
+                    for sid, sess in sessions.items():
+                        if sid == session_id or (isinstance(sess, dict) and sess.get('id') == session_id):
+                            session = sess
+                            break
+
+            if not session:
+                return {
+                    "success": False,
+                    "error": f"未找到会话: {session_id}"
+                }
+
+            # 获取消息
+            messages = session.get('messages', [])
+            if not messages:
+                return {
+                    "success": True,
+                    "history": [],
+                    "count": 0,
+                    "message": "该会话没有消息历史"
+                }
+
+            # 收集 thinking_cards
+            thinking_records = []
+            for msg in messages:
+                thinking_cards = msg.get('thinking_cards', [])
+                if thinking_cards:
+                    for card in thinking_cards:
+                        record = {
+                            "timestamp": card.get('timestamp', ''),
+                            "role": card.get('role', ''),
+                            "steps": []
+                        }
+
+                        # 处理每个步骤
+                        for step in card.get('steps', []):
+                            step_info = {
+                                "type": step.get('type', ''),
+                                "name": step.get('name', ''),
+                                "status": step.get('status', ''),
+                            }
+
+                            # 添加详细信息（用于工具调用）
+                            if step.get('detail'):
+                                step_info['detail'] = str(step['detail'])[:200]  # 限制长度
+
+                            # 添加完整参数
+                            if step.get('arguments'):
+                                step_info['arguments'] = step['arguments']
+
+                            # 添加完整结果
+                            if step.get('full_result'):
+                                full_result = step['full_result']
+                                if isinstance(full_result, dict):
+                                    # 提取关键信息
+                                    if full_result.get('success') is not None:
+                                        step_info['result'] = full_result.get('success')
+                                    if full_result.get('content'):
+                                        content = full_result['content']
+                                        if isinstance(content, str):
+                                            step_info['content_preview'] = content[:300]
+                                        elif isinstance(content, list):
+                                            step_info['items_count'] = len(content)
+                                    if full_result.get('files'):
+                                        step_info['files'] = full_result['files']
+                                    if full_result.get('query'):
+                                        step_info['query'] = full_result['query']
+                                    if full_result.get('results'):
+                                        results = full_result['results']
+                                        if isinstance(results, list) and len(results) > 0:
+                                            step_info['results_count'] = len(results)
+                                            step_info['results_preview'] = str(results)[:500]
+                                else:
+                                    step_info['full_result'] = str(full_result)[:500]
+
+                            record['steps'].append(step_info)
+
+                        if record['steps']:
+                            thinking_records.append(record)
+
+            # 限制返回数量（按时间倒序）
+            thinking_records = thinking_records[-limit:] if limit > 0 else thinking_records
+
+            _log.info(f"[ThinkingHistory] 返回 {len(thinking_records)} 条历史记录")
+
+            return {
+                "success": True,
+                "history": thinking_records,
+                "count": len(thinking_records),
+                "message": f"成功获取 {len(thinking_records)} 条历史思考记录"
+            }
+
+        except Exception as e:
+            _log.error(f"[ThinkingHistory] 查询历史失败: {e}", exc_info=True)
+            return {
+                "success": False,
+                "error": str(e)
+            }
+
 
 # 工具定义（用于 AI 工具调用）
 TOOL_DEFINITIONS = [
@@ -1058,6 +1209,23 @@ TOOL_DEFINITIONS = [
                     }
                 },
                 "required": ["content"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_session_thinking_history",
+            "description": "查询当前会话的历史思考记录（thinking_cards）。当需要了解之前使用了哪些工具、获得了什么结果时使用此工具。特别适用于长时间对话中，AI需要回顾之前操作的情况。此工具返回历史消息中的工具调用记录，包括工具名称、参数和完整结果。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "limit": {
+                        "type": "integer",
+                        "description": "返回的历史记录数量限制，默认10条",
+                        "default": 10
+                    }
+                }
             }
         }
     }
@@ -1404,6 +1572,7 @@ def execute_tool(tool_name: str, arguments: Dict[str, Any], context: Dict = None
         "http_get": executor.http_get,
         "understand_image": executor.understand_image,
         "exec_command": executor.exec_command,
+        "get_session_thinking_history": executor.get_session_thinking_history,
     }
 
     if tool_name not in tool_map:

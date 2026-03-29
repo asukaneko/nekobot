@@ -6810,12 +6810,13 @@ class WebChatServer:
                                 """更新进度卡片 - 使用新的 ProgressCard 系统"""
                                 if not progress_card:
                                     return
-                                    
+
                                 try:
                                     from nbot.core.progress_card import StepType
                                     step_type_map = {
                                         'start': StepType.START,
                                         'thinking': StepType.THINKING,
+                                        'ai_thinking': StepType.AI_THINKING,
                                         'tool': StepType.TOOL,
                                         'tool_done': StepType.TOOL_DONE,
                                         'image': StepType.IMAGE,
@@ -6866,7 +6867,10 @@ class WebChatServer:
                                 if 'tool_calls' in response and response['tool_calls']:
                                     tool_calls = response['tool_calls']
                                     _log.info(f"[Tools] AI 调用工具: {[tc.get('name') for tc in tool_calls]}")
-                                    
+
+                                    # 获取 AI 的思考内容（content），后续会关联到每个工具步骤
+                                    ai_thinking_content = response.get('content', '')
+
                                     # 添加 AI 回复到消息历史
                                     tool_messages.append({
                                         "role": "assistant",
@@ -6910,8 +6914,8 @@ class WebChatServer:
                                             'todo_clear': '🧹 清空待办'
                                         }.get(tool_name, f'⚙️ {tool_name}')
                                         
-                                        update_thinking_card('tool', tool_display_name, json.dumps(arguments, ensure_ascii=False)[:100])
-                                        
+                                        update_thinking_card('tool', tool_display_name, json.dumps(arguments, ensure_ascii=False)[:100], None, None, None, ai_thinking_content if ai_thinking_content else None)
+
                                         # 工作区工具日志
                                         if tool_name.startswith('workspace_'):
                                             _log.info(f"[Workspace] 工具调用: {tool_name}")
@@ -6920,29 +6924,31 @@ class WebChatServer:
                                                 _log.info(f"[Workspace] 参数: {args_str[:200]}... (共 {len(args_str)} 字符)")
                                             else:
                                                 _log.info(f"[Workspace] 参数: {args_str}")
-                                        
+
                                         # 执行工具，传递 context
                                         tool_result = execute_tool(tool_name, arguments, context=tool_context)
-                                        
-                                        # 更新进度卡片 - 工具完成（保存完整参数和返回值）
+
+                                        # 更新进度卡片 - 工具完成（保存完整参数、返回值和思考内容）
                                         if tool_result.get('success'):
                                             result_preview = str(tool_result.get('content', tool_result.get('files', tool_result)))[:100]
                                             update_thinking_card(
-                                                'tool_done', 
-                                                tool_display_name, 
+                                                'tool_done',
+                                                tool_display_name,
                                                 result_preview,
                                                 None,
                                                 step_arguments=arguments,  # 保存完整参数
-                                                step_full_result=tool_result  # 保存完整返回值
+                                                step_full_result=tool_result,  # 保存完整返回值
+                                                thinking_content=ai_thinking_content if ai_thinking_content else None  # 保存AI思考内容
                                             )
                                         else:
                                             update_thinking_card(
-                                                'tool_done', 
-                                                tool_display_name, 
+                                                'tool_done',
+                                                tool_display_name,
                                                 None,
                                                 None,
                                                 step_arguments=arguments,
-                                                step_full_result=tool_result
+                                                step_full_result=tool_result,
+                                                thinking_content=ai_thinking_content if ai_thinking_content else None  # 保存AI思考内容
                                             )
                                         
                                         # 工作区工具日志

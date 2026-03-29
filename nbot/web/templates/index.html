@@ -665,26 +665,37 @@
         
         .thinking-step.has-thinking {
             flex-direction: column;
-            align-items: flex-start;
+            align-items: stretch;
+            gap: 4px;
         }
-        
-        .thinking-content-wrapper {
-            width: 100%;
-            margin-top: 8px;
-            margin-left: 24px;
-        }
-        
-        .thinking-content-toggle {
+
+        .step-header {
             display: flex;
             align-items: center;
-            gap: 6px;
+            gap: 8px;
+            width: 100%;
+        }
+
+        .thinking-content-wrapper {
+            width: 100%;
+            margin-top: 4px;
+            padding-left: 24px;
+            box-sizing: border-box;
+        }
+
+        .thinking-content-toggle {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
             color: var(--accent-primary);
-            font-size: 12px;
+            font-size: 11px;
             cursor: pointer;
-            padding: 4px 8px;
+            padding: 2px 8px;
             background: var(--bg-tertiary);
             border-radius: 4px;
-            transition: background 0.2s;
+            transition: all 0.2s;
+            margin-left: auto;
+            white-space: nowrap;
         }
         
         .thinking-content-toggle:hover {
@@ -5907,20 +5918,12 @@
                                                 <span>{{ card.content }}</span>
                                             </div>
                                             <div class="thinking-card-steps">
-                                                <div v-for="(step, idx) in card.steps" :key="idx" class="thinking-step" :class="[step.type, step.status, (step.arguments || step.full_result) ? 'has-detail' : '', step.thinking_content ? 'has-thinking' : '']" @click="step.arguments || step.full_result ? viewStepDetail(step) : null">
-                                                    <i :class="step.status === 'done' ? 'fas fa-check' : (step.status === 'error' ? 'fas fa-times' : 'fas fa-cog fa-spin')"></i>
-                                                    <span class="step-name">{{ step.name }}</span>
-                                                    <span v-if="step.detail" class="step-detail">{{ step.detail }}</span>
-                                                    <i v-if="step.arguments || step.full_result" class="fas fa-external-link-alt step-detail-icon"></i>
-                                                    <!-- AI思考内容（默认折叠，加载完成后可展开） -->
-                                                    <div v-if="step.thinking_content" class="thinking-content-wrapper">
-                                                        <div class="thinking-content-toggle" @click.stop="step._thinking_expanded = !step._thinking_expanded">
-                                                            <i :class="step._thinking_expanded ? 'fas fa-chevron-up' : 'fas fa-chevron-down'"></i>
-                                                            <span>{{ step._thinking_expanded ? '收起思考' : '查看思考过程' }}</span>
-                                                        </div>
-                                                        <div v-if="step._thinking_expanded" class="thinking-content">
-                                                            <pre>{{ step.thinking_content }}</pre>
-                                                        </div>
+                                                <div v-for="(step, idx) in card.steps" :key="idx" class="thinking-step" :class="[step.type, step.status, (step.arguments || step.full_result || step.thinking_content) ? 'has-detail' : '']">
+                                                    <div class="step-header" @click="step.arguments || step.full_result || step.thinking_content ? viewStepDetail(step) : null">
+                                                        <i :class="step.status === 'done' ? 'fas fa-check' : (step.status === 'error' ? 'fas fa-times' : 'fas fa-cog fa-spin')"></i>
+                                                        <span class="step-name">{{ step.name }}</span>
+                                                        <span v-if="step.detail" class="step-detail">{{ step.detail }}</span>
+                                                        <i v-if="step.arguments || step.full_result || step.thinking_content" class="fas fa-external-link-alt step-detail-icon"></i>
                                                     </div>
                                                 </div>
                                             </div>
@@ -5996,20 +5999,12 @@
                                                         <span>{{ card.content }}</span>
                                                     </div>
                                                     <div class="thinking-card-steps">
-                                                        <div v-for="(step, idx) in card.steps" :key="idx" class="thinking-step" :class="[step.type, step.status, (step.arguments || step.full_result) ? 'has-detail' : '', step.thinking_content ? 'has-thinking' : '']" @click="step.arguments || step.full_result ? viewStepDetail(step) : null">
-                                                            <i :class="step.status === 'done' ? 'fas fa-check' : (step.status === 'error' ? 'fas fa-times' : 'fas fa-cog fa-spin')"></i>
-                                                            <span class="step-name">{{ step.name }}</span>
-                                                            <span v-if="step.detail" class="step-detail">{{ step.detail }}</span>
-                                                            <i v-if="step.arguments || step.full_result" class="fas fa-external-link-alt step-detail-icon"></i>
-                                                            <!-- AI思考内容（默认折叠，加载完成后可展开） -->
-                                                            <div v-if="step.thinking_content" class="thinking-content-wrapper">
-                                                                <div class="thinking-content-toggle" @click.stop="step._thinking_expanded = !step._thinking_expanded">
-                                                                    <i :class="step._thinking_expanded ? 'fas fa-chevron-up' : 'fas fa-chevron-down'"></i>
-                                                                    <span>{{ step._thinking_expanded ? '收起思考' : '查看思考过程' }}</span>
-                                                                </div>
-                                                                <div v-if="step._thinking_expanded" class="thinking-content">
-                                                                    <pre>{{ step.thinking_content }}</pre>
-                                                                </div>
+                                                        <div v-for="(step, idx) in card.steps" :key="idx" class="thinking-step" :class="[step.type, step.status, (step.arguments || step.full_result || step.thinking_content) ? 'has-detail' : '']">
+                                                            <div class="step-header" @click="step.arguments || step.full_result || step.thinking_content ? viewStepDetail(step) : null">
+                                                                <i :class="step.status === 'done' ? 'fas fa-check' : (step.status === 'error' ? 'fas fa-times' : 'fas fa-cog fa-spin')"></i>
+                                                                <span class="step-name">{{ step.name }}</span>
+                                                                <span v-if="step.detail" class="step-detail">{{ step.detail }}</span>
+                                                                <i v-if="step.arguments || step.full_result || step.thinking_content" class="fas fa-external-link-alt step-detail-icon"></i>
                                                             </div>
                                                         </div>
                                                     </div>
@@ -8106,7 +8101,17 @@
                         <div style="color: var(--text-secondary); font-size: 13px; margin-bottom: 4px;">描述</div>
                         <div style="background: var(--bg-tertiary); padding: 8px 12px; border-radius: 6px;">{{ stepDetailData.detail }}</div>
                     </div>
-                    
+
+                    <!-- AI思考内容 -->
+                    <div v-if="stepDetailData.thinking_content" style="margin-bottom: 16px;">
+                        <div style="color: var(--text-secondary); font-size: 13px; margin-bottom: 4px;">
+                            <i class="fas fa-brain" style="color: var(--accent-primary);"></i> AI思考过程
+                        </div>
+                        <div style="background: var(--bg-tertiary); padding: 12px; border-radius: 6px; border-left: 3px solid var(--accent-primary);">
+                            <pre style="margin: 0; font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace; font-size: 12px; line-height: 1.6; white-space: pre-wrap; word-break: break-all; color: var(--text-secondary);">{{ stepDetailData.thinking_content }}</pre>
+                        </div>
+                    </div>
+
                     <!-- 工具参数 -->
                     <div v-if="stepDetailData.arguments" style="margin-bottom: 16px;">
                         <div style="color: var(--text-secondary); font-size: 13px; margin-bottom: 4px;">
@@ -8114,18 +8119,18 @@
                         </div>
                         <pre class="code-block">{{ formatJson(stepDetailData.arguments) }}</pre>
                     </div>
-                    
+
                     <!-- 返回结果 -->
                     <div v-if="stepDetailData.full_result" style="margin-bottom: 16px;">
                         <div style="color: var(--text-secondary); font-size: 13px; margin-bottom: 4px;">
-                            <i class="fas fa-check-circle" :style="{ color: stepDetailData.full_result.success ? 'var(--success)' : 'var(--error)' }"></i> 
+                            <i class="fas fa-check-circle" :style="{ color: stepDetailData.full_result.success ? 'var(--success)' : 'var(--error)' }"></i>
                             返回结果 (Result)
                         </div>
                         <pre class="code-block">{{ formatJson(stepDetailData.full_result) }}</pre>
                     </div>
-                    
+
                     <!-- 无详情提示 -->
-                    <div v-if="!stepDetailData.arguments && !stepDetailData.full_result" style="text-align: center; color: var(--text-muted); padding: 40px;">
+                    <div v-if="!stepDetailData.arguments && !stepDetailData.full_result && !stepDetailData.thinking_content" style="text-align: center; color: var(--text-muted); padding: 40px;">
                         <i class="fas fa-info-circle" style="font-size: 48px; margin-bottom: 16px; opacity: 0.5;"></i>
                         <div>该步骤没有详细信息</div>
                     </div>
@@ -9740,7 +9745,8 @@
                         name: '',
                         detail: '',
                         arguments: null,
-                        full_result: null
+                        full_result: null,
+                        thinking_content: null
                     },
                     
                     // Theme Settings
@@ -14399,7 +14405,8 @@ def main(params):
                         name: step.name || '',
                         detail: step.detail || '',
                         arguments: step.arguments || null,
-                        full_result: step.full_result || null
+                        full_result: step.full_result || null,
+                        thinking_content: step.thinking_content || null
                     };
                     this.showStepDetailModal = true;
                 },

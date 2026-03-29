@@ -14,6 +14,7 @@ class StepType(Enum):
     """步骤类型"""
     START = "start"
     THINKING = "thinking"
+    AI_THINKING = "ai_thinking"
     TOOL = "tool"
     TOOL_DONE = "tool_done"
     IMAGE = "image"
@@ -30,6 +31,7 @@ class StepType(Enum):
 STEP_CONFIG = {
     StepType.START: {'type': 'thinking', 'icon': '🤔', 'status': 'active'},
     StepType.THINKING: {'type': 'thinking', 'icon': '💭', 'status': 'active'},
+    StepType.AI_THINKING: {'type': 'ai_thinking', 'icon': '🧠', 'status': 'done'},
     StepType.TOOL: {'type': 'tool', 'icon': '🔧', 'status': 'running'},
     StepType.TOOL_DONE: {'type': 'tool', 'icon': '🔧', 'status': 'done'},
     StepType.IMAGE: {'type': 'image', 'icon': '🖼️', 'status': 'running'},
@@ -93,7 +95,7 @@ class ProgressCard:
             return
         
         # 如果是完成状态，更新已有步骤
-        if step_type in [StepType.TOOL_DONE, StepType.IMAGE_DONE, 
+        if step_type in [StepType.TOOL_DONE, StepType.IMAGE_DONE,
                         StepType.FILE_DONE, StepType.UPLOAD_DONE]:
             base_type = config['type']
             # 找到最后一个匹配的 running 步骤并标记为完成
@@ -110,6 +112,9 @@ class ProgressCard:
                         step['arguments'] = step_arguments
                     if step_full_result:
                         step['full_result'] = step_full_result
+                    # 保存AI思考内容
+                    if thinking_content:
+                        step['thinking_content'] = thinking_content
                     break
         elif step_type == StepType.DONE:
             # 添加完成步骤前，将所有运行中的步骤标记为完成
@@ -126,6 +131,33 @@ class ProgressCard:
                 'detail': step_detail
             })
             self.is_completed = True
+        elif step_type == StepType.AI_THINKING:
+            # AI_THINKING 类型：查找并更新已有的 thinking 或 ai_thinking 步骤
+            updated = False
+            for step in reversed(self.steps):
+                if step['type'] in ['thinking', 'ai_thinking']:
+                    # 更新现有步骤
+                    step['type'] = config['type']
+                    step['icon'] = config['icon']
+                    step['name'] = step_name
+                    step['status'] = config['status']
+                    if thinking_content:
+                        step['thinking_content'] = thinking_content
+                    updated = True
+                    break
+            
+            # 如果没有找到现有步骤，创建新步骤
+            if not updated:
+                step_data = {
+                    'type': config['type'],
+                    'icon': config['icon'],
+                    'name': step_name,
+                    'status': config['status'],
+                    'detail': step_detail
+                }
+                if thinking_content:
+                    step_data['thinking_content'] = thinking_content
+                self.steps.append(step_data)
         else:
             # 添加新步骤前，将之前的运行中步骤（除了同类型的）标记为完成
             if step_type not in [StepType.THINKING, StepType.UPLOAD]:
@@ -158,54 +190,54 @@ class ProgressCard:
     def update_thinking_stream(self, thinking_content: str):
         """
         流式更新AI思考内容（在思考过程中实时更新）
-        
+
         Args:
             thinking_content: 思考内容
         """
-        # 找到最后一个thinking类型的步骤
+        # 找到最后一个 thinking 或 ai_thinking 类型的步骤
         for step in reversed(self.steps):
-            if step['type'] == 'thinking':
+            if step['type'] in ['thinking', 'ai_thinking']:
                 step['thinking_content'] = thinking_content
                 step['status'] = 'active'
                 break
         else:
-            # 如果没有找到thinking步骤，创建一个
+            # 如果没有找到 thinking 步骤，创建一个
             self.steps.append({
-                'type': 'thinking',
-                'icon': '💭',
-                'name': 'AI 正在思考...',
+                'type': 'ai_thinking',
+                'icon': '🧠',
+                'name': '🧠 AI 思考中',
                 'status': 'active',
                 'thinking_content': thinking_content
             })
-        
+
         # 发送更新
         self._emit_update()
     
     def append_thinking_content(self, new_content: str):
         """
         追加思考内容（用于流式更新）
-        
+
         Args:
             new_content: 新增的思考内容
         """
-        # 找到最后一个thinking类型的步骤
+        # 找到最后一个 thinking 或 ai_thinking 类型的步骤
         for step in reversed(self.steps):
-            if step['type'] == 'thinking':
+            if step['type'] in ['thinking', 'ai_thinking']:
                 if 'thinking_content' in step:
                     step['thinking_content'] += new_content
                 else:
                     step['thinking_content'] = new_content
                 break
         else:
-            # 如果没有找到thinking步骤，创建一个
+            # 如果没有找到 thinking 步骤，创建一个
             self.steps.append({
-                'type': 'thinking',
-                'icon': '💭',
-                'name': 'AI 正在思考...',
+                'type': 'ai_thinking',
+                'icon': '🧠',
+                'name': '🧠 AI 思考中',
                 'status': 'active',
                 'thinking_content': new_content
             })
-        
+
         # 发送更新
         self._emit_update()
     
