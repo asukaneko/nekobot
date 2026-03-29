@@ -6416,11 +6416,11 @@
                                 <div class="card-body">
                                     <div class="form-group">
                                         <label class="form-label">人格名称</label>
-                                        <input v-model="personality.name" type="text" class="form-input" placeholder="输入人格名称">
+                                        <input v-model="personality.name" type="text" class="form-input" placeholder="输入人格名称" @change="personalityHasUnsavedChanges = true">
                                     </div>
                                     <div class="form-group">
                                         <label class="form-label">系统提示词 (System Prompt)</label>
-                                        <textarea v-model="personality.prompt" class="form-textarea" rows="12" placeholder="输入系统提示词，定义 AI 的人格和行为..."></textarea>
+                                        <textarea v-model="personality.prompt" class="form-textarea" rows="12" placeholder="输入系统提示词，定义 AI 的人格和行为..." @change="personalityHasUnsavedChanges = true"></textarea>
                                         <div class="form-hint">这是 AI 的核心人格定义，会影响所有对话的回复风格</div>
                                     </div>
                                 </div>
@@ -9459,6 +9459,7 @@
                     },
                     personalityPresets: [],
                     customPersonalityPresets: [], // 用户自定义人格预设
+                    personalityHasUnsavedChanges: false, // 是否有未保存的修改
                     showConfirmDialog: false,
                     confirmDialogConfig: {
                         title: '确认',
@@ -10370,7 +10371,10 @@
                             await this.loadWorkflows();
                             break;
                         case 'personality':
-                            await this.loadPersonality();
+                            // 如果有未保存的修改，不重新加载服务器数据，保留本地修改
+                            if (!this.personalityHasUnsavedChanges) {
+                                await this.loadPersonality();
+                            }
                             await this.loadPersonalityPresets();
                             break;
                         case 'memory':
@@ -13950,6 +13954,7 @@ def main(params):
                     this.isLoading = true;
                     try {
                         await api.put('/api/personality', this.personality);
+                        this.personalityHasUnsavedChanges = false;
                         this.showToast('人格设置已保存', 'success');
                     } catch (e) {
                         this.showToast('保存失败', 'error');
@@ -13961,10 +13966,11 @@ def main(params):
                 loadPersonalityPreset(preset) {
                     this.showConfirmDialogFn({
                         title: '加载人格预设',
-                        message: `确定要加载预设人格 "${preset.name}" 吗？当前未保存的修改将会丢失。`,
+                        message: `确定要加载预设人格 "${preset.name}" 吗？`,
                         onConfirm: () => {
                             this.personality.name = preset.name;
                             this.personality.prompt = preset.prompt;
+                            this.personalityHasUnsavedChanges = true;
                             this.showToast('已加载预设人格，请保存以应用', 'success');
                         }
                     });
