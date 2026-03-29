@@ -6120,7 +6120,7 @@ class WebChatServer:
         # ==================== Tools API ====================
         @self.app.route('/api/tools')
         def get_tools():
-            """获取所有 Tools 配置（包括内置的工具）"""
+            """获取所有 Tools 配置（包括内置的工具和注册的工具）"""
             # 基于 name 去重，最终只保留每个 name 的一个条目
             seen_names: set = set()
             unique_tools: List[Dict] = []
@@ -6151,6 +6151,27 @@ class WebChatServer:
                         seen_names.add(name)
             except Exception as e:
                 _log.error(f"Failed to load built-in tools: {e}")
+
+            # 补充注册的工具（通过 @register_tool 装饰器注册的工具，如 skill_list, skill_view, skill_read, skill_get_info）
+            try:
+                from nbot.services.tool_registry import get_all_tool_definitions as get_registered_tools
+                registered_tools = get_registered_tools()
+                for tool_def in registered_tools:
+                    func = tool_def.get('function', {})
+                    name = func.get('name', '')
+                    if name and name not in seen_names:
+                        unique_tools.append({
+                            'id': f'_builtin_{name}',
+                            'name': name,
+                            'description': func.get('description', ''),
+                            'enabled': True,
+                            'parameters': func.get('parameters', {}),
+                            '_builtin': True
+                        })
+                        seen_names.add(name)
+                _log.info(f"[Tools] 已加载 {len(registered_tools)} 个注册的工具: {[t.get('function', {}).get('name') for t in registered_tools]}")
+            except Exception as e:
+                _log.error(f"Failed to load registered tools: {e}")
 
             return jsonify(unique_tools)
 

@@ -3,12 +3,12 @@ Skills 工具模块 - 提供 AI 访问 Skills 存储的功能
 
 使用装饰器自动注册工具，AI 可以调用以下工具：
 - skill_list: 列出所有 Skills 的存储空间
-- skill_view: 查看指定 Skill 的详细信息
-- skill_list_scripts: 列出指定 Skill 的所有脚本
-- skill_read_script: 读取 Skill 脚本内容
+- skill_view: 查看指定 Skill 的详细信息，列出所有文件
+- skill_read: 读取 Skill 存储空间中的指定文件内容
 - skill_get_info: 获取 Skills 系统信息
 """
 import logging
+import os
 from typing import Dict, Any, List
 from nbot.services.tool_registry import register_tool
 
@@ -29,13 +29,10 @@ def _get_skills_storage_info() -> Dict[str, Any]:
 def _format_skill_info(skill: Dict) -> Dict:
     """格式化 Skill 信息"""
     files = skill.get('files', [])
-    scripts = skill.get('scripts', [])
     return {
         "name": skill.get('name', ''),
         "description": skill.get('description', ''),
-        "scripts": scripts,
         "files": files,
-        "scripts_count": len(scripts),
         "files_count": len(files)
     }
 
@@ -70,27 +67,22 @@ def skill_list(args: Dict, context: Dict = None) -> Dict[str, Any]:
 
 @register_tool(
     name="skill_view",
-    description="查看指定 Skill 的详细信息，包括配置文件、脚本列表和内容。用于查看 Skill 的实现细节。",
+    description="查看指定 Skill 的文件结构，列出所有文件及目录。用于了解 Skill 包含哪些文件。",
     parameters={
         "type": "object",
         "properties": {
             "skill_name": {
                 "type": "string",
                 "description": "Skill 的名称"
-            },
-            "file_name": {
-                "type": "string",
-                "description": "要查看的文件名（可选，如不填则显示 Skill 概览）"
             }
         },
         "required": ["skill_name"]
     }
 )
 def skill_view(args: Dict, context: Dict = None) -> Dict[str, Any]:
-    """查看 Skill 详情"""
+    """查看 Skill 文件结构"""
     try:
         skill_name = args.get('skill_name', '')
-        file_name = args.get('file_name')
 
         info = _get_skills_storage_info()
         manager = info["manager"]
@@ -102,21 +94,14 @@ def skill_view(args: Dict, context: Dict = None) -> Dict[str, Any]:
             }
 
         storage = manager.get_skill_storage(skill_name)
+        files = storage.get_all_files()
 
         result = {
             "success": True,
             "skill_name": skill_name,
-            "scripts": storage.list_scripts(),
-            "files": storage.get_all_files()
+            "files": files,
+            "files_count": len(files)
         }
-
-        if file_name:
-            content = storage.load_script(file_name)
-            if content:
-                result["file_content"] = content
-                result["file_name"] = file_name
-            else:
-                result["error"] = f"文件 '{file_name}' 不存在"
 
         return result
 
@@ -126,43 +111,8 @@ def skill_view(args: Dict, context: Dict = None) -> Dict[str, Any]:
 
 
 @register_tool(
-    name="skill_list_scripts",
-    description="列出指定 Skill 的所有脚本文件。",
-    parameters={
-        "type": "object",
-        "properties": {
-            "skill_name": {
-                "type": "string",
-                "description": "Skill 的名称"
-            }
-        },
-        "required": ["skill_name"]
-    }
-)
-def skill_list_scripts(args: Dict, context: Dict = None) -> Dict[str, Any]:
-    """列出 Skill 的脚本"""
-    try:
-        skill_name = args.get('skill_name', '')
-
-        info = _get_skills_storage_info()
-        storage = info["manager"].get_skill_storage(skill_name)
-        scripts = storage.list_scripts()
-
-        return {
-            "success": True,
-            "skill_name": skill_name,
-            "scripts": scripts,
-            "count": len(scripts)
-        }
-
-    except Exception as e:
-        _log.error(f"skill_list_scripts error: {e}")
-        return {"success": False, "error": f"列出脚本失败: {str(e)}"}
-
-
-@register_tool(
-    name="skill_read_script",
-    description="读取 Skill 存储空间中的文件内容。支持按行范围或字符范围读取。",
+    name="skill_read",
+    description="读取 Skill 存储空间中的指定文件内容。支持按行范围或字符范围读取。",
     parameters={
         "type": "object",
         "properties": {
@@ -170,9 +120,9 @@ def skill_list_scripts(args: Dict, context: Dict = None) -> Dict[str, Any]:
                 "type": "string",
                 "description": "Skill 的名称"
             },
-            "script_name": {
+            "file_path": {
                 "type": "string",
-                "description": "文件名，可以是 SKILL.md、reference.md、LICENSE.txt 或 scripts/main.py 等"
+                "description": "文件路径，可以是 SKILL.md、reference.md、scripts/main.py、resources/config.json 等"
             },
             "start_line": {
                 "type": "integer",
@@ -191,14 +141,14 @@ def skill_list_scripts(args: Dict, context: Dict = None) -> Dict[str, Any]:
                 "description": "从第几个字符开始读取（从0开始）。需要与 char_count 配合使用。例如：start_char=100, char_count=200 表示从第100个字符开始读取200个字符。"
             }
         },
-        "required": ["skill_name", "script_name"]
+        "required": ["skill_name", "file_path"]
     }
 )
-def skill_read_script(args: Dict, context: Dict = None) -> Dict[str, Any]:
+def skill_read(args: Dict, context: Dict = None) -> Dict[str, Any]:
     """读取 Skill 存储空间中的文件"""
     try:
         skill_name = args.get('skill_name', '')
-        script_name = args.get('script_name', '')
+        file_path_param = args.get('file_path', '')
         start_line = args.get('start_line')
         end_line = args.get('end_line')
         char_count = args.get('char_count')
@@ -207,42 +157,42 @@ def skill_read_script(args: Dict, context: Dict = None) -> Dict[str, Any]:
         info = _get_skills_storage_info()
         storage = info["manager"].get_skill_storage(skill_name)
 
-        # 构建完整文件路径
-        import os
-        file_path = os.path.join(storage.skill_dir, script_name)
+        if not os.path.exists(storage.skill_dir):
+            return {
+                "success": False,
+                "error": f"Skill '{skill_name}' 不存在"
+            }
 
-        # 检查文件是否存在
+        file_path = os.path.join(storage.skill_dir, file_path_param)
+
         if not os.path.exists(file_path):
-            # 尝试检查是否是 scripts/ 目录下的文件
-            scripts_path = os.path.join(storage.scripts_dir, script_name)
-            if os.path.exists(scripts_path):
-                file_path = scripts_path
-            else:
-                return {
-                    "success": False,
-                    "error": f"文件 '{script_name}' 不存在"
-                }
+            return {
+                "success": False,
+                "error": f"文件 '{file_path_param}' 不存在"
+            }
 
-        # 读取文件内容
+        if not os.path.isfile(file_path):
+            return {
+                "success": False,
+                "error": f"'{file_path_param}' 是目录而非文件"
+            }
+
         try:
             with open(file_path, 'r', encoding='utf-8') as f:
                 content = f.read()
         except UnicodeDecodeError:
             return {
                 "success": False,
-                "error": f"文件 '{script_name}' 是二进制文件，无法读取"
+                "error": f"文件 '{file_path_param}' 是二进制文件，无法读取"
             }
 
-        # 处理按行范围读取
         if start_line is not None or end_line is not None:
             lines = content.split('\n')
             total_lines = len(lines)
 
-            # 转换行号（用户从1开始计数）
             start = (start_line - 1) if start_line else 0
             end = end_line if end_line else total_lines
 
-            # 确保范围有效
             start = max(0, start)
             end = min(total_lines, end)
 
@@ -256,7 +206,7 @@ def skill_read_script(args: Dict, context: Dict = None) -> Dict[str, Any]:
             return {
                 "success": True,
                 "skill_name": skill_name,
-                "script_name": script_name,
+                "file_path": file_path_param,
                 "content": selected_content,
                 "total_lines": total_lines,
                 "read_lines": f"{start + 1}-{end}",
@@ -265,7 +215,6 @@ def skill_read_script(args: Dict, context: Dict = None) -> Dict[str, Any]:
                 "read_mode": "line_range"
             }
 
-        # 处理按字符范围读取
         if start_char is not None or char_count is not None:
             start = start_char if start_char else 0
             count = char_count if char_count else len(content) - start
@@ -282,7 +231,7 @@ def skill_read_script(args: Dict, context: Dict = None) -> Dict[str, Any]:
             return {
                 "success": True,
                 "skill_name": skill_name,
-                "script_name": script_name,
+                "file_path": file_path_param,
                 "content": selected_content,
                 "total_length": len(content),
                 "read_length": len(selected_content),
@@ -290,24 +239,22 @@ def skill_read_script(args: Dict, context: Dict = None) -> Dict[str, Any]:
                 "read_mode": "char_range"
             }
 
-        # 默认：如果内容过长，生成摘要
         MAX_CONTENT_LENGTH = 8000
         result = {
             "success": True,
             "skill_name": skill_name,
-            "script_name": script_name,
+            "file_path": file_path_param,
             "total_length": len(content),
             "read_mode": "auto_truncate"
         }
 
         if len(content) > MAX_CONTENT_LENGTH:
-            # 返回摘要和部分内容
             first_line = content.split('\n')[0] if content else ""
             result["content"] = content[:MAX_CONTENT_LENGTH]
             result["truncated"] = True
             result["summary"] = f"文件共 {len(content)} 字符，已截断显示前 {MAX_CONTENT_LENGTH} 字符。"
             result["first_line"] = first_line[:200] if first_line else ""
-            result["read_more"] = f"如需读取更多内容，请使用 start_line/end_line 或 start_char/char_count 参数。"
+            result["read_more"] = "如需读取更多内容，请使用 start_line/end_line 或 start_char/char_count 参数。"
         else:
             result["content"] = content
             result["truncated"] = False
@@ -315,7 +262,7 @@ def skill_read_script(args: Dict, context: Dict = None) -> Dict[str, Any]:
         return result
 
     except Exception as e:
-        _log.error(f"skill_read_script error: {e}")
+        _log.error(f"skill_read error: {e}")
         return {"success": False, "error": f"读取文件失败: {str(e)}"}
 
 
@@ -327,7 +274,6 @@ def skill_get_info(args: Dict, context: Dict = None) -> Dict[str, Any]:
     """获取所有可用的 Skills 信息"""
     try:
         info = _get_skills_storage_info()
-        manager = info["manager"]
         all_skills = info["skills"]
 
         skills_list = []
@@ -336,7 +282,6 @@ def skill_get_info(args: Dict, context: Dict = None) -> Dict[str, Any]:
             skills_list.append({
                 "name": skill.get('name', ''),
                 "description": skill.get('description', ''),
-                "scripts": skill.get('scripts', []),
                 "files_count": len(skill.get('files', [])),
                 "source": "storage",
                 "has_storage": True

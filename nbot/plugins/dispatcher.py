@@ -39,11 +39,10 @@ class SkillDispatcher:
 3. 例如：`[SKILL:search]天气[/SKILL]`
 
 **查看技能详情：**
-你可以使用以下工具来查看技能的详细信息和脚本：
+你可以使用以下工具来查看技能的详细信息和文件：
 - `skill_list`: 列出所有 Skills 的存储空间
-- `skill_view`: 查看指定 Skill 的详细信息
-- `skill_list_scripts`: 列出 Skill 的所有脚本
-- `skill_read_script`: 读取 Skill 脚本内容
+- `skill_view`: 查看指定 Skill 的文件结构，列出所有文件
+- `skill_read`: 读取 Skill 存储空间中的指定文件内容
 - `skill_get_info`: 获取所有可用的 Skills 信息
 
 当用户询问某个技能的功能或需要查看技能的实现时，可以使用这些工具。
