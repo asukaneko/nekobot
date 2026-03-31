@@ -5952,7 +5952,7 @@
                                                 </div>
                                                 <!-- 机器人发送的文件 -->
                                                 <div v-if="msg.file" class="message-attachments">
-                                                    <div class="attachment-card" @click.stop="msg.session_id && msg.file.name ? previewFile(msg.session_id, msg.file.name) : downloadFile(msg.file)">
+                                                    <div class="attachment-card" @click.stop="msg.session_id && msg.file.name ? previewFile(msg) : downloadFile(msg.file)">
                                                         <!-- 图片直接显示 -->
                                                         <img v-if="msg.file.is_image" :src="msg.file.data || msg.file.url || msg.file.preview" class="attachment-preview" style="max-width: 200px; max-height: 150px; object-fit: cover;" @error="handleImageError">
                                                         <!-- 文本文件显示预览 -->
@@ -13080,11 +13080,27 @@ def main(params):
                 },
                 
                 // 文件预览
-                async previewFile(sessionId, filename) {
+                async previewFile(msgOrSessionId, filename) {
+                    // 支持两种调用方式：
+                    // 1. previewFile(msg) - 传入消息对象
+                    // 2. previewFile(sessionId, filename) - 传入 sessionId 和 filename（向后兼容）
+                    let msg, sessionId, originalFilename;
+                    if (typeof msgOrSessionId === 'object' && msgOrSessionId !== null) {
+                        msg = msgOrSessionId;
+                        sessionId = msg.session_id;
+                        originalFilename = msg.file?.name;
+                    } else {
+                        sessionId = msgOrSessionId;
+                        originalFilename = filename;
+                    }
+                    
+                    const file = msg?.file;
+                    const safeName = file?.safe_name;
+                    
                     this.showFilePreview = true;
                     this.filePreviewData = {
                         sessionId: sessionId,
-                        filename: filename,
+                        filename: originalFilename,
                         type: '',
                         content: '',
                         url: '',
@@ -13096,10 +13112,15 @@ def main(params):
                     };
                     
                     try {
-                        const encodedFilename = encodeURIComponent(filename);
+                        const encodedFilename = encodeURIComponent(originalFilename);
+                        
+                        // 如果有 safe_name（static/files 目录中的文件），使用新的 API
+                        if (safeName) {
+                            return this.previewStaticFile(safeName, originalFilename);
+                        }
                         
                         // docx 文件特殊处理：获取 blob 并在前端渲染
-                        if (this.isDocxFile(filename)) {
+                        if (this.isDocxFile(originalFilename)) {
                             const res = await api.get(`/api/sessions/${sessionId}/workspace/files/${encodedFilename}`, {
                                 responseType: 'blob'
                             });
@@ -13117,7 +13138,7 @@ def main(params):
                         }
                         
                         // excel 文件特殊处理：获取 blob 并在前端渲染
-                        if (this.isExcelFile(filename)) {
+                        if (this.isExcelFile(originalFilename)) {
                             const res = await api.get(`/api/sessions/${sessionId}/workspace/files/${encodedFilename}`, {
                                 responseType: 'blob'
                             });
@@ -13135,7 +13156,7 @@ def main(params):
                         }
                         
                         // PDF 文件特殊处理：获取 blob 并在前端渲染
-                        if (this.isPdfFile(filename)) {
+                        if (this.isPdfFile(originalFilename)) {
                             const res = await api.get(`/api/sessions/${sessionId}/workspace/files/${encodedFilename}`, {
                                 responseType: 'blob'
                             });
@@ -13153,7 +13174,7 @@ def main(params):
                         }
                         
                         // PPTX 文件特殊处理：获取 blob 并在前端渲染
-                        if (this.isPptxFile(filename)) {
+                        if (this.isPptxFile(originalFilename)) {
                             const res = await api.get(`/api/sessions/${sessionId}/workspace/files/${encodedFilename}`, {
                                 responseType: 'blob'
                             });
@@ -13171,7 +13192,7 @@ def main(params):
                         }
                         
                         // HTML 文件特殊处理：获取文本内容并渲染
-                        if (this.isHtmlFile(filename)) {
+                        if (this.isHtmlFile(originalFilename)) {
                             const res = await api.get(`/api/sessions/${sessionId}/workspace/files/${encodedFilename}`, {
                                 responseType: 'text'
                             });
@@ -13202,6 +13223,71 @@ def main(params):
                         }
                     } catch (e) {
                         console.error('文件预览失败:', e);
+                        this.filePreviewData.error = '预览失败: ' + (e.response?.data?.error || e.message);
+                        this.filePreviewData.loading = false;
+                    }
+                },
+                
+                // 预览 static/files 目录中的文件
+                async previewStaticFile(safeName, originalFilename) {
+                    try {
+                        const res = await api.get(`/api/files/${encodeURIComponent(safeName)}/preview`);
+                        
+                        if (res.data.success) {
+                            // 如果需要前端渲染（PDF、PPTX、DOCX、Excel），获取 blob
+                            if (res.data.is_blob) {
+                                const fileRes = await api.get(`/static/files/${encodeURIComponent(safeName)}`, {
+                                    responseType: 'blob'
+                                });
+                                if (fileRes.data) {
+                                    this.filePreviewData = {
+                                        ...this.filePreviewData,
+                                        ...res.data,
+                                        blob: fileRes.data,
+                                        loading: false
+                                    };
+                                    
+                                    // 调用对应的渲染函数
+                                    this.$nextTick(() => {
+                                        const fileType = res.data.type?.toLowerCase();
+                                        if (fileType === 'pdf') {
+                                            this.renderPdf(fileRes.data);
+                                        } else if (fileType === 'pptx' || fileType === 'ppt') {
+                                            this.renderPptx(fileRes.data);
+                                        } else if (fileType === 'docx' || fileType === 'doc') {
+                                            this.renderDocx(fileRes.data);
+                                        } else if (fileType === 'xlsx' || fileType === 'xls') {
+                                            this.renderExcel(fileRes.data);
+                                        }
+                                    });
+                                } else {
+                                    this.filePreviewData.error = '无法加载文件';
+                                    this.filePreviewData.loading = false;
+                                }
+                                return;
+                            }
+                            
+                            this.filePreviewData = {
+                                ...this.filePreviewData,
+                                ...res.data,
+                                loading: false
+                            };
+                            
+                            // 如果是图片类型，渲染图片
+                            if (res.data.type === 'image') {
+                                this.$nextTick(() => {
+                                    const img = this.$refs.filePreviewModal?.querySelector('img');
+                                    if (img) {
+                                        img.src = res.data.url;
+                                    }
+                                });
+                            }
+                        } else {
+                            this.filePreviewData.error = res.data.error || '预览失败';
+                            this.filePreviewData.loading = false;
+                        }
+                    } catch (e) {
+                        console.error('静态文件预览失败:', e);
                         this.filePreviewData.error = '预览失败: ' + (e.response?.data?.error || e.message);
                         this.filePreviewData.loading = false;
                     }

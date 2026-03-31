@@ -636,11 +636,14 @@ async def handle_jmrank(msg, is_group=True):
         page: JmCategoryPage = cl.week_ranking(1)
     cache_dir = os.path.join(load_address(),"rank")
     os.makedirs(cache_dir,exist_ok = True)
-    name = time.time()
+    # 使用固定文件名，每次操作只保留一份
+    filename = f"{select}.md"
+    filepath = os.path.join(cache_dir, filename)
     tot = 0
     fg=0
     comic_cache.clear()
-    with open(os.path.join(cache_dir , f"{select}_{name}.md"), "w", encoding="utf-8") as f:
+    # 先清空文件
+    with open(filepath, "w", encoding="utf-8") as f:
         f.write(f"## {select}：  \n")
     for page in cl.categories_filter_gen(page=1,  # 起始页码
                                          # 下面是分类参数
@@ -651,7 +654,7 @@ async def handle_jmrank(msg, is_group=True):
         for aid, atitle in page:
             tot += 1
             cover_url = fetch_cover_url(aid)
-            with open(os.path.join(cache_dir , f"{select}_{name}.md"), "a", encoding="utf-8") as f:
+            with open(filepath, "a", encoding="utf-8") as f:
                 f.write(f"{tot}: {aid} {atitle}  \n ![]({cover_url})    \n\n")
             comic_cache.append(aid)
             if tot >=100:
@@ -659,16 +662,16 @@ async def handle_jmrank(msg, is_group=True):
                 break
         if fg:
             break
-    if not os.path.exists(os.path.join(cache_dir , f"{select}_{name}.md")):
+    if not os.path.exists(filepath):
         if is_group:
             await msg.reply(text="获取排行失败喵~，文件不存在")
         else:
             await bot.api.post_private_msg(msg.user_id, text="获取排行失败喵~，文件不存在")
         return
     if is_group:
-        await bot.api.post_group_file(msg.group_id, file=os.path.join(cache_dir , f"{select}_{name}.md"))
+        await bot.api.post_group_file(msg.group_id, file=filepath)
     else:
-        await bot.api.upload_private_file(msg.user_id, os.path.join(cache_dir , f"{select}_{name}.md"), f"{select}_{name}.md")
+        await bot.api.upload_private_file(msg.user_id, filepath, filename)
 
 @register_command("/jm_search",help_text = "/jm_search <内容> -> 搜索漫画",category = "1")
 async def handle_search(msg, is_group=True):

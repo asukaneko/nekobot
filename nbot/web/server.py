@@ -492,6 +492,20 @@ class WebMessageAdapter:
         try:
             shutil.copy2(file_path, dest_path)
             _log.info(f"文件已复制到: {dest_path}")
+            
+            # 自动删除源文件（只删除 cache 目录下的文件，避免误删）
+            original_file_path = file_path
+            cache_dirs = [os.path.join(self.server.base_dir, 'data', 'cache'),
+                         os.path.join(self.server.base_dir, 'data', 'workspace'),
+                         os.path.join(self.server.base_dir, 'rank'),
+                         os.path.join(self.server.base_dir, 'search')]
+            is_cache_file = any(original_file_path.startswith(cache_dir) for cache_dir in cache_dirs)
+            if is_cache_file and os.path.exists(original_file_path):
+                try:
+                    os.remove(original_file_path)
+                    _log.info(f"已删除源文件: {original_file_path}")
+                except Exception as del_err:
+                    _log.warning(f"删除源文件失败: {del_err}")
         except Exception as e:
             _log.error(f"复制文件失败: {e}")
             return False
@@ -518,7 +532,8 @@ class WebMessageAdapter:
                 'is_audio': is_audio,
                 'extension': ext,
                 'download_url': download_url,  # 下载链接
-                'url': download_url  # 供前端使用
+                'url': download_url,  # 供前端使用
+                'safe_name': safe_name  # 静态文件目录中的文件名
             }
         }
 
@@ -3971,7 +3986,8 @@ class WebChatServer:
                                                             'is_image': is_image,
                                                             'extension': ext,
                                                             'download_url': download_url,
-                                                            'url': download_url
+                                                            'url': download_url,
+                                                            'safe_name': safe_name
                                                         }
                                                     }
                                                     
@@ -7840,6 +7856,59 @@ def create_web_app(config: Dict[str, Any] = None) -> tuple[Flask, SocketIO]:
         """提供文件下载服务"""
         files_dir = os.path.join(server.static_folder, 'files')
         return send_from_directory(files_dir, filename, as_attachment=True)
+
+    # 添加静态文件预览 API
+    @app.route('/api/files/<path:safe_name>/preview', methods=['GET'])
+    def preview_static_file(safe_name):
+        """预览 static/files 目录中的文件"""
+        import mimetypes
+        files_dir = os.path.join(server.static_folder, 'files')
+        file_path = os.path.join(files_dir, safe_name)
+        
+        if not os.path.exists(file_path):
+            return jsonify({'success': False, 'error': 'File not found'}), 404
+        
+        ext = os.path.splitext(safe_name.lower())[1]
+        mime_type, _ = mimetypes.guess_type(file_path)
+        
+        # 图片文件直接返回 URL
+        image_exts = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.svg']
+        if ext in image_exts:
+            return jsonify({
+                'success': True,
+                'type': 'image',
+                'url': f'/static/files/{safe_name}'
+            })
+        
+        # PDF、PPTX、DOCX 等需要前端渲染的文件，返回 blob 标识
+        frontend_render_exts = ['.pdf', '.pptx', '.ppt', '.docx', '.doc', '.xlsx', '.xls']
+        if ext in frontend_render_exts:
+            return jsonify({
+                'success': True,
+                'type': ext[1:],  # 返回 'pdf', 'pptx' 等
+                'is_blob': True,
+                'url': f'/static/files/{safe_name}'
+            })
+        
+        # 使用 file_parser 解析其他文件
+        from nbot.core.file_parser import FileParser
+        parse_result = FileParser.parse_file(file_path, safe_name, max_chars=50000)
+        
+        if not parse_result or not parse_result.get('success'):
+            return jsonify({
+                'success': False,
+                'error': parse_result.get('error', 'Failed to parse file') if parse_result else 'File not found'
+            }), 400
+        
+        return jsonify({
+            'success': True,
+            'type': parse_result.get('type', 'text'),
+            'content': parse_result.get('content', ''),
+            'filename': safe_name,
+            'extracted_length': parse_result.get('extracted_length', 0),
+            'original_length': parse_result.get('original_length', 0),
+            'truncated': parse_result.get('truncated', False)
+        })
 
     # 添加通用静态文件服务
     @app.route('/static/<path:filename>')
