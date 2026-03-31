@@ -2240,10 +2240,41 @@ class WebChatServer:
                     check_stop()  # 检查是否停止
                     try:
                         _log.info(f"[AI] Silicon API 调用 (尝试 {attempt + 1}/{max_retries})")
-                        resp = requests.post(url, json=payload, headers=headers, timeout=api_timeout)
-                        resp.raise_for_status()
-                        data = resp.json()
+
+                        # 使用线程来执行请求，以便能够响应停止事件
+                        import threading
+                        result_container = {'data': None, 'error': None}
+
+                        def make_request():
+                            try:
+                                resp = requests.post(url, json=payload, headers=headers, timeout=api_timeout)
+                                resp.raise_for_status()
+                                result_container['data'] = resp.json()
+                            except Exception as e:
+                                result_container['error'] = e
+
+                        request_thread = threading.Thread(target=make_request)
+                        request_thread.daemon = True
+                        request_thread.start()
+
+                        # 等待请求完成，同时检查停止事件（每0.5秒检查一次）
+                        while request_thread.is_alive():
+                            check_stop()  # 如果停止事件被设置，这里会抛出 StopIteration
+                            request_thread.join(timeout=0.5)
+
+                        # 检查请求结果
+                        if result_container['error']:
+                            raise result_container['error']
+
+                        data = result_container['data']
+                        if data is None:
+                            raise Exception("请求未返回数据")
+
                         break
+                    except StopIteration:
+                        # 用户停止生成，立即抛出
+                        _log.info(f"[AI] 检测到停止信号，中断 Silicon API 请求")
+                        raise
                     except requests.exceptions.Timeout as e:
                         last_error = e
                         _log.warning(f"[AI] Silicon API 超时 (尝试 {attempt + 1}/{max_retries}): {e}")
@@ -2328,10 +2359,41 @@ class WebChatServer:
                     check_stop()  # 检查是否停止
                     try:
                         _log.info(f"[AI] 主 API 调用 (尝试 {attempt + 1}/{max_retries})")
-                        resp = requests.post(url, json=payload, headers=headers, timeout=api_timeout)
-                        resp.raise_for_status()
-                        data = resp.json()
+
+                        # 使用线程来执行请求，以便能够响应停止事件
+                        import threading
+                        result_container = {'data': None, 'error': None}
+
+                        def make_request():
+                            try:
+                                resp = requests.post(url, json=payload, headers=headers, timeout=api_timeout)
+                                resp.raise_for_status()
+                                result_container['data'] = resp.json()
+                            except Exception as e:
+                                result_container['error'] = e
+
+                        request_thread = threading.Thread(target=make_request)
+                        request_thread.daemon = True
+                        request_thread.start()
+
+                        # 等待请求完成，同时检查停止事件（每0.5秒检查一次）
+                        while request_thread.is_alive():
+                            check_stop()  # 如果停止事件被设置，这里会抛出 StopIteration
+                            request_thread.join(timeout=0.5)
+
+                        # 检查请求结果
+                        if result_container['error']:
+                            raise result_container['error']
+
+                        data = result_container['data']
+                        if data is None:
+                            raise Exception("请求未返回数据")
+
                         break
+                    except StopIteration:
+                        # 用户停止生成，立即抛出
+                        _log.info(f"[AI] 检测到停止信号，中断 API 请求")
+                        raise
                     except requests.exceptions.Timeout as e:
                         last_error = e
                         _log.warning(f"[AI] 主 API 超时 (尝试 {attempt + 1}/{max_retries}): {e}")
