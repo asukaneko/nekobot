@@ -11934,9 +11934,12 @@ def main(params):
                             this.sessions.splice(tempIndex, 1, serverSession);
                         }
 
-                        // 如果当前选中的是临时会话，切换到真实会话
+                        // 如果当前选中的是临时会话，切换到真实会话并重新加入会话
                         if (this.currentSession && this.currentSession.id === tempId) {
                             this.currentSession = serverSession;
+                            // 重新发送 join_session，确保 Socket.IO 监听正确的会话 ID
+                            socket.emit('leave_session');
+                            socket.emit('join_session', { session_id: serverSession.id });
                         }
 
                         this.showToast('会话创建成功', 'success');

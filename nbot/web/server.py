@@ -1383,12 +1383,18 @@ class WebChatServer:
         except Exception as e:
             _log.error(f"Failed to load data: {e}")
 
+    def _invalidate_sessions_cache(self):
+        """清理会话列表缓存，避免新建/删除后短时间内读到旧快照。"""
+        self._sessions_cache = []
+        self._sessions_cache_time = 0
+
     def _save_data(self, data_type: str):
         """保存指定类型的数据到磁盘"""
         try:
             if data_type == 'sessions':
                 with open(os.path.join(self.data_dir, 'sessions.json'), 'w', encoding='utf-8') as f:
                     json.dump(self.sessions, f, ensure_ascii=False, indent=2)
+                self._invalidate_sessions_cache()
             elif data_type == 'workflows':
                 with open(os.path.join(self.data_dir, 'workflows.json'), 'w', encoding='utf-8') as f:
                     json.dump(self.workflows, f, ensure_ascii=False, indent=2)
@@ -2660,7 +2666,7 @@ class WebChatServer:
         # ==================== 会话管理 API ====================
         @self.app.route('/api/sessions')
         def get_sessions():
-            # 使用缓存避免频繁读取文件
+            # 使用缓存避免频繁组装列表
             current_time = time.time()
             if not hasattr(self, '_sessions_cache'):
                 self._sessions_cache = []
@@ -2670,20 +2676,16 @@ class WebChatServer:
             if (current_time - self._sessions_cache_time) < 5.0 and self._sessions_cache:
                 return jsonify(self._sessions_cache)
             
-            # 从文件读取
-            sessions_file = os.path.join(self.data_dir, 'sessions.json')
-            sessions_data = {}
-            if os.path.exists(sessions_file):
-                try:
-                    with open(sessions_file, 'r', encoding='utf-8') as f:
-                        sessions_data = json.load(f)
-                except:
-                    sessions_data = {}
-            
-            # 合并内存中的会话
-            for sid, session in self.sessions.items():
-                if sid not in sessions_data:
-                    sessions_data[sid] = session
+            # 以内存中的会话为准，避免磁盘旧快照把刚创建/删除的会话覆盖回列表。
+            sessions_data = dict(self.sessions)
+            if not sessions_data:
+                sessions_file = os.path.join(self.data_dir, 'sessions.json')
+                if os.path.exists(sessions_file):
+                    try:
+                        with open(sessions_file, 'r', encoding='utf-8') as f:
+                            sessions_data = json.load(f)
+                    except:
+                        sessions_data = {}
             
             sessions = []
             for sid, session in sessions_data.items():
