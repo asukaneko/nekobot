@@ -5265,6 +5265,12 @@
         .msg-action-btn.active {
             color: var(--accent-primary);
         }
+        .msg-action-btn.continue-btn {
+            background: var(--accent-primary);
+            color: #fff;
+            border-radius: 4px;
+            margin-left: 4px;
+        }
 
         /* 进度卡片改进样式 */
         .thinking-step.done .step-name {
@@ -5986,6 +5992,10 @@
                                                     <button class="msg-action-btn" :class="{ active: msg._disliked }"
                                                             @click="msg._disliked = !msg._disliked; msg._liked = false" title="没帮助">
                                                         <i class="fas fa-thumbs-down"></i>
+                                                    </button>
+                                                    <button v-if="msg.can_continue && currentMessages.indexOf(msg) === currentMessages.length - 1" class="msg-action-btn continue-btn" 
+                                                            @click="continueGeneration(msg)" title="继续生成">
+                                                        <i class="fas fa-play"></i> 继续
                                                     </button>
                                                 </div>
                                             </div>
@@ -9304,6 +9314,7 @@
                 return {
                     isLoggedIn: false,
                     isLoading: false,
+                    loadingSessionId: null,  // 追踪哪个会话正在加载
                     isUserScrolling: false,
                     isSidebarCollapsed: false,
                     isMobileMenuOpen: false,
@@ -11776,7 +11787,8 @@ def main(params):
                     
                     // 清除所有加载/生成状态
                     this.isTyping = false;
-                    this.isLoading = false;
+                    // 如果之前的会话正在加载，保持加载状态以便切换回来时恢复
+                    // isLoading 会在下面根据 loadingSessionId 恢复
                     
                     // 必须清空进度卡片和孤儿卡片，防止跨会话污染
                     this.thinkingCards = [];
@@ -11802,6 +11814,9 @@ def main(params):
                             this.loadMessages();
                         }
                     }, 2000);
+                    
+                    // 恢复当前会话的加载状态（如果这个会话正在生成）
+                    this.isLoading = (this.loadingSessionId === session.id);
                 },
                 
                 async switchChatTab(tab) {
@@ -11986,6 +12001,7 @@ def main(params):
                     
                     // 先上传文件到服务器（如果有文件）
                     this.isLoading = true;
+                    this.loadingSessionId = this.currentSession.id;
                     let uploadedFilesInfo = [];
                     
                     if (files.length > 0) {
@@ -12209,6 +12225,7 @@ def main(params):
 
                     // 立即更新 UI 状态，给用户即时反馈
                     this.isLoading = false;
+                    this.loadingSessionId = null;
                     this.showToast('正在停止生成...', 'info');
 
                     try {
@@ -12221,6 +12238,7 @@ def main(params):
                         this.showToast('停止失败: ' + (e.response?.data?.error || e.message), 'error');
                         // 如果停止失败，恢复 loading 状态
                         this.isLoading = true;
+                        this.loadingSessionId = this.currentSession?.id;
                     }
                 },
                 
@@ -15163,6 +15181,7 @@ def main(params):
                             if (msg.role === 'assistant' && !msg.is_progress_message && !msg.file) {
                                 this.isTyping = false;
                                 this.isLoading = false;
+                                this.loadingSessionId = null;
                             }
                         }
                     });
@@ -15200,12 +15219,14 @@ def main(params):
                     socket.on('ai_stream_end', (data) => {
                         console.log('[Stream] AI stream end:', data);
                         this.isLoading = false;
+                        this.loadingSessionId = null;
                     });
                     
                     socket.on('ai_response', (data) => {
                         console.log('Received ai_response:', data);
                         this.isTyping = false;
                         this.isLoading = false;
+                        this.loadingSessionId = null;
                         if (this.currentSession && data.session_id === this.currentSession.id) {
                             // 避免重复添加消息
                             const exists = this.currentMessages.find(m => m.id === data.message.id);
@@ -15222,6 +15243,7 @@ def main(params):
                         console.error('Socket error:', err);
                         this.isTyping = false;
                         this.isLoading = false;
+                        this.loadingSessionId = null;
                         this.showToast(err.message || '发生错误', 'error');
                     });
                     
@@ -15769,6 +15791,21 @@ def main(params):
                 copyMessage(msg) {
                     const text = msg.content || '';
                     this.copyToClipboard(text);
+                },
+
+                // 继续生成（从中断点恢复）
+                continueGeneration(msg) {
+                    if (!this.currentSession) {
+                        this.showToast('请先选择一个会话', 'error');
+                        return;
+                    }
+                    const tempId = 'local_' + Date.now();
+                    socket.emit('send_message', {
+                        session_id: this.currentSession.id,
+                        content: '继续',
+                        sender: 'web_user',
+                        tempId: tempId
+                    });
                 },
                 
                 copyToClipboard(text) {

@@ -2725,7 +2725,15 @@ async def handle_find_author(msg, is_group=True):
     else:
         await bot.api.post_private_msg(msg.user_id, text=reply)
 
-def search_wenku8_books(search_term: str, search_type: str) -> list:
+def search_wenku8_books(search_term: str, search_type: str, max_pages: int = 3) -> list:
+    """
+    搜索 wenku8 小说，支持分页
+    
+    :param search_term: 搜索关键词
+    :param search_type: 搜索类型 (articlename 或 author)
+    :param max_pages: 最大搜索页数，默认为 3 页
+    :return: 搜索结果列表
+    """
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
@@ -2742,72 +2750,90 @@ def search_wenku8_books(search_term: str, search_type: str) -> list:
     except Exception as e:
         _log.error(f"搜索关键词编码失败: {search_term}, 错误: {e}")
         return []
-    url = f"https://www.wenku8.net/modules/article/search.php?searchtype={search_type}&searchkey={encoded_key}"
-    _log.info(f"搜索URL: {url}")
-    try:
-        response = requests.get(url, headers=headers, timeout=10)
-        _log.info(f"搜索响应状态码: {response.status_code}")
-    except Exception as e:
-        _log.error(f"搜索请求失败: {e}")
-        return []
-    response.encoding = "gbk"
-    content = response.text
-    # 检查HTTP状态码
-    if response.status_code == 403:
-        _log.warning("搜索返回403错误，Cookie可能已失效或被反爬虫机制拦截")
-        return []
-    # 检查是否需要登录（根据特定错误提示，排除已登录状态下的"退出登录"字样）
-    if "出现错误" in content or ("登录" in content and "退出登录" not in content):
-        _log.warning("搜索需要登录，Cookie可能已失效")
-        return []
-    pattern = r'<div style="width:373px;height:136px;float:left;margin:5px 0px 5px 5px;">(.*?)</div>\s*</div>'
-    page_matches = re.findall(pattern, content, re.DOTALL)
-    _log.info(f"搜索结果数量: {len(page_matches)}")
+    
     results = []
-    for match in page_matches:
-        title_url_match = re.search(r'<b><a style="font-size:13px;" href="([^"]+)" title="([^"]+)" target="_blank">', match)
-        book_url = title_url_match.group(1) if title_url_match else ""
-        title = title_url_match.group(2) if title_url_match else "未知"
-        book_id = "0"
-        id_match = re.search(r'/book/(\d+)\.htm', book_url)
-        if id_match:
-            book_id = id_match.group(1)
-        node = int(book_id) // 1000 if book_id.isdigit() else 0
-        author_cat_match = re.search(r'<p>作者:([^/]+)/分类:([^<]+)</p>', match)
-        author = author_cat_match.group(1) if author_cat_match else "未知"
-        category = author_cat_match.group(2) if author_cat_match else "未知"
-        stats_match = re.search(r'<p>更新:([^/]+)/字数:([^/]+)/([^<]+)</p>', match)
-        last_date = stats_match.group(1) if stats_match else "未知"
-        word_count = stats_match.group(2) if stats_match else "未知"
-        is_serialize = stats_match.group(3) if stats_match else "未知"
-        tags_match = re.search(r'Tags:<span[^>]*>([^<]+)</span>', match)
-        tags = tags_match.group(1) if tags_match else "无"
-        intro_match = re.search(r'简介:([^<]+)', match)
-        introduction = intro_match.group(1).strip() if intro_match else "暂无简介"
-        img_match = re.search(r'<img src="([^"]+)"', match)
-        cover_url = img_match.group(1) if img_match else f"https://img.wenku8.com/image/{node}/{book_id}/{book_id}s.jpg"
-        download_url = f"https://dl.wenku8.com/down.php?type=txt&node={node}&id={book_id}"
-        page_url = f"https://www.wenku8.net/book/{book_id}.htm"
-        books[title] = {
-            "author": author,
-            "category": category,
-            "last_date": last_date,
-            "word_count": word_count,
-            "is_serialize": is_serialize,
-            "introduction": introduction,
-            "tags": tags,
-            "cover_url": cover_url,
-            "download_url": download_url,
-            "page": page_url,
-            "hot": "搜索结果书籍"
-        }
-        results.append((author, title, download_url))
+    pattern = r'<div style="width:373px;height:136px;float:left;margin:5px 0px 5px 5px;">(.*?)</div>\s*</div>'
+    
+    for page in range(1, max_pages + 1):
+        url = f"https://www.wenku8.net/modules/article/search.php?searchtype={search_type}&searchkey={encoded_key}&page={page}"
+        _log.info(f"搜索URL (第{page}页): {url}")
+        try:
+            response = requests.get(url, headers=headers, timeout=10)
+            _log.info(f"搜索响应状态码: {response.status_code}")
+        except Exception as e:
+            _log.error(f"搜索请求失败: {e}")
+            break
+        
+        # 检查网站是否关闭
+        if '有缘再相聚' in response.text or '网站已关闭' in response.text:
+            _log.warning(f"wenku8.net 网站已关闭")
+            break
+        
+        response.encoding = "gbk"
+        content = response.text
+        
+        # 检查HTTP状态码
+        if response.status_code == 403:
+            _log.warning("搜索返回403错误，Cookie可能已失效或被反爬虫机制拦截")
+            break
+        # 检查是否需要登录（根据特定错误提示，排除已登录状态下的"退出登录"字样）
+        if "出现错误" in content or ("登录" in content and "退出登录" not in content):
+            _log.warning("搜索需要登录，Cookie可能已失效")
+            break
+        
+        page_matches = re.findall(pattern, content, re.DOTALL)
+        _log.info(f"第{page}页搜索结果数量: {len(page_matches)}")
+        
+        if not page_matches:
+            _log.info(f"第{page}页没有结果，停止搜索")
+            break
+        
+        for match in page_matches:
+            title_url_match = re.search(r'<b><a style="font-size:13px;" href="([^"]+)" title="([^"]+)" target="_blank">', match)
+            book_url = title_url_match.group(1) if title_url_match else ""
+            title = title_url_match.group(2) if title_url_match else "未知"
+            book_id = "0"
+            id_match = re.search(r'/book/(\d+)\.htm', book_url)
+            if id_match:
+                book_id = id_match.group(1)
+            node = int(book_id) // 1000 if book_id.isdigit() else 0
+            author_cat_match = re.search(r'<p>作者:([^/]+)/分类:([^<]+)</p>', match)
+            author = author_cat_match.group(1) if author_cat_match else "未知"
+            category = author_cat_match.group(2) if author_cat_match else "未知"
+            stats_match = re.search(r'<p>更新:([^/]+)/字数:([^/]+)/([^<]+)</p>', match)
+            last_date = stats_match.group(1) if stats_match else "未知"
+            word_count = stats_match.group(2) if stats_match else "未知"
+            is_serialize = stats_match.group(3) if stats_match else "未知"
+            tags_match = re.search(r'Tags:<span[^>]*>([^<]+)</span>', match)
+            tags = tags_match.group(1) if tags_match else "无"
+            intro_match = re.search(r'简介:([^<]+)', match)
+            introduction = intro_match.group(1).strip() if intro_match else "暂无简介"
+            img_match = re.search(r'<img src="([^"]+)"', match)
+            cover_url = img_match.group(1) if img_match else f"https://img.wenku8.com/image/{node}/{book_id}/{book_id}s.jpg"
+            download_url = f"https://dl.wenku8.com/down.php?type=txt&node={node}&id={book_id}"
+            page_url = f"https://www.wenku8.net/book/{book_id}.htm"
+            books[title] = {
+                "author": author,
+                "category": category,
+                "last_date": last_date,
+                "word_count": word_count,
+                "is_serialize": is_serialize,
+                "introduction": introduction,
+                "tags": tags,
+                "cover_url": cover_url,
+                "download_url": download_url,
+                "page": page_url,
+                "hot": "搜索结果书籍"
+            }
+            results.append((author, title, download_url))
+    
+    _log.info(f"总搜索结果数量: {len(results)}")
     return results
 
 def get_book_detail_by_url(book_url: str) -> dict:
     """
     通过URL获取小说详情（类似/hotnovel的实现）
-    :param book_url: 小说详情页面URL，如 https://www.wenku8.net/book/1234.htm
+    :param book_url: 小说详情页面URL，如 https://www.wenku8.net/book/1234.htm 或 /book/1234.htm
     :return: 包含小说详细信息的字典
     """
     headers = {
@@ -2820,10 +2846,20 @@ def get_book_detail_by_url(book_url: str) -> dict:
         "Cookie": WENKU8_COOKIE
     }
 
+    # 处理相对路径
+    if not book_url.startswith(('http://', 'https://')):
+        book_url = 'https://www.wenku8.net' + book_url
+
     _log.info(f"获取小说详情: {book_url}")
     try:
         response = requests.get(book_url, headers=headers, timeout=10)
         _log.info(f"详情页响应状态码: {response.status_code}")
+        
+        # 检查网站是否关闭
+        if response.status_code == 404 or '网站已关闭' in response.text or '有缘再相聚' in response.text:
+            _log.warning(f"wenku8.net 网站已关闭或页面不存在")
+            return None
+        
         response.encoding = "gbk"
         content = response.text
         
@@ -3236,10 +3272,18 @@ async def handle_random_novel(msg, is_group=True):
         )
     if is_group:
         await msg.reply(rtf=reply)
-        await bot.api.post_group_file(msg.group_id, file=url)
+        try:
+            await bot.api.post_group_file(msg.group_id, file=url)
+        except Exception as e:
+            _log.error(f"发送群文件失败: {e}")
+            await msg.reply(text="但是下载小说失败喵~ 可能是因为 wenku8 网站已关闭，请稍后再试喵~")
     else:
         await bot.api.post_private_msg(msg.user_id, rtf=reply)
-        await bot.api.upload_private_file(msg.user_id, file=url,name=novel+".txt")
+        try:
+            await bot.api.upload_private_file(msg.user_id, file=url, name=novel+".txt")
+        except Exception as e:
+            _log.error(f"发送私聊文件失败: {e}")
+            await bot.api.post_private_msg(msg.user_id, text="但是下载小说失败喵~ 可能是因为 wenku8 网站已关闭，请稍后再试喵~")
 
 @register_command("/hotnovel", help_text="/hotnovel <day|month> [数量] -> 获取今日/本月热门轻小说(支持翻页)", category="6")
 async def handle_hotnovel(msg, is_group=True):
