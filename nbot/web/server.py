@@ -331,14 +331,37 @@ class WebChatServer:
 
         # 停止事件字典（用于取消 AI 生成）
         self.stop_events: Dict[str, threading.Event] = {}
+        self.startup_ready = False
+        self.startup_error: Optional[str] = None
+        self.startup_thread: Optional[threading.Thread] = None
+
 
         self._load_ai_config()
         self._load_web_config()
         self._register_routes()
         self._register_socket_events()
         self._init_default_data()
-        self._load_all_data()
-        self._init_workflow_scheduler()
+        self._start_background_initialization()
+
+    def _start_background_initialization(self):
+        """Load heavier startup data after the server begins accepting requests."""
+
+        def run():
+            try:
+                self._load_all_data()
+                self._init_workflow_scheduler()
+                self.startup_ready = True
+                _log.info("Web server background initialization completed")
+            except Exception as e:
+                self.startup_error = str(e)
+                _log.error(f"Web server background initialization failed: {e}")
+
+        self.startup_thread = threading.Thread(
+            target=run,
+            name="web-startup-init",
+            daemon=True,
+        )
+        self.startup_thread.start()
 
     def _format_uptime(self, seconds):
         """格式化运行时间"""

@@ -5,18 +5,117 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>NekoBot Dashboard</title>
     <link rel="icon" type="image/png" href="/static/neko.png">
-    <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
-    <script src="https://unpkg.com/vue-router@4/dist/vue-router.global.prod.js"></script>
-    <script src="https://cdn.bootcdn.net/ajax/libs/axios/1.6.2/axios.min.js"></script>
-    <script src="https://unpkg.com/socket.io-client@4.7.2/dist/socket.io.min.js"></script>
-    <script src="https://cdn.bootcdn.net/ajax/libs/echarts/5.4.3/echarts.min.js"></script>
-    <script src="https://unpkg.com/marked@11.1.1/marked.min.js"></script>
-    <link rel="stylesheet" href="https://unpkg.com/@highlightjs/cdn-assets@11.9.0/styles/github-dark.min.css">
-    <script src="https://unpkg.com/@highlightjs/cdn-assets@11.9.0/highlight.min.js"></script>
+    <script src="/static/vendor/socket.io.min.js"></script>
+    <script src="/static/vendor/vue.global.prod.js"></script>
+    <script src="/static/vendor/vue-router.global.prod.js"></script>
+    <script src="/static/vendor/axios.min.js"></script>
+    <script src="/static/vendor/echarts.min.js"></script>
+    <script src="/static/vendor/marked.min.js"></script>
+    <link rel="stylesheet" href="/static/vendor/styles/highlight-github-dark.min.css">
+    <script src="/static/vendor/highlight.min.js"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <!-- 文档预览库 -->
-    <script src="https://cdn.jsdelivr.net/npm/mammoth@1.6.0/mammoth.browser.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+    <script>
+        window.__nbotCoreDepsReady = Promise.resolve();
+        window.__nbotOptionalDepsReady = Promise.resolve();
+    </script>
+    <style>
+        #boot-overlay {
+            position: fixed;
+            inset: 0;
+            z-index: 99999;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: radial-gradient(circle at top, rgba(236,72,153,0.18), transparent 32%), #0d1117;
+            color: #e6edf3;
+            transition: opacity 0.25s ease, visibility 0.25s ease;
+        }
+        #boot-overlay.is-hidden {
+            opacity: 0;
+            visibility: hidden;
+            pointer-events: none;
+        }
+        .boot-card {
+            width: min(560px, calc(100vw - 32px));
+            padding: 28px 24px;
+            border-radius: 20px;
+            background: rgba(22, 27, 34, 0.92);
+            border: 1px solid rgba(255,255,255,0.08);
+            box-shadow: 0 24px 80px rgba(0, 0, 0, 0.35);
+        }
+        .boot-row {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            margin-bottom: 14px;
+        }
+        .boot-logo {
+            width: 54px;
+            height: 54px;
+            border-radius: 14px;
+            object-fit: cover;
+            flex: none;
+        }
+        .boot-title {
+            margin: 0;
+            font-size: 22px;
+            font-weight: 700;
+        }
+        .boot-subtitle {
+            margin: 4px 0 0;
+            color: #8b949e;
+            font-size: 14px;
+        }
+        .boot-progress {
+            height: 8px;
+            overflow: hidden;
+            border-radius: 999px;
+            background: rgba(255,255,255,0.08);
+            margin: 18px 0 12px;
+        }
+        .boot-progress::after {
+            content: '';
+            display: block;
+            width: 36%;
+            height: 100%;
+            border-radius: inherit;
+            background: linear-gradient(90deg, #ec4899, #58a6ff);
+            animation: boot-loading 1.2s ease-in-out infinite;
+        }
+        .boot-status {
+            margin: 0;
+            color: #c9d1d9;
+            font-size: 14px;
+            line-height: 1.6;
+        }
+        .boot-status strong {
+            color: #fff;
+        }
+        .boot-tips {
+            margin-top: 12px;
+            color: #8b949e;
+            font-size: 13px;
+            line-height: 1.6;
+        }
+        .boot-error {
+            margin-top: 14px;
+            padding: 12px 14px;
+            border-radius: 12px;
+            background: rgba(218,54,51,0.12);
+            border: 1px solid rgba(218,54,51,0.28);
+            color: #ffb4b0;
+            font-size: 13px;
+            line-height: 1.6;
+            display: none;
+        }
+        .boot-error.is-visible {
+            display: block;
+        }
+        @keyframes boot-loading {
+            0% { transform: translateX(-120%); }
+            100% { transform: translateX(320%); }
+        }
+    </style>
     <style>
         /* 深色主题（默认） */
         :root {
@@ -5309,6 +5408,21 @@
     </style>
 </head>
 <body>
+    <div id="boot-overlay">
+        <div class="boot-card">
+            <div class="boot-row">
+                <img class="boot-logo" src="/static/neko.png" alt="NekoBot">
+                <div>
+                    <h1 class="boot-title">NekoBot Dashboard</h1>
+                    <p class="boot-subtitle">Loading core assets and session data</p>
+                </div>
+            </div>
+            <div class="boot-progress"></div>
+            <p id="boot-status" class="boot-status"><strong>Starting</strong> First load may take a few seconds.</p>
+            <div class="boot-tips">If this screen stays for too long, the browser is usually waiting on frontend assets rather than the Python server.</div>
+            <div id="boot-error" class="boot-error"></div>
+        </div>
+    </div>
     <div id="app">
         <!-- Login -->
         <div v-if="!isLoggedIn" class="login-container">
@@ -9233,6 +9347,9 @@
     </div>
 
     <script>
+        (async function () {
+        await (window.__nbotCoreDepsReady || Promise.resolve());
+
         // 全局函数：复制代码块
         function copyCodeBlock(id) {
             const pre = document.getElementById(id);
@@ -9285,8 +9402,10 @@
         const api = axios.create({ baseURL: '', timeout: 60000 });
         
         // Socket.IO 连接配置优化
-        const socket = io({
-            transports: ['websocket'],  // 使用 WebSocket
+        const socket = io(window.location.origin, {
+            path: '/socket.io',
+            transports: ['polling', 'websocket'],
+            upgrade: true,  // 使用 WebSocket
             reconnection: true,         // 启用自动重连
             reconnectionAttempts: 10,   // 最多重连 10 次
             reconnectionDelay: 1000,   // 重连延迟 1 秒
@@ -15873,6 +15992,53 @@ def main(params):
                 'click-outside': clickOutside
             }
         }).mount('#app');
+        window.__nbotAppReady = true;
+        window.dispatchEvent(new Event('nbot-app-ready'));
+        if (window.__hideNbotBootOverlay) window.__hideNbotBootOverlay();
+        })().catch(function (error) {
+            console.error('Failed to initialize app:', error);
+            const statusEl = document.getElementById('boot-status');
+            const errorEl = document.getElementById('boot-error');
+            if (statusEl) statusEl.innerHTML = '<strong>App initialization failed</strong> The dashboard script did not finish starting.';
+            if (errorEl) {
+                errorEl.classList.add('is-visible');
+                errorEl.textContent = error && error.message ? error.message : String(error);
+            }
+        });
+    </script>
+
+    <script>
+        (function () {
+            const overlay = document.getElementById('boot-overlay');
+            const statusEl = document.getElementById('boot-status');
+            const errorEl = document.getElementById('boot-error');
+            if (!overlay || !statusEl || !errorEl) return;
+
+            function hideOverlay() {
+                overlay.classList.add('is-hidden');
+                window.clearTimeout(failTimer);
+            }
+
+            function showError() {
+                if (window.Vue && window.axios && window.io) return;
+                statusEl.innerHTML = '<strong>Assets blocked</strong> The HTML loaded, but core frontend libraries did not finish loading.';
+                errorEl.classList.add('is-visible');
+                errorEl.innerHTML = 'The browser could not finish loading frontend assets. Refresh the page, or keep using local vendor files instead of CDNs.';
+            }
+
+            const failTimer = window.setTimeout(showError, 8000);
+            window.addEventListener('nbot-app-ready', hideOverlay, { once: true });
+            if (window.__nbotAppReady) {
+                hideOverlay();
+                return;
+            }
+            window.addEventListener('load', function () {
+                if (window.Vue && window.axios && window.io) {
+                    statusEl.innerHTML = '<strong>Assets ready</strong> Rendering the dashboard.';
+                }
+            });
+            window.__hideNbotBootOverlay = hideOverlay;
+        })();
     </script>
 </body>
 </html>
