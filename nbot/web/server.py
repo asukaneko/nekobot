@@ -61,14 +61,7 @@ try:
 except ImportError:
     APSCHEDULER_AVAILABLE = False
 
-# 导入 Memory 系统（已废弃，使用 prompt_manager 的 memory）
-try:
-    from nbot.core.memory import MemoryStore, MemoryType
 
-    MEMORY_AVAILABLE = True
-except ImportError:
-    MEMORY_AVAILABLE = False
-    _log.warning("Memory system not available")
 
 # 导入知识库管理器
 try:
@@ -738,15 +731,6 @@ class WebChatServer:
 
         # 停止事件字典（用于取消 AI 生成）
         self.stop_events: Dict[str, threading.Event] = {}
-
-        # 初始化 Memory 存储
-        self.memory_store = None
-        if MEMORY_AVAILABLE:
-            try:
-                self.memory_store = MemoryStore()
-                _log.info("Memory store initialized")
-            except Exception as e:
-                _log.error(f"Failed to initialize memory store: {e}")
 
         self._load_ai_config()
         self._load_web_config()
@@ -8177,6 +8161,8 @@ class WebChatServer:
                                 )
 
                             max_iterations = 50
+                            consecutive_errors = 0
+                            max_consecutive_errors = 3
                             final_content = None
 
                             _log.info(
@@ -8696,11 +8682,21 @@ class WebChatServer:
                                     final_content = response.get("content", "")
                                     finish_reason = response.get("finish_reason", "")
 
+                                    # 检查是否为空回复（API 失败）
+                                    if not final_content:
+                                        consecutive_errors += 1
+                                        _log.warning(
+                                            f"[AgentLoop] API 返回空内容，错误计数: {consecutive_errors}/{max_consecutive_errors}, iteration={iteration}"
+                                        )
+                                    else:
+                                        consecutive_errors = 0
+
                                     # 判断是否应该终止思考
                                     # 1. finish_reason == 'stop' 表示模型正常完成（OpenAI标准）
                                     # 2. finish_reason 为空但 AI 返回了内容（某些国内API不返回finish_reason）
                                     # 3. 回复以 'break' 结尾表示AI主动要求终止
                                     # 4. 达到最大迭代次数
+                                    # 5. 连续错误次数超过阈值
                                     should_stop = (
                                         finish_reason == "stop"
                                         or (
@@ -8708,6 +8704,7 @@ class WebChatServer:
                                         )  # 兼容不返回finish_reason的API
                                         or final_content.rstrip().endswith("break")
                                         or iteration >= max_iterations - 1
+                                        or consecutive_errors >= max_consecutive_errors
                                     )
 
                                     if should_stop:
