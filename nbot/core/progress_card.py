@@ -1,4 +1,4 @@
-"""
+﻿"""
 进度卡片管理模块
 用于在 Web 端显示 AI 处理进度，包括工具调用、图片识别、文件处理等
 """
@@ -29,20 +29,20 @@ class StepType(Enum):
 
 
 STEP_CONFIG = {
-    StepType.START: {'type': 'thinking', 'icon': '🤔', 'status': 'active'},
-    StepType.THINKING: {'type': 'thinking', 'icon': '💭', 'status': 'active'},
-    StepType.AI_THINKING: {'type': 'ai_thinking', 'icon': '🧠', 'status': 'done'},
-    StepType.TOOL: {'type': 'tool', 'icon': '🔧', 'status': 'running'},
-    StepType.TOOL_DONE: {'type': 'tool', 'icon': '🔧', 'status': 'done'},
-    StepType.IMAGE: {'type': 'image', 'icon': '🖼️', 'status': 'running'},
-    StepType.IMAGE_DONE: {'type': 'image', 'icon': '🖼️', 'status': 'done'},
-    StepType.FILE: {'type': 'file', 'icon': '📄', 'status': 'running'},
-    StepType.FILE_DONE: {'type': 'file', 'icon': '📄', 'status': 'done'},
-    StepType.UPLOAD: {'type': 'upload', 'icon': '📤', 'status': 'running'},
-    StepType.UPLOAD_DONE: {'type': 'upload', 'icon': '📤', 'status': 'done'},
-    StepType.KNOWLEDGE: {'type': 'knowledge', 'icon': '📚', 'status': 'running'},
-    StepType.KNOWLEDGE_DONE: {'type': 'knowledge', 'icon': '📚', 'status': 'done'},
-    StepType.DONE: {'type': 'done', 'icon': '✅', 'status': 'done'},
+    StepType.START: {'type': 'thinking', 'icon': '\U0001F914', 'status': 'active'},
+    StepType.THINKING: {'type': 'thinking', 'icon': '\U0001F4AD', 'status': 'active'},
+    StepType.AI_THINKING: {'type': 'ai_thinking', 'icon': '\U0001F9E0', 'status': 'done'},
+    StepType.TOOL: {'type': 'tool', 'icon': '\U0001F527', 'status': 'running'},
+    StepType.TOOL_DONE: {'type': 'tool', 'icon': '\U0001F527', 'status': 'done'},
+    StepType.IMAGE: {'type': 'image', 'icon': '\U0001F5BC\uFE0F', 'status': 'running'},
+    StepType.IMAGE_DONE: {'type': 'image', 'icon': '\U0001F5BC\uFE0F', 'status': 'done'},
+    StepType.FILE: {'type': 'file', 'icon': '\U0001F4C4', 'status': 'running'},
+    StepType.FILE_DONE: {'type': 'file', 'icon': '\U0001F4C4', 'status': 'done'},
+    StepType.UPLOAD: {'type': 'upload', 'icon': '\U0001F4E4', 'status': 'running'},
+    StepType.UPLOAD_DONE: {'type': 'upload', 'icon': '\U0001F4E4', 'status': 'done'},
+    StepType.KNOWLEDGE: {'type': 'knowledge', 'icon': '\U0001F4DA', 'status': 'running'},
+    StepType.KNOWLEDGE_DONE: {'type': 'knowledge', 'icon': '\U0001F4DA', 'status': 'done'},
+    StepType.DONE: {'type': 'done', 'icon': '\u2705', 'status': 'done'},
 }
 
 

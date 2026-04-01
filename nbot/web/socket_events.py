@@ -9,12 +9,17 @@ from datetime import datetime
 from flask import request
 from flask_socketio import emit, join_room, leave_room
 
+from nbot.core import ChatRequest, WebSessionStore
 from nbot.web.message_adapter import WebMessageAdapter
 
 _log = logging.getLogger(__name__)
 
 
 def register_socket_events(server):
+    session_store = WebSessionStore(
+        server.sessions, save_callback=lambda: server._save_data("sessions")
+    )
+
     @server.socketio.on("connect")
     def handle_connect():
         user_id = request.args.get("user_id", "web_user")
@@ -135,19 +140,28 @@ def register_socket_events(server):
                         }
                         processed_attachments.append(processed_att)
 
+            chat_request = ChatRequest.for_web(
+                session_id=session_id,
+                content=content,
+                sender=sender,
+                attachments=processed_attachments,
+                parent_message_id=temp_id,
+                metadata={"tempId": temp_id},
+            )
+
             message = {
                 "id": str(uuid.uuid4()),
                 "role": "user",
-                "content": content,
+                "content": chat_request.content,
                 "timestamp": datetime.now().isoformat(),
-                "sender": sender,
-                "source": "web",
-                "attachments": processed_attachments,
+                "sender": chat_request.sender,
+                "source": chat_request.channel,
+                "attachments": chat_request.attachments,
                 "tempId": temp_id,
-                "session_id": session_id,
+                "session_id": chat_request.conversation_id,
             }
 
-            server.sessions[session_id]["messages"].append(message)
+            session_store.append_message(session_id, message)
 
             if getattr(server, "MESSAGE_MODULE_AVAILABLE", False) and getattr(
                 server, "message_manager", None
@@ -156,17 +170,16 @@ def register_socket_events(server):
                     session_id,
                     server.create_message(
                         "user",
-                        content,
-                        sender=sender,
+                        chat_request.content,
+                        sender=chat_request.sender,
                         source="web",
-                        session_id=session_id,
-                        attachments=processed_attachments,
+                        session_id=chat_request.conversation_id,
+                        attachments=chat_request.attachments,
                         metadata={"tempId": temp_id},
                     ),
                 )
 
             server.socketio.emit("new_message", message, room=session_id)
-            server._save_data("sessions")
 
             if is_command and matched_handler:
                 web_user_id = str(int(hashlib.md5(session_id.encode()).hexdigest(), 16))[
@@ -198,7 +211,11 @@ def register_socket_events(server):
             else:
                 parent_msg_id = temp_id if temp_id else message["id"]
                 server._trigger_ai_response(
-                    session_id, content, sender, attachments, parent_msg_id
+                    chat_request.conversation_id,
+                    chat_request.content,
+                    chat_request.sender,
+                    chat_request.attachments,
+                    parent_msg_id,
                 )
 
         except Exception as e:

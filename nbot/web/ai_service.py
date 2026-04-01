@@ -1,4 +1,4 @@
-import hashlib
+﻿import hashlib
 import json
 import logging
 import os
@@ -8,6 +8,16 @@ import time
 import uuid
 from datetime import datetime
 from typing import Dict, List
+from nbot.core import (
+    ChatRequest,
+    ChatResponse,
+    ToolLoopHooks,
+    WebSessionStore,
+    inject_knowledge_context,
+    restore_continue_messages,
+    run_tool_call_loop,
+    trim_messages,
+)
 
 try:
     from nbot.core.knowledge import get_knowledge_manager
@@ -29,6 +39,17 @@ def trigger_ai_response(
     parent_message_id=None,
 ):
     """Trigger an AI response for a web session."""
+    session_store = WebSessionStore(
+        server.sessions, save_callback=lambda: server._save_data("sessions")
+    )
+    chat_request = ChatRequest.for_web(
+        session_id=session_id,
+        content=user_content,
+        sender=sender,
+        attachments=attachments,
+        parent_message_id=parent_message_id,
+    )
+
     # 强制转换为列表
     if not attachments or not isinstance(attachments, list):
         attachments = []
@@ -84,7 +105,7 @@ def trigger_ai_response(
 
             # 检测"继续"意图
             tool_call_history = None
-            if messages_for_ai and user_content.strip() in [
+            if messages_for_ai and chat_request.content.strip() in [
                 "继续",
                 "继续执行",
                 "continue",
@@ -143,6 +164,19 @@ def trigger_ai_response(
                     )
 
             # 检查附件并处理
+            restored_messages, restored_tool_call_history = restore_continue_messages(
+                session["messages"], chat_request.content
+            )
+            if restored_tool_call_history:
+                tool_call_history = restored_tool_call_history
+                _log.info(
+                    f"[Continue] 妫€娴嬪埌缁х画璇锋眰锛屾仮澶?{len(tool_call_history)} 鏉″伐鍏疯皟鐢ㄨ褰?"
+                )
+
+            messages_for_ai = inject_knowledge_context(
+                trim_messages(restored_messages), knowledge_text
+            )
+
             image_urls = []
             file_contents = []
 
@@ -802,8 +836,327 @@ def trigger_ai_response(
 
                         # 注意：complete_thinking_card 函数已在前面定义
 
-                        stopped_prematurely = False
-                        for iteration in range(max_iterations):
+                        def send_workspace_file_message(file_path, filename):
+                            _log.info(
+                                f"[SendFile] \u51c6\u5907\u53d1\u9001\u6587\u4ef6: {filename}, path={file_path}, session_id={session_id}"
+                            )
+                            if not file_path or not filename or not session_id:
+                                _log.warning(
+                                    f"[SendFile] \u65e0\u6cd5\u53d1\u9001\u6587\u4ef6: file_path={file_path}, filename={filename}, session_id={session_id}"
+                                )
+                                return
+
+                            try:
+                                import base64
+                                import mimetypes
+                                import shutil
+
+                                if not os.path.exists(file_path):
+                                    _log.error(f"[SendFile] \u6587\u4ef6\u4e0d\u5b58\u5728: {file_path}")
+                                    return
+
+                                file_size = os.path.getsize(file_path)
+                                mime_type, _ = mimetypes.guess_type(file_path)
+                                if not mime_type:
+                                    mime_type = "application/octet-stream"
+                                ext = os.path.splitext(file_path)[1].lower()
+                                is_image = mime_type.startswith("image/")
+
+                                files_dir = os.path.join(server.static_folder, "files")
+                                os.makedirs(files_dir, exist_ok=True)
+                                file_hash = hashlib.md5(
+                                    f"{file_path}{time.time()}".encode()
+                                ).hexdigest()[:8]
+                                safe_name = f"{file_hash}_{filename}"
+                                dest_path = os.path.join(files_dir, safe_name)
+                                os.makedirs(os.path.dirname(dest_path), exist_ok=True)
+                                shutil.copy2(file_path, dest_path)
+                                download_url = f"/static/files/{safe_name}"
+
+                                file_info = {
+                                    "id": str(uuid.uuid4()),
+                                    "role": "assistant",
+                                    "content": f"[\u6587\u4ef6: {filename}]",
+                                    "timestamp": datetime.now().isoformat(),
+                                    "sender": "AI",
+                                    "source": "web",
+                                    "session_id": session_id,
+                                    "file": {
+                                        "name": filename,
+                                        "type": mime_type,
+                                        "size": file_size,
+                                        "is_image": is_image,
+                                        "extension": ext,
+                                        "download_url": download_url,
+                                        "url": download_url,
+                                    },
+                                }
+
+                                if is_image and file_size < 5 * 1024 * 1024:
+                                    try:
+                                        with open(file_path, "rb") as f:
+                                            file_data = f.read()
+                                        b64_data = base64.b64encode(file_data).decode(
+                                            "utf-8"
+                                        )
+                                        file_info["file"][
+                                            "data"
+                                        ] = f"data:{mime_type};base64,{b64_data}"
+                                        file_info["file"]["preview_url"] = file_info[
+                                            "file"
+                                        ]["data"]
+                                    except Exception as img_err:
+                                        _log.warning(
+                                            f"[SendFile] \u56fe\u7247\u8f6c base64 \u5931\u8d25: {img_err}"
+                                        )
+
+                                if session_id in server.sessions:
+                                    session_store.append_message(session_id, file_info)
+
+                                server.socketio.emit(
+                                    "new_message", file_info, room=session_id
+                                )
+                                _log.info(
+                                    f"[SendFile] \u6587\u4ef6\u5df2\u53d1\u9001: {filename} ({mime_type}, {file_size} bytes)"
+                                )
+                            except Exception as send_err:
+                                _log.error(
+                                    f"[SendFile] \u53d1\u9001\u6587\u4ef6\u65f6\u51fa\u9519: {send_err}",
+                                    exc_info=True,
+                                )
+
+                        def get_tool_display_name(tool_name):
+                            return {
+                                "search_news": "\U0001F50D \u641c\u7d22\u65b0\u95fb",
+                                "get_weather": "\U0001F324\uFE0F \u67e5\u8be2\u5929\u6c14",
+                                "search_web": "\U0001F310 \u7f51\u9875\u641c\u7d22",
+                                "get_date_time": "\U0001F550 \u83b7\u53d6\u65f6\u95f4",
+                                "http_get": "\U0001F4E1 \u83b7\u53d6\u7f51\u9875",
+                                "understand_image": "\U0001F5BC\uFE0F \u7406\u89e3\u56fe\u7247",
+                                "workspace_create_file": "\U0001F4DD \u521b\u5efa\u6587\u4ef6",
+                                "workspace_read_file": "\U0001F4D6 \u8bfb\u53d6\u6587\u4ef6",
+                                "workspace_edit_file": "\u270F\uFE0F \u7f16\u8f91\u6587\u4ef6",
+                                "workspace_delete_file": "\U0001F5D1\uFE0F \u5220\u9664\u6587\u4ef6",
+                                "workspace_list_files": "\U0001F4C1 \u5217\u51fa\u6587\u4ef6",
+                                "workspace_tree": "\U0001F333 \u663e\u793a\u76ee\u5f55\u6811",
+                                "workspace_send_file": "\U0001F4E4 \u53d1\u9001\u6587\u4ef6",
+                                "todo_add": "\u2705 \u6dfb\u52a0\u5f85\u529e",
+                                "todo_list": "\U0001F4CB \u5217\u51fa\u5f85\u529e",
+                                "todo_complete": "\u2713 \u5b8c\u6210\u5f85\u529e",
+                                "todo_delete": "\U0001F5D1\uFE0F \u5220\u9664\u5f85\u529e",
+                                "todo_clear": "\U0001F9F9 \u6e05\u7a7a\u5f85\u529e",
+                            }.get(tool_name, f"\u2699\uFE0F {tool_name}")
+
+                        def execute_web_tool(
+                            tool_call, thinking_content, iteration, current_tool_messages
+                        ):
+                            return execute_tool(
+                                tool_call["name"],
+                                tool_call["arguments"],
+                                context=tool_context,
+                            )
+
+                        def on_tool_start(
+                            tool_call, ai_thinking_content, iteration, current_tool_messages
+                        ):
+                            tool_name = tool_call["name"]
+                            arguments = tool_call["arguments"]
+                            tool_display_name = get_tool_display_name(tool_name)
+                            update_thinking_card(
+                                "tool",
+                                tool_display_name,
+                                json.dumps(arguments, ensure_ascii=False)[:100],
+                                None,
+                                None,
+                                None,
+                                ai_thinking_content if ai_thinking_content else None,
+                            )
+
+                            if tool_name.startswith("workspace_"):
+                                args_str = json.dumps(arguments, ensure_ascii=False)
+                                _log.info(f"[Workspace] \u5de5\u5177\u8c03\u7528: {tool_name}")
+                                if len(args_str) > 200:
+                                    _log.info(
+                                        f"[Workspace] \u53c2\u6570: {args_str[:200]}... ({len(args_str)} \u5b57\u7b26)"
+                                    )
+                                else:
+                                    _log.info(f"[Workspace] \u53c2\u6570: {args_str}")
+
+                        def on_tool_result(
+                            tool_call,
+                            tool_result,
+                            ai_thinking_content,
+                            iteration,
+                            current_tool_messages,
+                        ):
+                            tool_name = tool_call["name"]
+                            arguments = tool_call["arguments"]
+                            tool_display_name = get_tool_display_name(tool_name)
+
+                            if tool_result.get("success"):
+                                result_preview = str(
+                                    tool_result.get(
+                                        "content", tool_result.get("files", tool_result)
+                                    )
+                                )[:100]
+                                update_thinking_card(
+                                    "tool_done",
+                                    tool_display_name,
+                                    result_preview,
+                                    None,
+                                    step_arguments=arguments,
+                                    step_full_result=tool_result,
+                                    thinking_content=ai_thinking_content
+                                    if ai_thinking_content
+                                    else None,
+                                )
+                            else:
+                                update_thinking_card(
+                                    "tool_done",
+                                    tool_display_name,
+                                    None,
+                                    None,
+                                    step_arguments=arguments,
+                                    step_full_result=tool_result,
+                                    thinking_content=ai_thinking_content
+                                    if ai_thinking_content
+                                    else None,
+                                )
+
+                            if tool_name.startswith("workspace_"):
+                                if tool_result.get("success"):
+                                    _log.info(f"[Workspace] \u6267\u884c\u6210\u529f: {tool_name}")
+                                    _log.info(
+                                        f"[Workspace] \u7ed3\u679c\u9884\u89c8: {str(tool_result)[:300]}"
+                                    )
+                                else:
+                                    _log.error(
+                                        f"[Workspace] \u6267\u884c\u5931\u8d25: {tool_name} - {tool_result.get('error')}"
+                                    )
+
+                            if tool_name.startswith("todo_"):
+                                if tool_result.get("success"):
+                                    _log.info(
+                                        f"[Todo] \u6267\u884c\u6210\u529f: {tool_name} - {tool_result.get('message', '')}"
+                                    )
+                                    if todo_card and server.TODO_CARD_AVAILABLE:
+                                        try:
+                                            if tool_name == "todo_add":
+                                                todo_info = tool_result.get("todo", {})
+                                                todo_card.add_todo(
+                                                    todo_id=todo_info.get("id"),
+                                                    content=todo_info.get("content", ""),
+                                                    priority=todo_info.get(
+                                                        "priority", "medium"
+                                                    ),
+                                                )
+                                            elif tool_name == "todo_complete":
+                                                todo_info = tool_result.get("todo", {})
+                                                todo_card.complete_todo(
+                                                    todo_info.get("id")
+                                                )
+                                            elif tool_name == "todo_delete":
+                                                deleted_todo = tool_result.get(
+                                                    "deleted_todo", {}
+                                                )
+                                                todo_card.delete_todo(
+                                                    deleted_todo.get("id")
+                                                )
+                                            elif tool_name == "todo_list":
+                                                todo_card.update_todos(
+                                                    tool_result.get("todos", [])
+                                                )
+                                            elif tool_name == "todo_clear":
+                                                todo_card.todos = []
+                                                todo_card._emit_update()
+                                        except Exception as e:
+                                            _log.warning(
+                                                f"[TodoCard] \u66f4\u65b0 Todo \u5361\u7247\u5931\u8d25: {e}"
+                                            )
+                                else:
+                                    _log.error(
+                                        f"[Todo] \u6267\u884c\u5931\u8d25: {tool_name} - {tool_result.get('error', '')}"
+                                    )
+
+                            if (
+                                tool_name == "send_message"
+                                and tool_result.get("action") == "send_message"
+                            ):
+                                progress_msg = {
+                                    "id": str(uuid.uuid4()),
+                                    "role": "assistant",
+                                    "content": tool_result.get("content", ""),
+                                    "timestamp": datetime.now().isoformat(),
+                                    "sender": "AI",
+                                    "message_type": tool_result.get(
+                                        "message_type", "progress"
+                                    ),
+                                    "is_progress_message": True,
+                                }
+                                server.socketio.emit(
+                                    "progress_message",
+                                    {"session_id": session_id, "message": progress_msg},
+                                    room=session_id,
+                                )
+                                _log.info(
+                                    f"[SendMessage] \u5df2\u53d1\u9001\u8fdb\u5ea6\u6d88\u606f: {tool_result.get('content', '')[:50]}..."
+                                )
+                                return {
+                                    "role": "tool",
+                                    "tool_call_id": tool_call.get("id", ""),
+                                    "content": json.dumps(
+                                        {
+                                            "success": True,
+                                            "message": "\u6d88\u606f\u5df2\u53d1\u9001",
+                                        },
+                                        ensure_ascii=False,
+                                    ),
+                                }
+
+                            if (
+                                tool_name == "workspace_send_file"
+                                and tool_result.get("action") == "send_file"
+                            ):
+                                send_workspace_file_message(
+                                    tool_result.get("path", ""),
+                                    tool_result.get("filename", ""),
+                                )
+
+                            return None
+
+                        hooks = ToolLoopHooks(
+                            on_iteration_start=lambda iteration, current_tool_messages: (
+                                progress_card.increment_iteration()
+                                if progress_card
+                                else None
+                            ),
+                            on_tool_start=on_tool_start,
+                            on_tool_result=on_tool_result,
+                        )
+
+                        use_unified_tool_loop = True
+                        if use_unified_tool_loop:
+                            loop_result = run_tool_call_loop(
+                                tool_messages,
+                                lambda current_messages, stop_event=None: server._get_ai_response_with_tools(
+                                    current_messages,
+                                    enabled_tools,
+                                    stop_event=stop_event,
+                                ),
+                                execute_web_tool,
+                                max_iterations=max_iterations,
+                                max_consecutive_errors=max_consecutive_errors,
+                                stop_event=stop_event,
+                                hooks=hooks,
+                            )
+                            stopped_prematurely = loop_result.stopped
+                            final_content = loop_result.final_content
+                            tool_messages = loop_result.tool_messages
+                            consecutive_errors = loop_result.consecutive_errors
+                        else:
+                            stopped_prematurely = False
+
+                        for iteration in ([] if use_unified_tool_loop else range(max_iterations)):
                             # 检查停止事件
                             if stop_event.is_set():
                                 _log.info(
@@ -867,25 +1220,25 @@ def trigger_ai_response(
 
                                     # 更新进度卡片 - 工具开始
                                     tool_display_name = {
-                                        "search_news": "🔍 搜索新闻",
-                                        "get_weather": "🌤️ 查询天气",
-                                        "search_web": "🌐 网页搜索",
-                                        "get_date_time": "🕐 获取时间",
-                                        "http_get": "📡 获取网页",
-                                        "understand_image": "🖼️ 理解图片",
-                                        "workspace_create_file": "📝 创建文件",
-                                        "workspace_read_file": "📖 读取文件",
-                                        "workspace_edit_file": "✏️ 编辑文件",
-                                        "workspace_delete_file": "🗑️ 删除文件",
-                                        "workspace_list_files": "📁 列出文件",
-                                        "workspace_tree": "🌳 显示目录树",
-                                        "workspace_send_file": "📤 发送文件",
-                                        "todo_add": "✅ 添加待办",
-                                        "todo_list": "📋 列出待办",
-                                        "todo_complete": "✓ 完成待办",
-                                        "todo_delete": "🗑️ 删除待办",
-                                        "todo_clear": "🧹 清空待办",
-                                    }.get(tool_name, f"⚙️ {tool_name}")
+                                        "search_news": "\U0001F50D \u641c\u7d22\u65b0\u95fb",
+                                        "get_weather": "\U0001F324\uFE0F \u67e5\u8be2\u5929\u6c14",
+                                        "search_web": "\U0001F310 \u7f51\u9875\u641c\u7d22",
+                                        "get_date_time": "\U0001F550 \u83b7\u53d6\u65f6\u95f4",
+                                        "http_get": "\U0001F4E1 \u83b7\u53d6\u7f51\u9875",
+                                        "understand_image": "\U0001F5BC\uFE0F \u7406\u89e3\u56fe\u7247",
+                                        "workspace_create_file": "\U0001F4DD \u521b\u5efa\u6587\u4ef6",
+                                        "workspace_read_file": "\U0001F4D6 \u8bfb\u53d6\u6587\u4ef6",
+                                        "workspace_edit_file": "\u270F\uFE0F \u7f16\u8f91\u6587\u4ef6",
+                                        "workspace_delete_file": "\U0001F5D1\uFE0F \u5220\u9664\u6587\u4ef6",
+                                        "workspace_list_files": "\U0001F4C1 \u5217\u51fa\u6587\u4ef6",
+                                        "workspace_tree": "\U0001F333 \u663e\u793a\u76ee\u5f55\u6811",
+                                        "workspace_send_file": "\U0001F4E4 \u53d1\u9001\u6587\u4ef6",
+                                        "todo_add": "\u2705 \u6dfb\u52a0\u5f85\u529e",
+                                        "todo_list": "\U0001F4CB \u5217\u51fa\u5f85\u529e",
+                                        "todo_complete": "\u2713 \u5b8c\u6210\u5f85\u529e",
+                                        "todo_delete": "\U0001F5D1\uFE0F \u5220\u9664\u5f85\u529e",
+                                        "todo_clear": "\U0001F9F9 \u6e05\u7a7a\u5f85\u529e",
+                                    }.get(tool_name, f"\u2699\uFE0F {tool_name}")
 
                                     update_thinking_card(
                                         "tool",
@@ -1226,10 +1579,9 @@ def trigger_ai_response(
 
                                                     # 保存到 session
                                                     if session_id in server.sessions:
-                                                        server.sessions[session_id][
-                                                            "messages"
-                                                        ].append(file_info)
-                                                        server._save_data("sessions")
+                                                        session_store.append_message(
+                                                            session_id, file_info
+                                                        )
 
                                                     # 发送文件消息到前端
                                                     server.socketio.emit(
@@ -1362,40 +1714,31 @@ def trigger_ai_response(
                     f"[Stop] 保存工具调用历史，共 {len(tool_call_history)} 条记录"
                 )
 
-                assistant_message = {
-                    "id": str(uuid.uuid4()),
-                    "role": "assistant",
-                    "content": "【生成已停止 - 工具调用记录已保存，回复「继续」可继续执行】",
-                    "timestamp": datetime.now().isoformat(),
-                    "sender": "AI",
-                    "can_continue": True,
-                    "tool_call_history": tool_call_history,
-                }
-                session["messages"].append(assistant_message)
-                server._save_data("sessions")
+                assistant_message = ChatResponse(
+                    final_content="【生成已停止 - 工具调用记录已保存，回复「继续」可继续执行】",
+                    can_continue=True,
+                    tool_trace=tool_call_history,
+                ).to_assistant_message()
+                session_store.append_message(session_id, assistant_message)
                 complete_thinking_card()
                 server._stream_send_response(session_id, assistant_message)
                 return
 
             assistant_content = final_content
 
-            assistant_message = {
-                "id": str(uuid.uuid4()),
-                "role": "assistant",
-                "content": assistant_content,
-                "timestamp": datetime.now().isoformat(),
-                "sender": "AI",
-            }
+            assistant_message = ChatResponse(
+                final_content=assistant_content
+            ).to_assistant_message()
 
             # 使用流式发送
             _log.info(f"[Stream] _trigger_ai_response 准备发送流式响应")
             server._stream_send_response(session_id, assistant_message)
 
-            session["messages"].append(assistant_message)
+            session_store.append_message(session_id, assistant_message)
 
             # 更新 Token 统计
-            estimated_tokens = len(user_content) + len(assistant_content)
-            input_tokens = len(user_content)
+            estimated_tokens = len(chat_request.content) + len(assistant_content)
+            input_tokens = len(chat_request.content)
             output_tokens = len(assistant_content)
             server.token_stats["today"] = (
                 server.token_stats.get("today", 0) + estimated_tokens
@@ -1462,7 +1805,6 @@ def trigger_ai_response(
             )
 
             # 保存会话和 Token 统计到磁盘
-            server._save_data("sessions")
             server._save_data("token_stats")
 
             # 自动重命名会话（如果是默认名称且对话轮数达到一定数量）
@@ -1507,22 +1849,15 @@ def trigger_ai_response(
 
         except Exception as e:
             _log.error(f"Error in AI response: {e}")
-            error_message = {
-                "id": str(uuid.uuid4()),
-                "role": "assistant",
-                "content": f"抱歉，处理消息时出错: {str(e)}",
-                "timestamp": datetime.now().isoformat(),
-                "sender": "AI",
-                "error": True,
-            }
-            session["messages"].append(error_message)
+            error_message = ChatResponse(
+                error=f"抱歉，处理消息时出错: {str(e)}"
+            ).to_assistant_message()
+            session_store.append_message(session_id, error_message)
             server.socketio.emit(
                 "ai_response",
                 {"session_id": session_id, "message": error_message},
                 room=session_id,
             )
-            # 即使出错也保存会话
-            server._save_data("sessions")
         finally:
             # 清理停止事件
             if session_id in server.stop_events:

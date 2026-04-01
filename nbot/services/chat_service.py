@@ -4,7 +4,17 @@ from nbot.services.ai import (
     ai_client, user_messages, group_messages, MAX_HISTORY_LENGTH,
     model, api_key, base_url
 )
-from nbot.core import prompt_manager, message_manager
+from nbot.core import (
+    ChatRequest,
+    ChatResponse,
+    prompt_manager,
+    message_manager,
+    QQSessionStore,
+    ToolLoopExit,
+    build_qq_session_id,
+    dump_json,
+    run_tool_call_loop,
+)
 from nbot.core.message import create_message
 
 # 工作区管理
@@ -36,6 +46,24 @@ except ImportError:
     KNOWLEDGE_AVAILABLE = False
 
 last_log_entry = {}
+
+
+def _save_legacy_qq_histories():
+    try:
+        dump_json("saved_message/user_messages.json", user_messages)
+        dump_json("saved_message/group_messages.json", group_messages)
+    except Exception as e:
+        print(f"保存历史记录失败: {e}")
+
+
+def _get_qq_store() -> QQSessionStore:
+    return QQSessionStore(
+        user_messages=user_messages,
+        group_messages=group_messages,
+        prompt_loader=load_prompt,
+        max_history=MAX_HISTORY_LENGTH,
+        save_callback=_save_legacy_qq_histories,
+    )
 
 
 def search_knowledge_base(query: str, user_id: str = None, group_id: str = None) -> str:
@@ -98,13 +126,7 @@ def get_qq_session_id(user_id=None, group_id=None, group_user_id=None) -> str:
     私聊: "qq_private_{user_id}"
     群聊: "qq_group_{group_id}_{group_user_id}" 或 "qq_group_{group_id}"
     """
-    if user_id:
-        return f"qq_private_{user_id}"
-    elif group_id:
-        if group_user_id:
-            return f"qq_group_{group_id}_{group_user_id}"
-        return f"qq_group_{group_id}"
-    return ""
+    return build_qq_session_id(user_id, group_id, group_user_id)
 
 
 def get_workspace_context(user_id=None, group_id=None, group_user_id=None) -> dict:
@@ -142,6 +164,11 @@ def _get_ai_response_with_tools_qq(messages: list, tools: list, session_id: str 
     支持多轮工具调用，直到得到最终回复
     直接使用 HTTP 请求，不依赖 ai_client.chat_completion
     """
+    if TOOLS_AVAILABLE and tools:
+        return _get_ai_response_with_tools_qq_unified(
+            messages, tools, session_id=session_id, max_iterations=max_iterations
+        )
+
     import requests
     
     if not TOOLS_AVAILABLE or not tools:
@@ -273,6 +300,118 @@ def _get_ai_response_with_tools_qq(messages: list, tools: list, session_id: str 
     return final_content
 
 
+def _call_qq_ai_with_tools(messages: list, tools: list, stop_event=None) -> dict:
+    import requests
+
+    url_base = (base_url or "").rstrip("/")
+    if not url_base:
+        raise ValueError("base_url 鏈厤缃?")
+    if "/chat/completions" in url_base or "/chatcompletion" in url_base:
+        url = url_base
+    else:
+        url = f"{url_base}/chat/completions"
+
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+    payload = {
+        "model": model,
+        "messages": messages,
+        "tools": tools,
+        "tool_choice": "auto",
+        "stream": False,
+    }
+
+    resp = requests.post(url, json=payload, headers=headers, timeout=120)
+    resp.raise_for_status()
+    data = resp.json()
+
+    choice = data.get("choices", [{}])[0]
+    message = choice.get("message", {})
+    result = {
+        "content": message.get("content", ""),
+        "finish_reason": choice.get("finish_reason", ""),
+    }
+
+    if message.get("tool_calls"):
+        parsed_calls = []
+        for tool_call in message["tool_calls"]:
+            try:
+                arguments = json.loads(
+                    tool_call.get("function", {}).get("arguments", "{}")
+                )
+            except Exception:
+                arguments = {}
+            parsed_calls.append(
+                {
+                    "id": tool_call.get("id"),
+                    "name": tool_call.get("function", {}).get("name"),
+                    "arguments": arguments,
+                }
+            )
+        result["tool_calls"] = parsed_calls
+
+    return result
+
+
+def _get_ai_response_with_tools_qq_unified(
+    messages: list, tools: list, session_id: str = None, max_iterations: int = 10
+) -> str:
+    def model_call(current_messages, stop_event=None):
+        return _call_qq_ai_with_tools(current_messages, tools, stop_event=stop_event)
+
+    def execute_qq_tool(tool_call, thinking_content, iteration, tool_messages):
+        tool_name = tool_call.get("name")
+        arguments = tool_call.get("arguments", {})
+        print(f"[QQ Tools] 鎵ц宸ュ叿: {tool_name}, 鍙傛暟: {arguments}")
+
+        try:
+            tool_context = {"session_id": session_id} if session_id else {}
+            future = _tool_executor.submit(
+                execute_tool, tool_name, arguments, tool_context
+            )
+            tool_result = future.result(timeout=60)
+            if tool_result.get("require_confirmation"):
+                confirmation_msg = tool_result.get(
+                    "message", "AI 璇锋眰鎵ц鍛戒护锛岄渶瑕佹偍鐨勭‘璁ゃ€?"
+                )
+                raise ToolLoopExit(
+                    f"{confirmation_msg}\n\n璇峰洖澶嶃€岀‘璁ゆ墽琛屻€嶆垨銆屽悓鎰忋€嶆潵鎵ц璇ュ懡浠ゃ€?"
+                )
+            print(
+                f"[QQ Tools] 宸ュ叿缁撴灉: {json.dumps(tool_result, ensure_ascii=False)[:200]}..."
+            )
+            return tool_result
+        except TimeoutError:
+            return {"error": "宸ュ叿鎵ц瓒呮椂锛?0绉掞級"}
+        except ToolLoopExit:
+            raise
+        except Exception as e:
+            return {"error": str(e)}
+
+    try:
+        loop_result = run_tool_call_loop(
+            messages,
+            model_call,
+            execute_qq_tool,
+            max_iterations=max_iterations,
+        )
+    except Exception as e:
+        print(f"[QQ Tools] 宸ュ叿璋冪敤鍑洪敊: {e}")
+        return f"澶勭悊鍑洪敊: {str(e)}"
+
+    if loop_result.final_content:
+        return loop_result.final_content
+
+    if loop_result.tool_messages:
+        last_msg = loop_result.tool_messages[-1]
+        if last_msg.get("role") == "assistant":
+            return last_msg.get("content", "澶勭悊瀹屾垚")
+
+    return "澶勭悊瀹屾垚"
+
+
 def delete_session_workspace(user_id=None, group_id=None, group_user_id=None) -> bool:
     """删除会话对应的工作区"""
     if not WORKSPACE_AVAILABLE:
@@ -372,39 +511,33 @@ def judge_reply(content: str) -> float:
 def chat(content: str = "", user_id=None, group_id=None, group_user_id=None,
          image: bool = False, url=None, video=None):
     now_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    qq_store = _get_qq_store()
+    conversation_id = get_qq_session_id(user_id, group_id, group_user_id)
+    chat_request = ChatRequest.for_qq(
+        conversation_id=conversation_id,
+        content=content,
+        user_id=str(user_id) if user_id else None,
+        metadata={
+            "group_id": str(group_id) if group_id else None,
+            "group_user_id": str(group_user_id) if group_user_id else None,
+            "image": image,
+            "url": url,
+            "video": video,
+        },
+    )
 
     if user_id:
         user_id = str(user_id)
-        prompt = load_prompt(user_id=user_id)
-
-        if user_id not in user_messages:
-            user_messages[user_id] = [{"role": "system", "content": prompt}]
-        else:
-            if user_messages[user_id] and user_messages[user_id][0].get("role") == "system":
-                user_messages[user_id][0]["content"] = prompt
-            else:
-                user_messages[user_id].insert(0, {"role": "system", "content": prompt})
-        messages = user_messages[user_id]
+        history_messages = qq_store.ensure_history(user_id=user_id)
     elif group_id:
         group_id = str(group_id)
-        prompt = load_prompt(group_id=group_id)
-
-        # 群聊中每个用户有独立的会话
-        if group_user_id:
-            session_key = f"{group_id}_{group_user_id}"
-        else:
-            session_key = group_id
-
-        if session_key not in group_messages:
-            group_messages[session_key] = [{"role": "system", "content": prompt}]
-        else:
-            if group_messages[session_key] and group_messages[session_key][0].get("role") == "system":
-                group_messages[session_key][0]["content"] = prompt
-            else:
-                group_messages[session_key].insert(0, {"role": "system", "content": prompt})
-        messages = group_messages[session_key]
+        history_messages = qq_store.ensure_history(
+            group_id=group_id, group_user_id=group_user_id
+        )
     else:
-        messages = []
+        history_messages = []
+
+    messages = copy.deepcopy(history_messages)
 
     if group_user_id:
         pre_text = f"用户{group_user_id}说："
@@ -528,15 +661,9 @@ def chat(content: str = "", user_id=None, group_id=None, group_user_id=None,
     # 注意：AI回复的记录已通过 BotAPI 的补丁自动处理（wrapped_post_group_msg）
     # 这里不需要再调用 record_assistant_message，避免重复保存
 
-    try:
-        with open("saved_message/user_messages.json", "w", encoding='utf-8') as f:
-            json.dump(user_messages, f, ensure_ascii=False, indent=4)
-        with open("saved_message/group_messages.json", "w", encoding='utf-8') as f:
-            json.dump(group_messages, f, ensure_ascii=False, indent=4)
-    except Exception as e:
-        print(f"保存历史记录失败: {e}")
+    qq_store.save()
 
-    return display_response
+    return ChatResponse(final_content=display_response).final_content
 
 
 def _update_token_stats(user_id, group_id, prompt_tokens, completion_tokens, total_tokens):
@@ -756,20 +883,11 @@ def _record_message(role, content, user_id=None, group_id=None, group_user_id=No
     else:
         record_content = content
 
+    qq_store = _get_qq_store()
+
     if user_id:
         user_id = str(user_id)
-        prompt = load_prompt(user_id=user_id)
-        if user_id not in user_messages:
-            user_messages[user_id] = [{"role": "system", "content": prompt}]
-        else:
-            if user_messages[user_id] and user_messages[user_id][0].get("role") == "system":
-                user_messages[user_id][0]["content"] = prompt
-            else:
-                user_messages[user_id].insert(0, {"role": "system", "content": prompt})
-
-        user_messages[user_id].append({"role": role, "content": record_content})
-        if len(user_messages[user_id]) > MAX_HISTORY_LENGTH:
-            user_messages[user_id] = [user_messages[user_id][0]] + user_messages[user_id][-MAX_HISTORY_LENGTH:]
+        qq_store.append_message(role=role, content=record_content, user_id=user_id)
         
         # 同时记录到新消息模块
         message_manager.add_qq_private_message(user_id, 
@@ -777,39 +895,18 @@ def _record_message(role, content, user_id=None, group_id=None, group_user_id=No
     
     elif group_id:
         group_id = str(group_id)
-        prompt = load_prompt(group_id=group_id)
-        
-        # 群聊中每个用户有独立的会话（与 chat 函数保持一致）
-        if group_user_id:
-            session_key = f"{group_id}_{group_user_id}"
-        else:
-            session_key = group_id
-        
-        if session_key not in group_messages:
-            group_messages[session_key] = [{"role": "system", "content": prompt}]
-        else:
-            if group_messages[session_key] and group_messages[session_key][0].get("role") == "system":
-                group_messages[session_key][0]["content"] = prompt
-            else:
-                group_messages[session_key].insert(0, {"role": "system", "content": prompt})
-
-        group_messages[session_key].append({"role": role, "content": record_content})
-        if len(group_messages[session_key]) > MAX_HISTORY_LENGTH:
-            group_messages[session_key] = [group_messages[session_key][0]] + group_messages[session_key][-MAX_HISTORY_LENGTH:]
+        qq_store.append_message(
+            role=role,
+            content=record_content,
+            group_id=group_id,
+            group_user_id=group_user_id,
+        )
         
         # 同时记录到新消息模块（使用 group_id 作为文件标识）
         # 只有用户消息才设置 sender，AI 回复 sender 为空
         sender_id = group_user_id if (role == "user" and group_user_id) else ""
         message_manager.add_qq_group_message(group_id,
             create_message(role, record_content, sender=sender_id, source="qq_group"))
-
-    try:
-        with open("saved_message/user_messages.json", "w", encoding="utf-8") as f:
-            json.dump(user_messages, f, ensure_ascii=False, indent=4)
-        with open("saved_message/group_messages.json", "w", encoding="utf-8") as f:
-            json.dump(group_messages, f, ensure_ascii=False, indent=4)
-    except Exception as e:
-        print(f"保存历史记录失败: {e}")
 
 
 def log_to_group_full_file(group_id, user_id, nickname, content, timestamp=None):

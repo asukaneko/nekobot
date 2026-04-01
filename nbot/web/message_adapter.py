@@ -8,6 +8,8 @@ from datetime import datetime
 from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
+from nbot.core import WebSessionStore
+
 _log = logging.getLogger(__name__)
 
 try:
@@ -44,6 +46,9 @@ class WebMessageAdapter:
         self._reply_text = None
         self._reply_image = None
         self._thinking_card_id = None
+        self.session_store = WebSessionStore(
+            self.server.sessions, save_callback=lambda: self.server._save_data("sessions")
+        )
 
         try:
             from nbot.commands import admin
@@ -246,8 +251,7 @@ class WebMessageAdapter:
                 "session_id": self.session_id,
             }
             if self.session_id in self.server.sessions:
-                self.server.sessions[self.session_id]["messages"].append(message)
-                self.server._save_data("sessions")
+                self.session_store.append_message(self.session_id, message)
             self.server.socketio.emit("new_message", message, room=self.session_id)
         if image:
             self._reply_image = image
@@ -356,8 +360,7 @@ class WebMessageAdapter:
                 _log.warning(f"Failed to read text preview: {e}")
 
         if self.session_id in self.server.sessions:
-            self.server.sessions[self.session_id]["messages"].append(file_info)
-            self.server._save_data("sessions")
+            self.session_store.append_message(self.session_id, file_info)
 
         self.server.socketio.emit("new_message", file_info, room=self.session_id)
         _log.info(f"Sent file to web session: {file_name} ({mime_type}, {file_size} bytes)")

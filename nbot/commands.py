@@ -65,6 +65,7 @@ if not hasattr(BotAPI, '_nbot_patched'):
     original_post_group_msg = BotAPI.post_group_msg
     original_group_reply = GroupMessage.reply
     original_private_reply = PrivateMessage.reply
+    pending_group_reply_context = {}
 
     async def wrapped_post_private_msg(self, user_id, **kwargs):
         content = kwargs.get('text', '')
@@ -81,15 +82,34 @@ if not hasattr(BotAPI, '_nbot_patched'):
         if content and isinstance(content, str):
             try:
                 from chat import record_assistant_message, log_to_group_full_file
-                record_assistant_message(content, group_id=group_id)
+                context_key = (str(group_id), content)
+                pending_users = pending_group_reply_context.get(context_key, [])
+                group_user_id = pending_users.pop(0) if pending_users else kwargs.get("group_user_id")
+                if pending_users:
+                    pending_group_reply_context[context_key] = pending_users
+                else:
+                    pending_group_reply_context.pop(context_key, None)
+                record_assistant_message(
+                    content,
+                    group_id=group_id,
+                    group_user_id=group_user_id,
+                )
                 log_to_group_full_file(group_id, bot_id, "机器人", content)
             except Exception:
                 pass
         return await original_post_group_msg(self, group_id, **kwargs)
 
+    async def wrapped_group_reply(self, text=None, **kwargs):
+        content = text if isinstance(text, str) else kwargs.get("text", "")
+        if content and isinstance(content, str):
+            context_key = (str(self.group_id), content)
+            pending_group_reply_context.setdefault(context_key, []).append(str(self.user_id))
+        return await original_group_reply(self, text=text, **kwargs)
+
     # 应用补丁到类级别
     BotAPI.post_private_msg = wrapped_post_private_msg
     BotAPI.post_group_msg = wrapped_post_group_msg
+    GroupMessage.reply = wrapped_group_reply
     BotAPI._nbot_patched = True
 # ----------------------
 

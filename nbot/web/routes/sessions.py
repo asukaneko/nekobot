@@ -6,10 +6,16 @@ from datetime import datetime
 
 from flask import jsonify, request
 
+from nbot.core import WebSessionStore
+
 _log = logging.getLogger(__name__)
 
 
 def register_session_routes(app, server):
+    session_store = WebSessionStore(
+        server.sessions, save_callback=lambda: server._save_data("sessions")
+    )
+
     @app.route("/api/sessions")
     def get_sessions():
         current_time = server.time.time() if hasattr(server, "time") else None
@@ -150,8 +156,7 @@ def register_session_routes(app, server):
             "system_prompt": system_prompt,
         }
     
-        server.sessions[session_id] = session
-        server._save_data("sessions")
+        session_store.set_session(session_id, session)
     
         # 创建对应的工作区
         if server.WORKSPACE_AVAILABLE:
@@ -162,7 +167,7 @@ def register_session_routes(app, server):
         return jsonify({"id": session_id, "session": session})
     @app.route("/api/sessions/<session_id>")
     def get_session(session_id):
-        session = server.sessions.get(session_id)
+        session = session_store.get_session(session_id)
         if not session:
             sessions_file = os.path.join(server.data_dir, "sessions.json")
             if os.path.exists(sessions_file):
@@ -180,11 +185,11 @@ def register_session_routes(app, server):
 
     @app.route("/api/sessions/<session_id>", methods=["PUT"])
     def update_session(session_id):
-        if session_id not in server.sessions:
+        session = session_store.get_session(session_id)
+        if not session:
             return jsonify({"error": "Session not found"}), 404
 
         data = request.json
-        session = server.sessions[session_id]
         session["name"] = data.get("name", session["name"])
 
         new_prompt = data.get("system_prompt", session.get("system_prompt", ""))
@@ -195,14 +200,12 @@ def register_session_routes(app, server):
             else:
                 session["messages"].insert(0, {"role": "system", "content": new_prompt})
 
-        server._save_data("sessions")
+        session_store.set_session(session_id, session)
         return jsonify({"success": True, "session": session})
 
     @app.route("/api/sessions/<session_id>", methods=["DELETE"])
     def delete_session(session_id):
-        if session_id in server.sessions:
-            del server.sessions[session_id]
-            server._save_data("sessions")
+        if session_store.delete_session(session_id):
             if server.WORKSPACE_AVAILABLE and server.workspace_manager:
                 server.workspace_manager.delete_workspace(session_id)
             return jsonify({"success": True})
@@ -227,7 +230,7 @@ def register_session_routes(app, server):
 
     @app.route("/api/sessions/<session_id>/messages", methods=["GET"])
     def get_messages(session_id):
-        session = server.sessions.get(session_id)
+        session = session_store.get_session(session_id)
 
         if not session:
             sessions_file = os.path.join(server.data_dir, "sessions.json")
@@ -249,7 +252,7 @@ def register_session_routes(app, server):
 
     @app.route("/api/sessions/<session_id>/messages", methods=["POST"])
     def add_message(session_id):
-        session = server.sessions.get(session_id)
+        session = session_store.get_session(session_id)
         if not session:
             return jsonify({"error": "Session not found"}), 404
 
@@ -262,12 +265,12 @@ def register_session_routes(app, server):
             "sender": data.get("sender", "web_user"),
         }
 
-        session["messages"].append(message)
+        session_store.append_message(session_id, message)
         return jsonify(message)
 
     @app.route("/api/sessions/<session_id>/messages", methods=["DELETE"])
     def clear_messages(session_id):
-        session = server.sessions.get(session_id)
+        session = session_store.get_session(session_id)
         if not session:
             return jsonify({"error": "Session not found"}), 404
 
@@ -275,13 +278,12 @@ def register_session_routes(app, server):
         if session["messages"] and session["messages"][0].get("role") == "system":
             system_msg = session["messages"][0]
 
-        session["messages"] = [system_msg] if system_msg else []
-        server._save_data("sessions")
+        session_store.replace_messages(session_id, [system_msg] if system_msg else [])
         return jsonify({"success": True})
 
     @app.route("/api/sessions/<session_id>/compress", methods=["POST"])
     def compress_context(session_id):
-        session = server.sessions.get(session_id)
+        session = session_store.get_session(session_id)
         if not session:
             return jsonify({"error": "Session not found"}), 404
 
@@ -348,8 +350,7 @@ def register_session_routes(app, server):
             new_messages.append(summary_msg)
             new_messages.extend(recent_messages)
 
-            session["messages"] = new_messages
-            server._save_data("sessions")
+            session_store.replace_messages(session_id, new_messages)
 
             _log.info(
                 f"[Compress] 上下文压缩完成: {session_id[:8]}... ({len(messages_to_compress)} 条消息被压缩)"

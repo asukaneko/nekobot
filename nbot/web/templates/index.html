@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
@@ -6035,14 +6035,14 @@
                                         <div v-for="(card, index) in thinkingCards" :key="card.id || index" class="thinking-card" :class="{ 'is-complete': card.is_complete }">
                                             <div class="thinking-card-header">
                                                 <i :class="card.is_complete ? 'fas fa-check-circle' : 'fas fa-spinner fa-spin'"></i>
-                                                <span>{{ card.content }}</span>
+                                                <span>{{ normalizeDisplayText(card.content) }}</span>
                                             </div>
                                             <div class="thinking-card-steps">
                                                 <div v-for="(step, idx) in card.steps" :key="idx" class="thinking-step" :class="[step.type, step.status, (step.arguments || step.full_result || step.thinking_content) ? 'has-detail' : '']">
                                                     <div class="step-header" @click="step.arguments || step.full_result || step.thinking_content ? viewStepDetail(step) : null">
                                                         <i :class="step.status === 'done' ? 'fas fa-check' : (step.status === 'error' ? 'fas fa-times' : 'fas fa-cog fa-spin')"></i>
-                                                        <span class="step-name">{{ step.name }}</span>
-                                                        <span v-if="step.detail" class="step-detail">{{ step.detail }}</span>
+                                                        <span class="step-name">{{ normalizeDisplayText(step.name) }}</span>
+                                                        <span v-if="step.detail" class="step-detail">{{ normalizeDisplayText(step.detail) }}</span>
                                                         <i v-if="step.arguments || step.full_result || step.thinking_content" class="fas fa-external-link-alt step-detail-icon"></i>
                                                     </div>
                                                 </div>
@@ -6120,14 +6120,14 @@
                                                 <div v-for="(card, index) in msg.thinking_cards" :key="card.id || index" class="thinking-card" :class="{ 'is-complete': card.is_complete }">
                                                     <div class="thinking-card-header">
                                                         <i :class="card.is_complete ? 'fas fa-check-circle' : 'fas fa-spinner fa-spin'"></i>
-                                                        <span>{{ card.content }}</span>
+                                                        <span>{{ normalizeDisplayText(card.content) }}</span>
                                                     </div>
                                                     <div class="thinking-card-steps">
                                                         <div v-for="(step, idx) in card.steps" :key="idx" class="thinking-step" :class="[step.type, step.status, (step.arguments || step.full_result || step.thinking_content) ? 'has-detail' : '']">
                                                             <div class="step-header" @click="step.arguments || step.full_result || step.thinking_content ? viewStepDetail(step) : null">
                                                                 <i :class="step.status === 'done' ? 'fas fa-check' : (step.status === 'error' ? 'fas fa-times' : 'fas fa-cog fa-spin')"></i>
-                                                                <span class="step-name">{{ step.name }}</span>
-                                                                <span v-if="step.detail" class="step-detail">{{ step.detail }}</span>
+                                                                <span class="step-name">{{ normalizeDisplayText(step.name) }}</span>
+                                                                <span v-if="step.detail" class="step-detail">{{ normalizeDisplayText(step.detail) }}</span>
                                                                 <i v-if="step.arguments || step.full_result || step.thinking_content" class="fas fa-external-link-alt step-detail-icon"></i>
                                                             </div>
                                                         </div>
@@ -8215,7 +8215,7 @@
             <div class="modal" style="max-width: 700px; max-height: 80vh;">
                 <div class="modal-header">
                     <span class="modal-title">
-                        <i class="fas fa-terminal"></i> 步骤详情 - {{ stepDetailData.name }}
+                        <i class="fas fa-terminal"></i> ???????????? - {{ normalizeDisplayText(stepDetailData.name) }}
                     </span>
                     <button class="modal-close" @click="showStepDetailModal = false">&times;</button>
                 </div>
@@ -8223,7 +8223,7 @@
                     <!-- 步骤描述 -->
                     <div v-if="stepDetailData.detail" style="margin-bottom: 16px;">
                         <div style="color: var(--text-secondary); font-size: 13px; margin-bottom: 4px;">描述</div>
-                        <div style="background: var(--bg-tertiary); padding: 8px 12px; border-radius: 6px;">{{ stepDetailData.detail }}</div>
+                        <div style="background: var(--bg-tertiary); padding: 8px 12px; border-radius: 6px;">{{ normalizeDisplayText(stepDetailData.detail) }}</div>
                     </div>
 
                     <!-- AI思考内容 -->
@@ -12022,9 +12022,23 @@ def main(params):
                             }
                         });
                         
-                        this.currentMessages = newMessages;
-                        this.$nextTick(() => this.scrollToBottom());
+                        this.currentMessages = newMessages.map(msg => {
+                            if (!msg.thinking_cards || !msg.thinking_cards.length) return msg;
+                            return {
+                                ...msg,
+                                thinking_cards: msg.thinking_cards.map(card => ({
+                                    ...card,
+                                    content: this.normalizeDisplayText(card.content || ''),
+                                    steps: (card.steps || []).map(step => ({
+                                        ...step,
+                                        name: this.normalizeDisplayText(step.name || ''),
+                                        detail: this.normalizeDisplayText(step.detail || '')
+                                    }))
+                                }))
+                            };
+                        });
                         this.updateContextStats();
+                        this.$nextTick(() => this.scrollToBottom());
                     } catch (e) {
                         console.error('Failed to load messages:', e);
                     }
@@ -14638,10 +14652,61 @@ def main(params):
                     }
                 },
                 
+                normalizeDisplayText(text) {
+                    if (typeof text !== 'string' || !text) return text || '';
+
+                    const replacements = {
+                        '\xf0\x9f\x94\x8d \xe6\x90\x9c\xe7\xb4\xa2\xe6\x96\xb0\xe9\x97\xbb': '\uD83D\uDD0D \u641C\u7D22\u65B0\u95FB',
+                        '\u9983\u6533 \u93bc\u6ec5\u50a8\u93c2\u4f34\u6908': '\uD83D\uDD0D \u641C\u7D22\u65B0\u95FB',
+                        '\xf0\x9f\x8c\xa4\xef\xb8\x8f \xe6\x9f\xa5\xe8\xaf\xa2\xe5\xa4\xa9\xe6\xb0\x94': '\uD83C\uDF24\uFE0F \u67E5\u8BE2\u5929\u6C14',
+                        '\u9983\u5c0b\u9514 \u93cc\u30e8\u3220\u3049\u59d8': '\uD83C\uDF24\uFE0F \u67E5\u8BE2\u5929\u6C14',
+                        '\xf0\x9f\x8c\x90 \xe7\xbd\x91\xe9\xa1\xb5\xe6\x90\x9c\xe7\xb4\xa2': '\uD83C\uDF10 \u7F51\u9875\u641C\u7D22',
+                        '\u9983\u5bea \u7f03\u6226\u3009\u93bc\u6ec5\u50a8': '\uD83C\uDF10 \u7F51\u9875\u641C\u7D22',
+                        '\xf0\x9f\x95\x90 \xe8\x8e\xb7\xe5\x8f\x96\xe6\x97\xb6\xe9\x97\xb4': '\uD83D\uDD50 \u83B7\u53D6\u65F6\u95F4',
+                        '\u9983\u6672 \u947e\u5cf0\u5f47\u93c3\u5815\u68ff': '\uD83D\uDD50 \u83B7\u53D6\u65F6\u95F4',
+                        '\xf0\x9f\x93\xa1 \xe8\x8e\xb7\xe5\x8f\x96\xe7\xbd\x91\xe9\xa1\xb5': '\uD83D\uDCE1 \u83B7\u53D6\u7F51\u9875',
+                        '\u9983\u6457 \u947e\u5cf0\u5f47\u7f03\u6226\u3009': '\uD83D\uDCE1 \u83B7\u53D6\u7F51\u9875',
+                        '\xf0\x9f\x96\xbc\xef\xb8\x8f \xe7\x90\x86\xe8\xa7\xa3\xe5\x9b\xbe\xe7\x89\x87': '\uD83D\uDDBC\uFE0F \u7406\u89E3\u56FE\u7247',
+                        '\u9983\u67e4\u9514 \u941e\u55da\u0412\u9365\u5267\u5896': '\uD83D\uDDBC\uFE0F \u7406\u89E3\u56FE\u7247',
+                        '\xf0\x9f\x93\x9d \xe5\x88\x9b\xe5\xbb\xba\xe6\x96\x87\xe4\xbb\xb6': '\uD83D\uDCDD \u521B\u5EFA\u6587\u4EF6',
+                        '\u9983\u6451 \u9352\u6d98\u7f13\u93c2\u56e6\u6b22': '\uD83D\uDCDD \u521B\u5EFA\u6587\u4EF6',
+                        '\xf0\x9f\x93\x96 \xe8\xaf\xbb\xe5\x8f\x96\xe6\x96\x87\xe4\xbb\xb6': '\uD83D\uDCD6 \u8BFB\u53D6\u6587\u4EF6',
+                        '\u9983\u6449 \u7487\u8bf2\u5f47\u93c2\u56e6\u6b22': '\uD83D\uDCD6 \u8BFB\u53D6\u6587\u4EF6',
+                        '\xe2\x9c\x8f\xef\xb8\x8f \xe7\xbc\x96\xe8\xbe\x91\xe6\x96\x87\xe4\xbb\xb6': '\u270F\uFE0F \u7F16\u8F91\u6587\u4EF6',
+                        '\u9241\u5fe5\u7b0d \u7f02\u682c\u7deb\u93c2\u56e6\u6b22': '\u270F\uFE0F \u7F16\u8F91\u6587\u4EF6',
+                        '\xf0\x9f\x97\x91\xef\xb8\x8f \xe5\x88\xa0\xe9\x99\xa4\xe6\x96\x87\xe4\xbb\xb6': '\uD83D\uDDD1\uFE0F \u5220\u9664\u6587\u4EF6',
+                        '\u9983\u68cf\u9514 \u9352\u72bb\u6ace\u93c2\u56e6\u6b22': '\uD83D\uDDD1\uFE0F \u5220\u9664\u6587\u4EF6',
+                        '\xf0\x9f\x93\x81 \xe5\x88\x97\xe5\x87\xba\xe6\x96\x87\xe4\xbb\xb6': '\uD83D\uDCC1 \u5217\u51FA\u6587\u4EF6',
+                        '\u9983\u6427 \u9352\u6940\u56ad\u93c2\u56e6\u6b22': '\uD83D\uDCC1 \u5217\u51FA\u6587\u4EF6',
+                        '\xf0\x9f\x8c\xb3 \xe6\x98\xbe\xe7\xa4\xba\xe7\x9b\xae\xe5\xbd\x95\xe6\xa0\x91': '\uD83C\uDF33 \u663E\u793A\u76EE\u5F55\u6811',
+                        '\u9983\u5c26 \u93c4\u5267\u305a\u9429\u8930\u66df\u7232': '\uD83C\uDF33 \u663E\u793A\u76EE\u5F55\u6811',
+                        '\xf0\x9f\x93\xa4 \xe5\x8f\x91\xe9\x80\x81\xe6\x96\x87\xe4\xbb\xb6': '\uD83D\uDCE4 \u53D1\u9001\u6587\u4EF6',
+                        '\u9983\u645b \u9359\u6226\u4f79\u6783\u6d60': '\uD83D\uDCE4 \u53D1\u9001\u6587\u4EF6',
+                        '\xe2\x9c\x85 \xe6\xb7\xbb\xe5\x8a\xa0\xe5\xbe\x85\xe5\x8a\x9e': '\u2705 \u6DFB\u52A0\u5F85\u529E',
+                        '\u9241 \u5a23\u8bf2\u59de\u5bf0\u546d\u59d9': '\u2705 \u6DFB\u52A0\u5F85\u529E',
+                        '\xf0\x9f\x93\x8b \xe5\x88\x97\xe5\x87\xba\xe5\xbe\x85\xe5\x8a\x9e': '\uD83D\uDCCB \u5217\u51FA\u5F85\u529E',
+                        '\u9983\u6435 \u9352\u6940\u56ad\u5bf0\u546d\u59d9': '\uD83D\uDCCB \u5217\u51FA\u5F85\u529E',
+                        '\xe2\x9c\x93 \xe5\xae\x8c\xe6\x88\x90\xe5\xbe\x85\xe5\x8a\x9e': '\u2713 \u5B8C\u6210\u5F85\u529E',
+                        '\u9241 \u7039\u5c7e\u579a\u5bf0\u546d\u59d9': '\u2713 \u5B8C\u6210\u5F85\u529E',
+                        '\xf0\x9f\x97\x91\xef\xb8\x8f \xe5\x88\xa0\xe9\x99\xa4\xe5\xbe\x85\xe5\x8a\x9e': '\uD83D\uDDD1\uFE0F \u5220\u9664\u5F85\u529E',
+                        '\u9983\u68cf\u9514 \u9352\u72bb\u6ace\u5bf0\u546d\u59d9': '\uD83D\uDDD1\uFE0F \u5220\u9664\u5F85\u529E',
+                        '\xf0\x9f\xa7\xb9 \xe6\xb8\x85\xe7\xa9\xba\xe5\xbe\x85\xe5\x8a\x9e': '\uD83E\uDDF9 \u6E05\u7A7A\u5F85\u529E',
+                        '\u9983\u0427 \u5a13\u546f\u2516\u5bf0\u546d\u59d9': '\uD83E\uDDF9 \u6E05\u7A7A\u5F85\u529E'
+                    };
+
+                    let normalized = text;
+                    Object.entries(replacements).forEach(([bad, good]) => {
+                        if (normalized.includes(bad)) {
+                            normalized = normalized.replaceAll(bad, good);
+                        }
+                    });
+                    return normalized;
+                },
+                
                 viewStepDetail(step) {
                     this.stepDetailData = {
-                        name: step.name || '',
-                        detail: step.detail || '',
+                        name: this.normalizeDisplayText(step.name || ''),
+                        detail: this.normalizeDisplayText(step.detail || ''),
                         arguments: step.arguments || null,
                         full_result: step.full_result || null,
                         thinking_content: step.thinking_content || null
@@ -15173,6 +15238,15 @@ def main(params):
 
                             // 处理进度卡片（优先处理，避免被添加到消息列表）
                             if (msg.type === 'thinking_card' && this.showThinkingCard) {
+                                msg = {
+                                    ...msg,
+                                    content: this.normalizeDisplayText(msg.content || ''),
+                                    steps: (msg.steps || []).map(step => ({
+                                        ...step,
+                                        name: this.normalizeDisplayText(step.name || ''),
+                                        detail: this.normalizeDisplayText(step.detail || '')
+                                    }))
+                                };
                                 // 如果后端没发 id，前端自己生成一个，防止 Vue v-for 的 key 冲突失效
                                 if (!msg.id) {
                                     msg.id = 'tc_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5);

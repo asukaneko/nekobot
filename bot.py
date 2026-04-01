@@ -1,4 +1,3 @@
-import configparser
 import importlib
 import os
 import threading
@@ -13,40 +12,40 @@ from ncatbot.utils.config import config as ncatbot_config
 from ncatbot.utils.logger import get_log
 
 
-def _sync_env_to_config_ini():
+def _load_env_file():
     env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
     if os.path.exists(env_path):
         load_dotenv(env_path)
     else:
         load_dotenv()
 
-    config_parser = configparser.ConfigParser()
-    config_parser.read("config.ini", encoding="utf-8")
 
-    if "BotConfig" not in config_parser:
-        config_parser["BotConfig"] = {}
-    if "ApiKey" not in config_parser:
-        config_parser["ApiKey"] = {}
-
-    mapping = [
-        ("BOT_UIN", "BotConfig", "bot_uin"),
-        ("ROOT", "BotConfig", "root"),
-        ("WS_URI", "BotConfig", "ws_uri"),
-        ("TOKEN", "BotConfig", "token"),
-        ("API_KEY", "ApiKey", "api_key"),
-        ("BASE_URL", "ApiKey", "base_url"),
-        ("MODEL", "ApiKey", "model"),
-    ]
-    for env_key, section, option in mapping:
-        value = os.getenv(env_key)
-        if value:
-            config_parser.set(section, option, value)
-
-    with open("config.ini", "w", encoding="utf-8") as f:
-        config_parser.write(f)
+_load_env_file()
 
 
-_sync_env_to_config_ini()
+def _apply_runtime_ncatbot_config():
+    bot_uin = os.getenv("BOT_UIN")
+    if bot_uin:
+        ncatbot_config.set_bot_uin(bot_uin)
+
+    root = os.getenv("ROOT")
+    if root:
+        ncatbot_config.set_root(root)
+
+    ws_uri = os.getenv("WS_URI")
+    if ws_uri:
+        ncatbot_config.set_ws_uri(ws_uri)
+
+    token = os.getenv("TOKEN")
+    if token:
+        ncatbot_config.set_token(token)
+
+    webui_uri = os.getenv("WEBUI_URI")
+    if webui_uri:
+        ncatbot_config.set_webui_uri(webui_uri)
+
+
+_apply_runtime_ncatbot_config()
 
 _log = get_log()
 _commands_module = None
@@ -59,21 +58,6 @@ def _get_commands_module():
     if _commands_module is None:
         _commands_module = importlib.import_module("nbot.commands")
     return _commands_module
-
-
-def _apply_env_to_ncatbot_config():
-    bot_uin = os.getenv("BOT_UIN")
-    if bot_uin:
-        ncatbot_config.set_bot_uin(bot_uin)
-    root = os.getenv("ROOT")
-    if root:
-        ncatbot_config.set_root(root)
-    ws_uri = os.getenv("WS_URI")
-    if ws_uri:
-        ncatbot_config.set_ws_uri(ws_uri)
-    token = os.getenv("TOKEN")
-    if token:
-        ncatbot_config.set_token(token)
 
 
 def _set_web_server_bot(bot):
@@ -129,8 +113,6 @@ def run_bot():
 
 if __name__ == "__main__":
     import sys
-
-    _apply_env_to_ncatbot_config()
 
     web_disabled = "--no-web" in sys.argv
     only_web = "--only-web" in sys.argv
