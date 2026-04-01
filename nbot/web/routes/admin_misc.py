@@ -12,6 +12,16 @@ _log = logging.getLogger(__name__)
 
 
 def register_admin_misc_routes(app, server):
+    @app.route("/api/startup-status")
+    def get_startup_status():
+        return jsonify(
+            {
+                "ready": bool(server.startup_ready),
+                "error": server.startup_error,
+                "bot_connected": bool(getattr(server, "bot", None)),
+            }
+        )
+
     @app.route("/api/tokens")
     def get_token_stats():
         date_range = request.args.get("dateRange", "today")

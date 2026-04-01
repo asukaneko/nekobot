@@ -13,7 +13,7 @@
     <script src="/static/vendor/marked.min.js"></script>
     <link rel="stylesheet" href="/static/vendor/styles/highlight-github-dark.min.css">
     <script src="/static/vendor/highlight.min.js"></script>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="/static/vendor/styles/font-awesome.min.css">
     <script>
         window.__nbotCoreDepsReady = Promise.resolve();
         window.__nbotOptionalDepsReady = Promise.resolve();
@@ -13532,7 +13532,7 @@ def main(params):
                     if (window.XLSX) return;
                     
                     const script = document.createElement('script');
-                    script.src = 'https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js';
+                    script.src = '/static/vendor/xlsx.full.min.js';
                     document.head.appendChild(script);
                     
                     return new Promise((resolve, reject) => {
@@ -13636,10 +13636,10 @@ def main(params):
                     
                     return new Promise((resolve, reject) => {
                         const script = document.createElement('script');
-                        script.src = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js';
+                        script.src = '/static/vendor/pdf.min.js';
                         script.onload = () => {
                             // 设置 worker
-                            window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js';
+                            window.pdfjsLib.GlobalWorkerOptions.workerSrc = '/static/vendor/pdf.worker.min.js';
                             this._pdfJsLib = window.pdfjsLib;
                             resolve(this._pdfJsLib);
                         };
@@ -16014,9 +16014,21 @@ def main(params):
             const errorEl = document.getElementById('boot-error');
             if (!overlay || !statusEl || !errorEl) return;
 
+            let startupPollTimer = null;
+
             function hideOverlay() {
                 overlay.classList.add('is-hidden');
                 window.clearTimeout(failTimer);
+                if (startupPollTimer) {
+                    window.clearTimeout(startupPollTimer);
+                    startupPollTimer = null;
+                }
+            }
+
+            function hideOverlayIfReady() {
+                if (window.__nbotAppReady) {
+                    hideOverlay();
+                }
             }
 
             function showError() {
@@ -16026,18 +16038,45 @@ def main(params):
                 errorEl.innerHTML = 'The browser could not finish loading frontend assets. Refresh the page, or keep using local vendor files instead of CDNs.';
             }
 
+            async function pollStartupStatus() {
+                try {
+                    const response = await fetch(new URL('/api/startup-status', window.location.origin), { cache: 'no-store' });
+                    if (!response.ok) {
+                        throw new Error('HTTP ' + response.status);
+                    }
+                    const data = await response.json();
+                    if (data.ready) {
+                        window.__nbotStartupReady = true;
+                        statusEl.innerHTML = '<strong>Server ready</strong> Backend initialization finished.';
+                        return;
+                    }
+                    if (data.error) {
+                        statusEl.innerHTML = '<strong>Startup failed</strong> The Python server reported an initialization error.';
+                        errorEl.classList.add('is-visible');
+                        errorEl.textContent = data.error;
+                        return;
+                    }
+                    statusEl.innerHTML = '<strong>Server starting</strong> Python is still loading sessions and runtime data.';
+                } catch (error) {
+                    statusEl.innerHTML = '<strong>Checking backend</strong> The startup status endpoint could not be reached.';
+                    errorEl.classList.add('is-visible');
+                    errorEl.textContent = error && error.message ? error.message : String(error);
+                }
+                startupPollTimer = window.setTimeout(pollStartupStatus, 1000);
+            }
+
             const failTimer = window.setTimeout(showError, 8000);
-            window.addEventListener('nbot-app-ready', hideOverlay, { once: true });
+            window.addEventListener('nbot-app-ready', hideOverlayIfReady, { once: true });
             if (window.__nbotAppReady) {
-                hideOverlay();
-                return;
+                hideOverlayIfReady();
             }
             window.addEventListener('load', function () {
                 if (window.Vue && window.axios && window.io) {
-                    statusEl.innerHTML = '<strong>Assets ready</strong> Rendering the dashboard.';
+                    statusEl.innerHTML = '<strong>Assets ready</strong> Checking backend startup status.';
+                    pollStartupStatus();
                 }
             });
-            window.__hideNbotBootOverlay = hideOverlay;
+            window.__hideNbotBootOverlay = hideOverlayIfReady;
         })();
     </script>
 </body>
