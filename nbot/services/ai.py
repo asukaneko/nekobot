@@ -1,6 +1,11 @@
 import configparser, requests, os, base64, time, json, datetime, re, io
 from PIL import Image
 import imageio.v2 as imageio
+from nbot.core import (
+    build_chat_completion_payload,
+    normalize_chat_completion_data,
+    resolve_chat_completion_url,
+)
 
 config_parser = configparser.ConfigParser()
 config_parser.read('config.ini', encoding='utf-8')
@@ -14,6 +19,79 @@ search_api_key = config_parser.get('search', 'api_key', fallback="")
 search_api_url = config_parser.get('search', 'api_url', fallback="")
 video_api = config_parser.get('video', 'api_key', fallback="")
 silicon_api_key = config_parser.get('ApiKey', 'silicon_api_key', fallback="")
+provider_type = config_parser.get('ApiKey', 'provider_type', fallback="openai_compatible")
+supports_tools = config_parser.getboolean('ApiKey', 'supports_tools', fallback=True)
+supports_reasoning = config_parser.getboolean('ApiKey', 'supports_reasoning', fallback=True)
+supports_stream = config_parser.getboolean('ApiKey', 'supports_stream', fallback=True)
+
+
+def _load_shared_web_ai_config() -> dict:
+    data_dir = os.path.join("data", "web")
+    models_file = os.path.join(data_dir, "ai_models.json")
+    config_file = os.path.join(data_dir, "ai_config.json")
+
+    try:
+        if os.path.exists(models_file):
+            with open(models_file, "r", encoding="utf-8") as f:
+                models_data = json.load(f)
+            active_model_id = models_data.get("active_model_id")
+            for item in models_data.get("models", []):
+                if item.get("id") == active_model_id and item.get("enabled", True):
+                    return item
+    except Exception:
+        pass
+
+    try:
+        if os.path.exists(config_file):
+            with open(config_file, "r", encoding="utf-8") as f:
+                return json.load(f) or {}
+    except Exception:
+        pass
+
+    return {}
+
+
+def get_runtime_ai_config() -> dict:
+    shared = _load_shared_web_ai_config()
+    effective = {
+        "api_key": shared.get("api_key") or api_key,
+        "base_url": shared.get("base_url") or base_url,
+        "model": shared.get("model") or model,
+        "provider_type": shared.get("provider_type")
+        or shared.get("provider")
+        or provider_type
+        or "openai_compatible",
+        "supports_tools": shared.get("supports_tools", supports_tools),
+        "supports_reasoning": shared.get("supports_reasoning", supports_reasoning),
+        "supports_stream": shared.get("supports_stream", supports_stream),
+    }
+    return effective
+
+
+def refresh_runtime_ai_config() -> dict:
+    global api_key, base_url, model, provider_type
+    global supports_tools, supports_reasoning, supports_stream
+
+    effective = get_runtime_ai_config()
+    api_key = effective["api_key"]
+    base_url = effective["base_url"]
+    model = effective["model"]
+    provider_type = effective["provider_type"]
+    supports_tools = bool(effective["supports_tools"])
+    supports_reasoning = bool(effective["supports_reasoning"])
+    supports_stream = bool(effective["supports_stream"])
+
+    client = globals().get("ai_client")
+    if client is not None:
+        client.api_key = api_key
+        client.base_url = base_url
+        client.model = model
+        client.provider_type = provider_type
+        client.supports_tools = supports_tools
+        client.supports_reasoning = supports_reasoning
+        client.supports_stream = supports_stream
+
+    return effective
 
 user_messages = {}
 group_messages = {}
@@ -29,7 +107,11 @@ except FileNotFoundError:
 
 class AIClient:
     def __init__(self, api_key: str, base_url: str, model: str, pic_model: str,
-                 search_api_key: str, search_api_url: str, video_api: str, silicon_api_key: str):
+                 search_api_key: str, search_api_url: str, video_api: str, silicon_api_key: str,
+                 provider_type: str = "openai_compatible",
+                 supports_tools: bool = True,
+                 supports_reasoning: bool = True,
+                 supports_stream: bool = True):
         self.api_key = api_key
         self.base_url = base_url
         self.model = model
@@ -38,6 +120,10 @@ class AIClient:
         self.search_api_url = search_api_url
         self.video_api = video_api
         self.silicon_api_key = silicon_api_key
+        self.provider_type = provider_type or "openai_compatible"
+        self.supports_tools = bool(supports_tools)
+        self.supports_reasoning = bool(supports_reasoning)
+        self.supports_stream = bool(supports_stream)
 
     @staticmethod
     def clean_response(content: str) -> str:
@@ -55,22 +141,24 @@ class AIClient:
         return content.strip()
 
     def chat_completion(self, messages, model: str = None, stream: bool = False):
+        stream = bool(stream and self.supports_stream)
         url_base = (self.base_url or "").rstrip("/")
         if not url_base:
             raise ValueError("base_url 未配置")
-        if "/chat/completions" in url_base or "/chatcompletion" in url_base:
-            url = url_base
-        else:
-            url = f"{url_base}/chat/completions"
+        url = resolve_chat_completion_url(
+            self.base_url,
+            model=model or self.model or "",
+            provider_type=self.provider_type,
+        )
         headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json"
         }
-        payload = {
-            "model": model or self.model,
-            "messages": messages,
-            "stream": stream
-        }
+        payload = build_chat_completion_payload(
+            model or self.model,
+            messages,
+            stream=stream,
+        )
         
         if stream:
             # 流式响应模式
@@ -86,14 +174,16 @@ class AIClient:
             if not data.get("choices"):
                 print(f"[DEBUG] API响应没有choices: {data}")
 
-            content = ""
-            try:
-                content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
-            except Exception:
-                content = ""
+            normalized = normalize_chat_completion_data(
+                data,
+                base_url=self.base_url or "",
+                model=model or self.model or "",
+                provider_type=self.provider_type,
+            )
+            content = normalized.content
 
             # 获取 usage 信息
-            usage = data.get("usage") or {}
+            usage = normalized.usage or {}
             prompt_tokens = usage.get("prompt_tokens", 0) if usage else 0
             completion_tokens = usage.get("completion_tokens", 0) if usage else 0
             total_tokens = usage.get("total_tokens", prompt_tokens + completion_tokens) if usage else prompt_tokens + completion_tokens
@@ -419,4 +509,8 @@ ai_client = AIClient(
     search_api_url=search_api_url,
     video_api=video_api,
     silicon_api_key=silicon_api_key,
+    provider_type=provider_type,
+    supports_tools=supports_tools,
+    supports_reasoning=supports_reasoning,
+    supports_stream=supports_stream,
 )

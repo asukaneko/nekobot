@@ -3,13 +3,12 @@ import hashlib
 import json
 import logging
 import os
-import uuid
-from datetime import datetime
 
 from flask import request
 from flask_socketio import emit, join_room, leave_room
 
-from nbot.core import ChatRequest, WebSessionStore
+from nbot.channels import WebChannelAdapter
+from nbot.core import WebSessionStore
 from nbot.web.message_adapter import WebMessageAdapter
 
 _log = logging.getLogger(__name__)
@@ -19,6 +18,7 @@ def register_socket_events(server):
     session_store = WebSessionStore(
         server.sessions, save_callback=lambda: server._save_data("sessions")
     )
+    adapter = getattr(server, "web_channel_adapter", None) or WebChannelAdapter()
 
     @server.socketio.on("connect")
     def handle_connect():
@@ -37,7 +37,7 @@ def register_socket_events(server):
     @server.socketio.on("join_session")
     def handle_join_session(data):
         session_id = data.get("session_id")
-        if session_id in server.sessions:
+        if session_store.get_session(session_id):
             join_room(session_id)
             server.active_connections[request.sid] = session_id
             server.socketio.emit(
@@ -56,9 +56,19 @@ def register_socket_events(server):
     def handle_send_message(data):
         try:
             session_id = data.get("session_id")
-            content = data.get("content", "")
+            raw_content = data.get("content", "")
             sender = data.get("sender", "web_user")
-            attachments = data.get("attachments", [])
+            raw_attachments = data.get("attachments", [])
+            content = (
+                adapter.normalize_inbound_message(raw_content)
+                if adapter
+                else (raw_content or "")
+            )
+            attachments = (
+                adapter.normalize_attachments(raw_attachments)
+                if adapter
+                else list(raw_attachments or [])
+            )
 
             attachment_info = ""
             if attachments and isinstance(attachments, list):
@@ -83,12 +93,12 @@ def register_socket_events(server):
                     with open(sessions_file, "r", encoding="utf-8") as f:
                         file_sessions = json.load(f)
                     for sid, sess in file_sessions.items():
-                        if sid not in server.sessions:
-                            server.sessions[sid] = sess
+                        if not session_store.get_session(sid):
+                            session_store.set_session(sid, sess)
                 except Exception:
                     pass
 
-            if session_id not in server.sessions:
+            if not session_store.get_session(session_id):
                 server.socketio.emit(
                     "error", {"message": "Session not found"}, room=request.sid
                 )
@@ -140,8 +150,8 @@ def register_socket_events(server):
                         }
                         processed_attachments.append(processed_att)
 
-            chat_request = ChatRequest.for_web(
-                session_id=session_id,
+            chat_request = adapter.build_chat_request(
+                conversation_id=session_id,
                 content=content,
                 sender=sender,
                 attachments=processed_attachments,
@@ -149,34 +159,31 @@ def register_socket_events(server):
                 metadata={"tempId": temp_id},
             )
 
-            message = {
-                "id": str(uuid.uuid4()),
-                "role": "user",
-                "content": chat_request.content,
-                "timestamp": datetime.now().isoformat(),
-                "sender": chat_request.sender,
-                "source": chat_request.channel,
-                "attachments": chat_request.attachments,
-                "tempId": temp_id,
-                "session_id": chat_request.conversation_id,
-            }
+            message = adapter.build_message(
+                role="user",
+                content=chat_request.content,
+                sender=chat_request.sender,
+                conversation_id=chat_request.conversation_id,
+                attachments=chat_request.attachments,
+                metadata={"tempId": temp_id},
+            )
 
             session_store.append_message(session_id, message)
 
             if getattr(server, "MESSAGE_MODULE_AVAILABLE", False) and getattr(
                 server, "message_manager", None
             ):
+                manager_payload = adapter.build_manager_payload_from_message(
+                    message,
+                    default_role="user",
+                    default_content=chat_request.content,
+                    default_sender=chat_request.sender,
+                    default_conversation_id=chat_request.conversation_id,
+                    metadata={"tempId": temp_id},
+                )
                 server.message_manager.add_web_message(
                     session_id,
-                    server.create_message(
-                        "user",
-                        chat_request.content,
-                        sender=chat_request.sender,
-                        source="web",
-                        session_id=chat_request.conversation_id,
-                        attachments=chat_request.attachments,
-                        metadata={"tempId": temp_id},
-                    ),
+                    server.create_message(**manager_payload),
                 )
 
             server.socketio.emit("new_message", message, room=session_id)

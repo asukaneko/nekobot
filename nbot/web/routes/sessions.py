@@ -215,9 +215,14 @@ def register_session_routes(app, server):
     def stop_generation():
         data = request.json or {}
         session_id = data.get("session_id")
+        adapter = getattr(server, "web_channel_adapter", None)
+        capabilities = adapter.get_capabilities() if adapter else None
 
         if not session_id:
             return jsonify({"error": "session_id is required"}), 400
+
+        if capabilities is not None and not capabilities.supports_stop:
+            return jsonify({"success": False, "error": "Stop is not supported for this channel"}), 400
 
         if session_id in server.stop_events:
             server.stop_events[session_id].set()
@@ -369,7 +374,7 @@ def register_session_routes(app, server):
 
     @app.route("/api/sessions/<session_id>/chat", methods=["POST"])
     def chat_with_ai(session_id):
-        session = server.sessions.get(session_id)
+        session = session_store.get_session(session_id)
         if not session:
             return jsonify({"error": "Session not found"}), 404
 
@@ -388,8 +393,7 @@ def register_session_routes(app, server):
             "session_id": session_id,
         }
 
-        session["messages"].append(user_message)
-        server._save_data("sessions")
+        session_store.append_message(session_id, user_message)
 
         server._trigger_ai_response(
             session_id,

@@ -2,6 +2,8 @@ import logging
 
 from flask import jsonify, request
 
+from nbot.core import build_chat_completion_payload, resolve_chat_completion_url
+
 _log = logging.getLogger(__name__)
 
 
@@ -20,6 +22,8 @@ def register_ai_config_routes(app, server):
 
         if data.get("provider"):
             server.ai_config["provider"] = data["provider"]
+        if data.get("provider_type"):
+            server.ai_config["provider_type"] = data["provider_type"]
         if data.get("api_key") and data["api_key"] != "********":
             server.ai_config["api_key"] = data["api_key"]
             server.ai_api_key = data["api_key"]
@@ -35,30 +39,15 @@ def register_ai_config_routes(app, server):
             server.ai_config["max_tokens"] = data["max_tokens"]
         if data.get("top_p") is not None:
             server.ai_config["top_p"] = data["top_p"]
+        if data.get("supports_tools") is not None:
+            server.ai_config["supports_tools"] = data["supports_tools"]
+        if data.get("supports_reasoning") is not None:
+            server.ai_config["supports_reasoning"] = data["supports_reasoning"]
+        if data.get("supports_stream") is not None:
+            server.ai_config["supports_stream"] = data["supports_stream"]
 
-        if server.ai_api_key and server.ai_base_url:
-            try:
-                import configparser
-
-                from nbot.services.ai import AIClient
-
-                config = configparser.ConfigParser()
-                config.read("config.ini", encoding="utf-8")
-
-                server.ai_client = AIClient(
-                    api_key=server.ai_api_key,
-                    base_url=server.ai_base_url,
-                    model=server.ai_model,
-                    pic_model=config.get("pic", "model", fallback=""),
-                    search_api_key=config.get("search", "api_key", fallback=""),
-                    search_api_url=config.get("search", "api_url", fallback=""),
-                    video_api=config.get("video", "api_key", fallback=""),
-                    silicon_api_key=config.get(
-                        "ApiKey", "silicon_api_key", fallback=""
-                    ),
-                )
-            except Exception as e:
-                _log.error(f"Failed to reinitialize AI client: {e}")
+        if server.ai_api_key and server.ai_base_url and not server._initialize_ai_client():
+            _log.error("Failed to reinitialize AI client")
 
         server._save_data("ai_config")
         return jsonify({"success": True})
@@ -81,21 +70,25 @@ def register_ai_config_routes(app, server):
         try:
             import requests
 
-            url_base = base_url.rstrip("/")
-            if "/chat/completions" in url_base or "/chatcompletion" in url_base:
-                url = url_base
-            else:
-                url = f"{url_base}/chat/completions"
+            provider_type = data.get(
+                "provider_type",
+                data.get("provider", "openai_compatible"),
+            )
+            url = resolve_chat_completion_url(
+                base_url,
+                model=model,
+                provider_type=provider_type,
+            )
 
             headers = {
                 "Authorization": f"Bearer {api_key}",
                 "Content-Type": "application/json",
             }
-            payload = {
-                "model": model,
-                "messages": [{"role": "user", "content": "Hello"}],
-                "max_tokens": 10,
-            }
+            payload = build_chat_completion_payload(
+                model,
+                [{"role": "user", "content": "Hello"}],
+                extra_body={"max_tokens": 10},
+            )
 
             resp = requests.post(url, json=payload, headers=headers, timeout=30)
             resp.raise_for_status()

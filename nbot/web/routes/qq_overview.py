@@ -7,10 +7,16 @@ from datetime import datetime
 
 from flask import jsonify, request
 
+from nbot.core import WebSessionStore
+
 _log = logging.getLogger(__name__)
 
 
 def register_qq_overview_routes(app, server):
+    session_store = WebSessionStore(
+        server.sessions, save_callback=lambda: server._save_data("sessions")
+    )
+
     @app.route("/api/qq/users")
     def get_qq_users():
         try:
@@ -139,8 +145,7 @@ def register_qq_overview_routes(app, server):
                     break
 
             if session_id_to_delete:
-                del server.sessions[session_id_to_delete]
-                server._save_data("sessions")
+                session_store.delete_session(session_id_to_delete)
                 if server.WORKSPACE_AVAILABLE and server.workspace_manager:
                     server.workspace_manager.delete_workspace(session_id_to_delete)
                 _log.info(f"Deleted associated web session {session_id_to_delete}")
@@ -170,10 +175,10 @@ def register_qq_overview_routes(app, server):
 
     @app.route("/api/qq/sessions/<session_id>/sync", methods=["POST"])
     def sync_qq_session(session_id):
-        if session_id not in server.sessions:
+        session = session_store.get_session(session_id)
+        if not session:
             return jsonify({"error": "Session not found"}), 404
 
-        session = server.sessions[session_id]
         if session.get("type") not in ["qq_group", "qq_private"]:
             return jsonify({"error": "Not a QQ session"}), 400
 
@@ -190,27 +195,30 @@ def register_qq_overview_routes(app, server):
                 messages = []
 
             for msg in messages:
-                session["messages"].append(
+                session_store.append_message(
+                    session_id,
                     {
                         "id": str(uuid.uuid4()),
                         "role": "user" if msg.get("role") == "user" else "assistant",
                         "content": msg.get("content", ""),
                         "timestamp": msg.get("time", datetime.now().isoformat()),
                         "sender": msg.get("sender", "QQ User"),
-                    }
+                    },
                 )
 
-            server._save_data("sessions")
-            return jsonify({"success": True, "message_count": len(session["messages"])})
+            updated_session = session_store.get_session(session_id) or session
+            return jsonify(
+                {"success": True, "message_count": len(updated_session.get("messages", []))}
+            )
         except Exception as e:
             return jsonify({"error": str(e)}), 500
 
     @app.route("/api/qq/sessions/<session_id>/send", methods=["POST"])
     def send_qq_message(session_id):
-        if session_id not in server.sessions:
+        session = session_store.get_session(session_id)
+        if not session:
             return jsonify({"error": "Session not found"}), 404
 
-        session = server.sessions[session_id]
         if session.get("type") not in ["qq_group", "qq_private"]:
             return jsonify({"error": "Not a QQ session"}), 400
 
@@ -254,9 +262,9 @@ def register_qq_overview_routes(app, server):
                 "timestamp": datetime.now().isoformat(),
                 "sender": "Bot",
             }
-            session["messages"].append(message)
+            session_store.append_message(session_id, message)
             session["last_message"] = content
-            server._save_data("sessions")
+            session_store.set_session(session_id, session)
 
             return jsonify({"success": True, "message": message})
         except Exception as e:
@@ -286,8 +294,7 @@ def register_qq_overview_routes(app, server):
             "messages": [],
             "system_prompt": "",
         }
-        server.sessions[session_id] = session
-        server._save_data("sessions")
+        session_store.set_session(session_id, session)
 
         return jsonify({"success": True, "session_id": session_id, "exists": False})
 

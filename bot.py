@@ -51,6 +51,7 @@ _log = get_log()
 _commands_module = None
 web_server_instance = None
 _pending_qq_bot = None
+_web_server_started = threading.Event()
 
 
 def _get_commands_module():
@@ -68,26 +69,40 @@ def _set_web_server_bot(bot):
         _log.info("QQ Bot reference set in web server")
 
 
-def start_web_server(host="0.0.0.0", port=5000, bot=None):
+def _prepare_web_server(bot=None):
+    global web_server_instance
+    from nbot.web import create_web_app
+    import logging
+
+    werkzeug_log = logging.getLogger("werkzeug")
+    werkzeug_log.setLevel(logging.ERROR)
+    werkzeug_log.disabled = True
+
+    app, socketio, web_server = create_web_app()
+    web_server_instance = web_server
+
+    if bot:
+        _set_web_server_bot(bot)
+    elif _pending_qq_bot:
+        _set_web_server_bot(_pending_qq_bot)
+
+    return app, socketio, web_server
+
+
+def start_web_server(host="0.0.0.0", port=5000, bot=None, prepared=None):
     global web_server_instance
     try:
-        from nbot.web import create_web_app
-        import logging
-
         _log.info(f"Starting Web Chat Server on {host}:{port}...")
-
-        werkzeug_log = logging.getLogger("werkzeug")
-        werkzeug_log.setLevel(logging.ERROR)
-        werkzeug_log.disabled = True
-
-        app, socketio, web_server = create_web_app()
-        web_server_instance = web_server
-
-        if bot:
-            _set_web_server_bot(bot)
-        elif _pending_qq_bot:
-            _set_web_server_bot(_pending_qq_bot)
-
+        if prepared is None:
+            app, socketio, web_server = _prepare_web_server(bot=bot)
+        else:
+            app, socketio, web_server = prepared
+            web_server_instance = web_server
+            if bot:
+                _set_web_server_bot(bot)
+            elif _pending_qq_bot:
+                _set_web_server_bot(_pending_qq_bot)
+        _web_server_started.set()
         socketio.run(
             app,
             host=host,
@@ -97,17 +112,20 @@ def start_web_server(host="0.0.0.0", port=5000, bot=None):
             log_output=False,
         )
     except ImportError as e:
+        _web_server_started.set()
         _log.error(f"Failed to import web module: {e}")
         _log.info(
             "Install flask and flask-socketio to enable web chat: pip install flask flask-socketio"
         )
     except Exception as e:
+        _web_server_started.set()
         _log.error(f"Failed to start web server: {e}")
 
 
 def run_bot():
     _log.info("Starting NekoBot QQ service...")
     commands = _get_commands_module()
+    _set_web_server_bot(commands.bot)
     commands.bot.run(enable_webui_interaction=False)
 
 
@@ -133,13 +151,10 @@ if __name__ == "__main__":
         start_web_server(host=web_host, port=web_port, bot=None)
     else:
         _log.info("Starting NekoBot with Web Dashboard...")
-        web_thread = threading.Thread(
-            target=start_web_server,
-            args=(web_host, web_port, None),
+        bot_thread = threading.Thread(
+            target=run_bot,
+            name="qq-bot-main",
             daemon=True,
         )
-        web_thread.start()
-
-        commands = _get_commands_module()
-        _set_web_server_bot(commands.bot)
-        commands.bot.run(enable_webui_interaction=False)
+        bot_thread.start()
+        start_web_server(host=web_host, port=web_port, bot=None)

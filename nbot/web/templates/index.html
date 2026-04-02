@@ -7006,6 +7006,17 @@
                                         <input v-model="aiConfig.base_url" type="text" class="form-input" :placeholder="getBaseUrlPlaceholder()">
                                         <div class="form-hint">留空将使用默认地址</div>
                                     </div>
+                                    <div class="form-group">
+                                        <label class="form-label">Provider 类型</label>
+                                        <select v-model="aiConfig.provider_type" class="form-select">
+                                            <option value="openai_compatible">OpenAI Compatible</option>
+                                            <option value="anthropic">Anthropic Messages</option>
+                                            <option value="google">Google Gemini</option>
+                                            <option value="minimax">MiniMax Raw Endpoint</option>
+                                            <option value="siliconflow">SiliconFlow</option>
+                                        </select>
+                                        <div class="form-hint">优先使用显式 provider 类型，不再只靠 Base URL 猜测</div>
+                                    </div>
                                     <div class="form-row">
                                         <div class="form-group flex-2">
                                             <label class="form-label">模型 <span class="required">*</span></label>
@@ -7111,8 +7122,15 @@
                                     </div>
                                     <div class="form-group">
                                         <label class="checkbox-label">
-                                            <input v-model="aiConfig.stream" type="checkbox" class="checkbox-input">
+                                            <input v-model="aiConfig.stream" type="checkbox" class="checkbox-input" :disabled="!aiConfig.supports_stream">
                                             <span class="checkbox-text">启用流式响应 (Stream)</span>
+                                        </label>
+                                        <div class="form-hint" v-if="!aiConfig.supports_stream">当前 Provider 能力声明为不支持流式接口，因此这里已自动关闭。</div>
+                                    </div>
+                                    <div class="form-group">
+                                        <label class="checkbox-label">
+                                            <input v-model="aiConfig.supports_stream" type="checkbox" class="checkbox-input">
+                                            <span class="checkbox-text">模型支持流式接口</span>
                                         </label>
                                     </div>
                                     <div class="form-group">
@@ -7156,6 +7174,20 @@
                                         <label class="form-label">最大上下文长度</label>
                                         <input v-model.number="aiConfig.max_context_length" type="number" min="1000" max="128000" step="1000" class="form-input">
                                         <div class="form-hint">超过此长度将自动截断历史消息</div>
+                                    </div>
+                                    <div class="form-group">
+                                        <label class="checkbox-label">
+                                            <input v-model="aiConfig.supports_tools" type="checkbox" class="checkbox-input">
+                                            <span class="checkbox-text">模型支持工具调用</span>
+                                        </label>
+                                        <div class="form-hint" v-if="!aiConfig.supports_tools">关闭后将跳过工具链，直接走普通聊天回复。</div>
+                                    </div>
+                                    <div class="form-group">
+                                        <label class="checkbox-label">
+                                            <input v-model="aiConfig.supports_reasoning" type="checkbox" class="checkbox-input">
+                                            <span class="checkbox-text">模型支持推理/思考字段</span>
+                                        </label>
+                                        <div class="form-hint" v-if="!aiConfig.supports_reasoning">关闭后会忽略 thinking/reasoning 字段，不再展示思考内容。</div>
                                     </div>
                                 </div>
                             </div>
@@ -7323,7 +7355,7 @@
 
                                     <div class="form-group">
                                         <label class="form-label">AI 提供商 <span class="required">*</span></label>
-                                        <select v-model="modelForm.provider" class="form-select">
+                                        <select v-model="modelForm.provider" class="form-select" @change="onModelProviderChange">
                                             <option value="openai">OpenAI</option>
                                             <option value="anthropic">Anthropic (Claude)</option>
                                             <option value="google">Google (Gemini)</option>
@@ -7343,6 +7375,17 @@
                                     <div class="form-group">
                                         <label class="form-label">API Base URL</label>
                                         <input v-model="modelForm.base_url" type="text" class="form-input" placeholder="https://api.example.com/v1">
+                                    </div>
+
+                                    <div class="form-group">
+                                        <label class="form-label">Provider 类型</label>
+                                        <select v-model="modelForm.provider_type" class="form-select">
+                                            <option value="openai_compatible">OpenAI Compatible</option>
+                                            <option value="anthropic">Anthropic Messages</option>
+                                            <option value="google">Google Gemini</option>
+                                            <option value="minimax">MiniMax Raw Endpoint</option>
+                                            <option value="siliconflow">SiliconFlow</option>
+                                        </select>
                                     </div>
 
                                     <div class="form-group">
@@ -7366,6 +7409,27 @@
                                             <input v-model="modelForm.enabled" type="checkbox" class="checkbox-input">
                                             <span class="checkbox-text">启用此配置</span>
                                         </label>
+                                    </div>
+                                    <div class="form-group">
+                                        <label class="checkbox-label">
+                                            <input v-model="modelForm.supports_tools" type="checkbox" class="checkbox-input">
+                                            <span class="checkbox-text">支持工具调用</span>
+                                        </label>
+                                        <div class="form-hint" v-if="!modelForm.supports_tools">关闭后该模型被应用时会直接跳过工具链。</div>
+                                    </div>
+                                    <div class="form-group">
+                                        <label class="checkbox-label">
+                                            <input v-model="modelForm.supports_reasoning" type="checkbox" class="checkbox-input">
+                                            <span class="checkbox-text">支持推理/思考字段</span>
+                                        </label>
+                                        <div class="form-hint" v-if="!modelForm.supports_reasoning">关闭后不会展示模型返回的 thinking/reasoning 字段。</div>
+                                    </div>
+                                    <div class="form-group">
+                                        <label class="checkbox-label">
+                                            <input v-model="modelForm.supports_stream" type="checkbox" class="checkbox-input">
+                                            <span class="checkbox-text">支持流式响应</span>
+                                        </label>
+                                        <div class="form-hint" v-if="!modelForm.supports_stream">关闭后建议同时关闭运行时的流式输出。</div>
                                     </div>
                                 </div>
                                 <div class="modal-footer">
@@ -9647,10 +9711,14 @@
                     // AI Config
                     aiConfig: {
                         provider: 'openai',
+                        provider_type: 'openai_compatible',
                         api_key: '',
                         base_url: '',
                         model: 'gpt-4',
                         custom_model: '',
+                        supports_tools: true,
+                        supports_reasoning: true,
+                        supports_stream: true,
                         temperature: 0.7,
                         max_tokens: 2000,
                         top_p: 0.9,
@@ -9688,10 +9756,14 @@
                         id: null,
                         name: '',
                         provider: 'openai',
+                        provider_type: 'openai_compatible',
                         api_key: '',
                         base_url: '',
                         model: 'gpt-4',
                         enabled: true,
+                        supports_tools: true,
+                        supports_reasoning: true,
+                        supports_stream: true,
                         temperature: 0.7,
                         max_tokens: 2000,
                         top_p: 0.9,
@@ -11698,6 +11770,12 @@ def main(params):
                     try {
                         const res = await api.get('/api/ai-config');
                         this.aiConfig = { ...this.aiConfig, ...res.data };
+                        this.aiConfig.provider_type = this.aiConfig.provider_type || this.getProviderTypeByProvider(this.aiConfig.provider);
+                        if (typeof this.aiConfig.supports_tools !== 'boolean' ||
+                            typeof this.aiConfig.supports_reasoning !== 'boolean' ||
+                            typeof this.aiConfig.supports_stream !== 'boolean') {
+                            this.applyProviderCapabilities(this.aiConfig);
+                        }
                     } catch (e) {
                         console.error('Failed to load AI config:', e);
                     }
@@ -14740,13 +14818,64 @@ def main(params):
                         custom: 'custom'
                     };
                     this.aiConfig.model = defaultModels[this.aiConfig.provider] || 'custom';
+                    this.aiConfig.provider_type = this.getProviderTypeByProvider(this.aiConfig.provider);
+                    this.applyProviderCapabilities(this.aiConfig);
                     this.currentPreset = '';
+                },
+
+                onModelProviderChange() {
+                    const defaultModels = {
+                        openai: 'gpt-4',
+                        anthropic: 'claude-3-sonnet-20240229',
+                        google: 'gemini-pro',
+                        azure: 'gpt-4',
+                        siliconflow: 'Qwen/Qwen2.5-72B-Instruct',
+                        deepseek: 'deepseek-chat',
+                        custom: 'custom'
+                    };
+                    this.modelForm.model = defaultModels[this.modelForm.provider] || 'custom';
+                    this.modelForm.provider_type = this.getProviderTypeByProvider(this.modelForm.provider);
+                    this.applyProviderCapabilities(this.modelForm);
+                },
+
+                getProviderTypeByProvider(provider) {
+                    const mapping = {
+                        openai: 'openai_compatible',
+                        azure: 'openai_compatible',
+                        deepseek: 'openai_compatible',
+                        custom: 'openai_compatible',
+                        siliconflow: 'siliconflow',
+                        anthropic: 'anthropic',
+                        google: 'google'
+                    };
+                    return mapping[provider] || 'openai_compatible';
+                },
+
+                applyProviderCapabilities(target) {
+                    const providerType = target.provider_type || this.getProviderTypeByProvider(target.provider);
+                    const capabilityMap = {
+                        openai_compatible: { supports_tools: true, supports_reasoning: true, supports_stream: true },
+                        siliconflow: { supports_tools: true, supports_reasoning: true, supports_stream: true },
+                        minimax: { supports_tools: true, supports_reasoning: true, supports_stream: true },
+                        anthropic: { supports_tools: false, supports_reasoning: true, supports_stream: true },
+                        google: { supports_tools: false, supports_reasoning: true, supports_stream: true }
+                    };
+                    const defaults = capabilityMap[providerType] || capabilityMap.openai_compatible;
+                    target.provider_type = providerType;
+                    target.supports_tools = defaults.supports_tools;
+                    target.supports_reasoning = defaults.supports_reasoning;
+                    target.supports_stream = defaults.supports_stream;
+                    if (!target.supports_stream) {
+                        target.stream = false;
+                    }
                 },
 
                 applyAIPreset(preset) {
                     this.aiConfig.provider = preset.provider;
                     this.aiConfig.model = preset.model;
                     this.aiConfig.base_url = preset.base_url;
+                    this.aiConfig.provider_type = this.getProviderTypeByProvider(preset.provider);
+                    this.applyProviderCapabilities(this.aiConfig);
                     this.currentPreset = preset.name;
                     this.showToast(`已应用 ${preset.name} 配置`, 'success');
                 },
@@ -14769,6 +14898,7 @@ def main(params):
                     try {
                         const res = await api.post('/api/ai-config/test', {
                             provider: this.aiConfig.provider,
+                            provider_type: this.aiConfig.provider_type,
                             api_key: this.aiConfig.api_key,
                             base_url: this.aiConfig.base_url,
                             model: this.aiConfig.model
@@ -14791,6 +14921,7 @@ def main(params):
                 async saveAIConfig() {
                     this.isLoading = true;
                     try {
+                        this.applyProviderCapabilities(this.aiConfig);
                         await api.put('/api/ai-config', this.aiConfig);
                         this.aiStatus = { text: '已配置', class: 'badge-success' };
                         this.showToast('AI 配置已保存', 'success');
@@ -14815,16 +14946,26 @@ def main(params):
                     if (model) {
                         this.editingModel = model;
                         this.modelForm = { ...model };
+                        this.modelForm.provider_type = this.modelForm.provider_type || this.getProviderTypeByProvider(this.modelForm.provider);
+                        if (typeof this.modelForm.supports_tools !== 'boolean' ||
+                            typeof this.modelForm.supports_reasoning !== 'boolean' ||
+                            typeof this.modelForm.supports_stream !== 'boolean') {
+                            this.applyProviderCapabilities(this.modelForm);
+                        }
                     } else {
                         this.editingModel = null;
                         this.modelForm = {
                             id: null,
                             name: '新配置',
                             provider: 'openai',
+                            provider_type: 'openai_compatible',
                             api_key: '',
                             base_url: '',
                             model: 'gpt-4',
                             enabled: true,
+                            supports_tools: true,
+                            supports_reasoning: true,
+                            supports_stream: true,
                             temperature: 0.7,
                             max_tokens: 2000,
                             top_p: 0.9,
@@ -14852,6 +14993,7 @@ def main(params):
                 async saveModel() {
                     this.isLoading = true;
                     try {
+                        this.applyProviderCapabilities(this.modelForm);
                         if (this.editingModel) {
                             // 更新现有配置
                             await api.put(`/api/ai-models/${this.modelForm.id}`, this.modelForm);
@@ -14924,6 +15066,8 @@ def main(params):
                         this.activeModelId = model.id;
                         // 更新当前AI配置
                         this.aiConfig = { ...this.aiConfig, ...model };
+                        this.aiConfig.provider_type = this.aiConfig.provider_type || this.getProviderTypeByProvider(this.aiConfig.provider);
+                        this.applyProviderCapabilities(this.aiConfig);
                         this.showToast(`已应用模型配置: ${model.name}`, 'success');
                         // 刷新AI配置
                         await this.loadAIConfig();

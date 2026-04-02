@@ -9,14 +9,19 @@ import uuid
 from datetime import datetime
 from typing import Dict, List
 from nbot.core import (
+    AgentService,
+    build_continue_chat_response,
+    build_chat_completion_payload,
     ChatRequest,
     ChatResponse,
+    extract_tool_call_history,
+    normalize_chat_completion_data,
+    prepare_chat_context,
+    resolve_chat_completion_url,
     ToolLoopHooks,
+    ToolLoopSession,
     WebSessionStore,
-    inject_knowledge_context,
-    restore_continue_messages,
-    run_tool_call_loop,
-    trim_messages,
+    run_tool_loop_session,
 )
 
 try:
@@ -30,6 +35,22 @@ except ImportError:
 _log = logging.getLogger(__name__)
 
 
+def _build_channel_assistant_message(
+    chat_response: ChatResponse,
+    *,
+    session_id: str,
+    adapter=None,
+    sender: str = "AI",
+):
+    if adapter:
+        return adapter.build_assistant_message(
+            chat_response,
+            conversation_id=session_id,
+            sender=sender,
+        )
+    return chat_response.to_assistant_message(sender=sender)
+
+
 def trigger_ai_response(
     server,
     session_id: str,
@@ -39,26 +60,47 @@ def trigger_ai_response(
     parent_message_id=None,
 ):
     """Trigger an AI response for a web session."""
+    adapter = getattr(server, "web_channel_adapter", None)
+    chat_request = (
+        adapter.build_chat_request(
+            conversation_id=session_id,
+            content=user_content,
+            sender=sender,
+            attachments=attachments,
+            parent_message_id=parent_message_id,
+        )
+        if adapter
+        else ChatRequest.for_web(
+            session_id=session_id,
+            content=user_content,
+            sender=sender,
+            attachments=attachments,
+            parent_message_id=parent_message_id,
+        )
+    )
+    return trigger_ai_response_for_request(server, chat_request, adapter=adapter)
+
+
+def trigger_ai_response_for_request(server, chat_request: ChatRequest, adapter=None):
     session_store = WebSessionStore(
         server.sessions, save_callback=lambda: server._save_data("sessions")
     )
-    chat_request = ChatRequest.for_web(
-        session_id=session_id,
-        content=user_content,
-        sender=sender,
-        attachments=attachments,
-        parent_message_id=parent_message_id,
-    )
+    session_id = chat_request.conversation_id
+    user_content = chat_request.content
+    sender = chat_request.sender
+    attachments = list(chat_request.attachments or [])
+    parent_message_id = chat_request.parent_message_id
+    channel_capabilities = adapter.get_capabilities() if adapter else None
 
     # 强制转换为列表
     if not attachments or not isinstance(attachments, list):
         attachments = []
 
-    session = server.sessions.get(session_id)
+    session = session_store.get_session(session_id)
     if not session:
         _log.warning(f"Session not found: {session_id}")
         server.log_message("warning", f"Session not found: {session_id}")
-        return
+        return ChatResponse(error=f"Session not found: {session_id}")
 
     # 检查是否有图片附件
     has_image = False
@@ -102,80 +144,18 @@ def trigger_ai_response(
             import copy
 
             messages_for_ai = copy.deepcopy(session["messages"])
-
-            # 检测"继续"意图
             tool_call_history = None
-            if messages_for_ai and chat_request.content.strip() in [
-                "继续",
-                "继续执行",
-                "continue",
-            ]:
-                last_msg = messages_for_ai[-1]
-                if last_msg.get("can_continue") and last_msg.get(
-                    "tool_call_history"
-                ):
-                    tool_call_history = last_msg["tool_call_history"]
-                    messages_for_ai.pop()  # 移除继续消息
-                    messages_for_ai.pop()  # 移除不完整生成标记
-                    _log.info(
-                        f"[Continue] 检测到继续请求，恢复 {len(tool_call_history)} 条工具调用记录"
-                    )
-
-            # 限制历史长度
-            MAX_HISTORY = 20
-            MAX_TOTAL_CHARS = 30000  # 限制消息总字符数（大约）
-
-            # 如果消息太多，只保留最近的
-            if len(messages_for_ai) > MAX_HISTORY:
-                messages_for_ai = [messages_for_ai[0]] + messages_for_ai[
-                    -MAX_HISTORY:
-                ]
-
-            # 计算消息总字符数
-            total_chars = sum(
-                len(str(m.get("content", ""))) for m in messages_for_ai
+            prepared_context = prepare_chat_context(
+                messages_for_ai,
+                chat_request.content,
+                knowledge_text=knowledge_text,
             )
-            if total_chars > MAX_TOTAL_CHARS:
-                # 保留系统消息和最近的消息
-                system_msg = (
-                    messages_for_ai[0]
-                    if messages_for_ai
-                    and messages_for_ai[0].get("role") == "system"
-                    else None
-                )
-                recent_msgs = (
-                    messages_for_ai[-MAX_HISTORY:] if messages_for_ai else []
-                )
-                if system_msg:
-                    messages_for_ai = [system_msg] + recent_msgs
-                else:
-                    messages_for_ai = recent_msgs
-                _log.warning(
-                    f"[Context] 消息过长，已压缩: 总字符数 {total_chars} -> {MAX_TOTAL_CHARS}"
-                )
-
-            # 添加知识库内容到系统消息
-            if knowledge_text and messages_for_ai:
-                if messages_for_ai[0].get("role") == "system":
-                    messages_for_ai[0]["content"] += f"\n\n{knowledge_text}"
-                else:
-                    messages_for_ai.insert(
-                        0, {"role": "system", "content": knowledge_text}
-                    )
-
-            # 检查附件并处理
-            restored_messages, restored_tool_call_history = restore_continue_messages(
-                session["messages"], chat_request.content
-            )
-            if restored_tool_call_history:
-                tool_call_history = restored_tool_call_history
+            messages_for_ai = prepared_context.messages
+            tool_call_history = prepared_context.tool_call_history
+            if tool_call_history:
                 _log.info(
-                    f"[Continue] 妫€娴嬪埌缁х画璇锋眰锛屾仮澶?{len(tool_call_history)} 鏉″伐鍏疯皟鐢ㄨ褰?"
+                    f"[Continue] 检测到继续请求，恢复 {len(tool_call_history)} 条工具调用记录"
                 )
-
-            messages_for_ai = inject_knowledge_context(
-                trim_messages(restored_messages), knowledge_text
-            )
 
             image_urls = []
             file_contents = []
@@ -250,7 +230,10 @@ def trigger_ai_response(
                 and len(attachments) > 0
             )
 
-            if server.PROGRESS_CARD_AVAILABLE and server.progress_card_manager and server.socketio:
+            if (
+                channel_capabilities is None
+                or channel_capabilities.supports_progress_updates
+            ) and server.PROGRESS_CARD_AVAILABLE and server.progress_card_manager and server.socketio:
                 progress_card = server.progress_card_manager.create_card(
                     session_id=session_id,
                     parent_message_id=parent_message_id,
@@ -263,7 +246,10 @@ def trigger_ai_response(
                 progress_card.update(StepType.THINKING, "AI 正在思考...")
 
             # 创建 Todo 卡片（用于显示待办事项）
-            if server.TODO_CARD_AVAILABLE and server.todo_card_manager and server.socketio:
+            if (
+                channel_capabilities is None
+                or channel_capabilities.supports_progress_updates
+            ) and server.TODO_CARD_AVAILABLE and server.todo_card_manager and server.socketio:
                 todo_card = server.todo_card_manager.create_card(
                     session_id=session_id, parent_message_id=parent_message_id
                 )
@@ -734,12 +720,15 @@ def trigger_ai_response(
                 try:
                     from nbot.services.tools import get_enabled_tools, execute_tool
 
-                    enabled_tools = get_enabled_tools()
+                    supports_tools = server.ai_config.get("supports_tools", True)
+                    enabled_tools = get_enabled_tools() if supports_tools else []
                     # 记录加载的工具列表
                     tool_names = [
                         t.get("function", {}).get("name", "unknown")
                         for t in enabled_tools
                     ]
+                    if not supports_tools:
+                        _log.info("[Tools] 当前模型配置声明不支持工具调用，跳过工具链")
                     _log.info(
                         f"[Tools] 已加载 {len(enabled_tools)} 个工具: {tool_names}"
                     )
@@ -759,13 +748,6 @@ def trigger_ai_response(
                             and tool_messages[-1].get("role") == "user"
                         ):
                             tool_messages[-1]["content"] = enhanced_content
-
-                        # 如果是继续请求，恢复工具调用历史
-                        if tool_call_history:
-                            tool_messages.extend(tool_call_history)
-                            _log.info(
-                                f"[Continue] 已恢复工具调用历史，当前消息数: {len(tool_messages)}"
-                            )
 
                         max_iterations = 50
                         consecutive_errors = 0
@@ -837,6 +819,14 @@ def trigger_ai_response(
                         # 注意：complete_thinking_card 函数已在前面定义
 
                         def send_workspace_file_message(file_path, filename):
+                            if (
+                                channel_capabilities is not None
+                                and not channel_capabilities.supports_file_send
+                            ):
+                                _log.info(
+                                    f"[SendFile] channel does not support file sending: session_id={session_id}"
+                                )
+                                return
                             _log.info(
                                 f"[SendFile] \u51c6\u5907\u53d1\u9001\u6587\u4ef6: {filename}, path={file_path}, session_id={session_id}"
                             )
@@ -1134,528 +1124,27 @@ def trigger_ai_response(
                             on_tool_result=on_tool_result,
                         )
 
-                        use_unified_tool_loop = True
-                        if use_unified_tool_loop:
-                            loop_result = run_tool_call_loop(
-                                tool_messages,
-                                lambda current_messages, stop_event=None: server._get_ai_response_with_tools(
+                        execution_result = run_tool_loop_session(
+                            ToolLoopSession(
+                                initial_messages=tool_messages,
+                                model_call=lambda current_messages, stop_event=None: server._get_ai_response_with_tools(
                                     current_messages,
                                     enabled_tools,
                                     stop_event=stop_event,
                                 ),
-                                execute_web_tool,
+                                tool_executor=execute_web_tool,
+                                tool_call_history=tool_call_history,
                                 max_iterations=max_iterations,
                                 max_consecutive_errors=max_consecutive_errors,
                                 stop_event=stop_event,
                                 hooks=hooks,
                             )
-                            stopped_prematurely = loop_result.stopped
-                            final_content = loop_result.final_content
-                            tool_messages = loop_result.tool_messages
-                            consecutive_errors = loop_result.consecutive_errors
-                        else:
-                            stopped_prematurely = False
-
-                        for iteration in ([] if use_unified_tool_loop else range(max_iterations)):
-                            # 检查停止事件
-                            if stop_event.is_set():
-                                _log.info(
-                                    f"[Stop] 检测到停止信号，终止生成: session_id={session_id}"
-                                )
-                                stopped_prematurely = True
-                                break
-
-                            # 更新进度卡片迭代计数
-                            if progress_card:
-                                progress_card.increment_iteration()
-
-                            try:
-                                response = server._get_ai_response_with_tools(
-                                    tool_messages,
-                                    enabled_tools,
-                                    stop_event=stop_event,
-                                )
-                            except StopIteration:
-                                # 用户停止生成
-                                _log.info(f"[Stop] 检测到停止信号，终止生成")
-                                stopped_prematurely = True
-                                break
-
-                            if "tool_calls" in response and response["tool_calls"]:
-                                tool_calls = response["tool_calls"]
-                                _log.info(
-                                    f"[Tools] AI 调用工具: {[tc.get('name') for tc in tool_calls]}"
-                                )
-
-                                # 获取 AI 的思考内容（content），后续会关联到每个工具步骤
-                                ai_thinking_content = response.get("content", "")
-
-                                # 添加 AI 回复到消息历史
-                                tool_messages.append(
-                                    {
-                                        "role": "assistant",
-                                        "content": response.get("content", ""),
-                                        "tool_calls": [
-                                            {
-                                                "id": tc.get(
-                                                    "id", str(uuid.uuid4())
-                                                ),
-                                                "type": "function",
-                                                "function": {
-                                                    "name": tc["name"],
-                                                    "arguments": json.dumps(
-                                                        tc["arguments"]
-                                                    ),
-                                                },
-                                            }
-                                            for tc in tool_calls
-                                        ],
-                                    }
-                                )
-
-                                # 执行所有工具调用
-                                for tool_call in tool_calls:
-                                    tool_name = tool_call["name"]
-                                    arguments = tool_call["arguments"]
-
-                                    # 更新进度卡片 - 工具开始
-                                    tool_display_name = {
-                                        "search_news": "\U0001F50D \u641c\u7d22\u65b0\u95fb",
-                                        "get_weather": "\U0001F324\uFE0F \u67e5\u8be2\u5929\u6c14",
-                                        "search_web": "\U0001F310 \u7f51\u9875\u641c\u7d22",
-                                        "get_date_time": "\U0001F550 \u83b7\u53d6\u65f6\u95f4",
-                                        "http_get": "\U0001F4E1 \u83b7\u53d6\u7f51\u9875",
-                                        "understand_image": "\U0001F5BC\uFE0F \u7406\u89e3\u56fe\u7247",
-                                        "workspace_create_file": "\U0001F4DD \u521b\u5efa\u6587\u4ef6",
-                                        "workspace_read_file": "\U0001F4D6 \u8bfb\u53d6\u6587\u4ef6",
-                                        "workspace_edit_file": "\u270F\uFE0F \u7f16\u8f91\u6587\u4ef6",
-                                        "workspace_delete_file": "\U0001F5D1\uFE0F \u5220\u9664\u6587\u4ef6",
-                                        "workspace_list_files": "\U0001F4C1 \u5217\u51fa\u6587\u4ef6",
-                                        "workspace_tree": "\U0001F333 \u663e\u793a\u76ee\u5f55\u6811",
-                                        "workspace_send_file": "\U0001F4E4 \u53d1\u9001\u6587\u4ef6",
-                                        "todo_add": "\u2705 \u6dfb\u52a0\u5f85\u529e",
-                                        "todo_list": "\U0001F4CB \u5217\u51fa\u5f85\u529e",
-                                        "todo_complete": "\u2713 \u5b8c\u6210\u5f85\u529e",
-                                        "todo_delete": "\U0001F5D1\uFE0F \u5220\u9664\u5f85\u529e",
-                                        "todo_clear": "\U0001F9F9 \u6e05\u7a7a\u5f85\u529e",
-                                    }.get(tool_name, f"\u2699\uFE0F {tool_name}")
-
-                                    update_thinking_card(
-                                        "tool",
-                                        tool_display_name,
-                                        json.dumps(arguments, ensure_ascii=False)[
-                                            :100
-                                        ],
-                                        None,
-                                        None,
-                                        None,
-                                        ai_thinking_content
-                                        if ai_thinking_content
-                                        else None,
-                                    )
-
-                                    # 工作区工具日志
-                                    if tool_name.startswith("workspace_"):
-                                        _log.info(
-                                            f"[Workspace] 工具调用: {tool_name}"
-                                        )
-                                        args_str = json.dumps(
-                                            arguments, ensure_ascii=False
-                                        )
-                                        if len(args_str) > 200:
-                                            _log.info(
-                                                f"[Workspace] 参数: {args_str[:200]}... (共 {len(args_str)} 字符)"
-                                            )
-                                        else:
-                                            _log.info(
-                                                f"[Workspace] 参数: {args_str}"
-                                            )
-
-                                    # 执行工具，传递 context
-                                    tool_result = execute_tool(
-                                        tool_name, arguments, context=tool_context
-                                    )
-
-                                    # 更新进度卡片 - 工具完成（保存完整参数、返回值和思考内容）
-                                    if tool_result.get("success"):
-                                        result_preview = str(
-                                            tool_result.get(
-                                                "content",
-                                                tool_result.get(
-                                                    "files", tool_result
-                                                ),
-                                            )
-                                        )[:100]
-                                        update_thinking_card(
-                                            "tool_done",
-                                            tool_display_name,
-                                            result_preview,
-                                            None,
-                                            step_arguments=arguments,  # 保存完整参数
-                                            step_full_result=tool_result,  # 保存完整返回值
-                                            thinking_content=ai_thinking_content
-                                            if ai_thinking_content
-                                            else None,  # 保存AI思考内容
-                                        )
-                                    else:
-                                        update_thinking_card(
-                                            "tool_done",
-                                            tool_display_name,
-                                            None,
-                                            None,
-                                            step_arguments=arguments,
-                                            step_full_result=tool_result,
-                                            thinking_content=ai_thinking_content
-                                            if ai_thinking_content
-                                            else None,  # 保存AI思考内容
-                                        )
-
-                                    # 工作区工具日志
-                                    if tool_name.startswith("workspace_"):
-                                        if tool_result.get("success"):
-                                            _log.info(
-                                                f"[Workspace] ✓ 执行成功: {tool_name}"
-                                            )
-                                            _log.info(
-                                                f"[Workspace] 结果预览: {str(tool_result)[:300]}"
-                                            )
-                                        else:
-                                            _log.error(
-                                                f"[Workspace] ✗ 执行失败: {tool_name} - {tool_result.get('error')}"
-                                            )
-
-                                    # Todo 工具日志
-                                    if tool_name.startswith("todo_"):
-                                        if tool_result.get("success"):
-                                            _log.info(
-                                                f"[Todo] ✓ 执行成功: {tool_name} - {tool_result.get('message', '')}"
-                                            )
-                                            # 更新 Todo 卡片
-                                            if todo_card and server.TODO_CARD_AVAILABLE:
-                                                try:
-                                                    if tool_name == "todo_add":
-                                                        todo_info = tool_result.get(
-                                                            "todo", {}
-                                                        )
-                                                        todo_card.add_todo(
-                                                            todo_id=todo_info.get(
-                                                                "id"
-                                                            ),
-                                                            content=todo_info.get(
-                                                                "content", ""
-                                                            ),
-                                                            priority=todo_info.get(
-                                                                "priority", "medium"
-                                                            ),
-                                                        )
-                                                    elif (
-                                                        tool_name == "todo_complete"
-                                                    ):
-                                                        todo_info = tool_result.get(
-                                                            "todo", {}
-                                                        )
-                                                        todo_card.complete_todo(
-                                                            todo_info.get("id")
-                                                        )
-                                                    elif tool_name == "todo_delete":
-                                                        deleted_todo = (
-                                                            tool_result.get(
-                                                                "deleted_todo", {}
-                                                            )
-                                                        )
-                                                        todo_card.delete_todo(
-                                                            deleted_todo.get("id")
-                                                        )
-                                                    elif tool_name == "todo_list":
-                                                        todos = tool_result.get(
-                                                            "todos", []
-                                                        )
-                                                        todo_card.update_todos(
-                                                            todos
-                                                        )
-                                                    elif tool_name == "todo_clear":
-                                                        todo_card.todos = []
-                                                        todo_card._emit_update()
-                                                except Exception as e:
-                                                    _log.warning(
-                                                        f"[TodoCard] 更新 Todo 卡片失败: {e}"
-                                                    )
-                                        else:
-                                            _log.error(
-                                                f"[Todo] ✗ 执行失败: {tool_name} - {tool_result.get('error', '')}"
-                                            )
-
-                                    # 处理 send_message 工具（不中断思考流程）
-                                    if (
-                                        tool_name == "send_message"
-                                        and tool_result.get("action")
-                                        == "send_message"
-                                    ):
-                                        # 立即发送消息给用户，不添加到 tool_messages
-                                        progress_msg = {
-                                            "id": str(uuid.uuid4()),
-                                            "role": "assistant",
-                                            "content": tool_result.get(
-                                                "content", ""
-                                            ),
-                                            "timestamp": datetime.now().isoformat(),
-                                            "sender": "AI",
-                                            "message_type": tool_result.get(
-                                                "message_type", "progress"
-                                            ),
-                                            "is_progress_message": True,  # 标记为进度消息
-                                        }
-                                        # 发送消息但不保存到 session（避免污染对话历史）
-                                        server.socketio.emit(
-                                            "progress_message",
-                                            {
-                                                "session_id": session_id,
-                                                "message": progress_msg,
-                                            },
-                                            room=session_id,
-                                        )
-                                        _log.info(
-                                            f"[SendMessage] 已发送进度消息: {tool_result.get('content', '')[:50]}..."
-                                        )
-
-                                        # 添加工具结果到消息历史（让 AI 知道消息已发送）
-                                        tool_messages.append(
-                                            {
-                                                "role": "tool",
-                                                "tool_call_id": tool_call.get(
-                                                    "id", ""
-                                                ),
-                                                "content": json.dumps(
-                                                    {
-                                                        "success": True,
-                                                        "message": "消息已发送",
-                                                    },
-                                                    ensure_ascii=False,
-                                                ),
-                                            }
-                                        )
-                                    else:
-                                        # 普通工具，正常处理
-                                        tool_messages.append(
-                                            {
-                                                "role": "tool",
-                                                "tool_call_id": tool_call.get(
-                                                    "id", ""
-                                                ),
-                                                "content": json.dumps(
-                                                    tool_result, ensure_ascii=False
-                                                ),
-                                            }
-                                        )
-
-                                    # 如果是 workspace_send_file ，自动发送文件到 Web 端
-                                    if (
-                                        tool_name == "workspace_send_file"
-                                        and tool_result.get("action") == "send_file"
-                                    ):
-                                        file_path = tool_result.get("path", "")
-                                        filename = tool_result.get("filename", "")
-                                        _log.info(
-                                            f"[SendFile] 准备发送文件: {filename}, path: {file_path}, session_id: {session_id}"
-                                        )
-
-                                        if file_path and filename and session_id:
-                                            try:
-                                                # 直接构建文件消息并发送
-                                                import os
-                                                import mimetypes
-                                                import shutil
-
-                                                # 获取文件信息
-                                                if not os.path.exists(file_path):
-                                                    _log.error(
-                                                        f"[SendFile] 文件不存在: {file_path}"
-                                                    )
-                                                else:
-                                                    file_size = os.path.getsize(
-                                                        file_path
-                                                    )
-                                                    mime_type, _ = (
-                                                        mimetypes.guess_type(
-                                                            file_path
-                                                        )
-                                                    )
-                                                    if not mime_type:
-                                                        mime_type = "application/octet-stream"
-                                                    ext = os.path.splitext(
-                                                        file_path
-                                                    )[1].lower()
-                                                    is_image = (
-                                                        mime_type
-                                                        and mime_type.startswith(
-                                                            "image/"
-                                                        )
-                                                    )
-
-                                                    # 复制文件到静态目录
-                                                    files_dir = os.path.join(
-                                                        server.static_folder, "files"
-                                                    )
-                                                    os.makedirs(
-                                                        files_dir, exist_ok=True
-                                                    )
-
-                                                    import hashlib
-                                                    import time
-
-                                                    file_hash = hashlib.md5(
-                                                        f"{file_path}{time.time()}".encode()
-                                                    ).hexdigest()[:8]
-                                                    safe_name = (
-                                                        f"{file_hash}_{filename}"
-                                                    )
-                                                    dest_path = os.path.join(
-                                                        files_dir, safe_name
-                                                    )
-
-                                                    # 确保目标目录存在（处理子目录情况）
-                                                    os.makedirs(
-                                                        os.path.dirname(dest_path),
-                                                        exist_ok=True,
-                                                    )
-
-                                                    shutil.copy2(
-                                                        file_path, dest_path
-                                                    )
-                                                    download_url = (
-                                                        f"/static/files/{safe_name}"
-                                                    )
-
-                                                    # 构建文件消息
-                                                    file_info = {
-                                                        "id": str(uuid.uuid4()),
-                                                        "role": "assistant",
-                                                        "content": f"[文件: {filename}]",
-                                                        "timestamp": datetime.now().isoformat(),
-                                                        "sender": "AI",
-                                                        "source": "web",
-                                                        "session_id": session_id,
-                                                        "file": {
-                                                            "name": filename,
-                                                            "type": mime_type,
-                                                            "size": file_size,
-                                                            "is_image": is_image,
-                                                            "extension": ext,
-                                                            "download_url": download_url,
-                                                            "url": download_url,
-                                                        },
-                                                    }
-
-                                                    # 对于图片，嵌入 base64 数据
-                                                    if (
-                                                        is_image
-                                                        and file_size
-                                                        < 5 * 1024 * 1024
-                                                    ):
-                                                        try:
-                                                            import base64
-
-                                                            with open(
-                                                                file_path, "rb"
-                                                            ) as f:
-                                                                file_data = f.read()
-                                                            b64_data = (
-                                                                base64.b64encode(
-                                                                    file_data
-                                                                ).decode("utf-8")
-                                                            )
-                                                            file_info["file"][
-                                                                "data"
-                                                            ] = f"data:{mime_type};base64,{b64_data}"
-                                                            file_info["file"][
-                                                                "preview_url"
-                                                            ] = file_info["file"][
-                                                                "data"
-                                                            ]
-                                                        except Exception as img_err:
-                                                            _log.warning(
-                                                                f"[SendFile] 图片转base64失败: {img_err}"
-                                                            )
-
-                                                    # 保存到 session
-                                                    if session_id in server.sessions:
-                                                        session_store.append_message(
-                                                            session_id, file_info
-                                                        )
-
-                                                    # 发送文件消息到前端
-                                                    server.socketio.emit(
-                                                        "new_message",
-                                                        file_info,
-                                                        room=session_id,
-                                                    )
-                                                    _log.info(
-                                                        f"[SendFile] 文件已发送: {filename} ({mime_type}, {file_size} bytes)"
-                                                    )
-
-                                            except Exception as send_err:
-                                                _log.error(
-                                                    f"[SendFile] 发送文件时出错: {send_err}",
-                                                    exc_info=True,
-                                                )
-                                        else:
-                                            _log.warning(
-                                                f"[SendFile] 无法发送文件: file_path={file_path}, filename={filename}, session_id={session_id}"
-                                            )
-                            else:
-                                # AI 没有调用工具，得到回复内容
-                                final_content = response.get("content", "")
-                                finish_reason = response.get("finish_reason", "")
-
-                                # 检查是否为空回复（API 失败）
-                                if not final_content:
-                                    consecutive_errors += 1
-                                    _log.warning(
-                                        f"[AgentLoop] API 返回空内容，错误计数: {consecutive_errors}/{max_consecutive_errors}, iteration={iteration}"
-                                    )
-                                else:
-                                    consecutive_errors = 0
-
-                                # 判断是否应该终止思考
-                                # 1. finish_reason == 'stop' 表示模型正常完成（OpenAI标准）
-                                # 2. finish_reason 为空但 AI 返回了内容（某些国内API不返回finish_reason）
-                                # 3. 回复以 'break' 结尾表示AI主动要求终止
-                                # 4. 达到最大迭代次数
-                                # 5. 连续错误次数超过阈值
-                                should_stop = (
-                                    finish_reason == "stop"
-                                    or (
-                                        not finish_reason and final_content
-                                    )  # 兼容不返回finish_reason的API
-                                    or final_content.rstrip().endswith("break")
-                                    or iteration >= max_iterations - 1
-                                    or consecutive_errors >= max_consecutive_errors
-                                )
-
-                                if should_stop:
-                                    # 移除末尾的break标记（如果有）
-                                    if final_content.rstrip().endswith("break"):
-                                        final_content = final_content.rstrip()[
-                                            :-5
-                                        ].rstrip()
-                                    _log.info(
-                                        f"[AgentLoop] 终止思考: finish_reason={finish_reason}, iteration={iteration}"
-                                    )
-                                    break
-                                else:
-                                    # AI 没有要求终止，继续下一轮思考
-                                    # 将AI的回复添加到消息历史
-                                    tool_messages.append(
-                                        {
-                                            "role": "assistant",
-                                            "content": final_content,
-                                        }
-                                    )
-                                    _log.info(
-                                        f"[AgentLoop] 继续思考: finish_reason={finish_reason}, iteration={iteration}"
-                                    )
-                                    # 继续下一轮迭代，给AI机会调用工具
-                                    continue
+                        )
+                        loop_result = execution_result.loop_result
+                        stopped_prematurely = loop_result.stopped
+                        final_content = loop_result.final_content
+                        tool_messages = loop_result.tool_messages
+                        consecutive_errors = loop_result.consecutive_errors
 
                         if not final_content:
                             _log.warning(f"[Tools] AI 未生成最终回复，使用默认提示")
@@ -1705,34 +1194,46 @@ def trigger_ai_response(
 
             # 如果是提前停止，保存工具调用历史并添加继续按钮
             if stopped_prematurely:
-                tool_call_history = [
-                    m
-                    for m in tool_messages
-                    if m.get("role") in ("assistant", "tool")
-                ]
+                tool_call_history = extract_tool_call_history(tool_messages)
                 _log.info(
                     f"[Stop] 保存工具调用历史，共 {len(tool_call_history)} 条记录"
                 )
 
-                assistant_message = ChatResponse(
-                    final_content="【生成已停止 - 工具调用记录已保存，回复「继续」可继续执行】",
-                    can_continue=True,
-                    tool_trace=tool_call_history,
-                ).to_assistant_message()
+                assistant_message = _build_channel_assistant_message(
+                    build_continue_chat_response(tool_trace=tool_call_history),
+                    session_id=session_id,
+                    adapter=adapter,
+                )
                 session_store.append_message(session_id, assistant_message)
                 complete_thinking_card()
-                server._stream_send_response(session_id, assistant_message)
+                if channel_capabilities is None or channel_capabilities.supports_stream:
+                    server._stream_send_response(session_id, assistant_message)
+                else:
+                    server.socketio.emit(
+                        "ai_response",
+                        {"session_id": session_id, "message": assistant_message},
+                        room=session_id,
+                    )
                 return
 
             assistant_content = final_content
 
-            assistant_message = ChatResponse(
-                final_content=assistant_content
-            ).to_assistant_message()
+            assistant_message = _build_channel_assistant_message(
+                ChatResponse(final_content=assistant_content),
+                session_id=session_id,
+                adapter=adapter,
+            )
 
             # 使用流式发送
             _log.info(f"[Stream] _trigger_ai_response 准备发送流式响应")
-            server._stream_send_response(session_id, assistant_message)
+            if channel_capabilities is None or channel_capabilities.supports_stream:
+                server._stream_send_response(session_id, assistant_message)
+            else:
+                server.socketio.emit(
+                    "ai_response",
+                    {"session_id": session_id, "message": assistant_message},
+                    room=session_id,
+                )
 
             session_store.append_message(session_id, assistant_message)
 
@@ -1849,9 +1350,11 @@ def trigger_ai_response(
 
         except Exception as e:
             _log.error(f"Error in AI response: {e}")
-            error_message = ChatResponse(
-                error=f"抱歉，处理消息时出错: {str(e)}"
-            ).to_assistant_message()
+            error_message = _build_channel_assistant_message(
+                ChatResponse(error=f"抱歉，处理消息时出错: {str(e)}"),
+                session_id=session_id,
+                adapter=adapter,
+            )
             session_store.append_message(session_id, error_message)
             server.socketio.emit(
                 "ai_response",
@@ -1866,6 +1369,7 @@ def trigger_ai_response(
 
     # 使用 Flask-SocketIO 的后台任务机制
     server.socketio.start_background_task(get_response)
+    return ChatResponse(metadata={"scheduled": True, "session_id": session_id})
 
 
 def get_ai_response(self, messages: List[Dict]) -> str:
@@ -2281,16 +1785,11 @@ server,
                 raise last_error or Exception("API 调用失败")
         else:
             # 使用主 API
-            url_base = (server.ai_base_url or "").rstrip("/")
-
-            # 检查 base_url 是否已经是完整的 API 端点
-            # MiniMax 的 base_url 通常已经包含完整的路径（如 /v1/text/chatcompletion_v2）
-            if "completion" in url_base.lower() or url_base.endswith("/v1"):
-                # 已经是完整端点，直接使用
-                url = url_base
-            else:
-                # 需要添加 /chat/completions
-                url = f"{url_base}/chat/completions"
+            url = resolve_chat_completion_url(
+                server.ai_base_url,
+                model=server.ai_model or "",
+                provider_type=server.ai_config.get("provider_type", server.ai_config.get("provider", "openai_compatible")),
+            )
 
             headers = {
                 "Authorization": f"Bearer {server.ai_api_key}",
@@ -2344,12 +1843,12 @@ server,
 
                 processed_messages.append(msg_copy)
 
-            payload = {
-                "model": server.ai_model,
-                "messages": processed_messages,
-                "tools": tools,
-                "tool_choice": "auto",
-            }
+            payload = build_chat_completion_payload(
+                server.ai_model,
+                processed_messages,
+                tools=tools,
+                tool_choice="auto",
+            )
 
             # 记录 payload 大小
             import json
@@ -2432,17 +1931,15 @@ server,
             else:
                 raise last_error or Exception("API 调用失败")
 
-        # 检查 choices 是否有效
-        choices = data.get("choices")
-        if not choices or len(choices) == 0:
-            base_resp = data.get("base_resp", {})
-            status_msg = base_resp.get("status_msg", "API 返回空响应")
-            _log.warning(f"[AI] API 返回空 choices: {status_msg}")
-            raise Exception(f"API 错误: {status_msg}")
-
-        choice = choices[0]
-        message = choice.get("message", {})
-        finish_reason = choice.get("finish_reason", "")
+        normalized = normalize_chat_completion_data(
+            data,
+            base_url=server.ai_base_url or "",
+            model=server.ai_model or "",
+            provider_type=server.ai_config.get("provider_type", server.ai_config.get("provider", "openai_compatible")),
+            fallback_tool_parser=server._parse_tool_call_from_text,
+        )
+        message = normalized.raw_message
+        finish_reason = normalized.finish_reason
 
         _log.info(
             f"[AI] API 响应: finish_reason={finish_reason}, has_tool_calls={'tool_calls' in message}"
@@ -2455,60 +1952,27 @@ server,
                 f"[AI] 工具未生效，content 前100字符: {message.get('content', '')[:100]}"
             )
 
-        result = {
-            "content": message.get("content", ""),
-            "finish_reason": finish_reason,
-        }
+        result = normalized.to_dict()
 
         # 获取AI思考内容（如果API返回了的话）
-        thinking_content = message.get("thinking_content", "")
+        supports_reasoning = server.ai_config.get("supports_reasoning", True)
+        thinking_content = normalized.thinking_content if supports_reasoning else ""
+        if not supports_reasoning and "thinking_content" in result:
+            result.pop("thinking_content", None)
         if thinking_content:
-            result["thinking_content"] = thinking_content
             _log.debug(f"[AI] 收到思考内容: {len(thinking_content)} 字符")
-
-        # 处理工具调用
-        if "tool_calls" in message or finish_reason == "tool_calls":
-            tool_calls = message["tool_calls"]
-            result["tool_calls"] = []
-
-            for tool_call in tool_calls:
-                function_name = tool_call.get("function", {}).get("name")
-                arguments = json.loads(
-                    tool_call.get("function", {}).get("arguments", "{}")
-                )
-
-                result["tool_calls"].append(
-                    {
-                        "id": tool_call.get("id", ""),
-                        "name": function_name,
-                        "arguments": arguments,
-                    }
-                )
-        else:
-            # 检查 content 中是否包含 [TOOL_CALL] 格式（备用工具调用格式）
-            content = result.get("content", "")
-            if "[TOOL_CALL]" in content and "[/TOOL_CALL]" in content:
-                _log.info(
-                    f"[AI] 检测到 [TOOL_CALL] 格式，content 前200字符: {content[:200]}..."
-                )
-                parsed_calls = server._parse_tool_call_from_text(content)
-                _log.info(
-                    f"[AI] 解析结果: {len(parsed_calls)} 个工具调用, 内容: {parsed_calls}"
-                )
-                if parsed_calls:
-                    result["tool_calls"] = parsed_calls
-                    # 移除原始的 [TOOL_CALL] 内容
-                    import re
-
-                    cleaned = re.sub(
-                        r"\[TOOL_CALL\]\s*.*?\s*\[/TOOL_CALL\]\s*",
-                        "",
-                        content,
-                        flags=re.DOTALL,
-                    )
-                    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
-                    result["content"] = cleaned.strip()
-                    _log.info(f"[AI] 成功解析 {len(parsed_calls)} 个工具调用")
+        elif normalized.thinking_content and not supports_reasoning:
+            _log.info("[AI] 当前模型配置声明不展示 reasoning 字段，已忽略思考内容")
+        if result.get("tool_calls") and "[TOOL_CALL]" in result.get("content", ""):
+            cleaned = re.sub(
+                r"\[TOOL_CALL\]\s*.*?\s*\[/TOOL_CALL\]\s*",
+                "",
+                result["content"],
+                flags=re.DOTALL,
+            )
+            cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
+            result["content"] = cleaned.strip()
+            _log.info(f"[AI] 成功解析 {len(result['tool_calls'])} 个工具调用")
 
         return result
 

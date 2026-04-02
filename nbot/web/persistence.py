@@ -50,12 +50,16 @@ def init_default_data(server):
     # 默认 AI 配置
     server.ai_config = {
         "provider": "openai",
+        "provider_type": "openai_compatible",
         "api_key": "",
         "base_url": "",
         "model": server.ai_model or "gpt-4",
         "temperature": 0.7,
         "max_tokens": 2000,
         "top_p": 0.9,
+        "supports_tools": True,
+        "supports_reasoning": True,
+        "supports_stream": True,
     }
 
     # 默认 Token 统计
@@ -293,7 +297,9 @@ def load_all_data(server):
         sessions_file = os.path.join(server.data_dir, "sessions.json")
         if os.path.exists(sessions_file):
             with open(sessions_file, "r", encoding="utf-8") as f:
-                server.sessions = json.load(f)
+                loaded_sessions = json.load(f)
+            server.sessions.clear()
+            server.sessions.update(loaded_sessions)
             # 重新设置 sessions 到 ProgressCardManager
             if server.PROGRESS_CARD_AVAILABLE and server.progress_card_manager:
                 server.progress_card_manager.set_sessions(server.sessions)

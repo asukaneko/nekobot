@@ -24,6 +24,7 @@ from nbot.web.ai_service import (
     stream_ai_response,
     stream_send_response,
     trigger_ai_response,
+    trigger_ai_response_for_request,
 )
 from nbot.web.message_adapter import WebMessageAdapter
 from nbot.web.persistence import (
@@ -57,6 +58,149 @@ from nbot.web.routes import (
 from nbot.web.socket_events import register_socket_events
 
 _log = logging.getLogger(__name__)
+
+
+def _resolve_web_adapter(adapter):
+    if adapter:
+        return adapter
+    try:
+        return WebChannelAdapter() if WebChannelAdapter else None
+    except NameError:
+        return None
+
+
+def _build_heartbeat_user_message(adapter, session_id: str, content: str) -> dict:
+    web_adapter = _resolve_web_adapter(adapter)
+    if web_adapter and hasattr(web_adapter, "build_heartbeat_user_message"):
+        return web_adapter.build_heartbeat_user_message(session_id, content)
+    if web_adapter:
+        return web_adapter.build_message(
+            role="user",
+            content=f"【Heartbeat 任务】\n{content}",
+            sender="system",
+            conversation_id=session_id,
+            metadata={
+                "source": "heartbeat",
+                "is_heartbeat": True,
+                "hide_in_web": False,
+            },
+        )
+    return {
+        "role": "user",
+        "content": f"【Heartbeat 任务】\n{content}",
+        "timestamp": datetime.now().isoformat(),
+        "sender": "system",
+        "source": "heartbeat",
+        "is_heartbeat": True,
+        "hide_in_web": False,
+    }
+
+
+def _build_heartbeat_assistant_message(adapter, session_id: str, content: str) -> dict:
+    web_adapter = _resolve_web_adapter(adapter)
+    if web_adapter and hasattr(web_adapter, "build_heartbeat_assistant_message"):
+        return web_adapter.build_heartbeat_assistant_message(session_id, content)
+    if web_adapter:
+        return web_adapter.build_assistant_message(
+            ChatResponse(final_content=content),
+            conversation_id=session_id,
+            sender="AI",
+            metadata={
+                "source": "heartbeat",
+                "is_heartbeat": True,
+                "hide_in_web": False,
+            },
+        )
+    return {
+        "role": "assistant",
+        "content": content,
+        "timestamp": datetime.now().isoformat(),
+        "sender": "AI",
+        "source": "heartbeat",
+        "is_heartbeat": True,
+        "hide_in_web": False,
+    }
+
+
+def _build_workflow_user_message(
+    adapter, session_id: str, content: str, workflow_id: str
+) -> dict:
+    web_adapter = _resolve_web_adapter(adapter)
+    if web_adapter and hasattr(web_adapter, "build_workflow_user_message"):
+        return web_adapter.build_workflow_user_message(session_id, content, workflow_id)
+    if web_adapter:
+        return web_adapter.build_message(
+            role="user",
+            content=content,
+            sender="user",
+            conversation_id=session_id,
+            metadata={"workflow_id": workflow_id},
+        )
+    return {
+        "id": str(uuid.uuid4()),
+        "role": "user",
+        "content": content,
+        "timestamp": datetime.now().isoformat(),
+        "sender": "user",
+        "workflow_id": workflow_id,
+    }
+
+
+def _build_workflow_assistant_message(
+    adapter, session_id: str, content: str, workflow_id: str
+) -> dict:
+    web_adapter = _resolve_web_adapter(adapter)
+    if web_adapter and hasattr(web_adapter, "build_workflow_assistant_message"):
+        return web_adapter.build_workflow_assistant_message(
+            session_id, content, workflow_id
+        )
+    if web_adapter:
+        return web_adapter.build_assistant_message(
+            ChatResponse(final_content=content),
+            conversation_id=session_id,
+            sender="AI",
+            metadata={"workflow_id": workflow_id},
+        )
+    return {
+        "id": str(uuid.uuid4()),
+        "role": "assistant",
+        "content": content,
+        "timestamp": datetime.now().isoformat(),
+        "sender": "AI",
+        "workflow_id": workflow_id,
+    }
+
+
+def _build_web_manager_payload(
+    adapter,
+    message: dict,
+    *,
+    default_role: str,
+    default_content: str,
+    default_sender: str,
+    default_conversation_id: str,
+    metadata: Optional[Dict[str, Any]] = None,
+) -> dict:
+    manager_adapter = _resolve_web_adapter(adapter)
+    if manager_adapter:
+        return manager_adapter.build_manager_payload_from_message(
+            message,
+            default_role=default_role,
+            default_content=default_content,
+            default_sender=default_sender,
+            default_conversation_id=default_conversation_id,
+            metadata=metadata,
+        )
+    payload = {
+        "role": default_role,
+        "content": default_content,
+        "sender": default_sender,
+        "source": "web",
+        "session_id": default_conversation_id,
+    }
+    if metadata:
+        payload["metadata"] = dict(metadata)
+    return payload
 
 # 固定的核心指令 - 这些功能不会因为用户修改提示词而丢失
 CORE_INSTRUCTIONS = """【重要】你必须严格遵循以下要求：
@@ -114,11 +258,16 @@ except ImportError:
 
 # 导入统一消息模块
 try:
-    from nbot.core import message_manager, create_message
+    from nbot.core import AgentService, ChatRequest, WebSessionStore, message_manager, create_message
+    from nbot.channels import WebChannelAdapter
 
     MESSAGE_MODULE_AVAILABLE = True
 except ImportError:
     MESSAGE_MODULE_AVAILABLE = False
+    WebSessionStore = None
+    AgentService = None
+    ChatRequest = None
+    WebChannelAdapter = None
     message_manager = None
     create_message = None
     _log.warning("Message module not available")
@@ -230,6 +379,17 @@ class WebChatServer:
         self.file_parser = file_parser
 
         self.sessions: Dict[str, Dict[str, Any]] = {}
+        self.session_store = WebSessionStore(
+            self.sessions, save_callback=lambda: self._save_data("sessions")
+        )
+        self.agent_service = AgentService()
+        self.agent_service.register_handler(
+            "web",
+            lambda chat_request, adapter=None, server=self: trigger_ai_response_for_request(
+                server, chat_request, adapter=adapter
+            ),
+        )
+        self.web_channel_adapter = WebChannelAdapter() if WebChannelAdapter else None
 
         # 初始化进度卡片管理器
         if PROGRESS_CARD_AVAILABLE and progress_card_manager:
@@ -349,6 +509,10 @@ class WebChatServer:
         def run():
             try:
                 self._load_all_data()
+                if self.active_model_id:
+                    self._apply_ai_model(self.active_model_id)
+                elif not self.ai_client:
+                    self._initialize_ai_client()
                 self._init_workflow_scheduler()
                 self.startup_ready = True
                 _log.info("Web server background initialization completed")
@@ -457,6 +621,82 @@ class WebChatServer:
         except Exception as e:
             _log.error(f"[Auth] 保存登录 Token 失败: {e}")
 
+    def _initialize_ai_client(
+        self,
+        *,
+        provider_type: str = None,
+        supports_tools: Optional[bool] = None,
+        supports_reasoning: Optional[bool] = None,
+        supports_stream: Optional[bool] = None,
+    ) -> bool:
+        if not self.ai_api_key or not self.ai_base_url:
+            self.ai_client = None
+            return False
+
+        try:
+            if CONFIG_LOADER_AVAILABLE and get_pic_config:
+                pic_config = get_pic_config() if get_pic_config else {}
+                search_config = get_search_config() if get_search_config else {}
+                video_config = get_video_config() if get_video_config else {}
+                api_config = get_api_config() if get_api_config else {}
+            else:
+                import configparser
+
+                config = configparser.ConfigParser()
+                config.read("config.ini", encoding="utf-8")
+                pic_config = {"model": config.get("pic", "model", fallback="")}
+                search_config = {
+                    "api_key": config.get("search", "api_key", fallback=""),
+                    "api_url": config.get("search", "api_url", fallback=""),
+                }
+                video_config = {"api_key": config.get("video", "api_key", fallback="")}
+                api_config = {
+                    "silicon_api_key": config.get(
+                        "ApiKey", "silicon_api_key", fallback=""
+                    )
+                }
+
+            from nbot.services.ai import AIClient
+
+            resolved_provider_type = provider_type or self.ai_config.get(
+                "provider_type", self.ai_config.get("provider", "openai_compatible")
+            )
+            resolved_supports_tools = (
+                self.ai_config.get("supports_tools", True)
+                if supports_tools is None
+                else supports_tools
+            )
+            resolved_supports_reasoning = (
+                self.ai_config.get("supports_reasoning", True)
+                if supports_reasoning is None
+                else supports_reasoning
+            )
+            resolved_supports_stream = (
+                self.ai_config.get("supports_stream", True)
+                if supports_stream is None
+                else supports_stream
+            )
+
+            self.ai_client = AIClient(
+                api_key=self.ai_api_key,
+                base_url=self.ai_base_url,
+                model=self.ai_model,
+                pic_model=pic_config.get("model", ""),
+                search_api_key=search_config.get("api_key", ""),
+                search_api_url=search_config.get("api_url", ""),
+                video_api=video_config.get("api_key", ""),
+                silicon_api_key=api_config.get("silicon_api_key", ""),
+                provider_type=resolved_provider_type,
+                supports_tools=resolved_supports_tools,
+                supports_reasoning=resolved_supports_reasoning,
+                supports_stream=resolved_supports_stream,
+            )
+            return True
+        except Exception as e:
+            _log.error(f"Failed to initialize AI client: {e}")
+            self.ai_client = None
+            return False
+
     def _load_ai_config(self):
         """从配置文件加载 AI 配置（支持 .env 环境变量）"""
         try:
@@ -491,6 +731,8 @@ class WebChatServer:
             )
 
             if self.ai_api_key and self.ai_base_url:
+                _log.info("[Config] AI client initialization deferred to background startup")
+                return
                 try:
                     from nbot.services.ai import AIClient
 
@@ -503,6 +745,10 @@ class WebChatServer:
                         search_api_url=search_config.get("api_url", ""),
                         video_api=video_config.get("api_key", ""),
                         silicon_api_key=api_config.get("silicon_api_key", ""),
+                        provider_type=self.ai_config.get("provider_type", self.ai_config.get("provider", "openai_compatible")),
+                        supports_tools=self.ai_config.get("supports_tools", True),
+                        supports_reasoning=self.ai_config.get("supports_reasoning", True),
+                        supports_stream=self.ai_config.get("supports_stream", True),
                     )
                     _log.info("[Config] AI 客户端初始化成功")
                 except Exception as e:
@@ -685,11 +931,15 @@ class WebChatServer:
                     "id": str(uuid.uuid4()),
                     "name": "默认配置",
                     "provider": "custom",
+                    "provider_type": "openai_compatible",
                     "api_key": self.ai_api_key,
                     "base_url": self.ai_base_url,
                     "model": self.ai_model,
                     "enabled": True,
                     "is_default": True,
+                    "supports_tools": True,
+                    "supports_reasoning": True,
+                    "supports_stream": True,
                     "temperature": 0.7,
                     "max_tokens": 2000,
                     "top_p": 0.9,
@@ -719,8 +969,36 @@ class WebChatServer:
             self.ai_model = model.get("model", "")
             self.active_model_id = model_id
 
+            if self.ai_api_key and self.ai_base_url and self._initialize_ai_client(
+                provider_type=model.get(
+                    "provider_type", model.get("provider", "openai_compatible")
+                ),
+                supports_tools=model.get("supports_tools", True),
+                supports_reasoning=model.get("supports_reasoning", True),
+                supports_stream=model.get("supports_stream", True),
+            ):
+                self.ai_config.update(
+                    {
+                        "provider": model.get("provider", "custom"),
+                        "provider_type": model.get(
+                            "provider_type", model.get("provider", "openai_compatible")
+                        ),
+                        "api_key": self.ai_api_key,
+                        "base_url": self.ai_base_url,
+                        "model": self.ai_model,
+                        "temperature": model.get("temperature", 0.7),
+                        "max_tokens": model.get("max_tokens", 2000),
+                        "top_p": model.get("top_p", 0.9),
+                        "supports_tools": model.get("supports_tools", True),
+                        "supports_reasoning": model.get("supports_reasoning", True),
+                        "supports_stream": model.get("supports_stream", True),
+                    }
+                )
+                self._save_data("ai_models")
+                return True
+
             # 重新初始化AI客户端
-            if self.ai_api_key and self.ai_base_url:
+            if False and self.ai_api_key and self.ai_base_url:
                 try:
                     from nbot.services.ai import AIClient
                     import configparser
@@ -739,18 +1017,26 @@ class WebChatServer:
                         silicon_api_key=config.get(
                             "ApiKey", "silicon_api_key", fallback=""
                         ),
+                        provider_type=model.get("provider_type", model.get("provider", "openai_compatible")),
+                        supports_tools=model.get("supports_tools", True),
+                        supports_reasoning=model.get("supports_reasoning", True),
+                        supports_stream=model.get("supports_stream", True),
                     )
 
                     # 更新内存中的配置
                     self.ai_config.update(
                         {
                             "provider": model.get("provider", "custom"),
+                            "provider_type": model.get("provider_type", model.get("provider", "openai_compatible")),
                             "api_key": self.ai_api_key,
                             "base_url": self.ai_base_url,
                             "model": self.ai_model,
                             "temperature": model.get("temperature", 0.7),
                             "max_tokens": model.get("max_tokens", 2000),
                             "top_p": model.get("top_p", 0.9),
+                            "supports_tools": model.get("supports_tools", True),
+                            "supports_reasoning": model.get("supports_reasoning", True),
+                            "supports_stream": model.get("supports_stream", True),
                         }
                     )
 
@@ -829,6 +1115,7 @@ class WebChatServer:
     def _execute_workflow(self, workflow_id: str, trigger_data: Dict = None):
         """执行工作流 - 支持多轮工具调用"""
         workflow = None
+        workflow_adapter = _resolve_web_adapter(self.web_channel_adapter)
         for w in self.workflows:
             if w["id"] == workflow_id:
                 workflow = w
@@ -841,7 +1128,7 @@ class WebChatServer:
 
         # 获取或创建工作流的专属会话
         session_id = workflow.get("session_id")
-        if not session_id or session_id not in self.sessions:
+        if not session_id or not self.session_store.get_session(session_id):
             session_id = self._create_workflow_session(workflow)
             workflow["session_id"] = session_id
             self._save_data("workflows")
@@ -858,7 +1145,7 @@ class WebChatServer:
         ]
 
         # 添加历史上下文（最近10条）
-        session = self.sessions.get(session_id, {})
+        session = self.session_store.get_session(session_id) or {}
         history = session.get("messages", [])[-10:]
         for msg in history:
             if msg.get("role") in ["user", "assistant"]:
@@ -883,28 +1170,25 @@ class WebChatServer:
             messages.append({"role": "user", "content": trigger_msg})
 
             # 保存用户消息到会话
-            user_message = {
-                "id": str(uuid.uuid4()),
-                "role": "user",
-                "content": trigger_msg,
-                "timestamp": datetime.now().isoformat(),
-                "sender": "user",
-                "workflow_id": workflow_id,
-            }
-            if session_id in self.sessions:
-                self.sessions[session_id]["messages"].append(user_message)
+            user_message = _build_workflow_user_message(
+                workflow_adapter, session_id, trigger_msg, workflow_id
+            )
+            if self.session_store.get_session(session_id):
+                self.session_store.append_message(session_id, user_message)
                 # 同时记录到新消息模块
                 if MESSAGE_MODULE_AVAILABLE and message_manager:
+                    manager_payload = _build_web_manager_payload(
+                        workflow_adapter,
+                        user_message,
+                        default_role="user",
+                        default_content=trigger_msg,
+                        default_sender="user",
+                        default_conversation_id=session_id,
+                        metadata={"workflow_id": workflow_id},
+                    )
                     message_manager.add_web_message(
                         session_id,
-                        create_message(
-                            "user",
-                            trigger_msg,
-                            sender="user",
-                            source="web",
-                            session_id=session_id,
-                            metadata={"workflow_id": workflow_id},
-                        ),
+                        create_message(**manager_payload),
                     )
         else:
             messages.append({"role": "user", "content": "[定时触发] 请执行工作流任务"})
@@ -986,30 +1270,26 @@ class WebChatServer:
                     final_response = messages[-1].get("content", "工作流执行完成")
 
                 # 保存 AI 回复到会话
-                assistant_message = {
-                    "id": str(uuid.uuid4()),
-                    "role": "assistant",
-                    "content": final_response,
-                    "timestamp": datetime.now().isoformat(),
-                    "sender": "AI",
-                    "workflow_id": workflow_id,
-                }
+                assistant_message = _build_workflow_assistant_message(
+                    workflow_adapter, session_id, final_response, workflow_id
+                )
 
-                if session_id in self.sessions:
-                    self.sessions[session_id]["messages"].append(assistant_message)
-                    self._save_data("sessions")
+                if self.session_store.get_session(session_id):
+                    self.session_store.append_message(session_id, assistant_message)
                     # 同时记录到新消息模块
                     if MESSAGE_MODULE_AVAILABLE and message_manager:
+                        manager_payload = _build_web_manager_payload(
+                            workflow_adapter,
+                            assistant_message,
+                            default_role="assistant",
+                            default_content=final_response,
+                            default_sender="AI",
+                            default_conversation_id=session_id,
+                            metadata={"workflow_id": workflow_id},
+                        )
                         message_manager.add_web_message(
                             session_id,
-                            create_message(
-                                "assistant",
-                                final_response,
-                                sender="AI",
-                                source="web",
-                                session_id=session_id,
-                                metadata={"workflow_id": workflow_id},
-                            ),
+                            create_message(**manager_payload),
                         )
 
                 # 发送结果到目标
@@ -1045,8 +1325,7 @@ class WebChatServer:
             ],
             "system_prompt": workflow.get("description", ""),
         }
-        self.sessions[session_id] = session
-        self._save_data("sessions")
+        self.session_store.set_session(session_id, session)
 
         # 为工作流创建工作区
         if WORKSPACE_AVAILABLE:
@@ -1105,7 +1384,7 @@ class WebChatServer:
 
             elif target_type == "session":
                 # 发送到 Web 会话
-                if target_id in self.sessions:
+                if self.session_store.get_session(target_id):
                     message = {
                         "id": str(uuid.uuid4()),
                         "role": "assistant",
@@ -1114,8 +1393,7 @@ class WebChatServer:
                         "sender": "Workflow",
                         "workflow_id": workflow["id"],
                     }
-                    self.sessions[target_id]["messages"].append(message)
-                    self._save_data("sessions")
+                    self.session_store.append_message(target_id, message)
 
                     # 通过 WebSocket 通知
                     self.socketio.emit("new_message", message, room=target_id)
@@ -1281,32 +1559,54 @@ class WebChatServer:
         parent_message_id=None,
     ):
         """?? AI ????????"""
-        trigger_ai_response(
-            self,
-            session_id,
-            user_content,
-            sender,
-            attachments,
-            parent_message_id,
+        adapter = _resolve_web_adapter(self.web_channel_adapter)
+        chat_request = (
+            adapter.build_chat_request(
+                conversation_id=session_id,
+                content=user_content,
+                sender=sender,
+                attachments=attachments,
+                parent_message_id=parent_message_id,
+            )
+            if adapter
+            else ChatRequest.for_web(
+                session_id=session_id,
+                content=user_content,
+                sender=sender,
+                attachments=attachments,
+                parent_message_id=parent_message_id,
+            )
         )
+        self.agent_service.process(chat_request, adapter=adapter)
 
     def add_message_to_session(
         self, session_id: str, role: str, content: str, sender: str, source: str = "qq"
     ):
         """从外部添加消息到会话（QQ 消息同步）"""
-        if session_id not in self.sessions:
+        if not self.session_store.get_session(session_id):
             return
 
-        message = {
-            "id": str(uuid.uuid4()),
-            "role": role,
-            "content": content,
-            "timestamp": datetime.now().isoformat(),
-            "sender": sender,
-            "source": source,
-        }
+        adapter = _resolve_web_adapter(self.web_channel_adapter)
+        message = (
+            adapter.build_message(
+                role=role,
+                content=content,
+                sender=sender,
+                conversation_id=session_id,
+                source=source,
+            )
+            if adapter
+            else {
+                "id": str(uuid.uuid4()),
+                "role": role,
+                "content": content,
+                "timestamp": datetime.now().isoformat(),
+                "sender": sender,
+                "source": source,
+            }
+        )
 
-        self.sessions[session_id]["messages"].append(message)
+        self.session_store.append_message(session_id, message)
         self.socketio.emit("new_message", message, room=session_id)
 
     def create_web_session(self, user_id: str, name: str = None) -> str:
@@ -1396,7 +1696,7 @@ class WebChatServer:
             "system_prompt": system_prompt,
         }
 
-        self.sessions[session_id] = session
+        self.session_store.set_session(session_id, session)
         return session_id
 
     def _init_heartbeat_scheduler(self):
@@ -1488,12 +1788,15 @@ class WebChatServer:
         _log.info(f"Executing heartbeat with content from {content_file}")
 
         # 追加到现有会话或创建新会话
-        is_appended_session = target_session_id and target_session_id in self.sessions
+        is_appended_session = bool(
+            target_session_id and self.session_store.get_session(target_session_id)
+        )
+        heartbeat_adapter = _resolve_web_adapter(self.web_channel_adapter)
 
         if is_appended_session:
             # 追加到现有会话
             session_id = target_session_id
-            session = self.sessions[session_id]
+            session = self.session_store.get_session(session_id)
 
             # 构建带标记的用户消息
             hb_user_message = {
@@ -1505,7 +1808,22 @@ class WebChatServer:
                 "is_heartbeat": True,
                 "hide_in_web": False,  # 追加到现有会话时显示
             }
-            session["messages"].append(hb_user_message)
+            if heartbeat_adapter:
+                hb_user_message = heartbeat_adapter.build_message(
+                    role="user",
+                    content=hb_user_message.get("content", ""),
+                    sender="system",
+                    conversation_id=session_id,
+                    metadata={
+                        "source": "heartbeat",
+                        "is_heartbeat": True,
+                        "hide_in_web": False,
+                    },
+                )
+            hb_user_message = _build_heartbeat_user_message(
+                heartbeat_adapter, session_id, content
+            )
+            self.session_store.append_message(session_id, hb_user_message)
             _log.info(f"Heartbeat: 追加到会话 {session_id}")
         else:
             # 创建新的 heartbeat 会话（原有逻辑）
@@ -1525,7 +1843,11 @@ class WebChatServer:
                 ],
                 "system_prompt": "你是一个智能助手，请根据任务描述执行相关操作。",
             }
-            self.sessions[session_id] = session
+            if heartbeat_adapter:
+                session["messages"][1] = _build_heartbeat_user_message(
+                    heartbeat_adapter, session_id, content
+                )
+            self.session_store.set_session(session_id, session)
             _log.info(f"Heartbeat: 创建新会话 {session_id}")
 
         # 调用 AI 处理
@@ -1558,8 +1880,21 @@ class WebChatServer:
                 }
 
                 # 更新会话
-                self.sessions[session_id]["messages"].append(hb_assistant_message)
-                self._save_data("sessions")
+                if heartbeat_adapter:
+                    hb_assistant_message = heartbeat_adapter.build_assistant_message(
+                        ChatResponse(final_content=hb_assistant_message.get("content", "")),
+                        conversation_id=session_id,
+                        sender="AI",
+                        metadata={
+                            "source": "heartbeat",
+                            "is_heartbeat": True,
+                            "hide_in_web": False,
+                        },
+                    )
+                hb_assistant_message = _build_heartbeat_assistant_message(
+                    heartbeat_adapter, session_id, response_text
+                )
+                self.session_store.append_message(session_id, hb_assistant_message)
 
                 # 发送响应到目标（仅发送给配置的 targets）
                 for target in targets:
@@ -1671,14 +2006,10 @@ class WebChatServer:
         session_type = "qq_group" if group_id else "qq_private"
 
         # 检查是否已存在该 QQ 会话
-        existing_session_id = None
-        for sid, session in self.sessions.items():
-            if (
-                session.get("qq_id") == target_id
-                and session.get("type") == session_type
-            ):
-                existing_session_id = sid
-                break
+        existing_session_id = self.session_store.find_session_id(
+            lambda sid, session: session.get("qq_id") == target_id
+            and session.get("type") == session_type
+        )
 
         if existing_session_id:
             session_id = existing_session_id
@@ -1694,8 +2025,7 @@ class WebChatServer:
                 "messages": [],
                 "system_prompt": "",
             }
-            self.sessions[session_id] = session
-            self._save_data("sessions")
+            self.session_store.set_session(session_id, session)
         else:
             return None
 
@@ -1715,10 +2045,9 @@ class WebChatServer:
                     "sender": target_id,
                     "source": "qq",
                 }
-                self.sessions[session_id]["messages"].append(web_msg)
+                self.session_store.append_message(session_id, web_msg)
 
             # 保存会话数据
-            self._save_data("sessions")
 
         return session_id
 

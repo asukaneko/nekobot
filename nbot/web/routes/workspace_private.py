@@ -3,8 +3,14 @@ import re
 
 from flask import jsonify, request, send_from_directory
 
+from nbot.core import WebSessionStore
+
 
 def register_workspace_private_routes(app, server):
+    session_store = WebSessionStore(
+        server.sessions, save_callback=lambda: server._save_data("sessions")
+    )
+
     @app.route("/api/sessions/<session_id>/workspace/files", methods=["GET"])
     def get_workspace_files(session_id):
         if not server.WORKSPACE_AVAILABLE:
@@ -19,7 +25,8 @@ def register_workspace_private_routes(app, server):
         if not server.WORKSPACE_AVAILABLE:
             return jsonify({"error": "Workspace not available"}), 503
 
-        if session_id not in server.sessions:
+        session = session_store.get_session(session_id)
+        if not session:
             return jsonify({"error": "Session not found"}), 404
 
         if "file" not in request.files:
@@ -30,7 +37,7 @@ def register_workspace_private_routes(app, server):
             return jsonify({"error": "Empty filename"}), 400
 
         file_data = file.read()
-        session_type = server.sessions[session_id].get("type", "web")
+        session_type = session.get("type", "web")
         result = server.workspace_manager.save_uploaded_file(
             session_id, file_data, file.filename, session_type
         )

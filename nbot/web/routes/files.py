@@ -4,8 +4,14 @@ import time
 
 from flask import jsonify, request, send_from_directory
 
+from nbot.core import WebSessionStore
+
 
 def register_file_routes(app, server, workspace_available, workspace_manager):
+    session_store = WebSessionStore(
+        server.sessions, save_callback=lambda: server._save_data("sessions")
+    )
+
     max_file_size = 50 * 1024 * 1024
     max_text_content_size = 100 * 1024
 
@@ -103,8 +109,9 @@ def register_file_routes(app, server, workspace_available, workspace_manager):
 
             if session_id and workspace_available:
                 session_type = "web"
-                if session_id in server.sessions:
-                    session_type = server.sessions[session_id].get("type", "web")
+                session = session_store.get_session(session_id)
+                if session:
+                    session_type = session.get("type", "web")
                 else:
                     try:
                         sessions_file = os.path.join(server.data_dir, "sessions.json")

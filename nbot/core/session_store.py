@@ -158,6 +158,15 @@ class WebSessionStore:
     def get_session(self, session_id: str) -> Optional[Dict[str, Any]]:
         return self.sessions.get(session_id)
 
+    def iter_sessions(self):
+        return self.sessions.items()
+
+    def find_session_id(self, predicate: Callable[[str, Dict[str, Any]], bool]) -> Optional[str]:
+        for session_id, session in self.sessions.items():
+            if predicate(session_id, session):
+                return session_id
+        return None
+
     def set_session(self, session_id: str, session: Dict[str, Any]) -> Dict[str, Any]:
         self.sessions[session_id] = session
         if self.save_callback:

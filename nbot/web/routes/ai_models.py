@@ -22,10 +22,14 @@ def register_ai_model_routes(app, server):
             "id": str(uuid.uuid4()),
             "name": data.get("name", "新模型"),
             "provider": data.get("provider", "custom"),
+            "provider_type": data.get("provider_type", data.get("provider", "openai_compatible")),
             "api_key": data.get("api_key", ""),
             "base_url": data.get("base_url", ""),
             "model": data.get("model", ""),
             "enabled": data.get("enabled", True),
+            "supports_tools": data.get("supports_tools", True),
+            "supports_reasoning": data.get("supports_reasoning", True),
+            "supports_stream": data.get("supports_stream", True),
             "temperature": data.get("temperature", 0.7),
             "max_tokens": data.get("max_tokens", 2000),
             "top_p": data.get("top_p", 0.9),
@@ -54,11 +58,24 @@ def register_ai_model_routes(app, server):
                 data = request.json or {}
                 model["name"] = data.get("name", model["name"])
                 model["provider"] = data.get("provider", model["provider"])
+                model["provider_type"] = data.get(
+                    "provider_type",
+                    model.get("provider_type", model.get("provider", "openai_compatible")),
+                )
                 if data.get("api_key") and data["api_key"] != "********":
                     model["api_key"] = data["api_key"]
                 model["base_url"] = data.get("base_url", model["base_url"])
                 model["model"] = data.get("model", model["model"])
                 model["enabled"] = data.get("enabled", model.get("enabled", True))
+                model["supports_tools"] = data.get(
+                    "supports_tools", model.get("supports_tools", True)
+                )
+                model["supports_reasoning"] = data.get(
+                    "supports_reasoning", model.get("supports_reasoning", True)
+                )
+                model["supports_stream"] = data.get(
+                    "supports_stream", model.get("supports_stream", True)
+                )
                 model["temperature"] = data.get("temperature", model.get("temperature", 0.7))
                 model["max_tokens"] = data.get("max_tokens", model.get("max_tokens", 2000))
                 model["top_p"] = data.get("top_p", model.get("top_p", 0.9))
@@ -147,22 +164,29 @@ def register_ai_model_routes(app, server):
 
                 try:
                     import requests
+                    from nbot.core import (
+                        build_chat_completion_payload,
+                        resolve_chat_completion_url,
+                    )
 
-                    url_base = base_url.rstrip("/")
-                    if "/chat/completions" in url_base or "/chatcompletion" in url_base:
-                        url = url_base
-                    else:
-                        url = f"{url_base}/chat/completions"
+                    provider_type = model.get(
+                        "provider_type", model.get("provider", "openai_compatible")
+                    )
+                    url = resolve_chat_completion_url(
+                        base_url,
+                        model=model_name,
+                        provider_type=provider_type,
+                    )
 
                     headers = {
                         "Authorization": f"Bearer {api_key}",
                         "Content-Type": "application/json",
                     }
-                    payload = {
-                        "model": model_name,
-                        "messages": [{"role": "user", "content": "Hello"}],
-                        "max_tokens": 10,
-                    }
+                    payload = build_chat_completion_payload(
+                        model_name,
+                        [{"role": "user", "content": "Hello"}],
+                        extra_body={"max_tokens": 10},
+                    )
                     resp = requests.post(url, json=payload, headers=headers, timeout=30)
                     resp.raise_for_status()
                     return jsonify({"success": True, "message": "Connection successful"})

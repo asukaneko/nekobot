@@ -2,18 +2,28 @@ import os, json, datetime, time, re, copy
 from concurrent.futures import ThreadPoolExecutor, TimeoutError
 from nbot.services.ai import (
     ai_client, user_messages, group_messages, MAX_HISTORY_LENGTH,
-    model, api_key, base_url
+    refresh_runtime_ai_config,
 )
 from nbot.core import (
+    AgentService,
+    build_chat_completion_payload,
     ChatRequest,
     ChatResponse,
+    clean_response_content,
+    extract_display_text,
+    normalize_chat_completion_data,
+    prepare_chat_context,
     prompt_manager,
     message_manager,
     QQSessionStore,
+    QQChannelAdapter,
+    resolve_chat_completion_url,
+    resolve_loop_final_content,
+    ToolLoopSession,
     ToolLoopExit,
     build_qq_session_id,
     dump_json,
-    run_tool_call_loop,
+    run_tool_loop_session,
 )
 from nbot.core.message import create_message
 
@@ -159,38 +169,47 @@ def ensure_workspace(user_id=None, group_id=None, group_user_id=None) -> str:
 
 
 def _get_ai_response_with_tools_qq(messages: list, tools: list, session_id: str = None, max_iterations: int = 10) -> str:
+    runtime_ai = refresh_runtime_ai_config()
     """
     QQ 端带工具调用的 AI 响应获取
     支持多轮工具调用，直到得到最终回复
     直接使用 HTTP 请求，不依赖 ai_client.chat_completion
     """
-    if TOOLS_AVAILABLE and tools:
-        return _get_ai_response_with_tools_qq_unified(
-            messages, tools, session_id=session_id, max_iterations=max_iterations
+    if not TOOLS_AVAILABLE or not tools:
+        response = ai_client.chat_completion(
+            model=runtime_ai.get("model") or ai_client.model,
+            messages=messages,
+            stream=False,
         )
+        return response.choices[0].message.content
+
+    return _get_ai_response_with_tools_qq_unified(
+        messages, tools, session_id=session_id, max_iterations=max_iterations
+    )
 
     import requests
     
     if not TOOLS_AVAILABLE or not tools:
         # 不支持工具，直接调用 AI
         response = ai_client.chat_completion(
-            model=model,
+            model=runtime_ai.get("model") or ai_client.model,
             messages=messages,
             stream=False
         )
         return response.choices[0].message.content
     
     # 获取 API 配置
-    url_base = (base_url or "").rstrip("/")
+    url_base = (runtime_ai.get("base_url") or "").rstrip("/")
     if not url_base:
         raise ValueError("base_url 未配置")
-    if "/chat/completions" in url_base or "/chatcompletion" in url_base:
-        url = url_base
-    else:
-        url = f"{url_base}/chat/completions"
+    url = resolve_chat_completion_url(
+        runtime_ai.get("base_url") or "",
+        model=runtime_ai.get("model") or "",
+        provider_type=runtime_ai.get("provider_type") or "openai_compatible",
+    )
     
     headers = {
-        "Authorization": f"Bearer {api_key}",
+        "Authorization": f"Bearer {runtime_ai.get('api_key') or ''}",
         "Content-Type": "application/json"
     }
     
@@ -201,7 +220,7 @@ def _get_ai_response_with_tools_qq(messages: list, tools: list, session_id: str 
         try:
             # 构造请求 payload
             payload = {
-                "model": model,
+                "model": runtime_ai.get("model") or ai_client.model,
                 "messages": tool_messages,
                 "tools": tools,
                 "tool_choice": "auto",
@@ -302,57 +321,40 @@ def _get_ai_response_with_tools_qq(messages: list, tools: list, session_id: str 
 
 def _call_qq_ai_with_tools(messages: list, tools: list, stop_event=None) -> dict:
     import requests
+    runtime_ai = refresh_runtime_ai_config()
 
-    url_base = (base_url or "").rstrip("/")
+    url_base = (runtime_ai.get("base_url") or "").rstrip("/")
     if not url_base:
-        raise ValueError("base_url 鏈厤缃?")
-    if "/chat/completions" in url_base or "/chatcompletion" in url_base:
-        url = url_base
-    else:
-        url = f"{url_base}/chat/completions"
+        raise ValueError("base_url 未配置")
+    url = resolve_chat_completion_url(
+        runtime_ai.get("base_url") or "",
+        model=runtime_ai.get("model") or "",
+        provider_type=runtime_ai.get("provider_type") or "openai_compatible",
+    )
 
     headers = {
-        "Authorization": f"Bearer {api_key}",
+        "Authorization": f"Bearer {runtime_ai.get('api_key') or ''}",
         "Content-Type": "application/json",
     }
-    payload = {
-        "model": model,
-        "messages": messages,
-        "tools": tools,
-        "tool_choice": "auto",
-        "stream": False,
-    }
+    payload = build_chat_completion_payload(
+        runtime_ai.get("model") or ai_client.model,
+        messages,
+        tools=tools,
+        tool_choice="auto",
+        stream=False,
+    )
 
     resp = requests.post(url, json=payload, headers=headers, timeout=120)
     resp.raise_for_status()
     data = resp.json()
 
-    choice = data.get("choices", [{}])[0]
-    message = choice.get("message", {})
-    result = {
-        "content": message.get("content", ""),
-        "finish_reason": choice.get("finish_reason", ""),
-    }
-
-    if message.get("tool_calls"):
-        parsed_calls = []
-        for tool_call in message["tool_calls"]:
-            try:
-                arguments = json.loads(
-                    tool_call.get("function", {}).get("arguments", "{}")
-                )
-            except Exception:
-                arguments = {}
-            parsed_calls.append(
-                {
-                    "id": tool_call.get("id"),
-                    "name": tool_call.get("function", {}).get("name"),
-                    "arguments": arguments,
-                }
-            )
-        result["tool_calls"] = parsed_calls
-
-    return result
+    normalized = normalize_chat_completion_data(
+        data,
+        base_url=runtime_ai.get("base_url") or "",
+        model=runtime_ai.get("model") or "",
+        provider_type=runtime_ai.get("provider_type") or "openai_compatible",
+    )
+    return normalized.to_dict()
 
 
 def _get_ai_response_with_tools_qq_unified(
@@ -391,15 +393,23 @@ def _get_ai_response_with_tools_qq_unified(
             return {"error": str(e)}
 
     try:
-        loop_result = run_tool_call_loop(
-            messages,
-            model_call,
-            execute_qq_tool,
-            max_iterations=max_iterations,
+        execution_result = run_tool_loop_session(
+            ToolLoopSession(
+                initial_messages=messages,
+                model_call=model_call,
+                tool_executor=execute_qq_tool,
+                max_iterations=max_iterations,
+            )
         )
+        loop_result = execution_result.loop_result
     except Exception as e:
         print(f"[QQ Tools] 宸ュ叿璋冪敤鍑洪敊: {e}")
         return f"澶勭悊鍑洪敊: {str(e)}"
+
+    return resolve_loop_final_content(
+        loop_result,
+        "\u62b1\u6b49\uff0c\u6211\u6682\u65f6\u6ca1\u6709\u751f\u6210\u51fa\u6709\u6548\u56de\u590d\u3002",
+    )
 
     if loop_result.final_content:
         return loop_result.final_content
@@ -510,13 +520,10 @@ def judge_reply(content: str) -> float:
 
 def chat(content: str = "", user_id=None, group_id=None, group_user_id=None,
          image: bool = False, url=None, video=None):
-    now_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    qq_store = _get_qq_store()
-    conversation_id = get_qq_session_id(user_id, group_id, group_user_id)
-    chat_request = ChatRequest.for_qq(
-        conversation_id=conversation_id,
+    chat_request = QQChannelAdapter().build_chat_request(
         content=content,
         user_id=str(user_id) if user_id else None,
+        attachments=[],
         metadata={
             "group_id": str(group_id) if group_id else None,
             "group_user_id": str(group_user_id) if group_user_id else None,
@@ -525,6 +532,29 @@ def chat(content: str = "", user_id=None, group_id=None, group_user_id=None,
             "video": video,
         },
     )
+    return chat_from_request(chat_request).final_content
+
+
+def chat_from_request(chat_request: ChatRequest) -> ChatResponse:
+    agent_service = AgentService()
+    agent_service.register_handler("qq", _run_qq_chat_request)
+    return agent_service.process(chat_request, adapter=QQChannelAdapter())
+
+
+def _run_qq_chat_request(
+    chat_request: ChatRequest, adapter: QQChannelAdapter = None
+) -> ChatResponse:
+    runtime_ai = refresh_runtime_ai_config()
+    channel_capabilities = adapter.get_capabilities() if adapter else None
+    content = chat_request.content
+    user_id = chat_request.user_id
+    group_id = chat_request.metadata.get("group_id")
+    group_user_id = chat_request.metadata.get("group_user_id")
+    image = bool(chat_request.metadata.get("image", False))
+    url = chat_request.metadata.get("url")
+    video = chat_request.metadata.get("video")
+    now_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    qq_store = _get_qq_store()
 
     if user_id:
         user_id = str(user_id)
@@ -535,6 +565,10 @@ def chat(content: str = "", user_id=None, group_id=None, group_user_id=None,
             group_id=group_id, group_user_id=group_user_id
         )
     else:
+        if TOOLS_AVAILABLE and not runtime_ai.get("supports_tools", True):
+            print("[QQ Tools] 当前配置声明不支持工具调用，已跳过工具链")
+        if TOOLS_AVAILABLE and not runtime_ai.get("supports_tools", True):
+            print("[QQ Tools] 当前配置声明不支持工具调用，已跳过工具链")
         history_messages = []
 
     messages = copy.deepcopy(history_messages)
@@ -583,17 +617,25 @@ def chat(content: str = "", user_id=None, group_id=None, group_user_id=None,
 
     # 知识库检索 - 根据用户提问匹配相关内容
     knowledge_res = search_knowledge_base(content, user_id, group_id)
-    if knowledge_res:
-        messages.append({"role": "system", "content": knowledge_res})
-
-    if len(messages) > MAX_HISTORY_LENGTH:
-        messages = [messages[0]] + messages[-MAX_HISTORY_LENGTH:]
+    prepared_context = prepare_chat_context(
+        messages,
+        content,
+        knowledge_text=knowledge_res,
+        max_history=MAX_HISTORY_LENGTH,
+        max_total_chars=30000,
+    )
+    messages = prepared_context.messages
 
     # 获取工作区上下文（用于工具调用）
     workspace_context = get_workspace_context(user_id, group_id, group_user_id)
     
     # 使用带工具调用的 AI 响应获取
-    if TOOLS_AVAILABLE and workspace_context.get('session_id'):
+    if (
+        TOOLS_AVAILABLE
+        and runtime_ai.get("supports_tools", True)
+        and (channel_capabilities is None or channel_capabilities.supports_file_send)
+        and workspace_context.get('session_id')
+    ):
         # 准备工具上下文
         tool_context = {
             'session_id': workspace_context['session_id'],
@@ -612,7 +654,7 @@ def chat(content: str = "", user_id=None, group_id=None, group_user_id=None,
     else:
         # 普通 AI 调用（不支持工具）
         response = ai_client.chat_completion(
-            model=model,
+            model=runtime_ai.get("model") or ai_client.model,
             messages=messages,
             stream=False
         )
@@ -632,22 +674,10 @@ def chat(content: str = "", user_id=None, group_id=None, group_user_id=None,
     # 注意：QQ 消息已通过新模块 message_manager 统一管理，存储在 data/qq/ 目录
     # 不再同步到 data/web/sessions.json
 
-    temp_content = assistant_response.strip()
-    if temp_content.startswith("```json"):
-        temp_content = temp_content[7:]
-        if temp_content.endswith("```"):
-            temp_content = temp_content[:-3]
-        assistant_response = temp_content.strip()
-    elif temp_content.startswith("```"):
-        temp_content = temp_content[3:]
-        if temp_content.endswith("```"):
-            temp_content = temp_content[:-3]
-        assistant_response = temp_content.strip()
-
-    assistant_response = assistant_response.lstrip()
+    assistant_response = clean_response_content(assistant_response)
 
     # 解析 JSON 返回给 QQ
-    display_response = assistant_response
+    display_response = extract_display_text(assistant_response)
     if assistant_response and assistant_response.strip().startswith('{'):
         try:
             # 先替换中文引号和冒号为英文
@@ -663,7 +693,14 @@ def chat(content: str = "", user_id=None, group_id=None, group_user_id=None,
 
     qq_store.save()
 
-    return ChatResponse(final_content=display_response).final_content
+    chat_response = ChatResponse(final_content=display_response)
+    if adapter:
+        chat_response.assistant_message = adapter.build_assistant_message(
+            chat_response,
+            conversation_id=chat_request.conversation_id,
+            sender="AI",
+        )
+    return chat_response
 
 
 def _update_token_stats(user_id, group_id, prompt_tokens, completion_tokens, total_tokens):
@@ -884,14 +921,41 @@ def _record_message(role, content, user_id=None, group_id=None, group_user_id=No
         record_content = content
 
     qq_store = _get_qq_store()
+    qq_adapter = QQChannelAdapter()
+
+    def _sync_manager_message(target_id, **payload_kwargs):
+        base_message = {
+            "role": payload_kwargs.get("role"),
+            "content": payload_kwargs.get("content"),
+        }
+        manager_message = qq_adapter.build_manager_payload_from_message(
+            base_message,
+            default_role=payload_kwargs.get("role"),
+            default_content=payload_kwargs.get("content"),
+            user_id=payload_kwargs.get("user_id", ""),
+            group_id=payload_kwargs.get("group_id", ""),
+            group_user_id=payload_kwargs.get("group_user_id", ""),
+        )
+        if payload_kwargs.get("user_id"):
+            message_manager.add_qq_private_message(
+                target_id, create_message(**manager_message)
+            )
+        else:
+            message_manager.add_qq_group_message(
+                target_id, create_message(**manager_message)
+            )
 
     if user_id:
         user_id = str(user_id)
         qq_store.append_message(role=role, content=record_content, user_id=user_id)
         
         # 同时记录到新消息模块
-        message_manager.add_qq_private_message(user_id, 
-            create_message(role, record_content, sender=user_id, source="qq_private"))
+        _sync_manager_message(
+            user_id,
+            role=role,
+            content=record_content,
+            user_id=user_id,
+        )
     
     elif group_id:
         group_id = str(group_id)
@@ -904,9 +968,13 @@ def _record_message(role, content, user_id=None, group_id=None, group_user_id=No
         
         # 同时记录到新消息模块（使用 group_id 作为文件标识）
         # 只有用户消息才设置 sender，AI 回复 sender 为空
-        sender_id = group_user_id if (role == "user" and group_user_id) else ""
-        message_manager.add_qq_group_message(group_id,
-            create_message(role, record_content, sender=sender_id, source="qq_group"))
+        _sync_manager_message(
+            group_id,
+            role=role,
+            content=record_content,
+            group_id=group_id,
+            group_user_id=group_user_id,
+        )
 
 
 def log_to_group_full_file(group_id, user_id, nickname, content, timestamp=None):
@@ -966,13 +1034,19 @@ def summarize_group_text(text: str) -> str:
         f"{text}"
     )
     try:
-        summary = ai_client.summarize_text(system_prompt, user_prompt, model=model)
+        runtime_ai = refresh_runtime_ai_config()
+        summary = ai_client.summarize_text(
+            system_prompt,
+            user_prompt,
+            model=runtime_ai.get("model") or ai_client.model,
+        )
         return summary or "总结结果为空喵~"
     except Exception:
         return "总结时出错喵，请稍后再试~"
 
 
 def generate_today_summary(user_id=None, group_id=None) -> str:
+    runtime_ai = refresh_runtime_ai_config()
     today_str = datetime.datetime.now().strftime("%Y-%m-%d")
     if group_id:
         group_id_str = str(group_id)
@@ -1008,7 +1082,10 @@ def generate_today_summary(user_id=None, group_id=None) -> str:
         client = None
         try:
             from openai import OpenAI
-            client = OpenAI(api_key=api_key, base_url=base_url)
+            client = OpenAI(
+                api_key=runtime_ai.get("api_key") or "",
+                base_url=runtime_ai.get("base_url") or "",
+            )
         except ImportError:
             pass
 
@@ -1022,7 +1099,7 @@ def generate_today_summary(user_id=None, group_id=None) -> str:
             )
             try:
                 response = client.chat.completions.create(
-                    model=model,
+                    model=runtime_ai.get("model") or ai_client.model,
                     messages=[
                         {"role": "system", "content": system_prompt},
                         {"role": "user", "content": user_prompt},

@@ -3,12 +3,12 @@ import logging
 import os
 import re
 import shutil
-import uuid
 from datetime import datetime
 from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
-from nbot.core import WebSessionStore
+from nbot.channels import WebChannelAdapter
+from nbot.core import ChatResponse, WebSessionStore
 
 _log = logging.getLogger(__name__)
 
@@ -49,6 +49,7 @@ class WebMessageAdapter:
         self.session_store = WebSessionStore(
             self.server.sessions, save_callback=lambda: self.server._save_data("sessions")
         )
+        self.channel_adapter = getattr(self.server, "web_channel_adapter", None) or WebChannelAdapter()
 
         try:
             from nbot.commands import admin
@@ -241,15 +242,11 @@ class WebMessageAdapter:
 
         if text:
             self._reply_text = text
-            message = {
-                "id": str(uuid.uuid4()),
-                "role": "assistant",
-                "content": text,
-                "timestamp": datetime.now().isoformat(),
-                "sender": "AI",
-                "source": "web",
-                "session_id": self.session_id,
-            }
+            message = self.channel_adapter.build_assistant_message(
+                ChatResponse(final_content=text),
+                conversation_id=self.session_id,
+                sender="AI",
+            )
             if self.session_id in self.server.sessions:
                 self.session_store.append_message(self.session_id, message)
             self.server.socketio.emit("new_message", message, room=self.session_id)
@@ -320,28 +317,26 @@ class WebMessageAdapter:
             return False
 
         download_url = f"/static/files/{safe_name}"
-        file_info = {
-            "id": str(uuid.uuid4()),
-            "role": "assistant",
-            "content": f"[File: {file_name}]",
-            "timestamp": datetime.now().isoformat(),
-            "sender": "AI",
-            "source": "web",
-            "session_id": self.session_id,
-            "file": {
-                "name": file_name,
-                "type": mime_type,
-                "size": file_size,
-                "is_image": is_image,
-                "is_text": is_text,
-                "is_video": is_video,
-                "is_audio": is_audio,
-                "extension": ext,
-                "download_url": download_url,
-                "url": download_url,
-                "safe_name": safe_name,
+        file_info = self.channel_adapter.build_assistant_message(
+            ChatResponse(final_content=f"[File: {file_name}]"),
+            conversation_id=self.session_id,
+            sender="AI",
+            metadata={
+                "file": {
+                    "name": file_name,
+                    "type": mime_type,
+                    "size": file_size,
+                    "is_image": is_image,
+                    "is_text": is_text,
+                    "is_video": is_video,
+                    "is_audio": is_audio,
+                    "extension": ext,
+                    "download_url": download_url,
+                    "url": download_url,
+                    "safe_name": safe_name,
+                }
             },
-        }
+        )
 
         if is_image and file_size < 5 * 1024 * 1024:
             try:
