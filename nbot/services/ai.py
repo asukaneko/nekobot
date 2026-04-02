@@ -25,6 +25,17 @@ supports_reasoning = config_parser.getboolean('ApiKey', 'supports_reasoning', fa
 supports_stream = config_parser.getboolean('ApiKey', 'supports_stream', fallback=True)
 
 
+def resolve_runtime_api_key(configured_api_key: str = "", provider: str = "") -> str:
+    provider_name = (provider or "").strip().lower()
+    if provider_name == "minimax":
+        return (
+            os.getenv("MINIMAX_API_KEY")
+            or os.getenv("API_KEY")
+            or configured_api_key
+        )
+    return os.getenv("API_KEY") or configured_api_key
+
+
 def _load_shared_web_ai_config() -> dict:
     data_dir = os.path.join("data", "web")
     models_file = os.path.join(data_dir, "ai_models.json")
@@ -54,7 +65,6 @@ def _load_shared_web_ai_config() -> dict:
 def get_runtime_ai_config() -> dict:
     shared = _load_shared_web_ai_config()
     effective = {
-        "api_key": shared.get("api_key") or api_key,
         "base_url": shared.get("base_url") or base_url,
         "model": shared.get("model") or model,
         "provider_type": shared.get("provider_type")
@@ -65,6 +75,10 @@ def get_runtime_ai_config() -> dict:
         "supports_reasoning": shared.get("supports_reasoning", supports_reasoning),
         "supports_stream": shared.get("supports_stream", supports_stream),
     }
+    effective["api_key"] = resolve_runtime_api_key(
+        shared.get("api_key") or api_key,
+        effective["provider_type"],
+    )
     return effective
 
 

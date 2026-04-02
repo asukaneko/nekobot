@@ -23,6 +23,13 @@ def _read_config():
     return config_parser
 
 
+def resolve_runtime_api_key(configured_api_key: str = "", provider_type: str = "") -> str:
+    provider = (provider_type or "").strip().lower()
+    if provider == "minimax":
+        return os.getenv("MINIMAX_API_KEY") or os.getenv("API_KEY") or configured_api_key
+    return os.getenv("API_KEY") or configured_api_key
+
+
 def load_config():
     config_parser = _read_config()
 
@@ -37,8 +44,12 @@ def load_config():
 def get_api_config():
     config_parser = _read_config()
 
-    api_key = os.getenv("API_KEY") or config_parser.get(
-        "ApiKey", "api_key", fallback=""
+    provider_type = os.getenv("PROVIDER_TYPE") or config_parser.get(
+        "ApiKey", "provider_type", fallback="openai_compatible"
+    )
+    api_key = resolve_runtime_api_key(
+        config_parser.get("ApiKey", "api_key", fallback=""),
+        provider_type,
     )
     base_url = os.getenv("BASE_URL") or config_parser.get(
         "ApiKey",
@@ -56,6 +67,7 @@ def get_api_config():
         "api_key": api_key,
         "base_url": base_url,
         "model": model,
+        "provider_type": provider_type,
         "silicon_api_key": silicon_api_key,
     }
 

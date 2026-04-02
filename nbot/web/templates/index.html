@@ -4667,6 +4667,581 @@
             color: var(--text-primary);
         }
 
+        .ai-config-shell {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+
+        .ai-hero {
+            position: relative;
+            overflow: hidden;
+            padding: 24px;
+            border-radius: 20px;
+            border: 1px solid color-mix(in srgb, var(--accent-primary) 18%, var(--border-color));
+            background:
+                radial-gradient(circle at top right, color-mix(in srgb, var(--accent-primary) 18%, transparent), transparent 34%),
+                radial-gradient(circle at bottom left, color-mix(in srgb, var(--secondary) 16%, transparent), transparent 32%),
+                linear-gradient(135deg, color-mix(in srgb, var(--bg-secondary) 92%, white 8%), var(--bg-secondary));
+            box-shadow: 0 18px 48px rgba(15, 23, 42, 0.08);
+        }
+
+        .ai-hero::after {
+            content: '';
+            position: absolute;
+            inset: auto -80px -120px auto;
+            width: 220px;
+            height: 220px;
+            border-radius: 50%;
+            background: color-mix(in srgb, var(--accent-primary) 12%, transparent);
+            filter: blur(20px);
+            animation: aiFloatOrb 9s ease-in-out infinite;
+            pointer-events: none;
+        }
+
+        .ai-hero-grid {
+            position: relative;
+            z-index: 1;
+            display: grid;
+            grid-template-columns: minmax(0, 1.7fr) minmax(320px, 1fr);
+            gap: 20px;
+            align-items: stretch;
+        }
+
+        .ai-hero-title {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            margin-bottom: 14px;
+        }
+
+        .ai-hero-icon {
+            width: 52px;
+            height: 52px;
+            border-radius: 16px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 22px;
+            background: linear-gradient(135deg, var(--accent-primary), var(--secondary));
+            box-shadow: 0 14px 28px color-mix(in srgb, var(--accent-primary) 30%, transparent);
+        }
+
+        .ai-hero-copy h2 {
+            margin: 0 0 6px;
+            font-size: 26px;
+            line-height: 1.15;
+        }
+
+        .ai-hero-copy p {
+            margin: 0;
+            max-width: 720px;
+            color: var(--text-secondary);
+            line-height: 1.7;
+        }
+
+        .ai-toolbar {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            justify-content: space-between;
+            gap: 16px;
+            margin-top: 18px;
+        }
+
+        .ai-preset-cluster {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .ai-preset-label {
+            font-size: 12px;
+            font-weight: 600;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            color: var(--text-muted);
+        }
+
+        .ai-action-group {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: flex-end;
+            gap: 10px;
+        }
+
+        .ai-hero-side {
+            display: flex;
+            flex-direction: column;
+            gap: 14px;
+        }
+
+        .ai-status-panel {
+            padding: 18px;
+            border-radius: 18px;
+            background: color-mix(in srgb, var(--surface) 88%, white 12%);
+            border: 1px solid var(--border-color);
+            backdrop-filter: blur(8px);
+        }
+
+        .ai-status-top {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            margin-bottom: 14px;
+        }
+
+        .ai-status-title {
+            font-size: 13px;
+            color: var(--text-secondary);
+        }
+
+        .ai-status-name {
+            font-size: 18px;
+            font-weight: 700;
+            margin-top: 4px;
+        }
+
+        .ai-summary-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 12px;
+        }
+
+        .ai-summary-card {
+            padding: 14px;
+            border-radius: 14px;
+            border: 1px solid var(--border-color);
+            background: color-mix(in srgb, var(--bg-secondary) 78%, white 22%);
+            transition: transform 0.25s ease, box-shadow 0.25s ease, border-color 0.25s ease;
+        }
+
+        .ai-summary-card:hover {
+            transform: translateY(-2px);
+            border-color: color-mix(in srgb, var(--accent-primary) 30%, var(--border-color));
+            box-shadow: 0 12px 24px rgba(15, 23, 42, 0.08);
+        }
+
+        .ai-summary-label {
+            font-size: 12px;
+            color: var(--text-muted);
+            margin-bottom: 6px;
+        }
+
+        .ai-summary-value {
+            font-size: 16px;
+            font-weight: 700;
+            line-height: 1.3;
+        }
+
+        .ai-summary-note {
+            margin-top: 6px;
+            font-size: 12px;
+            color: var(--text-secondary);
+        }
+
+        .ai-config-grid {
+            display: grid;
+            grid-template-columns: minmax(0, 1.15fr) minmax(360px, 0.85fr);
+            gap: 20px;
+            align-items: start;
+        }
+
+        .ai-config-column {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+
+        .ai-pane {
+            position: relative;
+            overflow: hidden;
+            border-radius: 18px;
+            border: 1px solid var(--border-color);
+            background: linear-gradient(180deg, color-mix(in srgb, var(--surface) 90%, white 10%), var(--surface));
+            box-shadow: 0 16px 32px rgba(15, 23, 42, 0.05);
+            transition: transform 0.28s ease, box-shadow 0.28s ease, border-color 0.28s ease;
+        }
+
+        .ai-pane:hover {
+            transform: translateY(-3px);
+            border-color: color-mix(in srgb, var(--accent-primary) 22%, var(--border-color));
+            box-shadow: 0 20px 42px rgba(15, 23, 42, 0.08);
+        }
+
+        .ai-pane-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            padding: 18px 20px 0;
+        }
+
+        .ai-pane-title {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 16px;
+            font-weight: 700;
+        }
+
+        .ai-pane-title i {
+            color: var(--accent-primary);
+        }
+
+        .ai-pane-subtitle {
+            padding: 6px 20px 0;
+            color: var(--text-secondary);
+            font-size: 13px;
+            line-height: 1.6;
+        }
+
+        .ai-pane-body {
+            padding: 18px 20px 20px;
+        }
+
+        .ai-section-divider {
+            margin: 18px 0 14px;
+            padding-top: 18px;
+            border-top: 1px solid var(--border-color);
+        }
+
+        .ai-section-label {
+            margin-bottom: 10px;
+            font-size: 12px;
+            font-weight: 700;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            color: var(--text-muted);
+        }
+
+        .ai-capability-list {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .ai-capability-item {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 14px;
+            padding: 14px 16px;
+            border-radius: 14px;
+            border: 1px solid var(--border-color);
+            background: color-mix(in srgb, var(--bg-secondary) 80%, white 20%);
+        }
+
+        .ai-capability-copy strong {
+            display: block;
+            margin-bottom: 4px;
+        }
+
+        .ai-capability-copy span {
+            display: block;
+            font-size: 12px;
+            color: var(--text-secondary);
+            line-height: 1.6;
+        }
+
+        .ai-help-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 12px;
+        }
+
+        .ai-help-card {
+            padding: 14px;
+            border-radius: 14px;
+            border: 1px solid var(--border-color);
+            background: color-mix(in srgb, var(--bg-secondary) 82%, white 18%);
+            font-size: 13px;
+            color: var(--text-secondary);
+            line-height: 1.7;
+        }
+
+        .ai-help-card strong {
+            display: block;
+            margin-bottom: 6px;
+            color: var(--text-primary);
+        }
+
+        .ai-saved-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+            gap: 14px;
+        }
+
+        .ai-saved-card {
+            position: relative;
+            overflow: hidden;
+            padding: 16px;
+            border-radius: 16px;
+            border: 1px solid var(--border-color);
+            background:
+                radial-gradient(circle at top right, color-mix(in srgb, var(--accent-primary) 10%, transparent), transparent 34%),
+                linear-gradient(180deg, color-mix(in srgb, var(--surface) 88%, white 12%), color-mix(in srgb, var(--bg-secondary) 82%, white 18%));
+            box-shadow: 0 12px 28px rgba(15, 23, 42, 0.05);
+            transition: transform 0.24s ease, box-shadow 0.24s ease, border-color 0.24s ease;
+        }
+
+        .ai-saved-card:hover {
+            transform: translateY(-3px);
+            border-color: color-mix(in srgb, var(--accent-primary) 26%, var(--border-color));
+            box-shadow: 0 18px 32px rgba(15, 23, 42, 0.08);
+        }
+
+        .ai-saved-card.active {
+            border-color: color-mix(in srgb, var(--accent-primary) 50%, var(--border-color));
+            box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent-primary) 26%, transparent), 0 20px 40px rgba(15, 23, 42, 0.09);
+        }
+
+        .ai-saved-top {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 12px;
+            margin-bottom: 12px;
+        }
+
+        .ai-saved-brand {
+            display: flex;
+            align-items: flex-start;
+            gap: 14px;
+            min-width: 0;
+        }
+
+        .ai-saved-icon {
+            width: 52px;
+            height: 52px;
+            border-radius: 16px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 20px;
+            flex-shrink: 0;
+            background: linear-gradient(135deg, var(--accent-primary), var(--secondary));
+            box-shadow: 0 14px 24px color-mix(in srgb, var(--accent-primary) 24%, transparent);
+        }
+
+        .ai-saved-icon-glyph,
+        .ai-hero-glyph {
+            font-size: 22px;
+            line-height: 1;
+        }
+
+        .ai-saved-watermark {
+            position: absolute;
+            right: 18px;
+            bottom: 18px;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            opacity: 0.08;
+            pointer-events: none;
+        }
+
+        .ai-saved-watermark span {
+            display: block;
+            width: 52px;
+            height: 14px;
+            border-radius: 999px;
+            background: var(--text-primary);
+        }
+
+        .ai-saved-watermark span:nth-child(2) {
+            width: 34px;
+            margin-left: 18px;
+        }
+
+        .ai-saved-title {
+            font-size: 15px;
+            font-weight: 700;
+            line-height: 1.35;
+        }
+
+        .ai-saved-meta {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px 12px;
+            margin-bottom: 12px;
+            font-size: 12px;
+            color: var(--text-secondary);
+        }
+
+        .ai-saved-meta span {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .ai-saved-flags {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-bottom: 14px;
+        }
+
+        .ai-saved-flag {
+            padding: 6px 10px;
+            border-radius: 999px;
+            background: var(--bg-secondary);
+            color: var(--text-secondary);
+            font-size: 12px;
+            border: 1px solid var(--border-color);
+        }
+
+        .ai-saved-actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+
+        .switch-field {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 14px;
+            width: 100%;
+        }
+
+        .switch-copy {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            min-width: 0;
+        }
+
+        .switch-label {
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+
+        .switch-hint {
+            font-size: 12px;
+            line-height: 1.6;
+            color: var(--text-secondary);
+        }
+
+        .switch-control {
+            position: relative;
+            display: inline-flex;
+            align-items: center;
+            flex-shrink: 0;
+            cursor: pointer;
+        }
+
+        .switch-control input {
+            position: absolute;
+            opacity: 0;
+            pointer-events: none;
+        }
+
+        .switch-slider {
+            position: relative;
+            width: 52px;
+            height: 30px;
+            border-radius: 999px;
+            background: color-mix(in srgb, var(--text-muted) 28%, transparent);
+            border: 1px solid color-mix(in srgb, var(--text-muted) 26%, transparent);
+            transition: background 0.22s ease, border-color 0.22s ease, box-shadow 0.22s ease;
+        }
+
+        .switch-slider::after {
+            content: '';
+            position: absolute;
+            top: 3px;
+            left: 3px;
+            width: 22px;
+            height: 22px;
+            border-radius: 50%;
+            background: #fff;
+            box-shadow: 0 4px 12px rgba(15, 23, 42, 0.18);
+            transition: transform 0.22s ease;
+        }
+
+        .switch-control input:checked + .switch-slider {
+            background: linear-gradient(135deg, var(--accent-primary), var(--secondary));
+            border-color: transparent;
+            box-shadow: 0 8px 20px color-mix(in srgb, var(--accent-primary) 24%, transparent);
+        }
+
+        .switch-control input:checked + .switch-slider::after {
+            transform: translateX(22px);
+        }
+
+        .switch-control input:disabled + .switch-slider {
+            opacity: 0.45;
+            cursor: not-allowed;
+        }
+
+        .ai-config-fade {
+            animation: aiSectionRise 0.45s ease both;
+        }
+
+        .ai-config-fade:nth-child(2) { animation-delay: 0.04s; }
+        .ai-config-fade:nth-child(3) { animation-delay: 0.08s; }
+        .ai-config-fade:nth-child(4) { animation-delay: 0.12s; }
+
+        @keyframes aiSectionRise {
+            from {
+                opacity: 0;
+                transform: translateY(10px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        @keyframes aiFloatOrb {
+            0%, 100% { transform: translate3d(0, 0, 0); }
+            50% { transform: translate3d(-12px, -10px, 0); }
+        }
+
+        @media (max-width: 1080px) {
+            .ai-hero-grid,
+            .ai-config-grid,
+            .ai-help-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .ai-summary-grid {
+                grid-template-columns: 1fr 1fr;
+            }
+        }
+
+        @media (max-width: 760px) {
+            .ai-hero {
+                padding: 18px;
+            }
+
+            .ai-toolbar,
+            .ai-action-group {
+                align-items: stretch;
+            }
+
+            .ai-action-group,
+            .config-actions {
+                width: 100%;
+                justify-content: stretch;
+            }
+
+            .ai-action-group .btn,
+            .config-actions .btn {
+                flex: 1;
+            }
+
+            .ai-summary-grid,
+            .ai-help-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
         /* Model Manager Styles */
         .model-card {
             transition: all 0.2s ease;
@@ -7073,308 +7648,444 @@
                     </div>
 
                     <!-- AI Config -->
-                    <div v-if="currentPage === 'ai-config'" class="fade-in">
-                        <!-- 配置操作栏 -->
-                        <div class="ai-config-header">
-                            <div class="config-presets">
-                                <label class="form-label">快速选择配置</label>
-                                <div class="preset-buttons">
-                                    <button
-                                        v-for="preset in aiPresets"
-                                        :key="preset.name"
-                                        class="preset-btn"
-                                        :class="{ active: currentPreset === preset.name }"
-                                        @click="applyAIPreset(preset)"
-                                    >
-                                        <i :class="preset.icon"></i>
-                                        {{ preset.name }}
-                                    </button>
-                                </div>
-                            </div>
-                            <div class="config-actions">
-                                <button class="btn btn-secondary" @click="openModelManager">
-                                    <i class="fas fa-layer-group"></i> 模型管理
-                                </button>
-                                <button class="btn btn-secondary" @click="testAIConnection" :disabled="isTesting">
-                                    <i class="fas" :class="isTesting ? 'fa-spinner fa-spin' : 'fa-vial'"></i>
-                                    {{ isTesting ? '测试中...' : '测试连接' }}
-                                </button>
-                                <button class="btn btn-primary" @click="saveAIConfig" :disabled="isLoading">
-                                    <i class="fas fa-save"></i> 保存配置
-                                </button>
-                            </div>
-                        </div>
-
-                        <!-- 当前激活的模型提示 -->
-                        <div v-if="activeModelId" class="card" style="margin-bottom: 20px;">
-                            <div class="card-body" style="display: flex; align-items: center; justify-content: space-between;">
-                                <div style="display: flex; align-items: center; gap: 12px;">
-                                    <div class="model-icon" style="width: 40px; height: 40px; border-radius: 8px; background: linear-gradient(135deg, var(--primary), var(--secondary)); display: flex; align-items: center; justify-content: center; color: white;">
-                                        <i class="fas fa-check"></i>
-                                    </div>
-                                    <div>
-                                        <div style="font-weight: 500;">当前使用模型</div>
-                                        <div style="font-size: 12px; color: var(--text-secondary);">
-                                            {{ aiModels.find(m => m.id === activeModelId)?.name || '未知' }}
-                                            ({{ getProviderLabel(aiModels.find(m => m.id === activeModelId)?.provider) }})
+                    <div v-if="currentPage === 'ai-config'" class="fade-in ai-config-shell">
+                        <div class="ai-hero ai-config-fade">
+                            <div class="ai-hero-grid">
+                                <div>
+                                    <div class="ai-hero-title">
+                                        <div class="ai-hero-icon">
+                                            <span class="ai-hero-glyph">✦</span>
+                                        </div>
+                                        <div class="ai-hero-copy">
+                                            <h2>AI 配置中心</h2>
+                                            <p>先确认服务能连通，再决定模型能力和运行策略。这样连接问题、能力问题和调参问题会被清楚地分开。</p>
                                         </div>
                                     </div>
-                                </div>
-                                <span class="badge badge-success">已激活</span>
-                            </div>
-                        </div>
-
-                        <div class="grid-2">
-                            <!-- 基础配置 -->
-                            <div class="card">
-                                <div class="card-header">
-                                    <span class="card-title"><i class="fas fa-server"></i> AI 提供商配置</span>
-                                    <span class="badge" :class="aiStatus.class">{{ aiStatus.text }}</span>
-                                </div>
-                                <div class="card-body">
-                                    <div class="form-group">
-                                        <label class="form-label">AI 提供商 <span class="required">*</span></label>
-                                        <select v-model="aiConfig.provider" class="form-select" @change="onProviderChange">
-                                            <option value="openai">OpenAI</option>
-                                            <option value="anthropic">Anthropic (Claude)</option>
-                                            <option value="google">Google (Gemini)</option>
-                                            <option value="azure">Azure OpenAI</option>
-                                            <option value="siliconflow">SiliconFlow</option>
-                                            <option value="deepseek">DeepSeek</option>
-                                            <option value="custom">自定义</option>
-                                        </select>
-                                    </div>
-                                    <div class="form-group">
-                                        <label class="form-label">API Key <span class="required">*</span></label>
-                                        <div class="input-with-icon">
-                                            <input 
-                                                v-model="aiConfig.api_key" 
-                                                :type="showApiKey ? 'text' : 'password'" 
-                                                class="form-input" 
-                                                placeholder="输入 API Key"
-                                            >
-                                            <button class="icon-btn" @click="showApiKey = !showApiKey">
-                                                <i :class="showApiKey ? 'fas fa-eye-slash' : 'fas fa-eye'"></i>
+                                    <div class="ai-toolbar">
+                                        <div class="ai-action-group">
+                                            <button class="btn btn-secondary" @click="openModelEditModal()">
+                                                <i class="fas fa-plus"></i> 新增模型
+                                            </button>
+                                            <button class="btn btn-secondary" @click="showAIConfigDetails = !showAIConfigDetails">
+                                                <i class="fas" :class="showAIConfigDetails ? 'fa-eye-slash' : 'fa-sliders-h'"></i>
+                                                {{ showAIConfigDetails ? '收起详细配置' : '展开详细配置' }}
+                                            </button>
+                                            <button class="btn btn-primary" @click="saveAIConfig" :disabled="isLoading">
+                                                <i class="fas fa-save"></i> 保存配置
                                             </button>
                                         </div>
-                                        <div class="form-hint">您的 API Key 将被安全存储，不会明文显示</div>
                                     </div>
-                                    <div class="form-group">
-                                        <label class="form-label">API Base URL</label>
-                                        <input v-model="aiConfig.base_url" type="text" class="form-input" :placeholder="getBaseUrlPlaceholder()">
-                                        <div class="form-hint">留空将使用默认地址</div>
-                                    </div>
-                                    <div class="form-group">
-                                        <label class="form-label">Provider 类型</label>
-                                        <select v-model="aiConfig.provider_type" class="form-select">
-                                            <option value="openai_compatible">OpenAI Compatible</option>
-                                            <option value="anthropic">Anthropic Messages</option>
-                                            <option value="google">Google Gemini</option>
-                                            <option value="minimax">MiniMax Raw Endpoint</option>
-                                            <option value="siliconflow">SiliconFlow</option>
-                                        </select>
-                                        <div class="form-hint">优先使用显式 provider 类型，不再只靠 Base URL 猜测</div>
-                                    </div>
-                                    <div class="form-row">
-                                        <div class="form-group flex-2">
-                                            <label class="form-label">模型 <span class="required">*</span></label>
-                                            <select v-model="aiConfig.model" class="form-select">
-                                                <option v-for="model in availableModels" :key="model.value" :value="model.value">
-                                                    {{ model.label }}
-                                                </option>
-                                            </select>
+                                </div>
+
+                                <div class="ai-hero-side">
+                                    <div class="ai-status-panel">
+                                        <div class="ai-status-top">
+                                            <div>
+                                                <div class="ai-status-title">当前生效模型</div>
+                                                <div class="ai-status-name">
+                                                    {{ activeModelId ? (aiModels.find(m => m.id === activeModelId)?.name || '未知模型') : (aiConfig.model || '未设置模型') }}
+                                                </div>
+                                            </div>
+                                            <span class="badge" :class="aiStatus.class">{{ aiStatus.text }}</span>
                                         </div>
-                                        <div class="form-group flex-1">
-                                            <label class="form-label">或自定义</label>
-                                            <input v-model="aiConfig.custom_model" type="text" class="form-input" placeholder="模型ID">
+                                        <div class="ai-summary-grid">
+                                            <div class="ai-summary-card">
+                                                <div class="ai-summary-label">Provider</div>
+                                                <div class="ai-summary-value">{{ getProviderLabel(aiConfig.provider) }}</div>
+                                                <div class="ai-summary-note">{{ aiConfig.provider_type || 'openai_compatible' }}</div>
+                                            </div>
+                                            <div class="ai-summary-card">
+                                                <div class="ai-summary-label">模型标识</div>
+                                                <div class="ai-summary-value">{{ aiConfig.custom_model || aiConfig.model || '未设置' }}</div>
+                                                <div class="ai-summary-note">切换后建议先做一次连接测试</div>
+                                            </div>
+                                            <div class="ai-summary-card">
+                                                <div class="ai-summary-label">能力状态</div>
+                                                <div class="ai-summary-value">{{ aiConfig.supports_tools ? '工具已开' : '无工具' }}</div>
+                                                <div class="ai-summary-note">{{ aiConfig.supports_reasoning ? '展示思考内容' : '不展示思考内容' }}</div>
+                                            </div>
+                                            <div class="ai-summary-card">
+                                                <div class="ai-summary-label">上下文预算</div>
+                                                <div class="ai-summary-value">{{ Math.round((contextTokenEstimate || 0) / (aiConfig.max_context_length || 30000) * 100) }}%</div>
+                                                <div class="ai-summary-note">预计 {{ formatNumber(contextTokenEstimate || 0) }} / {{ formatNumber(aiConfig.max_context_length || 30000) }} Token</div>
+                                            </div>
                                         </div>
                                     </div>
                                 </div>
                             </div>
+                        </div>
 
-                            <!-- 生成参数 -->
-                            <div class="card">
-                                <div class="card-header">
-                                    <span class="card-title"><i class="fas fa-sliders-h"></i> 生成参数</span>
-                                    <button class="btn btn-text" @click="resetAIParams">
-                                        <i class="fas fa-undo"></i> 重置
+                        <div class="ai-pane ai-config-fade">
+                            <div class="ai-pane-header">
+                                <div class="ai-pane-title">
+                                    <i class="fas fa-layer-group"></i>
+                                    <span>已保存的模型配置</span>
+                                </div>
+                            </div>
+                            <div class="ai-pane-subtitle">这里直接展示已经保存的模型卡片，可以快速测试、应用或继续编辑，不用每次先打开弹窗。</div>
+                            <div class="ai-pane-body">
+                                <div v-if="aiModels.length === 0" class="empty-state" style="padding: 20px;">
+                                    <i class="fas fa-robot" style="font-size: 40px; color: var(--text-secondary); margin-bottom: 12px;"></i>
+                                    <p>还没有已保存的模型配置</p>
+                                    <button class="btn btn-primary" @click="openModelEditModal()" style="margin-top: 12px;">
+                                        创建第一个配置
                                     </button>
                                 </div>
-                                <div class="card-body">
-                                    <div class="form-group">
-                                        <div class="slider-header">
-                                            <label class="form-label">温度 (Temperature)</label>
-                                            <span class="slider-value">{{ aiConfig.temperature }}</span>
-                                        </div>
-                                        <input v-model.number="aiConfig.temperature" type="range" min="0" max="2" step="0.1" class="form-slider">
-                                        <div class="slider-labels">
-                                            <span>精确</span>
-                                            <span>平衡</span>
-                                            <span>创意</span>
-                                        </div>
-                                    </div>
-                                    <div class="form-group">
-                                        <div class="slider-header">
-                                            <label class="form-label">最大 Token</label>
-                                            <span class="slider-value">{{ aiConfig.max_tokens }}</span>
-                                        </div>
-                                        <input v-model.number="aiConfig.max_tokens" type="range" min="100" max="32000" step="100" class="form-slider">
-                                        <!-- 实时上下文使用预览 -->
-                                        <div style="margin-top: 12px; padding: 12px; background: var(--bg-secondary); border-radius: 8px;">
-                                            <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
-                                                <span style="font-size: 12px; color: var(--text-secondary);">当前上下文使用</span>
-                                                <span style="font-size: 12px; font-weight: 500;">
-                                                    {{ Math.round((contextTokenEstimate || 0) / (aiConfig.max_context_length || 30000) * 100) }}%
+                                    <div v-else class="ai-saved-grid">
+                                        <div
+                                            v-for="model in aiModels"
+                                            :key="model.id"
+                                            class="ai-saved-card"
+                                            :class="{ active: activeModelId === model.id }"
+                                        >
+                                            <div class="ai-saved-top">
+                                                <div class="ai-saved-brand">
+                                                    <div class="ai-saved-icon">
+                                                        <span class="ai-saved-icon-glyph">{{ getProviderGlyph(model.provider) }}</span>
+                                                    </div>
+                                                    <div style="min-width: 0;">
+                                                        <div class="ai-saved-title">{{ model.name }}</div>
+                                                        <div class="ai-saved-meta">
+                                                            <span><i :class="getProviderIcon(model.provider)"></i> {{ getProviderLabel(model.provider) }}</span>
+                                                            <span><i class="fas fa-cube"></i> {{ model.model }}</span>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                                <span class="badge" :class="model.enabled ? (activeModelId === model.id ? 'badge-primary' : 'badge-success') : 'badge-secondary'">
+                                                    {{ activeModelId === model.id ? '当前使用' : (model.enabled ? '已启用' : '已禁用') }}
                                                 </span>
                                             </div>
-                                            <div class="progress-bar" style="height: 8px;">
-                                                <div class="progress-fill" :style="{ width: Math.min(100, (contextTokenEstimate || 0) / (aiConfig.max_context_length || 30000) * 100) + '%' }"></div>
+                                        <div class="ai-saved-flags">
+                                            <span class="ai-saved-flag">{{ model.supports_tools ? '工具调用' : '纯聊天' }}</span>
+                                            <span class="ai-saved-flag">{{ model.supports_reasoning ? '展示思考' : '不展示思考' }}</span>
+                                            <span class="ai-saved-flag">{{ model.supports_stream ? '支持流式' : '无流式' }}</span>
+                                        </div>
+                                        <div class="ai-saved-actions">
+                                            <button
+                                                v-if="activeModelId !== model.id && model.enabled"
+                                                class="btn btn-primary btn-sm"
+                                                @click="applyModel(model)"
+                                                :disabled="isLoading"
+                                            >
+                                                <i class="fas fa-check"></i> 应用
+                                            </button>
+                                            <button class="btn btn-secondary btn-sm" @click="testModel(model)" :disabled="isTesting">
+                                                <i class="fas" :class="isTesting ? 'fa-spinner fa-spin' : 'fa-vial'"></i> 测试
+                                            </button>
+                                            <button class="btn btn-text btn-sm" @click="openModelEditModal(model)">
+                                                <i class="fas fa-edit"></i> 编辑
+                                            </button>
+                                        </div>
+                                        <div class="ai-saved-watermark" aria-hidden="true">
+                                            <span></span>
+                                            <span></span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div v-if="showAIConfigDetails" class="ai-config-grid">
+                            <div class="ai-config-column">
+                                <div class="ai-pane ai-config-fade">
+                                    <div class="ai-pane-header">
+                                        <div class="ai-pane-title">
+                                            <i class="fas fa-plug"></i>
+                                            <span>连接设置</span>
+                                        </div>
+                                        <span class="badge" :class="aiStatus.class">{{ aiStatus.text }}</span>
+                                    </div>
+                                    <div class="ai-pane-subtitle">这一组只处理连接本身，出问题时优先检查这里。</div>
+                                    <div class="ai-pane-body">
+                                        <div class="form-row">
+                                            <div class="form-group">
+                                                <label class="form-label">AI 提供商 <span class="required">*</span></label>
+                                                <select v-model="aiConfig.provider" class="form-select" @change="onProviderChange">
+                                                    <option value="openai">OpenAI</option>
+                                                    <option value="anthropic">Anthropic (Claude)</option>
+                                                    <option value="google">Google (Gemini)</option>
+                                                    <option value="azure">Azure OpenAI</option>
+                                                    <option value="siliconflow">SiliconFlow</option>
+                                                    <option value="deepseek">DeepSeek</option>
+                                                    <option value="custom">自定义</option>
+                                                </select>
                                             </div>
-                                            <div style="display: flex; justify-content: space-between; margin-top: 6px; font-size: 11px; color: var(--text-secondary);">
-                                                <span>预估 {{ formatNumber(contextTokenEstimate || 0) }} Token</span>
-                                                <span>限制 {{ formatNumber(aiConfig.max_context_length || 30000) }} Token</span>
+                                            <div class="form-group">
+                                                <label class="form-label">Provider 类型</label>
+                                                <select v-model="aiConfig.provider_type" class="form-select">
+                                                    <option value="openai_compatible">OpenAI Compatible</option>
+                                                    <option value="anthropic">Anthropic Messages</option>
+                                                    <option value="google">Google Gemini</option>
+                                                    <option value="minimax">MiniMax Raw Endpoint</option>
+                                                    <option value="siliconflow">SiliconFlow</option>
+                                                </select>
+                                                <div class="form-hint">显式 provider 类型会直接影响后端请求格式和测试连接行为。</div>
+                                            </div>
+                                        </div>
+                                        <div class="form-group">
+                                            <label class="form-label">API Key <span class="required">*</span></label>
+                                            <div class="input-with-icon">
+                                                <input v-model="aiConfig.api_key" :type="showApiKey ? 'text' : 'password'" class="form-input" placeholder="输入 API Key">
+                                                <button class="icon-btn" @click="showApiKey = !showApiKey">
+                                                    <i :class="showApiKey ? 'fas fa-eye-slash' : 'fas fa-eye'"></i>
+                                                </button>
+                                            </div>
+                                            <div class="form-hint">保存后会做掩码显示；如果是新 Key，建议保存前先测试一次连接。</div>
+                                        </div>
+                                        <div class="form-group">
+                                            <label class="form-label">API Base URL</label>
+                                            <input v-model="aiConfig.base_url" type="text" class="form-input" :placeholder="getBaseUrlPlaceholder()">
+                                            <div class="form-hint">留空时使用默认地址；私有网关或代理需要填完整基础地址。</div>
+                                        </div>
+                                        <div class="form-row">
+                                            <div class="form-group flex-2">
+                                                <label class="form-label">模型 <span class="required">*</span></label>
+                                                <select v-model="aiConfig.model" class="form-select">
+                                                    <option v-for="model in availableModels" :key="model.value" :value="model.value">
+                                                        {{ model.label }}
+                                                    </option>
+                                                </select>
+                                            </div>
+                                            <div class="form-group flex-1">
+                                                <label class="form-label">自定义模型 ID</label>
+                                                <input v-model="aiConfig.custom_model" type="text" class="form-input" placeholder="例如 gpt-4.1-mini">
                                             </div>
                                         </div>
                                     </div>
-                                    <div class="form-group">
-                                        <div class="slider-header">
-                                            <label class="form-label">Top P</label>
-                                            <span class="slider-value">{{ aiConfig.top_p }}</span>
+                                </div>
+
+                                <div class="ai-pane ai-config-fade">
+                                    <div class="ai-pane-header">
+                                        <div class="ai-pane-title">
+                                            <i class="fas fa-sliders-h"></i>
+                                            <span>生成参数</span>
                                         </div>
-                                        <input v-model.number="aiConfig.top_p" type="range" min="0" max="1" step="0.05" class="form-slider">
+                                        <button class="btn btn-text" @click="resetAIParams">
+                                            <i class="fas fa-undo"></i> 重置参数
+                                        </button>
                                     </div>
-                                    <div class="form-row">
+                                    <div class="ai-pane-subtitle">这些参数只影响输出风格和长度，不影响是否能连上服务。</div>
+                                    <div class="ai-pane-body">
                                         <div class="form-group">
-                                            <label class="form-label">频率惩罚</label>
-                                            <input v-model.number="aiConfig.frequency_penalty" type="number" min="-2" max="2" step="0.1" class="form-input">
+                                            <div class="slider-header">
+                                                <label class="form-label">温度 (Temperature)</label>
+                                                <span class="slider-value">{{ aiConfig.temperature }}</span>
+                                            </div>
+                                            <input v-model.number="aiConfig.temperature" type="range" min="0" max="2" step="0.1" class="form-slider">
+                                            <div class="slider-labels">
+                                                <span>更稳</span>
+                                                <span>平衡</span>
+                                                <span>更有创造性</span>
+                                            </div>
                                         </div>
                                         <div class="form-group">
-                                            <label class="form-label">存在惩罚</label>
-                                            <input v-model.number="aiConfig.presence_penalty" type="number" min="-2" max="2" step="0.1" class="form-input">
+                                            <div class="slider-header">
+                                                <label class="form-label">最大输出 Token</label>
+                                                <span class="slider-value">{{ aiConfig.max_tokens }}</span>
+                                            </div>
+                                            <input v-model.number="aiConfig.max_tokens" type="range" min="100" max="32000" step="100" class="form-slider">
+                                        </div>
+                                        <div class="form-group">
+                                            <div class="slider-header">
+                                                <label class="form-label">Top P</label>
+                                                <span class="slider-value">{{ aiConfig.top_p }}</span>
+                                            </div>
+                                            <input v-model.number="aiConfig.top_p" type="range" min="0" max="1" step="0.05" class="form-slider">
+                                        </div>
+                                        <div class="form-row">
+                                            <div class="form-group">
+                                                <label class="form-label">频率惩罚</label>
+                                                <input v-model.number="aiConfig.frequency_penalty" type="number" min="-2" max="2" step="0.1" class="form-input">
+                                            </div>
+                                            <div class="form-group">
+                                                <label class="form-label">存在惩罚</label>
+                                                <input v-model.number="aiConfig.presence_penalty" type="number" min="-2" max="2" step="0.1" class="form-input">
+                                            </div>
+                                        </div>
+                                        <div class="ai-section-divider">
+                                            <div class="ai-section-label">上下文预算</div>
+                                            <div style="padding: 14px; border-radius: 14px; background: var(--bg-secondary);">
+                                                <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
+                                                    <span style="font-size: 12px; color: var(--text-secondary);">当前上下文使用</span>
+                                                    <span style="font-size: 12px; font-weight: 600;">
+                                                        {{ Math.round((contextTokenEstimate || 0) / (aiConfig.max_context_length || 30000) * 100) }}%
+                                                    </span>
+                                                </div>
+                                                <div class="progress-bar" style="height: 8px;">
+                                                    <div class="progress-fill" :style="{ width: Math.min(100, (contextTokenEstimate || 0) / (aiConfig.max_context_length || 30000) * 100) + '%' }"></div>
+                                                </div>
+                                                <div style="display: flex; justify-content: space-between; margin-top: 8px; font-size: 11px; color: var(--text-secondary);">
+                                                    <span>预计 {{ formatNumber(contextTokenEstimate || 0) }} Token</span>
+                                                    <span>上限 {{ formatNumber(aiConfig.max_context_length || 30000) }} Token</span>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="ai-config-column">
+                                <div class="ai-pane ai-config-fade">
+                                    <div class="ai-pane-header">
+                                        <div class="ai-pane-title">
+                                            <i class="fas fa-cogs"></i>
+                                            <span>运行策略</span>
+                                        </div>
+                                    </div>
+                                    <div class="ai-pane-subtitle">这里决定系统提示、超时、是否流式，以及是否启用记忆。</div>
+                                    <div class="ai-pane-body">
+                                        <div class="form-group">
+                                            <label class="form-label">系统提示词</label>
+                                            <textarea v-model="aiConfig.system_prompt" class="form-textarea" rows="5" placeholder="用于定义 AI 的角色、风格和工作边界。"></textarea>
+                                        </div>
+                                        <div class="form-row">
+                                            <div class="form-group">
+                                                <label class="form-label">超时时间 (秒)</label>
+                                                <input v-model.number="aiConfig.timeout" type="number" min="10" max="300" class="form-input">
+                                            </div>
+                                            <div class="form-group">
+                                                <label class="form-label">重试次数</label>
+                                                <input v-model.number="aiConfig.retry_count" type="number" min="0" max="5" class="form-input">
+                                            </div>
+                                        </div>
+                                        <div class="ai-capability-list">
+                                            <div class="ai-capability-item">
+                                                <div class="switch-field">
+                                                    <div class="switch-copy">
+                                                        <span class="switch-label">运行时启用流式输出</span>
+                                                        <span class="switch-hint">开启后用户会更快看到回复过程；若模型声明不支持，这里会自动禁用。</span>
+                                                    </div>
+                                                    <label class="switch-control">
+                                                        <input v-model="aiConfig.stream" type="checkbox" :disabled="!aiConfig.supports_stream">
+                                                        <span class="switch-slider"></span>
+                                                    </label>
+                                                </div>
+                                            </div>
+                                            <div class="form-hint" v-if="!aiConfig.supports_stream">当前 provider 能力声明为不支持流式接口，因此这里已自动关闭。</div>
+                                            <div class="ai-capability-item">
+                                                <div class="switch-field">
+                                                    <div class="switch-copy">
+                                                        <span class="switch-label">模型支持流式接口</span>
+                                                        <span class="switch-hint">这是能力声明，不是运行开关。它会影响后端是否尝试走流式路径。</span>
+                                                    </div>
+                                                    <label class="switch-control">
+                                                        <input v-model="aiConfig.supports_stream" type="checkbox">
+                                                        <span class="switch-slider"></span>
+                                                    </label>
+                                                </div>
+                                            </div>
+                                            <div class="ai-capability-item">
+                                                <div class="switch-field">
+                                                    <div class="switch-copy">
+                                                        <span class="switch-label">启用上下文记忆</span>
+                                                        <span class="switch-hint">适合连续任务；关闭后会更像一次性问答。</span>
+                                                    </div>
+                                                    <label class="switch-control">
+                                                        <input v-model="aiConfig.enable_memory" type="checkbox">
+                                                        <span class="switch-slider"></span>
+                                                    </label>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div class="ai-pane ai-config-fade">
+                                    <div class="ai-pane-header">
+                                        <div class="ai-pane-title">
+                                            <i class="fas fa-puzzle-piece"></i>
+                                            <span>能力与扩展</span>
+                                        </div>
+                                    </div>
+                                    <div class="ai-pane-subtitle">这部分决定模型在系统里的工作方式，包括工具链、推理字段和扩展能力。</div>
+                                    <div class="ai-pane-body">
+                                        <div class="form-group">
+                                            <label class="form-label">图片生成模型</label>
+                                            <select v-model="aiConfig.image_model" class="form-select">
+                                                <option value="">不使用</option>
+                                                <option value="dall-e-3">DALL-E 3</option>
+                                                <option value="dall-e-2">DALL-E 2</option>
+                                                <option value="stable-diffusion">Stable Diffusion</option>
+                                            </select>
+                                        </div>
+                                        <div class="form-group">
+                                            <label class="form-label">联网搜索 API Key</label>
+                                            <input v-model="aiConfig.search_api_key" type="password" class="form-input" placeholder="可选，用于独立搜索服务">
+                                        </div>
+                                        <div class="form-group">
+                                            <label class="form-label">Embedding 模型</label>
+                                            <select v-model="aiConfig.embedding_model" class="form-select">
+                                                <option value="">不使用</option>
+                                                <option value="text-embedding-3-small">text-embedding-3-small</option>
+                                                <option value="text-embedding-3-large">text-embedding-3-large</option>
+                                                <option value="text-embedding-ada-002">text-embedding-ada-002</option>
+                                            </select>
+                                        </div>
+                                        <div class="form-group">
+                                            <label class="form-label">最大上下文长度</label>
+                                            <input v-model.number="aiConfig.max_context_length" type="number" min="1000" max="128000" step="1000" class="form-input">
+                                            <div class="form-hint">超过这个阈值时，后端会自动裁剪历史消息，避免上下文爆掉。</div>
+                                        </div>
+                                        <div class="ai-capability-list">
+                                            <div class="ai-capability-item">
+                                                <div class="switch-field">
+                                                    <div class="switch-copy">
+                                                        <span class="switch-label">模型支持工具调用</span>
+                                                        <span class="switch-hint">关闭后，后端会跳过工具链，直接走普通聊天回复。</span>
+                                                    </div>
+                                                    <label class="switch-control">
+                                                        <input v-model="aiConfig.supports_tools" type="checkbox">
+                                                        <span class="switch-slider"></span>
+                                                    </label>
+                                                </div>
+                                            </div>
+                                            <div class="ai-capability-item">
+                                                <div class="switch-field">
+                                                    <div class="switch-copy">
+                                                        <span class="switch-label">模型支持 reasoning / thinking 字段</span>
+                                                        <span class="switch-hint">关闭后，不再展示思考内容，后端也不会依赖相关字段。</span>
+                                                    </div>
+                                                    <label class="switch-control">
+                                                        <input v-model="aiConfig.supports_reasoning" type="checkbox">
+                                                        <span class="switch-slider"></span>
+                                                    </label>
+                                                </div>
+                                            </div>
                                         </div>
                                     </div>
                                 </div>
                             </div>
                         </div>
 
-                        <div class="grid-2" style="margin-top: 20px;">
-                            <!-- 高级配置 -->
-                            <div class="card">
-                                <div class="card-header">
-                                    <span class="card-title"><i class="fas fa-cogs"></i> 高级配置</span>
-                                </div>
-                                <div class="card-body">
-                                    <div class="form-group">
-                                        <label class="form-label">系统提示词 (System Prompt)</label>
-                                        <textarea v-model="aiConfig.system_prompt" class="form-textarea" rows="4" placeholder="输入系统提示词，用于定义 AI 的行为和角色"></textarea>
-                                    </div>
-                                    <div class="form-row">
-                                        <div class="form-group">
-                                            <label class="form-label">超时时间 (秒)</label>
-                                            <input v-model.number="aiConfig.timeout" type="number" min="10" max="300" class="form-input">
-                                        </div>
-                                        <div class="form-group">
-                                            <label class="form-label">重试次数</label>
-                                            <input v-model.number="aiConfig.retry_count" type="number" min="0" max="5" class="form-input">
-                                        </div>
-                                    </div>
-                                    <div class="form-group">
-                                        <label class="checkbox-label">
-                                            <input v-model="aiConfig.stream" type="checkbox" class="checkbox-input" :disabled="!aiConfig.supports_stream">
-                                            <span class="checkbox-text">启用流式响应 (Stream)</span>
-                                        </label>
-                                        <div class="form-hint" v-if="!aiConfig.supports_stream">当前 Provider 能力声明为不支持流式接口，因此这里已自动关闭。</div>
-                                    </div>
-                                    <div class="form-group">
-                                        <label class="checkbox-label">
-                                            <input v-model="aiConfig.supports_stream" type="checkbox" class="checkbox-input">
-                                            <span class="checkbox-text">模型支持流式接口</span>
-                                        </label>
-                                    </div>
-                                    <div class="form-group">
-                                        <label class="checkbox-label">
-                                            <input v-model="aiConfig.enable_memory" type="checkbox" class="checkbox-input">
-                                            <span class="checkbox-text">启用上下文记忆</span>
-                                        </label>
-                                    </div>
+                        <div v-if="showAIConfigDetails" class="ai-pane ai-config-fade">
+                            <div class="ai-pane-header">
+                                <div class="ai-pane-title">
+                                    <i class="fas fa-compass"></i>
+                                    <span>调参建议</span>
                                 </div>
                             </div>
-
-                            <!-- 功能配置 -->
-                            <div class="card">
-                                <div class="card-header">
-                                    <span class="card-title"><i class="fas fa-puzzle-piece"></i> 功能配置</span>
-                                </div>
-                                <div class="card-body">
-                                    <div class="form-group">
-                                        <label class="form-label">图片生成模型</label>
-                                        <select v-model="aiConfig.image_model" class="form-select">
-                                            <option value="">不使用</option>
-                                            <option value="dall-e-3">DALL-E 3</option>
-                                            <option value="dall-e-2">DALL-E 2</option>
-                                            <option value="stable-diffusion">Stable Diffusion</option>
-                                        </select>
+                            <div class="ai-pane-subtitle">新的布局按“连接 -> 能力 -> 生成参数”组织。下面几条是最常用的判断规则。</div>
+                            <div class="ai-pane-body">
+                                <div class="ai-help-grid">
+                                    <div class="ai-help-card">
+                                        <strong>先测连接，再决定能力</strong>
+                                        改完 Provider、Base URL、API Key 或模型后，先测试连接。这样更容易分辨是网络问题，还是能力声明不匹配。
                                     </div>
-                                    <div class="form-group">
-                                        <label class="form-label">联网搜索 API</label>
-                                        <input v-model="aiConfig.search_api_key" type="password" class="form-input" placeholder="搜索 API Key (可选)">
+                                    <div class="ai-help-card">
+                                        <strong>工具开关会改变主执行链</strong>
+                                        supports_tools 关闭后，后端会直接跳过工具循环，适合只做纯文本聊天的模型。
                                     </div>
-                                    <div class="form-group">
-                                        <label class="form-label">Embedding 模型</label>
-                                        <select v-model="aiConfig.embedding_model" class="form-select">
-                                            <option value="">不使用</option>
-                                            <option value="text-embedding-3-small">text-embedding-3-small</option>
-                                            <option value="text-embedding-3-large">text-embedding-3-large</option>
-                                            <option value="text-embedding-ada-002">text-embedding-ada-002</option>
-                                        </select>
+                                    <div class="ai-help-card">
+                                        <strong>流式分成两层</strong>
+                                        supports_stream 是模型能力声明，stream 是实际运行开关。两者都满足时才会真的走流式输出。
                                     </div>
-                                    <div class="form-group">
-                                        <label class="form-label">最大上下文长度</label>
-                                        <input v-model.number="aiConfig.max_context_length" type="number" min="1000" max="128000" step="1000" class="form-input">
-                                        <div class="form-hint">超过此长度将自动截断历史消息</div>
-                                    </div>
-                                    <div class="form-group">
-                                        <label class="checkbox-label">
-                                            <input v-model="aiConfig.supports_tools" type="checkbox" class="checkbox-input">
-                                            <span class="checkbox-text">模型支持工具调用</span>
-                                        </label>
-                                        <div class="form-hint" v-if="!aiConfig.supports_tools">关闭后将跳过工具链，直接走普通聊天回复。</div>
-                                    </div>
-                                    <div class="form-group">
-                                        <label class="checkbox-label">
-                                            <input v-model="aiConfig.supports_reasoning" type="checkbox" class="checkbox-input">
-                                            <span class="checkbox-text">模型支持推理/思考字段</span>
-                                        </label>
-                                        <div class="form-hint" v-if="!aiConfig.supports_reasoning">关闭后会忽略 thinking/reasoning 字段，不再展示思考内容。</div>
+                                    <div class="ai-help-card">
+                                        <strong>参数别一次性全改</strong>
+                                        通常先调温度和最大输出长度就够了。出现重复或跑题时，再动频率惩罚和存在惩罚。
                                     </div>
                                 </div>
                             </div>
                         </div>
-
-                        <!-- 配置说明 -->
-                        <div class="card" style="margin-top: 20px;">
-                            <div class="card-header">
-                                <span class="card-title"><i class="fas fa-info-circle"></i> 配置说明</span>
-                            </div>
-                            <div class="card-body">
-                                <div class="config-help">
-                                    <div class="help-item">
-                                        <strong>温度 (Temperature):</strong> 控制输出的随机性。较低值（如0.2）使输出更确定和保守，较高值（如0.8）使输出更创意和多样。
-                                    </div>
-                                    <div class="help-item">
-                                        <strong>Top P:</strong> 核采样参数。与温度类似，但控制的是累积概率阈值。通常与温度只调整其中一个即可。
-                                    </div>
-                                    <div class="help-item">
-                                        <strong>频率惩罚:</strong> 降低模型重复相同内容的倾向。正值会减少重复，负值会增加重复。
-                                    </div>
-                                    <div class="help-item">
-                                        <strong>存在惩罚:</strong> 鼓励模型讨论新话题。正值会鼓励新主题，负值会鼓励坚持当前主题。
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-
-                        <!-- 模型管理器弹窗 -->
                         <div v-if="showModelManager" class="modal-overlay" @click.self="closeModelManager">
                             <div class="modal" style="max-width: 900px; max-height: 80vh;">
                                 <div class="modal-header">
@@ -7506,6 +8217,22 @@
                                     </button>
                                 </div>
                                 <div class="modal-body" style="overflow-y: auto;">
+                                    <div v-if="!editingModel" class="form-group">
+                                        <label class="form-label">快速套用</label>
+                                        <div class="preset-buttons">
+                                            <button
+                                                v-for="preset in aiPresets"
+                                                :key="`create-${preset.name}`"
+                                                class="preset-btn"
+                                                @click="applyModelPresetToForm(preset)"
+                                            >
+                                                <i :class="preset.icon"></i>
+                                                {{ preset.name }}
+                                            </button>
+                                        </div>
+                                        <div class="form-hint">用于快速填充新增模型的 Provider、模型和基础地址。</div>
+                                    </div>
+
                                     <div class="form-group">
                                         <label class="form-label">配置名称 <span class="required">*</span></label>
                                         <input v-model="modelForm.name" type="text" class="form-input" placeholder="例如：OpenAI GPT-4">
@@ -7563,31 +8290,52 @@
                                     </div>
 
                                     <div class="form-group">
-                                        <label class="checkbox-label">
-                                            <input v-model="modelForm.enabled" type="checkbox" class="checkbox-input">
-                                            <span class="checkbox-text">启用此配置</span>
-                                        </label>
+                                        <div class="switch-field">
+                                            <div class="switch-copy">
+                                                <span class="switch-label">启用此配置</span>
+                                                <span class="switch-hint">关闭后保留配置，但不会作为可应用候选参与使用。</span>
+                                            </div>
+                                            <label class="switch-control">
+                                                <input v-model="modelForm.enabled" type="checkbox">
+                                                <span class="switch-slider"></span>
+                                            </label>
+                                        </div>
                                     </div>
                                     <div class="form-group">
-                                        <label class="checkbox-label">
-                                            <input v-model="modelForm.supports_tools" type="checkbox" class="checkbox-input">
-                                            <span class="checkbox-text">支持工具调用</span>
-                                        </label>
-                                        <div class="form-hint" v-if="!modelForm.supports_tools">关闭后该模型被应用时会直接跳过工具链。</div>
+                                        <div class="switch-field">
+                                            <div class="switch-copy">
+                                                <span class="switch-label">支持工具调用</span>
+                                                <span class="switch-hint">关闭后该模型被应用时会直接跳过工具链。</span>
+                                            </div>
+                                            <label class="switch-control">
+                                                <input v-model="modelForm.supports_tools" type="checkbox">
+                                                <span class="switch-slider"></span>
+                                            </label>
+                                        </div>
                                     </div>
                                     <div class="form-group">
-                                        <label class="checkbox-label">
-                                            <input v-model="modelForm.supports_reasoning" type="checkbox" class="checkbox-input">
-                                            <span class="checkbox-text">支持推理/思考字段</span>
-                                        </label>
-                                        <div class="form-hint" v-if="!modelForm.supports_reasoning">关闭后不会展示模型返回的 thinking/reasoning 字段。</div>
+                                        <div class="switch-field">
+                                            <div class="switch-copy">
+                                                <span class="switch-label">支持推理 / 思考字段</span>
+                                                <span class="switch-hint">关闭后不会展示模型返回的 thinking / reasoning 字段。</span>
+                                            </div>
+                                            <label class="switch-control">
+                                                <input v-model="modelForm.supports_reasoning" type="checkbox">
+                                                <span class="switch-slider"></span>
+                                            </label>
+                                        </div>
                                     </div>
                                     <div class="form-group">
-                                        <label class="checkbox-label">
-                                            <input v-model="modelForm.supports_stream" type="checkbox" class="checkbox-input">
-                                            <span class="checkbox-text">支持流式响应</span>
-                                        </label>
-                                        <div class="form-hint" v-if="!modelForm.supports_stream">关闭后建议同时关闭运行时的流式输出。</div>
+                                        <div class="switch-field">
+                                            <div class="switch-copy">
+                                                <span class="switch-label">支持流式响应</span>
+                                                <span class="switch-hint">关闭后建议同时关闭运行时的流式输出。</span>
+                                            </div>
+                                            <label class="switch-control">
+                                                <input v-model="modelForm.supports_stream" type="checkbox">
+                                                <span class="switch-slider"></span>
+                                            </label>
+                                        </div>
                                     </div>
                                 </div>
                                 <div class="modal-footer">
@@ -9933,6 +10681,7 @@
                         max_context_length: 30000
                     },
                     showApiKey: false,
+                    showAIConfigDetails: false,
                     isTesting: false,
                     currentPreset: '',
                     aiStatus: { text: '未配置', class: 'badge-warning' },
@@ -10789,6 +11538,7 @@
                             break;
                         case 'ai-config':
                             await this.loadAIConfig();
+                            await this.loadAIModels();
                             break;
                         case 'tokens':
                             await this.loadTokenStats();
@@ -11970,10 +12720,16 @@ def main(params):
                         const res = await api.get('/api/ai-config');
                         this.aiConfig = { ...this.aiConfig, ...res.data };
                         this.aiConfig.provider_type = this.aiConfig.provider_type || this.getProviderTypeByProvider(this.aiConfig.provider);
+                        const availableModelValues = (this.availableModels || []).map(model => model.value);
+                        this.aiConfig.custom_model = availableModelValues.includes(this.aiConfig.model)
+                            ? ''
+                            : (this.aiConfig.model || '');
                         if (typeof this.aiConfig.supports_tools !== 'boolean' ||
                             typeof this.aiConfig.supports_reasoning !== 'boolean' ||
                             typeof this.aiConfig.supports_stream !== 'boolean') {
                             this.applyProviderCapabilities(this.aiConfig);
+                        } else {
+                            this.syncProviderMetadata(this.aiConfig);
                         }
                     } catch (e) {
                         console.error('Failed to load AI config:', e);
@@ -15071,6 +15827,7 @@ def main(params):
                         custom: 'custom'
                     };
                     this.aiConfig.model = defaultModels[this.aiConfig.provider] || 'custom';
+                    this.aiConfig.custom_model = '';
                     this.aiConfig.provider_type = this.getProviderTypeByProvider(this.aiConfig.provider);
                     this.applyProviderCapabilities(this.aiConfig);
                     this.currentPreset = '';
@@ -15104,6 +15861,20 @@ def main(params):
                     return mapping[provider] || 'openai_compatible';
                 },
 
+                getResolvedModelValue(target) {
+                    const customModel = typeof target?.custom_model === 'string'
+                        ? target.custom_model.trim()
+                        : '';
+                    return customModel || target?.model || '';
+                },
+
+                syncProviderMetadata(target) {
+                    target.provider_type = target.provider_type || this.getProviderTypeByProvider(target.provider);
+                    if (!target.supports_stream) {
+                        target.stream = false;
+                    }
+                },
+
                 applyProviderCapabilities(target) {
                     const providerType = target.provider_type || this.getProviderTypeByProvider(target.provider);
                     const capabilityMap = {
@@ -15126,11 +15897,23 @@ def main(params):
                 applyAIPreset(preset) {
                     this.aiConfig.provider = preset.provider;
                     this.aiConfig.model = preset.model;
+                    this.aiConfig.custom_model = '';
                     this.aiConfig.base_url = preset.base_url;
                     this.aiConfig.provider_type = this.getProviderTypeByProvider(preset.provider);
                     this.applyProviderCapabilities(this.aiConfig);
                     this.currentPreset = preset.name;
                     this.showToast(`已应用 ${preset.name} 配置`, 'success');
+                },
+
+                applyModelPresetToForm(preset) {
+                    this.modelForm.provider = preset.provider;
+                    this.modelForm.model = preset.model;
+                    this.modelForm.base_url = preset.base_url;
+                    this.modelForm.provider_type = this.getProviderTypeByProvider(preset.provider);
+                    this.applyProviderCapabilities(this.modelForm);
+                    if (!this.modelForm.name || this.modelForm.name === '新配置') {
+                        this.modelForm.name = `${preset.name} 配置`;
+                    }
                 },
 
                 resetAIParams() {
@@ -15147,6 +15930,11 @@ def main(params):
                         this.showToast('请先输入 API Key', 'warning');
                         return;
                     }
+                    const modelToTest = this.getResolvedModelValue(this.aiConfig);
+                    if (!modelToTest) {
+                        this.showToast('请先选择或输入模型', 'warning');
+                        return;
+                    }
                     this.isTesting = true;
                     try {
                         const res = await api.post('/api/ai-config/test', {
@@ -15154,7 +15942,7 @@ def main(params):
                             provider_type: this.aiConfig.provider_type,
                             api_key: this.aiConfig.api_key,
                             base_url: this.aiConfig.base_url,
-                            model: this.aiConfig.model
+                            model: modelToTest
                         });
                         if (res.data.success) {
                             this.aiStatus = { text: '连接正常', class: 'badge-success' };
@@ -15174,8 +15962,13 @@ def main(params):
                 async saveAIConfig() {
                     this.isLoading = true;
                     try {
-                        this.applyProviderCapabilities(this.aiConfig);
-                        await api.put('/api/ai-config', this.aiConfig);
+                        const payload = {
+                            ...this.aiConfig,
+                            model: this.getResolvedModelValue(this.aiConfig)
+                        };
+                        this.syncProviderMetadata(payload);
+                        await api.put('/api/ai-config', payload);
+                        this.aiConfig = { ...this.aiConfig, ...payload };
                         this.aiStatus = { text: '已配置', class: 'badge-success' };
                         this.showToast('AI 配置已保存', 'success');
                     } catch (e) {
@@ -15319,8 +16112,7 @@ def main(params):
                         this.activeModelId = model.id;
                         // 更新当前AI配置
                         this.aiConfig = { ...this.aiConfig, ...model };
-                        this.aiConfig.provider_type = this.aiConfig.provider_type || this.getProviderTypeByProvider(this.aiConfig.provider);
-                        this.applyProviderCapabilities(this.aiConfig);
+                        this.syncProviderMetadata(this.aiConfig);
                         this.showToast(`已应用模型配置: ${model.name}`, 'success');
                         // 刷新AI配置
                         await this.loadAIConfig();
@@ -15358,6 +16150,19 @@ def main(params):
                         custom: 'fas fa-cog'
                     };
                     return icons[provider] || 'fas fa-robot';
+                },
+
+                getProviderGlyph(provider) {
+                    const glyphs = {
+                        openai: '◎',
+                        anthropic: '◈',
+                        google: '✦',
+                        azure: '⬢',
+                        siliconflow: '◉',
+                        deepseek: '≈',
+                        custom: '◌'
+                    };
+                    return glyphs[provider] || '◌';
                 },
 
                 getProviderLabel(provider) {

@@ -326,6 +326,7 @@ try:
         get_api_config,
         get_pic_config,
         get_search_config,
+        resolve_runtime_api_key,
         get_video_config,
     )
 
@@ -335,6 +336,7 @@ except ImportError:
     get_api_config = None
     get_pic_config = None
     get_search_config = None
+    resolve_runtime_api_key = None
     get_video_config = None
     _log.warning("Config loader not available")
 
@@ -628,6 +630,15 @@ class WebChatServer:
         supports_reasoning: Optional[bool] = None,
         supports_stream: Optional[bool] = None,
     ) -> bool:
+        resolved_provider_type = provider_type or self.ai_config.get(
+            "provider_type", self.ai_config.get("provider", "openai_compatible")
+        )
+        if resolve_runtime_api_key:
+            self.ai_api_key = resolve_runtime_api_key(
+                self.ai_api_key or "",
+                resolved_provider_type,
+            )
+
         if not self.ai_api_key or not self.ai_base_url:
             self.ai_client = None
             return False
@@ -657,9 +668,6 @@ class WebChatServer:
 
             from nbot.services.ai import AIClient
 
-            resolved_provider_type = provider_type or self.ai_config.get(
-                "provider_type", self.ai_config.get("provider", "openai_compatible")
-            )
             resolved_supports_tools = (
                 self.ai_config.get("supports_tools", True)
                 if supports_tools is None
@@ -704,6 +712,10 @@ class WebChatServer:
                 self.ai_api_key = api_config.get("api_key", "")
                 self.ai_base_url = api_config.get("base_url", "")
                 self.ai_model = api_config.get("model", "MiniMax-M2.7")
+                self.ai_config["provider_type"] = api_config.get(
+                    "provider_type",
+                    self.ai_config.get("provider_type", "openai_compatible"),
+                )
 
                 pic_config = get_pic_config() if get_pic_config else {}
                 search_config = get_search_config() if get_search_config else {}
@@ -963,15 +975,22 @@ class WebChatServer:
                 return False
 
             # 更新当前AI配置
-            self.ai_api_key = model.get("api_key", "")
+            model_provider_type = model.get(
+                "provider_type", model.get("provider", "openai_compatible")
+            )
+            if resolve_runtime_api_key:
+                self.ai_api_key = resolve_runtime_api_key(
+                    model.get("api_key", ""),
+                    model_provider_type,
+                )
+            else:
+                self.ai_api_key = model.get("api_key", "")
             self.ai_base_url = model.get("base_url", "")
             self.ai_model = model.get("model", "")
             self.active_model_id = model_id
 
             if self.ai_api_key and self.ai_base_url and self._initialize_ai_client(
-                provider_type=model.get(
-                    "provider_type", model.get("provider", "openai_compatible")
-                ),
+                provider_type=model_provider_type,
                 supports_tools=model.get("supports_tools", True),
                 supports_reasoning=model.get("supports_reasoning", True),
                 supports_stream=model.get("supports_stream", True),
@@ -988,6 +1007,17 @@ class WebChatServer:
                         "temperature": model.get("temperature", 0.7),
                         "max_tokens": model.get("max_tokens", 2000),
                         "top_p": model.get("top_p", 0.9),
+                        "frequency_penalty": model.get("frequency_penalty", 0),
+                        "presence_penalty": model.get("presence_penalty", 0),
+                        "system_prompt": model.get("system_prompt", ""),
+                        "timeout": model.get("timeout", 60),
+                        "retry_count": model.get("retry_count", 3),
+                        "stream": model.get("stream", True),
+                        "enable_memory": model.get("enable_memory", True),
+                        "image_model": model.get("image_model", ""),
+                        "search_api_key": model.get("search_api_key", ""),
+                        "embedding_model": model.get("embedding_model", ""),
+                        "max_context_length": model.get("max_context_length", 30000),
                         "supports_tools": model.get("supports_tools", True),
                         "supports_reasoning": model.get("supports_reasoning", True),
                         "supports_stream": model.get("supports_stream", True),

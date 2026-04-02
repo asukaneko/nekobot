@@ -3,6 +3,7 @@ import logging
 from flask import jsonify, request
 
 from nbot.core import build_chat_completion_payload, resolve_chat_completion_url
+from nbot.web.utils.config_loader import resolve_runtime_api_key
 
 _log = logging.getLogger(__name__)
 
@@ -39,6 +40,28 @@ def register_ai_config_routes(app, server):
             server.ai_config["max_tokens"] = data["max_tokens"]
         if data.get("top_p") is not None:
             server.ai_config["top_p"] = data["top_p"]
+        if data.get("frequency_penalty") is not None:
+            server.ai_config["frequency_penalty"] = data["frequency_penalty"]
+        if data.get("presence_penalty") is not None:
+            server.ai_config["presence_penalty"] = data["presence_penalty"]
+        if data.get("system_prompt") is not None:
+            server.ai_config["system_prompt"] = data["system_prompt"]
+        if data.get("timeout") is not None:
+            server.ai_config["timeout"] = data["timeout"]
+        if data.get("retry_count") is not None:
+            server.ai_config["retry_count"] = data["retry_count"]
+        if data.get("stream") is not None:
+            server.ai_config["stream"] = data["stream"]
+        if data.get("enable_memory") is not None:
+            server.ai_config["enable_memory"] = data["enable_memory"]
+        if data.get("image_model") is not None:
+            server.ai_config["image_model"] = data["image_model"]
+        if data.get("search_api_key") is not None:
+            server.ai_config["search_api_key"] = data["search_api_key"]
+        if data.get("embedding_model") is not None:
+            server.ai_config["embedding_model"] = data["embedding_model"]
+        if data.get("max_context_length") is not None:
+            server.ai_config["max_context_length"] = data["max_context_length"]
         if data.get("supports_tools") is not None:
             server.ai_config["supports_tools"] = data["supports_tools"]
         if data.get("supports_reasoning") is not None:
@@ -56,7 +79,11 @@ def register_ai_config_routes(app, server):
     def test_ai_config():
         data = request.json or {}
 
-        api_key = data.get("api_key", "")
+        provider_type = data.get(
+            "provider_type",
+            data.get("provider", "openai_compatible"),
+        )
+        api_key = resolve_runtime_api_key(data.get("api_key", ""), provider_type)
         base_url = data.get("base_url", "")
         model = data.get("model", "")
 
@@ -70,10 +97,6 @@ def register_ai_config_routes(app, server):
         try:
             import requests
 
-            provider_type = data.get(
-                "provider_type",
-                data.get("provider", "openai_compatible"),
-            )
             url = resolve_chat_completion_url(
                 base_url,
                 model=model,
