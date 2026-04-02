@@ -59,16 +59,8 @@ def register_socket_events(server):
             raw_content = data.get("content", "")
             sender = data.get("sender", "web_user")
             raw_attachments = data.get("attachments", [])
-            content = (
-                adapter.normalize_inbound_message(raw_content)
-                if adapter
-                else (raw_content or "")
-            )
-            attachments = (
-                adapter.normalize_attachments(raw_attachments)
-                if adapter
-                else list(raw_attachments or [])
-            )
+            content = adapter.normalize_inbound_message(raw_content)
+            attachments = adapter.normalize_attachments(raw_attachments)
 
             attachment_info = ""
             if attachments and isinstance(attachments, list):

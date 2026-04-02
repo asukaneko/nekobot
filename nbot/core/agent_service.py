@@ -2,10 +2,12 @@ import copy
 import json
 import logging
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional, Sequence
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Sequence
 
-from nbot.channels import BaseChannelAdapter
 from nbot.core.chat_models import ChatRequest, ChatResponse
+
+if TYPE_CHECKING:
+    from nbot.channels.base import BaseChannelAdapter
 
 _log = logging.getLogger(__name__)
 
@@ -78,7 +80,7 @@ class AgentService:
         self,
         chat_request: ChatRequest,
         *,
-        adapter: Optional[BaseChannelAdapter] = None,
+        adapter: Optional["BaseChannelAdapter"] = None,
         **kwargs,
     ) -> ChatResponse:
         handler = self._handlers.get(chat_request.channel)

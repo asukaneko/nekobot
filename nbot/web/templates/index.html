@@ -976,7 +976,135 @@
         .message-todo-cards .todo-card {
             margin-bottom: 4px;
         }
-        
+
+        .change-cards-container {
+            padding: 10px 20px;
+            position: relative;
+            z-index: 10;
+        }
+
+        .change-card {
+            background: var(--bg-secondary);
+            border: 1px solid #6366f1;
+            border-radius: 12px;
+            padding: 12px 16px;
+            margin-bottom: 8px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+        }
+
+        .change-card-header {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-weight: 600;
+            color: #818cf8;
+            font-size: 14px;
+            margin-bottom: 10px;
+        }
+
+        .change-summary {
+            margin-left: auto;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+        }
+
+        .change-summary-badge {
+            display: inline-flex;
+            align-items: center;
+            padding: 2px 8px;
+            border-radius: 999px;
+            font-size: 11px;
+            font-weight: 600;
+            background: rgba(129, 140, 248, 0.16);
+            color: #a5b4fc;
+        }
+
+        .change-summary-badge.created {
+            background: rgba(34, 197, 94, 0.14);
+            color: #4ade80;
+        }
+
+        .change-summary-badge.modified {
+            background: rgba(245, 158, 11, 0.14);
+            color: #fbbf24;
+        }
+
+        .change-summary-badge.deleted {
+            background: rgba(239, 68, 68, 0.14);
+            color: #f87171;
+        }
+
+        .change-card-list {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        .change-card-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 8px 10px;
+            background: var(--bg-tertiary);
+            border-radius: 6px;
+            border: 1px solid var(--border-color);
+            font-size: 13px;
+        }
+
+        .change-card-action {
+            min-width: 58px;
+            padding: 4px 8px;
+            border-radius: 999px;
+            text-align: center;
+            font-size: 11px;
+            font-weight: 700;
+        }
+
+        .change-card-action.created {
+            background: rgba(34, 197, 94, 0.14);
+            color: #4ade80;
+        }
+
+        .change-card-action.modified {
+            background: rgba(245, 158, 11, 0.14);
+            color: #fbbf24;
+        }
+
+        .change-card-action.deleted {
+            background: rgba(239, 68, 68, 0.14);
+            color: #f87171;
+        }
+
+        .change-card-path {
+            flex: 1;
+            min-width: 0;
+            color: var(--text-primary);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .change-card-scope {
+            font-size: 12px;
+            color: var(--text-muted);
+        }
+
+        .message-change-cards-wrapper {
+            display: flex;
+            margin-bottom: 16px;
+        }
+
+        .message-change-cards-wrapper .message-change-cards {
+            flex: 1;
+            margin-left: 52px;
+            padding: 0;
+        }
+
+        .message-change-cards .change-card {
+            margin-bottom: 4px;
+        }
+
         .session-name-input {
             width: 100%;
             padding: 4px 8px;
@@ -6135,6 +6263,36 @@
                                                 </div>
                                             </div>
                                         </div>
+
+                                        <div v-if="msg.change_cards && msg.change_cards.length > 0" class="message-change-cards-wrapper">
+                                            <div class="change-cards-container message-change-cards">
+                                                <div v-for="(card, index) in msg.change_cards" :key="card.id || index" class="change-card">
+                                                    <div class="change-card-header">
+                                                        <i class="fas fa-code-branch"></i>
+                                                        <span>{{ normalizeDisplayText(card.content) }}</span>
+                                                        <div v-if="card.summary" class="change-summary">
+                                                            <span v-if="card.summary.created" class="change-summary-badge created">+{{ card.summary.created }}</span>
+                                                            <span v-if="card.summary.modified" class="change-summary-badge modified">~{{ card.summary.modified }}</span>
+                                                            <span v-if="card.summary.deleted" class="change-summary-badge deleted">-{{ card.summary.deleted }}</span>
+                                                        </div>
+                                                    </div>
+                                                    <div class="change-card-list">
+                                                        <div
+                                                            v-for="(change, idx) in card.file_changes || []"
+                                                            :key="idx"
+                                                            class="change-card-item"
+                                                            :style="hasRenderableFileChange(change) ? { cursor: 'pointer' } : null"
+                                                            @click="hasRenderableFileChange(change) ? viewFileChangeDetail(change) : null"
+                                                        >
+                                                            <span class="change-card-action" :class="change.action">{{ getFileChangeLabel(change.action) }}</span>
+                                                            <span class="change-card-path" :title="change.path">{{ change.path || '未命名文件' }}</span>
+                                                            <span class="change-card-scope">{{ change.scope || 'private' }}</span>
+                                                            <i v-if="hasRenderableFileChange(change)" class="fas fa-external-link-alt" style="font-size: 11px; color: var(--text-muted);"></i>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
                                         
                                         <!-- 该消息关联的 Todo 卡片（在消息下方独立显示） -->
                                         <div v-if="msg.todo_cards && msg.todo_cards.length > 0" class="message-todo-cards-wrapper">
@@ -8279,7 +8437,7 @@
             <div class="modal" style="max-width: 700px; max-height: 80vh;">
                 <div class="modal-header">
                     <span class="modal-title">
-                        <i class="fas fa-terminal"></i> ???????????? - {{ normalizeDisplayText(stepDetailData.name) }}
+                        <i class="fas fa-terminal"></i> 步骤详情 - {{ normalizeDisplayText(stepDetailData.name) }}
                     </span>
                     <button class="modal-close" @click="showStepDetailModal = false">&times;</button>
                 </div>
@@ -8317,8 +8475,48 @@
                         <pre class="code-block">{{ formatJson(stepDetailData.full_result) }}</pre>
                     </div>
 
+                    <!-- 文件变更预览 -->
+                    <div v-if="stepDetailData.file_changes && stepDetailData.file_changes.length" style="margin-bottom: 16px;">
+                        <div style="color: var(--text-secondary); font-size: 13px; margin-bottom: 8px;">
+                            <i class="fas fa-code-branch"></i> 文件变更预览
+                        </div>
+                        <div v-for="(change, idx) in stepDetailData.file_changes" :key="idx" style="margin-bottom: 12px; border: 1px solid var(--border-color); border-radius: 8px; overflow: hidden; background: var(--bg-tertiary);">
+                            <div style="display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 12px; border-bottom: 1px solid var(--border-color);">
+                                <div style="display: flex; align-items: center; gap: 10px; min-width: 0;">
+                                    <span :style="{ color: getFileChangeColor(change.action), fontWeight: 700, fontSize: '12px' }">
+                                        {{ getFileChangeLabel(change.action) }}
+                                    </span>
+                                    <code style="font-size: 12px; word-break: break-all;">{{ change.path }}</code>
+                                </div>
+                                <span v-if="change.scope" style="font-size: 12px; color: var(--text-muted);">{{ change.scope }}</span>
+                            </div>
+
+                            <div v-if="change.diff_preview" style="padding: 10px 12px;">
+                                <div style="font-size: 12px; color: var(--text-muted); margin-bottom: 6px;">Diff Preview</div>
+                                <div class="code-block" style="margin: 0; max-height: 260px; overflow: auto; font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace; font-size: 12px; line-height: 1.5;">
+                                    <div v-for="(line, lineIdx) in change.diff_preview.split('\n')" :key="lineIdx" :style="getDiffLineStyle(line)">{{ line }}</div>
+                                </div>
+                            </div>
+
+                            <div v-else-if="change.preview_too_large" style="padding: 14px 12px; color: var(--text-muted); font-size: 13px;">
+                                预览内容过大，已跳过渲染。请在工作区中查看该文件。
+                            </div>
+
+                            <div v-else style="padding: 10px 12px; display: grid; gap: 10px;">
+                                <div v-if="change.before_preview">
+                                    <div style="font-size: 12px; color: var(--text-muted); margin-bottom: 6px;">Before</div>
+                                    <pre class="code-block" style="margin: 0; max-height: 180px; overflow: auto;">{{ change.before_preview }}</pre>
+                                </div>
+                                <div v-if="change.after_preview">
+                                    <div style="font-size: 12px; color: var(--text-muted); margin-bottom: 6px;">After</div>
+                                    <pre class="code-block" style="margin: 0; max-height: 180px; overflow: auto;">{{ change.after_preview }}</pre>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
                     <!-- 无详情提示 -->
-                    <div v-if="!stepDetailData.arguments && !stepDetailData.full_result && !stepDetailData.thinking_content" style="text-align: center; color: var(--text-muted); padding: 40px;">
+                    <div v-if="!stepDetailData.arguments && !stepDetailData.full_result && !stepDetailData.thinking_content && (!stepDetailData.file_changes || !stepDetailData.file_changes.length)" style="text-align: center; color: var(--text-muted); padding: 40px;">
                         <i class="fas fa-info-circle" style="font-size: 48px; margin-bottom: 16px; opacity: 0.5;"></i>
                         <div>该步骤没有详细信息</div>
                     </div>
@@ -9949,7 +10147,8 @@
                         detail: '',
                         arguments: null,
                         full_result: null,
-                        thinking_content: null
+                        thinking_content: null,
+                        file_changes: []
                     },
                     
                     // Theme Settings
@@ -12097,6 +12296,9 @@ def main(params):
                             const existingMsg = this.currentMessages.find(m => m.id === newMsg.id);
                             if (existingMsg && existingMsg.thinking_cards) {
                                 newMsg.thinking_cards = existingMsg.thinking_cards;
+                            }
+                            if (existingMsg && existingMsg.change_cards) {
+                                newMsg.change_cards = existingMsg.change_cards;
                             }
                         });
                         
@@ -14782,14 +14984,65 @@ def main(params):
                 },
                 
                 viewStepDetail(step) {
+                    const fullResult = step.full_result || null;
                     this.stepDetailData = {
                         name: this.normalizeDisplayText(step.name || ''),
                         detail: this.normalizeDisplayText(step.detail || ''),
                         arguments: step.arguments || null,
-                        full_result: step.full_result || null,
-                        thinking_content: step.thinking_content || null
+                        full_result: fullResult,
+                        thinking_content: step.thinking_content || null,
+                        file_changes: Array.isArray(fullResult?.file_changes) ? fullResult.file_changes : []
                     };
                     this.showStepDetailModal = true;
+                },
+
+                viewFileChangeDetail(change) {
+                    this.stepDetailData = {
+                        name: this.normalizeDisplayText(change.path || '文件变更'),
+                        detail: this.normalizeDisplayText(this.getFileChangeLabel(change.action)),
+                        arguments: null,
+                        full_result: null,
+                        thinking_content: null,
+                        file_changes: [change]
+                    };
+                    this.showStepDetailModal = true;
+                },
+
+                hasRenderableFileChange(change) {
+                    if (!change || change.preview_too_large) return false;
+                    return !!(change.diff_preview || change.before_preview || change.after_preview);
+                },
+
+                getFileChangeLabel(action) {
+                    const labels = {
+                        created: '新增文件',
+                        modified: '修改文件',
+                        deleted: '删除文件'
+                    };
+                    return labels[action] || action || '文件变更';
+                },
+
+                getFileChangeColor(action) {
+                    const colors = {
+                        created: 'var(--success)',
+                        modified: 'var(--warning)',
+                        deleted: 'var(--error)'
+                    };
+                    return colors[action] || 'var(--text-secondary)';
+                },
+
+                getDiffLineStyle(line) {
+                    if (!line) return {};
+                    if (line.startsWith('+') && !line.startsWith('+++')) {
+                        return { color: 'var(--success)', background: 'rgba(34, 197, 94, 0.08)' };
+                    }
+                    if (line.startsWith('-') && !line.startsWith('---')) {
+                        return { color: 'var(--error)', background: 'rgba(239, 68, 68, 0.08)' };
+                    }
+                    if (line.startsWith('@@')) {
+                        return { color: 'var(--accent-primary)', background: 'rgba(59, 130, 246, 0.08)' };
+                    }
+                    return {};
                 },
                 
                 // AI Config Functions
@@ -15355,7 +15608,8 @@ def main(params):
                                         ...msg,
                                         originalTempId: msg.tempId,  // 保存原始 tempId
                                         attachments: msg.attachments?.length ? msg.attachments : localMsg.attachments,
-                                        thinking_cards: localMsg.thinking_cards || []  // 保留进度卡片
+                                        thinking_cards: localMsg.thinking_cards || [],  // 保留进度卡片
+                                        change_cards: localMsg.change_cards || []
                                     };
                                     
                                     this.currentMessages.splice(localIdx, 1, newMsg);
@@ -15505,6 +15759,33 @@ def main(params):
                                 }
                                 this.$nextTick(() => this.scrollToBottom());
                                 return;  // 不添加到消息列表
+                            }
+
+                            if (msg.type === 'change_card') {
+                                if (!msg.id) {
+                                    msg.id = 'cc_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5);
+                                }
+
+                                const parentMsgId = msg.parent_message_id;
+
+                                if (parentMsgId) {
+                                    const parentMsg = this.currentMessages.find(m => m.id === parentMsgId || m.originalTempId === parentMsgId);
+
+                                    if (parentMsg) {
+                                        if (!parentMsg.change_cards) {
+                                            parentMsg.change_cards = [];
+                                        }
+                                        const existingIdx = parentMsg.change_cards.findIndex(c => c.id === msg.id);
+
+                                        if (existingIdx !== -1) {
+                                            parentMsg.change_cards[existingIdx] = msg;
+                                        } else {
+                                            parentMsg.change_cards.push(msg);
+                                        }
+                                    }
+                                }
+                                this.$nextTick(() => this.scrollToBottom());
+                                return;
                             }
                             
                             // 检查是否已存在（排除 thinking_card 类型）

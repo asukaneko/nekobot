@@ -77,13 +77,6 @@ from nbot.core.session_store import (
     build_qq_session_id,
     dump_json,
 )
-from nbot.channels import (
-    BaseChannelAdapter,
-    ChannelCapabilities,
-    ChannelEnvelope,
-    QQChannelAdapter,
-    WebChannelAdapter,
-)
 
 __all__ = [
     # prompt 模块
@@ -149,9 +142,4 @@ __all__ = [
     'build_qq_history_key',
     'build_qq_session_id',
     'dump_json',
-    'BaseChannelAdapter',
-    'ChannelCapabilities',
-    'ChannelEnvelope',
-    'QQChannelAdapter',
-    'WebChannelAdapter',
 ]

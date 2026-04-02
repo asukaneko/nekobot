@@ -8,8 +8,8 @@ import time
 import uuid
 from datetime import datetime
 from typing import Dict, List
+from nbot.channels import WebChannelAdapter
 from nbot.core import (
-    AgentService,
     build_continue_chat_response,
     build_chat_completion_payload,
     ChatRequest,
@@ -42,13 +42,107 @@ def _build_channel_assistant_message(
     adapter=None,
     sender: str = "AI",
 ):
-    if adapter:
-        return adapter.build_assistant_message(
-            chat_response,
-            conversation_id=session_id,
-            sender=sender,
-        )
-    return chat_response.to_assistant_message(sender=sender)
+    channel_adapter = adapter or WebChannelAdapter()
+    return channel_adapter.build_assistant_message(
+        chat_response,
+        conversation_id=session_id,
+        sender=sender,
+    )
+
+
+def _build_change_card(
+    *,
+    session_id: str,
+    parent_message_id: str,
+    file_changes,
+):
+    normalized_changes = []
+    summary = {"total": 0, "created": 0, "modified": 0, "deleted": 0}
+    change_by_path = {}
+
+    for change in file_changes or []:
+        if not isinstance(change, dict):
+            continue
+        action = str(change.get("action") or "modified")
+        if action not in summary:
+            action = "modified"
+        normalized_change = {
+            "action": action,
+            "path": change.get("path") or change.get("filename") or "",
+            "scope": change.get("scope") or "private",
+            "before_preview": change.get("before_preview"),
+            "after_preview": change.get("after_preview"),
+            "diff_preview": change.get("diff_preview"),
+        }
+        change_key = normalized_change["path"] or f"unnamed_{len(change_by_path)}"
+        change_by_path[change_key] = normalized_change
+
+    normalized_changes = list(change_by_path.values())
+    for change in normalized_changes:
+        action = change["action"]
+        summary[action] += 1
+        summary["total"] += 1
+
+    if not normalized_changes:
+        return None
+
+    return {
+        "id": str(uuid.uuid4()),
+        "session_id": session_id,
+        "parent_message_id": parent_message_id,
+        "role": "system",
+        "type": "change_card",
+        "content": "本轮文件变更",
+        "summary": summary,
+        "file_changes": normalized_changes,
+        "timestamp": datetime.now().isoformat(),
+        "is_complete": True,
+    }
+
+
+def _emit_change_card(
+    server,
+    session_store,
+    *,
+    session_id: str,
+    parent_message_id: str,
+    file_changes,
+):
+    if not parent_message_id:
+        return None
+
+    change_card = _build_change_card(
+        session_id=session_id,
+        parent_message_id=parent_message_id,
+        file_changes=file_changes,
+    )
+    if not change_card:
+        return None
+
+    session = session_store.get_session(session_id)
+    if not session:
+        return None
+
+    for msg in session.get("messages", []):
+        if (
+            msg.get("id") == parent_message_id
+            or msg.get("tempId") == parent_message_id
+            or msg.get("originalTempId") == parent_message_id
+        ):
+            if "change_cards" not in msg:
+                msg["change_cards"] = []
+            msg["change_cards"] = [
+                card
+                for card in msg["change_cards"]
+                if card.get("type") != "change_card"
+            ]
+            msg["change_cards"].append(change_card)
+            break
+
+    if session_store.save_callback:
+        session_store.save_callback()
+    server.socketio.emit("new_message", change_card, room=session_id)
+    return change_card
 
 
 def trigger_ai_response(
@@ -60,28 +154,19 @@ def trigger_ai_response(
     parent_message_id=None,
 ):
     """Trigger an AI response for a web session."""
-    adapter = getattr(server, "web_channel_adapter", None)
-    chat_request = (
-        adapter.build_chat_request(
-            conversation_id=session_id,
-            content=user_content,
-            sender=sender,
-            attachments=attachments,
-            parent_message_id=parent_message_id,
-        )
-        if adapter
-        else ChatRequest.for_web(
-            session_id=session_id,
-            content=user_content,
-            sender=sender,
-            attachments=attachments,
-            parent_message_id=parent_message_id,
-        )
+    adapter = getattr(server, "web_channel_adapter", None) or WebChannelAdapter()
+    chat_request = adapter.build_chat_request(
+        conversation_id=session_id,
+        content=user_content,
+        sender=sender,
+        attachments=attachments,
+        parent_message_id=parent_message_id,
     )
     return trigger_ai_response_for_request(server, chat_request, adapter=adapter)
 
 
 def trigger_ai_response_for_request(server, chat_request: ChatRequest, adapter=None):
+    adapter = adapter or getattr(server, "web_channel_adapter", None) or WebChannelAdapter()
     session_store = WebSessionStore(
         server.sessions, save_callback=lambda: server._save_data("sessions")
     )
@@ -90,7 +175,7 @@ def trigger_ai_response_for_request(server, chat_request: ChatRequest, adapter=N
     sender = chat_request.sender
     attachments = list(chat_request.attachments or [])
     parent_message_id = chat_request.parent_message_id
-    channel_capabilities = adapter.get_capabilities() if adapter else None
+    channel_capabilities = adapter.get_capabilities()
 
     # 强制转换为列表
     if not attachments or not isinstance(attachments, list):
@@ -224,6 +309,7 @@ def trigger_ai_response_for_request(server, chat_request: ChatRequest, adapter=N
             # 创建进度卡片（所有消息都创建，立即显示"AI 正在思考..."）
             progress_card = None
             todo_card = None
+            round_file_changes = []
             has_attachments = (
                 attachments
                 and isinstance(attachments, list)
@@ -231,9 +317,11 @@ def trigger_ai_response_for_request(server, chat_request: ChatRequest, adapter=N
             )
 
             if (
-                channel_capabilities is None
-                or channel_capabilities.supports_progress_updates
-            ) and server.PROGRESS_CARD_AVAILABLE and server.progress_card_manager and server.socketio:
+                channel_capabilities.supports_progress_updates
+                and server.PROGRESS_CARD_AVAILABLE
+                and server.progress_card_manager
+                and server.socketio
+            ):
                 progress_card = server.progress_card_manager.create_card(
                     session_id=session_id,
                     parent_message_id=parent_message_id,
@@ -247,9 +335,11 @@ def trigger_ai_response_for_request(server, chat_request: ChatRequest, adapter=N
 
             # 创建 Todo 卡片（用于显示待办事项）
             if (
-                channel_capabilities is None
-                or channel_capabilities.supports_progress_updates
-            ) and server.TODO_CARD_AVAILABLE and server.todo_card_manager and server.socketio:
+                channel_capabilities.supports_progress_updates
+                and server.TODO_CARD_AVAILABLE
+                and server.todo_card_manager
+                and server.socketio
+            ):
                 todo_card = server.todo_card_manager.create_card(
                     session_id=session_id, parent_message_id=parent_message_id
                 )
@@ -289,8 +379,6 @@ def trigger_ai_response_for_request(server, chat_request: ChatRequest, adapter=N
                                 elif att_path:
                                     # 尝试读取服务器上的图片文件
                                     try:
-                                        import os
-
                                         file_path = os.path.join(
                                             server.static_folder,
                                             att_path.replace("/static/", ""),
@@ -363,8 +451,6 @@ def trigger_ai_response_for_request(server, chat_request: ChatRequest, adapter=N
                                 # 从文件路径读取内容
                                 elif att_path:
                                     try:
-                                        import os
-
                                         file_path = os.path.join(
                                             server.static_folder,
                                             att_path.replace("/static/", ""),
@@ -437,8 +523,6 @@ def trigger_ai_response_for_request(server, chat_request: ChatRequest, adapter=N
                                 # 从文件路径读取内容
                                 elif att_path:
                                     try:
-                                        import os
-
                                         file_path = os.path.join(
                                             server.static_folder,
                                             att_path.replace("/static/", ""),
@@ -572,8 +656,6 @@ def trigger_ai_response_for_request(server, chat_request: ChatRequest, adapter=N
                                 and att_path
                             ):
                                 try:
-                                    import os
-
                                     file_abs_path = os.path.join(
                                         server.static_folder,
                                         att_path.replace("/static/", ""),
@@ -984,11 +1066,19 @@ def trigger_ai_response_for_request(server, chat_request: ChatRequest, adapter=N
                             tool_display_name = get_tool_display_name(tool_name)
 
                             if tool_result.get("success"):
-                                result_preview = str(
-                                    tool_result.get(
-                                        "content", tool_result.get("files", tool_result)
-                                    )
-                                )[:100]
+                                file_changes = tool_result.get("file_changes") or []
+                                if file_changes:
+                                    round_file_changes.extend(file_changes)
+                                    result_preview = "；".join(
+                                        f"{change.get('action', 'changed')}: {change.get('path', '')}"
+                                        for change in file_changes[:3]
+                                    )[:160]
+                                else:
+                                    result_preview = str(
+                                        tool_result.get(
+                                            "content", tool_result.get("files", tool_result)
+                                        )
+                                    )[:100]
                                 update_thinking_card(
                                     "tool_done",
                                     tool_display_name,
@@ -1206,7 +1296,7 @@ def trigger_ai_response_for_request(server, chat_request: ChatRequest, adapter=N
                 )
                 session_store.append_message(session_id, assistant_message)
                 complete_thinking_card()
-                if channel_capabilities is None or channel_capabilities.supports_stream:
+                if channel_capabilities.supports_stream:
                     server._stream_send_response(session_id, assistant_message)
                 else:
                     server.socketio.emit(
@@ -1214,6 +1304,13 @@ def trigger_ai_response_for_request(server, chat_request: ChatRequest, adapter=N
                         {"session_id": session_id, "message": assistant_message},
                         room=session_id,
                     )
+                _emit_change_card(
+                    server,
+                    session_store,
+                    session_id=session_id,
+                    parent_message_id=parent_message_id,
+                    file_changes=round_file_changes,
+                )
                 return
 
             assistant_content = final_content
@@ -1226,7 +1323,7 @@ def trigger_ai_response_for_request(server, chat_request: ChatRequest, adapter=N
 
             # 使用流式发送
             _log.info(f"[Stream] _trigger_ai_response 准备发送流式响应")
-            if channel_capabilities is None or channel_capabilities.supports_stream:
+            if channel_capabilities.supports_stream:
                 server._stream_send_response(session_id, assistant_message)
             else:
                 server.socketio.emit(
@@ -1236,6 +1333,13 @@ def trigger_ai_response_for_request(server, chat_request: ChatRequest, adapter=N
                 )
 
             session_store.append_message(session_id, assistant_message)
+            _emit_change_card(
+                server,
+                session_store,
+                session_id=session_id,
+                parent_message_id=parent_message_id,
+                file_changes=round_file_changes,
+            )
 
             # 更新 Token 统计
             estimated_tokens = len(chat_request.content) + len(assistant_content)

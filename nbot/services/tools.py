@@ -6,6 +6,8 @@ import logging
 import urllib.request
 import urllib.parse
 import os
+import difflib
+import mimetypes
 from typing import Dict, Any, Optional, List
 from datetime import datetime
 import configparser
@@ -30,6 +32,12 @@ def get_dynamic_executor():
 # 加载配置文件
 config_parser = configparser.ConfigParser()
 config_parser.read('config.ini', encoding='utf-8')
+def get_minimax_api_key() -> str:
+    return (
+        os.getenv("MINIMAX_API_KEY")
+        or os.getenv("API_KEY")
+        or config_parser.get("ApiKey", "api_key", fallback="")
+    )
 
 # MiniMax API 配置（仅用于 search_web 和 understand_image 工具）
 MINIMAX_API_KEY = config_parser.get('ApiKey', 'api_key', fallback="")
@@ -64,6 +72,102 @@ EXEC_BLACKLIST_PATTERNS = [
     r'fork\s*\(',
     r'while\s*\(true\)',
 ]
+
+
+def _truncate_text_preview(text: str, limit: int = 1200) -> str:
+    text = (text or "").replace("\r\n", "\n")
+    if len(text) <= limit:
+        return text
+    return text[:limit] + "\n...<truncated>"
+
+
+def _read_text_preview(path: str, limit: int = 1200) -> Optional[str]:
+    if not path or not os.path.exists(path) or os.path.isdir(path):
+        return None
+    mime_type, _ = mimetypes.guess_type(path)
+    if mime_type and not (
+        mime_type.startswith("text/")
+        or mime_type
+        in {
+            "application/json",
+            "application/xml",
+            "application/yaml",
+            "application/javascript",
+            "application/x-python",
+        }
+    ):
+        return None
+    try:
+        with open(path, "r", encoding="utf-8", errors="replace") as f:
+            return _truncate_text_preview(f.read(), limit=limit)
+    except Exception:
+        return None
+
+
+def _build_diff_preview(before_text: str, after_text: str, max_lines: int = 80) -> str:
+    before_lines = (before_text or "").replace("\r\n", "\n").splitlines()
+    after_lines = (after_text or "").replace("\r\n", "\n").splitlines()
+    diff_lines = list(
+        difflib.unified_diff(
+            before_lines,
+            after_lines,
+            fromfile="before",
+            tofile="after",
+            lineterm="",
+        )
+    )
+    if len(diff_lines) > max_lines:
+        diff_lines = diff_lines[:max_lines] + ["...<diff truncated>"]
+    return "\n".join(diff_lines)
+
+
+def _build_workspace_change(
+    *,
+    action: str,
+    filename: str,
+    scope: str,
+    before_text: Optional[str] = None,
+    after_text: Optional[str] = None,
+    path: Optional[str] = None,
+) -> Dict[str, Any]:
+    max_preview_chars = 4000
+    preview_too_large = (
+        len(before_text or "") > max_preview_chars
+        or len(after_text or "") > max_preview_chars
+    )
+    before_preview = (
+        _truncate_text_preview(before_text or "") if before_text is not None and not preview_too_large else None
+    )
+    after_preview = (
+        _truncate_text_preview(after_text or "") if after_text is not None and not preview_too_large else None
+    )
+    change = {
+        "action": action,
+        "path": filename,
+        "scope": scope,
+        "preview_too_large": preview_too_large,
+    }
+    if path:
+        change["absolute_path"] = path
+    if before_preview is not None:
+        change["before_preview"] = before_preview
+    if after_preview is not None:
+        change["after_preview"] = after_preview
+    if (before_text is not None or after_text is not None) and not preview_too_large:
+        change["diff_preview"] = _build_diff_preview(before_text or "", after_text or "")
+    return change
+
+
+def _append_workspace_change(result: Dict[str, Any], change: Dict[str, Any]) -> Dict[str, Any]:
+    file_changes = list(result.get("file_changes") or [])
+    file_changes.append(change)
+    result["file_changes"] = file_changes
+    result["change_summary"] = {
+        "created": sum(1 for item in file_changes if item.get("action") == "created"),
+        "modified": sum(1 for item in file_changes if item.get("action") == "modified"),
+        "deleted": sum(1 for item in file_changes if item.get("action") == "deleted"),
+    }
+    return result
 
 
 def load_tools_config() -> List[Dict]:
@@ -378,7 +482,8 @@ class ToolExecutor:
         """
         try:
             # 检查配置是否完整
-            if not MINIMAX_API_KEY:
+            api_key = get_minimax_api_key()
+            if not api_key:
                 _log.error("MiniMax API密钥未配置，请在config.ini中配置[ApiKey]部分的api_key")
                 return {
                     "success": False,
@@ -389,7 +494,7 @@ class ToolExecutor:
             # 使用 MiniMax 专门的搜索 API（固定URL）
             headers = {
                 "Content-Type": "application/json",
-                "Authorization": f"Bearer {MINIMAX_API_KEY}"
+                "Authorization": f"Bearer {api_key}"
             }
             
             payload = {"q": query}
@@ -492,7 +597,8 @@ class ToolExecutor:
         """
         try:
             # 检查配置
-            if not MINIMAX_API_KEY:
+            api_key = get_minimax_api_key()
+            if not api_key:
                 _log.error("MiniMax API密钥未配置")
                 return {
                     "success": False,
@@ -505,7 +611,7 @@ class ToolExecutor:
             # 构建请求
             headers = {
                 "Content-Type": "application/json",
-                "Authorization": f"Bearer {MINIMAX_API_KEY}"
+                "Authorization": f"Bearer {api_key}"
             }
             
             payload = {
@@ -1614,6 +1720,15 @@ def _execute_workspace_tool(tool_name: str, arguments: Dict[str, Any],
         # 获取 scope 参数，默认 'private'
         scope = arguments.get('scope', 'private')
         is_shared = (scope == 'shared')
+        if is_shared:
+            target_path = os.path.normpath(
+                os.path.join(workspace_manager.get_shared_workspace(), filename or "")
+            )
+        else:
+            workspace_root = workspace_manager.get_or_create(session_id, session_type)
+            target_path = os.path.normpath(os.path.join(workspace_root, filename or ""))
+        target_exists_before = os.path.exists(target_path) if filename else False
+        target_preview_before = _read_text_preview(target_path) if target_exists_before else None
         
         if tool_name == "workspace_create_file":
             if not filename:
@@ -1627,6 +1742,18 @@ def _execute_workspace_tool(tool_name: str, arguments: Dict[str, Any],
                 result = workspace_manager.create_file(
                     session_id, filename, arguments['content'], session_type)
             result['scope'] = scope
+            if result.get('success'):
+                _append_workspace_change(
+                    result,
+                    _build_workspace_change(
+                        action='modified' if target_exists_before else 'created',
+                        filename=result.get('filename', filename),
+                        scope=scope,
+                        before_text=target_preview_before,
+                        after_text=arguments.get('content', ''),
+                        path=result.get('path', target_path),
+                    ),
+                )
             return result
 
         elif tool_name == "workspace_read_file":
@@ -1666,6 +1793,18 @@ def _execute_workspace_tool(tool_name: str, arguments: Dict[str, Any],
                     session_id, filename,
                     arguments['old_content'], arguments['new_content'])
             result['scope'] = scope
+            if result.get('success'):
+                _append_workspace_change(
+                    result,
+                    _build_workspace_change(
+                        action='modified',
+                        filename=result.get('filename', filename),
+                        scope=scope,
+                        before_text=arguments.get('old_content', ''),
+                        after_text=arguments.get('new_content', ''),
+                        path=result.get('path', target_path),
+                    ),
+                )
             return result
 
         elif tool_name == "workspace_delete_file":
@@ -1677,6 +1816,18 @@ def _execute_workspace_tool(tool_name: str, arguments: Dict[str, Any],
             else:
                 result = workspace_manager.delete_file(session_id, filename)
             result['scope'] = scope
+            if result.get('success'):
+                _append_workspace_change(
+                    result,
+                    _build_workspace_change(
+                        action='deleted',
+                        filename=result.get('filename', filename),
+                        scope=scope,
+                        before_text=target_preview_before,
+                        after_text=None,
+                        path=target_path,
+                    ),
+                )
             return result
 
         elif tool_name == "workspace_list_files":

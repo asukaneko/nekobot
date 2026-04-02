@@ -21,6 +21,38 @@ from datetime import datetime
 _log = logging.getLogger(__name__)
 
 
+def _normalize_edit_block(text: str) -> str:
+    return "\n".join(
+        line.rstrip() for line in (text or "").replace("\r\n", "\n").strip().split("\n")
+    )
+
+
+def _replace_content_block(content: str, old_content: str, new_content: str):
+    if old_content in content:
+        return content.replace(old_content, new_content, 1), "exact"
+
+    normalized_content = content.replace("\r\n", "\n")
+    normalized_old = (old_content or "").replace("\r\n", "\n")
+    if normalized_old and normalized_old in normalized_content:
+        return normalized_content.replace(normalized_old, new_content, 1), "normalized_newlines"
+
+    relaxed_old = _normalize_edit_block(old_content)
+    if not relaxed_old:
+        return None, None
+
+    content_lines = content.replace("\r\n", "\n").split("\n")
+    old_lines = relaxed_old.split("\n")
+    old_len = len(old_lines)
+    for start in range(0, len(content_lines) - old_len + 1):
+        candidate = "\n".join(content_lines[start : start + old_len])
+        if _normalize_edit_block(candidate) == relaxed_old:
+            new_lines = new_content.replace("\r\n", "\n").split("\n")
+            updated_lines = content_lines[:start] + new_lines + content_lines[start + old_len :]
+            return "\n".join(updated_lines), "relaxed_block"
+
+    return None, None
+
+
 class WorkspaceManager:
     """工作区管理器（单例模式）"""
 
@@ -245,10 +277,11 @@ class WorkspaceManager:
             with open(file_path, 'r', encoding='utf-8') as f:
                 content = f.read()
 
-            if old_content not in content:
+            new_file_content, match_mode = _replace_content_block(
+                content, old_content, new_content
+            )
+            if new_file_content is None:
                 return {'success': False, 'error': '未找到要替换的内容'}
-
-            new_file_content = content.replace(old_content, new_content, 1)
             with open(file_path, 'w', encoding='utf-8') as f:
                 f.write(new_file_content)
 
@@ -256,7 +289,8 @@ class WorkspaceManager:
                 'success': True,
                 'filename': filename,
                 'scope': 'shared',
-                'size': len(new_file_content.encode('utf-8'))
+                'size': len(new_file_content.encode('utf-8')),
+                'match_mode': match_mode,
             }
         except Exception as e:
             return {'success': False, 'error': str(e)}
@@ -815,17 +849,19 @@ class WorkspaceManager:
             with open(file_path, 'r', encoding='utf-8') as f:
                 content = f.read()
 
-            if old_content not in content:
+            new_file_content, match_mode = _replace_content_block(
+                content, old_content, new_content
+            )
+            if new_file_content is None:
                 return {'success': False, 'error': '未找到要替换的内容'}
-
-            new_file_content = content.replace(old_content, new_content, 1)
             with open(file_path, 'w', encoding='utf-8') as f:
                 f.write(new_file_content)
 
             return {
                 'success': True,
                 'filename': filename,
-                'size': len(new_file_content.encode('utf-8'))
+                'size': len(new_file_content.encode('utf-8')),
+                'match_mode': match_mode,
             }
         except Exception as e:
             return {'success': False, 'error': str(e)}

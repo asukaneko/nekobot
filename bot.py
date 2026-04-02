@@ -148,13 +148,15 @@ if __name__ == "__main__":
         run_bot()
     elif only_web:
         _log.info("Starting NekoBot Web Dashboard only (QQ disabled)...")
-        start_web_server(host=web_host, port=web_port, bot=None)
+        prepared = _prepare_web_server(bot=None)
+        start_web_server(host=web_host, port=web_port, bot=None, prepared=prepared)
     else:
         _log.info("Starting NekoBot with Web Dashboard...")
+        prepared = _prepare_web_server(bot=None)
         bot_thread = threading.Thread(
             target=run_bot,
             name="qq-bot-main",
             daemon=True,
         )
         bot_thread.start()
-        start_web_server(host=web_host, port=web_port, bot=None)
+        start_web_server(host=web_host, port=web_port, bot=None, prepared=prepared)

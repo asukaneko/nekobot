@@ -258,7 +258,7 @@ except ImportError:
 
 # 导入统一消息模块
 try:
-    from nbot.core import AgentService, ChatRequest, WebSessionStore, message_manager, create_message
+    from nbot.core import AgentService, WebSessionStore, message_manager, create_message
     from nbot.channels import WebChannelAdapter
 
     MESSAGE_MODULE_AVAILABLE = True
@@ -266,7 +266,6 @@ except ImportError:
     MESSAGE_MODULE_AVAILABLE = False
     WebSessionStore = None
     AgentService = None
-    ChatRequest = None
     WebChannelAdapter = None
     message_manager = None
     create_message = None
@@ -1560,22 +1559,12 @@ class WebChatServer:
     ):
         """?? AI ????????"""
         adapter = _resolve_web_adapter(self.web_channel_adapter)
-        chat_request = (
-            adapter.build_chat_request(
-                conversation_id=session_id,
-                content=user_content,
-                sender=sender,
-                attachments=attachments,
-                parent_message_id=parent_message_id,
-            )
-            if adapter
-            else ChatRequest.for_web(
-                session_id=session_id,
-                content=user_content,
-                sender=sender,
-                attachments=attachments,
-                parent_message_id=parent_message_id,
-            )
+        chat_request = adapter.build_chat_request(
+            conversation_id=session_id,
+            content=user_content,
+            sender=sender,
+            attachments=attachments,
+            parent_message_id=parent_message_id,
         )
         self.agent_service.process(chat_request, adapter=adapter)
 
@@ -1587,23 +1576,12 @@ class WebChatServer:
             return
 
         adapter = _resolve_web_adapter(self.web_channel_adapter)
-        message = (
-            adapter.build_message(
-                role=role,
-                content=content,
-                sender=sender,
-                conversation_id=session_id,
-                source=source,
-            )
-            if adapter
-            else {
-                "id": str(uuid.uuid4()),
-                "role": role,
-                "content": content,
-                "timestamp": datetime.now().isoformat(),
-                "sender": sender,
-                "source": source,
-            }
+        message = adapter.build_message(
+            role=role,
+            content=content,
+            sender=sender,
+            conversation_id=session_id,
+            source=source,
         )
 
         self.session_store.append_message(session_id, message)
@@ -1808,18 +1786,6 @@ class WebChatServer:
                 "is_heartbeat": True,
                 "hide_in_web": False,  # 追加到现有会话时显示
             }
-            if heartbeat_adapter:
-                hb_user_message = heartbeat_adapter.build_message(
-                    role="user",
-                    content=hb_user_message.get("content", ""),
-                    sender="system",
-                    conversation_id=session_id,
-                    metadata={
-                        "source": "heartbeat",
-                        "is_heartbeat": True,
-                        "hide_in_web": False,
-                    },
-                )
             hb_user_message = _build_heartbeat_user_message(
                 heartbeat_adapter, session_id, content
             )
@@ -1880,17 +1846,6 @@ class WebChatServer:
                 }
 
                 # 更新会话
-                if heartbeat_adapter:
-                    hb_assistant_message = heartbeat_adapter.build_assistant_message(
-                        ChatResponse(final_content=hb_assistant_message.get("content", "")),
-                        conversation_id=session_id,
-                        sender="AI",
-                        metadata={
-                            "source": "heartbeat",
-                            "is_heartbeat": True,
-                            "hide_in_web": False,
-                        },
-                    )
                 hb_assistant_message = _build_heartbeat_assistant_message(
                     heartbeat_adapter, session_id, response_text
                 )

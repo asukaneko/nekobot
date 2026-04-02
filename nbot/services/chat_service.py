@@ -16,7 +16,6 @@ from nbot.core import (
     prompt_manager,
     message_manager,
     QQSessionStore,
-    QQChannelAdapter,
     resolve_chat_completion_url,
     resolve_loop_final_content,
     ToolLoopSession,
@@ -25,6 +24,7 @@ from nbot.core import (
     dump_json,
     run_tool_loop_session,
 )
+from nbot.channels import QQChannelAdapter
 from nbot.core.message import create_message
 
 # 工作区管理
@@ -520,7 +520,8 @@ def judge_reply(content: str) -> float:
 
 def chat(content: str = "", user_id=None, group_id=None, group_user_id=None,
          image: bool = False, url=None, video=None):
-    chat_request = QQChannelAdapter().build_chat_request(
+    adapter = QQChannelAdapter()
+    chat_request = adapter.build_chat_request(
         content=content,
         user_id=str(user_id) if user_id else None,
         attachments=[],
@@ -532,20 +533,24 @@ def chat(content: str = "", user_id=None, group_id=None, group_user_id=None,
             "video": video,
         },
     )
-    return chat_from_request(chat_request).final_content
+    return chat_from_request(chat_request, adapter=adapter).final_content
 
 
-def chat_from_request(chat_request: ChatRequest) -> ChatResponse:
+def chat_from_request(
+    chat_request: ChatRequest, adapter: QQChannelAdapter = None
+) -> ChatResponse:
     agent_service = AgentService()
     agent_service.register_handler("qq", _run_qq_chat_request)
-    return agent_service.process(chat_request, adapter=QQChannelAdapter())
+    adapter = adapter or QQChannelAdapter()
+    return agent_service.process(chat_request, adapter=adapter)
 
 
 def _run_qq_chat_request(
     chat_request: ChatRequest, adapter: QQChannelAdapter = None
 ) -> ChatResponse:
+    adapter = adapter or QQChannelAdapter()
     runtime_ai = refresh_runtime_ai_config()
-    channel_capabilities = adapter.get_capabilities() if adapter else None
+    channel_capabilities = adapter.get_capabilities()
     content = chat_request.content
     user_id = chat_request.user_id
     group_id = chat_request.metadata.get("group_id")
@@ -633,7 +638,7 @@ def _run_qq_chat_request(
     if (
         TOOLS_AVAILABLE
         and runtime_ai.get("supports_tools", True)
-        and (channel_capabilities is None or channel_capabilities.supports_file_send)
+        and channel_capabilities.supports_file_send
         and workspace_context.get('session_id')
     ):
         # 准备工具上下文
@@ -694,12 +699,11 @@ def _run_qq_chat_request(
     qq_store.save()
 
     chat_response = ChatResponse(final_content=display_response)
-    if adapter:
-        chat_response.assistant_message = adapter.build_assistant_message(
-            chat_response,
-            conversation_id=chat_request.conversation_id,
-            sender="AI",
-        )
+    chat_response.assistant_message = adapter.build_assistant_message(
+        chat_response,
+        conversation_id=chat_request.conversation_id,
+        sender="AI",
+    )
     return chat_response
 
 
