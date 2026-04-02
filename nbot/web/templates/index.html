@@ -1306,6 +1306,260 @@
             border-bottom: 1px solid var(--border-color);
         }
 
+        .dashboard-shell {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+
+        .dashboard-hero {
+            position: relative;
+            overflow: hidden;
+            padding: 24px;
+            border-radius: 22px;
+            border: 1px solid color-mix(in srgb, var(--accent-primary) 18%, var(--border-color));
+            background:
+                radial-gradient(circle at top right, color-mix(in srgb, var(--accent-primary) 20%, transparent), transparent 34%),
+                radial-gradient(circle at bottom left, color-mix(in srgb, var(--secondary) 18%, transparent), transparent 30%),
+                linear-gradient(135deg, color-mix(in srgb, var(--bg-secondary) 92%, white 8%), var(--bg-secondary));
+            box-shadow: 0 18px 42px rgba(15, 23, 42, 0.08);
+        }
+
+        .dashboard-hero::after {
+            content: '';
+            position: absolute;
+            right: -30px;
+            top: -40px;
+            width: 220px;
+            height: 220px;
+            border-radius: 50%;
+            background: color-mix(in srgb, var(--accent-primary) 10%, transparent);
+            filter: blur(18px);
+            pointer-events: none;
+        }
+
+        .dashboard-hero-grid {
+            position: relative;
+            z-index: 1;
+            display: grid;
+            grid-template-columns: minmax(0, 1.5fr) minmax(300px, 0.9fr);
+            gap: 20px;
+            align-items: stretch;
+        }
+
+        .dashboard-hero-title {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            margin-bottom: 14px;
+        }
+
+        .dashboard-hero-icon {
+            width: 54px;
+            height: 54px;
+            border-radius: 16px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 22px;
+            background: linear-gradient(135deg, var(--accent-primary), var(--secondary));
+            box-shadow: 0 14px 28px color-mix(in srgb, var(--accent-primary) 24%, transparent);
+        }
+
+        .dashboard-hero-copy h2 {
+            margin: 0 0 6px;
+            font-size: 28px;
+            line-height: 1.15;
+        }
+
+        .dashboard-pills {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin-top: 10px;
+        }
+
+        .dashboard-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 10px 14px;
+            border-radius: 999px;
+            border: 1px solid var(--border-color);
+            background: color-mix(in srgb, var(--surface) 84%, white 16%);
+            color: var(--text-secondary);
+            font-size: 13px;
+        }
+
+        .dashboard-pill i {
+            color: var(--accent-primary);
+        }
+
+        .dashboard-hero-side {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .dashboard-side-card {
+            padding: 18px;
+            border-radius: 18px;
+            border: 1px solid var(--border-color);
+            background: color-mix(in srgb, var(--surface) 88%, white 12%);
+            box-shadow: 0 12px 24px rgba(15, 23, 42, 0.05);
+        }
+
+        .dashboard-side-title {
+            font-size: 12px;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            color: var(--text-muted);
+            margin-bottom: 8px;
+        }
+
+        .dashboard-side-main {
+            font-size: 24px;
+            font-weight: 700;
+            line-height: 1.2;
+            margin-bottom: 4px;
+        }
+
+        .dashboard-side-sub {
+            font-size: 13px;
+            color: var(--text-secondary);
+        }
+
+        .dashboard-quick-actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin-top: 14px;
+        }
+
+        .dashboard-action {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 10px 14px;
+            border-radius: 12px;
+            border: 1px solid var(--border-color);
+            background: color-mix(in srgb, var(--surface) 84%, white 16%);
+            color: var(--text-primary);
+            cursor: pointer;
+            transition: transform 0.22s ease, border-color 0.22s ease, box-shadow 0.22s ease;
+        }
+
+        .dashboard-action:hover {
+            transform: translateY(-2px);
+            border-color: color-mix(in srgb, var(--accent-primary) 30%, var(--border-color));
+            box-shadow: 0 12px 24px rgba(15, 23, 42, 0.08);
+        }
+
+        .dashboard-action i {
+            color: var(--accent-primary);
+        }
+
+        .dashboard-panel-grid {
+            display: grid;
+            grid-template-columns: minmax(0, 1.5fr) minmax(320px, 0.85fr);
+            gap: 20px;
+            align-items: start;
+        }
+
+        .dashboard-stack {
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+
+        .dashboard-section-card {
+            border-radius: 18px;
+            border: 1px solid var(--border-color);
+            background: linear-gradient(180deg, color-mix(in srgb, var(--surface) 90%, white 10%), var(--surface));
+            box-shadow: 0 14px 30px rgba(15, 23, 42, 0.05);
+            overflow: hidden;
+        }
+
+        .dashboard-section-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            padding: 18px 20px 0;
+        }
+
+        .dashboard-section-copy {
+            padding: 6px 20px 0;
+            color: var(--text-secondary);
+            font-size: 13px;
+            line-height: 1.6;
+        }
+
+        .dashboard-section-body {
+            padding: 18px 20px 20px;
+        }
+
+        .dashboard-section-body .chart-container {
+            min-height: 280px;
+        }
+
+        .dashboard-status-list {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .dashboard-status-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            padding: 12px 14px;
+            border-radius: 14px;
+            border: 1px solid var(--border-color);
+            background: color-mix(in srgb, var(--bg-secondary) 80%, white 20%);
+        }
+
+        .dashboard-activity-list {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .dashboard-activity-item {
+            display: flex;
+            justify-content: space-between;
+            gap: 12px;
+            padding-bottom: 12px;
+            border-bottom: 1px solid var(--border-color);
+            font-size: 13px;
+        }
+
+        .dashboard-activity-item:last-child {
+            padding-bottom: 0;
+            border-bottom: none;
+        }
+
+        @media (max-width: 1180px) {
+            .dashboard-hero-grid,
+            .dashboard-panel-grid,
+            .dashboard-metrics {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        @media (max-width: 760px) {
+            .dashboard-hero {
+                padding: 18px;
+            }
+
+            .dashboard-quick-actions,
+            .dashboard-pills {
+                gap: 8px;
+            }
+        }
+
         .status-title {
             font-size: 14px;
             font-weight: 600;
@@ -6274,188 +6528,76 @@
                 <!-- Content Area -->
                 <div class="content-area">
                     <!-- Dashboard -->
-                    <div v-if="currentPage === 'dashboard'" class="fade-in">
-                        <!-- 消息趋势分析（放在最上面） -->
-                        <div class="chart-card trend-chart" style="margin-bottom: 20px;">
-                            <div class="chart-header">
+                    <div v-if="currentPage === 'dashboard'" class="fade-in dashboard-shell">
+                        <div class="dashboard-hero">
+                            <div class="dashboard-hero-grid">
                                 <div>
-                                    <div class="chart-title">消息趋势分析</div>
-                                    <div class="chart-subtitle">接收消息数量随时间的变化</div>
-                                </div>
-                                <div class="time-filter">
-                                    <button
-                                        v-for="period in timePeriods"
-                                        :key="period.value"
-                                        class="time-filter-btn"
-                                        :class="{ active: selectedPeriod === period.value }"
-                                        @click="changeTimePeriod(period.value)"
-                                    >
-                                        {{ period.label }}
-                                    </button>
-                                </div>
-                            </div>
-                            <div class="chart-body">
-                                <div ref="trendChart" class="chart-container"></div>
-                            </div>
-                        </div>
-
-                        <!-- 统计卡片 - 第一行 -->
-                        <div class="stats-grid">
-                            <div class="stat-card">
-                                <div class="stat-icon purple">
-                                    <i class="fas fa-comments"></i>
-                                </div>
-                                <div class="stat-content">
-                                    <div class="stat-label">消息总数</div>
-                                    <div class="stat-value">{{ formatNumber(stats.total_messages || stats.today_messages) }}</div>
-                                    <div class="stat-subtitle">所有平台消息总计</div>
-                                </div>
-                            </div>
-                            <div class="stat-card">
-                                <div class="stat-icon blue">
-                                    <i class="fas fa-comments"></i>
-                                </div>
-                                <div class="stat-content">
-                                    <div class="stat-label">会话总数</div>
-                                    <div class="stat-value">{{ sessionCount }}</div>
-                                    <div class="stat-subtitle">Web + QQ 会话总数</div>
-                                </div>
-                            </div>
-                            <div class="stat-card">
-                                <div class="stat-icon green">
-                                    <i class="fas fa-clock"></i>
-                                </div>
-                                <div class="stat-content">
-                                    <div class="stat-label">运行时间</div>
-                                    <div class="stat-value">{{ stats.uptime || '0小时' }}</div>
-                                    <div class="stat-subtitle">系统已运行时长</div>
-                                </div>
-                            </div>
-                            <div class="stat-card">
-                                <div class="stat-icon orange">
-                                    <i class="fas fa-memory"></i>
-                                </div>
-                                <div class="stat-content">
-                                    <div class="stat-label">内存占用</div>
-                                    <div class="stat-value">{{ stats.memory_usage || 42 }} MB</div>
-                                    <div class="stat-subtitle">当前内存使用率</div>
-                                </div>
-                            </div>
-                        </div>
-
-                        <!-- 图表和系统状态区域 -->
-                        <div class="dashboard-main" style="margin-top: 20px;">
-                            <!-- 左侧：统计卡片第二行 -->
-                            <div class="dashboard-left">
-                                <div class="stats-grid">
-                                    <div class="stat-card">
-                                        <div class="stat-icon pink">
-                                            <i class="fas fa-users"></i>
+                                    <div class="dashboard-hero-title">
+                                        <div class="dashboard-hero-icon">
+                                            <i class="fas fa-compass"></i>
                                         </div>
-                                        <div class="stat-content">
-                                            <div class="stat-label">今日活跃用户</div>
-                                            <div class="stat-value">{{ stats.today_active_users || 0 }}</div>
-                                            <div class="stat-subtitle">QQ + Web 活跃用户数</div>
+                                        <div class="dashboard-hero-copy">
+                                            <h2>&#x63a7;&#x5236;&#x53f0;&#x9996;&#x9875;</h2>
                                         </div>
                                     </div>
-                                    <div class="stat-card">
-                                        <div class="stat-icon cyan">
+                                    <div class="dashboard-pills">
+                                        <div class="dashboard-pill">
                                             <i class="fas fa-robot"></i>
+                                            AI {{ stats.ai_service_status === 'normal' ? '&#x6b63;&#x5e38;' : '&#x5f85;&#x914d;&#x7f6e;' }}
                                         </div>
-                                        <div class="stat-content">
-                                            <div class="stat-label">AI 调用次数</div>
-                                            <div class="stat-value">{{ formatNumber(stats.ai_calls || 0) }}</div>
-                                            <div class="stat-subtitle">今日 AI 服务调用</div>
+                                        <div class="dashboard-pill">
+                                            <i class="fab fa-qq"></i>
+                                            QQ {{ stats.qq_connected ? '&#x5df2;&#x8fde;&#x63a5;' : '&#x672a;&#x8fde;&#x63a5;' }}
                                         </div>
-                                    </div>
-                                    <div class="stat-card">
-                                        <div class="stat-icon yellow">
-                                            <i class="fas fa-file-alt"></i>
-                                        </div>
-                                        <div class="stat-content">
-                                            <div class="stat-label">文件传输</div>
-                                            <div class="stat-value">{{ formatNumber(stats.file_transfers || 0) }}</div>
-                                            <div class="stat-subtitle">今日文件上传/下载</div>
+                                        <div class="dashboard-pill">
+                                            <i class="fas fa-plug"></i>
+                                            WebSocket {{ socketConnected ? '&#x5728;&#x7ebf;' : '&#x65ad;&#x5f00;' }}
                                         </div>
                                     </div>
-                                    <div class="stat-card">
-                                        <div class="stat-icon red">
-                                            <i class="fas fa-bolt"></i>
-                                        </div>
-                                        <div class="stat-content">
-                                            <div class="stat-label">平均响应</div>
-                                            <div class="stat-value">{{ stats.avg_response_time || '1.2' }}s</div>
-                                            <div class="stat-subtitle">AI 平均响应时间</div>
-                                        </div>
+                                    <div class="dashboard-quick-actions">
+                                        <button class="dashboard-action" @click="navigateTo('chat')"><i class="fas fa-comments"></i> &#x6253;&#x5f00;&#x4f1a;&#x8bdd;</button>
+                                        <button class="dashboard-action" @click="navigateTo('ai-config')"><i class="fas fa-sliders-h"></i> AI &#x914d;&#x7f6e;</button>
+                                        <button class="dashboard-action" @click="refreshData()"><i class="fas fa-rotate-right"></i> &#x5237;&#x65b0;&#x72b6;&#x6001;</button>
                                     </div>
+                                </div>
+                                <div class="dashboard-hero-side">
+                                    <div class="dashboard-side-card"><div class="dashboard-side-title">&#x7d2f;&#x8ba1;&#x6d88;&#x606f;</div><div class="dashboard-side-main">{{ formatNumber(stats.total_messages || stats.today_messages || 0) }}</div><div class="dashboard-side-sub">&#x8986;&#x76d6; Web &#x4e0e; QQ &#x4e24;&#x4e2a;&#x9891;&#x9053;&#x7684;&#x7d2f;&#x8ba1;&#x6d88;&#x606f;&#x89c4;&#x6a21;&#x3002;</div></div>
+                                    <div class="dashboard-side-card"><div class="dashboard-side-title">&#x6d3b;&#x8dc3;&#x4f1a;&#x8bdd;</div><div class="dashboard-side-main">{{ sessionCount }}</div><div class="dashboard-side-sub">&#x5f53;&#x524d;&#x5df2;&#x8bb0;&#x5f55;&#x7684;&#x4f1a;&#x8bdd;&#x6570;&#x91cf;&#xff0c;&#x53ef;&#x76f4;&#x63a5;&#x8f6c;&#x5165;&#x4f1a;&#x8bdd;&#x9875;&#x5904;&#x7406;&#x3002;</div></div>
                                 </div>
                             </div>
-
-                            <!-- 右侧：系统状态 + 平台统计 -->
-                            <div class="dashboard-sidebar">
-                                <!-- 系统状态小卡片 -->
-                                <div class="status-mini-card">
-                                    <div class="status-header">
-                                        <span class="status-title">系统状态</span>
-                                        <span class="status-badge" :class="stats.ai_service_status === 'normal' ? 'badge-success' : 'badge-warning'">
-                                            {{ stats.ai_service_status === 'normal' ? '运行中' : '未配置' }}
-                                        </span>
+                        </div>
+                        <div class="dashboard-panel-grid">
+                            <div class="dashboard-stack">
+                                <div class="dashboard-section-card">
+                                    <div class="dashboard-section-header">
+                                        <div class="dashboard-section-copy"><div class="chart-title">&#x6d88;&#x606f;&#x8d8b;&#x52bf;</div><div class="chart-subtitle">&#x6309;&#x65f6;&#x95f4;&#x67e5;&#x770b;&#x6d88;&#x606f;&#x53d8;&#x5316;&#xff0c;&#x5feb;&#x901f;&#x5224;&#x65ad;&#x5f53;&#x524d;&#x6d3b;&#x8dc3;&#x5ea6;&#x3002;</div></div>
+                                        <div class="time-filter">
+                                            <button v-for="period in timePeriods" :key="period.value" class="time-filter-btn" :class="{ active: selectedPeriod === period.value }" @click="changeTimePeriod(period.value)">{{ period.label }}</button>
+                                        </div>
                                     </div>
-                                    <div class="status-item">
-                                        <span class="status-label">QQ 连接</span>
-                                        <span class="status-value" :class="stats.qq_connected ? 'text-success' : 'text-warning'">
-                                            {{ stats.qq_connected ? '已连接' : '未连接' }}
-                                        </span>
-                                    </div>
-                                    <div class="status-item">
-                                        <span class="status-label">AI 服务</span>
-                                        <span class="status-value" :class="stats.ai_service_status === 'normal' ? 'text-success' : 'text-warning'">
-                                            {{ stats.ai_service_status === 'normal' ? '正常' : '未配置' }}
-                                        </span>
-                                    </div>
-                                    <div class="status-item">
-                                        <span class="status-label">WebSocket</span>
-                                        <span class="status-value" :class="socketConnected ? 'text-success' : 'text-warning'">
-                                            {{ socketConnected ? '已连接' : '未连接' }}
-                                        </span>
-                                    </div>
+                                    <div class="dashboard-section-body"><div ref="trendChart" class="chart-container"></div></div>
                                 </div>
-
-                                <!-- 平台消息统计 -->
-                                <div class="chart-card platform-chart">
-                                    <div class="chart-header">
-                                        <div>
-                                            <div class="chart-title">平台消息统计</div>
-                                            <div class="chart-subtitle">各平台消息数量分布</div>
-                                        </div>
-                                    </div>
-                                    <div class="chart-body">
-                                        <div ref="platformChart" class="chart-container"></div>
-                                    </div>
+                                <div class="stats-grid">
+                                    <div class="stat-card"><div class="stat-icon green"><i class="fas fa-clock"></i></div><div class="stat-content"><div class="stat-label">&#x8fd0;&#x884c;&#x65f6;&#x95f4;</div><div class="stat-value">{{ stats.uptime || '0&#x5c0f;&#x65f6;' }}</div><div class="stat-subtitle">&#x5f53;&#x524d;&#x670d;&#x52a1;&#x6301;&#x7eed;&#x8fd0;&#x884c;&#x65f6;&#x957f;</div></div></div>
+                                    <div class="stat-card"><div class="stat-icon orange"><i class="fas fa-memory"></i></div><div class="stat-content"><div class="stat-label">&#x5185;&#x5b58;&#x5360;&#x7528;</div><div class="stat-value">{{ stats.memory_usage || 42 }} MB</div><div class="stat-subtitle">&#x5f53;&#x524d;&#x8fdb;&#x7a0b;&#x5185;&#x5b58;&#x6d88;&#x8017;</div></div></div>
+                                    <div class="stat-card"><div class="stat-icon yellow"><i class="fas fa-file-arrow-up"></i></div><div class="stat-content"><div class="stat-label">&#x6587;&#x4ef6;&#x4f20;&#x8f93;</div><div class="stat-value">{{ formatNumber(stats.file_transfers || 0) }}</div><div class="stat-subtitle">&#x4eca;&#x65e5;&#x4e0a;&#x4f20;&#x4e0e;&#x4e0b;&#x8f7d;&#x6b21;&#x6570;</div></div></div>
+                                    <div class="stat-card"><div class="stat-icon red"><i class="fas fa-bolt"></i></div><div class="stat-content"><div class="stat-label">&#x5e73;&#x5747;&#x54cd;&#x5e94;</div><div class="stat-value">{{ stats.avg_response_time || '1.2' }}s</div><div class="stat-subtitle">AI &#x5e73;&#x5747;&#x54cd;&#x5e94;&#x8017;&#x65f6;</div></div></div>
                                 </div>
-
-                                <!-- 最近活动 -->
-                                <div class="chart-card activity-card" style="margin-top: 16px;">
-                                    <div class="chart-header">
-                                        <div>
-                                            <div class="chart-title">最近活动</div>
-                                            <div class="chart-subtitle">最近的系统事件</div>
-                                        </div>
+                            </div>
+                            <div class="dashboard-stack">
+                                <div class="dashboard-section-card">
+                                    <div class="dashboard-section-header">
+                                        <div class="dashboard-section-copy"><div class="chart-title">&#x7cfb;&#x7edf;&#x72b6;&#x6001;</div><div class="chart-subtitle">&#x5173;&#x952e;&#x8fde;&#x63a5;&#x4e0e;&#x670d;&#x52a1;&#x72b6;&#x6001;&#x4e00;&#x773c;&#x770b;&#x6e05;&#x3002;</div></div>
+                                        <span class="status-badge" :class="stats.ai_service_status === 'normal' ? 'badge-success' : 'badge-warning'">{{ stats.ai_service_status === 'normal' ? '&#x8fd0;&#x884c;&#x4e2d;' : '&#x5f85;&#x914d;&#x7f6e;' }}</span>
                                     </div>
-                                    <div class="chart-body" style="max-height: 200px; overflow-y: auto;">
-                                        <div v-if="recentActivities && recentActivities.length > 0">
-                                            <div v-for="(activity, index) in recentActivities" :key="index" class="activity-item" style="padding: 8px 0; border-bottom: 1px solid var(--border-color); font-size: 13px;">
-                                                <div style="display: flex; justify-content: space-between; align-items: center;">
-                                                    <span style="color: var(--text-primary);">{{ activity.message }}</span>
-                                                    <span style="color: var(--text-secondary); font-size: 11px;">{{ formatTime(activity.time) }}</span>
-                                                </div>
-                                            </div>
-                                        </div>
-                                        <div v-else style="text-align: center; color: var(--text-secondary); padding: 20px;">
-                                            暂无活动记录
-                                        </div>
-                                    </div>
+                                    <div class="dashboard-section-body"><div class="dashboard-status-list">
+                                        <div class="dashboard-status-item"><span class="status-label">QQ &#x8fde;&#x63a5;</span><span class="status-value" :class="stats.qq_connected ? 'text-success' : 'text-warning'">{{ stats.qq_connected ? '&#x5df2;&#x8fde;&#x63a5;' : '&#x672a;&#x8fde;&#x63a5;' }}</span></div>
+                                        <div class="dashboard-status-item"><span class="status-label">AI &#x670d;&#x52a1;</span><span class="status-value" :class="stats.ai_service_status === 'normal' ? 'text-success' : 'text-warning'">{{ stats.ai_service_status === 'normal' ? '&#x6b63;&#x5e38;' : '&#x672a;&#x914d;&#x7f6e;' }}</span></div>
+                                        <div class="dashboard-status-item"><span class="status-label">WebSocket</span><span class="status-value" :class="socketConnected ? 'text-success' : 'text-warning'">{{ socketConnected ? '&#x5728;&#x7ebf;' : '&#x65ad;&#x5f00;' }}</span></div>
+                                        <div class="dashboard-status-item"><span class="status-label">&#x4f1a;&#x8bdd;&#x6c60;&#x89c4;&#x6a21;</span><span class="status-value">{{ sessionCount }}</span></div>
+                                    </div></div>
                                 </div>
+                                <div class="dashboard-section-card"><div class="dashboard-section-header"><div class="dashboard-section-copy"><div class="chart-title">&#x6700;&#x8fd1;&#x6d3b;&#x52a8;</div><div class="chart-subtitle">&#x6700;&#x8fd1;&#x53d1;&#x751f;&#x7684;&#x7cfb;&#x7edf;&#x4e8b;&#x4ef6;&#x4e0e;&#x64cd;&#x4f5c;&#x8bb0;&#x5f55;&#x3002;</div></div></div><div class="dashboard-section-body" style="max-height: 260px; overflow-y: auto;"><div v-if="recentActivities && recentActivities.length > 0" class="dashboard-activity-list"><div v-for="(activity, index) in recentActivities" :key="index" class="dashboard-activity-item"><span style="color: var(--text-primary);">{{ activity.message }}</span><span style="color: var(--text-secondary); font-size: 11px; white-space: nowrap;">{{ formatTime(activity.time) }}</span></div></div><div v-else style="text-align: center; color: var(--text-secondary); padding: 20px;">&#x6682;&#x65e0;&#x6d3b;&#x52a8;&#x8bb0;&#x5f55;</div></div></div>
                             </div>
                         </div>
                     </div>
