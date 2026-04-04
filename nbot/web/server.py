@@ -844,6 +844,39 @@ class WebChatServer:
             _log.error(f"[Knowledge] 检索失败: {e}")
             return ""
 
+    def _keyword_search(self, km, query: str, max_docs: int = 3) -> list:
+        try:
+            bases = km.list_knowledge_bases()
+            if not bases:
+                return []
+
+            query_words = set(re.findall(r"[\w]+", query.lower()))
+            all_docs = []
+            for kb in bases:
+                for doc_id in kb.documents:
+                    doc = km.store.load_document(doc_id)
+                    if doc:
+                        all_docs.append((doc, doc.content))
+
+            scored = []
+            for doc, content in all_docs:
+                content_lower = content.lower()
+                title_lower = doc.title.lower()
+                score = 0
+                for word in query_words:
+                    if word in title_lower:
+                        score += 3
+                    if word in content_lower:
+                        score += 1
+                if score > 0:
+                    scored.append((doc, score, content))
+
+            scored.sort(key=lambda x: x[1], reverse=True)
+            return [(doc, float(score), content) for doc, score, content in scored[:max_docs]]
+        except Exception as e:
+            _log.error(f"[Knowledge] keyword search failed: {e}")
+            return []
+
     def _init_default_data(self):
         return init_default_data(self)
 
