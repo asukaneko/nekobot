@@ -8216,6 +8216,9 @@
                                     <button class="btn btn-secondary" @click="showImportKnowledgeModal = true" :disabled="isLoading">
                                         <i class="fas fa-file-import"></i> 导入
                                     </button>
+                                    <button class="btn btn-secondary" @click="exportAllKnowledge" :disabled="isLoading || knowledgeDocs.length === 0">
+                                        <i class="fas fa-file-export"></i> 导出
+                                    </button>
                                     <button class="btn btn-primary" @click="openKnowledgeModal()" :disabled="isLoading">
                                         <i class="fas fa-plus"></i> 添加文档
                                     </button>
@@ -11059,6 +11062,94 @@
                 </div>
             </div>
         </div>
+
+        <!-- Knowledge Import Modal -->
+        <div v-if="showImportKnowledgeModal" class="modal-overlay" @click.self="showImportKnowledgeModal = false">
+            <div class="modal" style="max-width: 700px; max-height: 90vh; overflow-y: auto;">
+                <div class="modal-header">
+                    <span class="modal-title">批量导入文档</span>
+                    <button class="modal-close" @click="showImportKnowledgeModal = false">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <div class="form-group">
+                        <label class="form-label">导入方式</label>
+                        <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                            <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
+                                <input type="radio" v-model="importMode" value="json"> JSON 格式
+                            </label>
+                            <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
+                                <input type="radio" v-model="importMode" value="text"> 文本列表（每行一篇）
+                            </label>
+                        </div>
+                    </div>
+
+                    <!-- 文件上传区域 -->
+                    <div class="form-group">
+                        <label class="form-label">选择文件</label>
+                        <div v-if="importForm.fileName" style="padding: 12px; background: var(--bg-tertiary); border-radius: 8px; display: flex; align-items: center; gap: 12px;">
+                            <i class="fas fa-file-alt" style="font-size: 24px; color: var(--accent-primary);"></i>
+                            <div style="flex: 1;">
+                                <div style="font-weight: 600;">{{ importForm.fileName }}</div>
+                                <div style="font-size: 12px; color: var(--text-secondary);">{{ importForm.fileSize }}</div>
+                            </div>
+                            <button class="btn btn-secondary" @click="clearImportFile" style="padding: 4px 12px;">
+                                <i class="fas fa-times"></i> 清除
+                            </button>
+                        </div>
+                        <div v-else
+                            class="form-textarea"
+                            style="padding: 24px; text-align: center; border: 2px dashed var(--border-color); border-radius: 8px; cursor: pointer; color: var(--text-secondary);"
+                            @click="$refs.importFileInput.click()"
+                            @dragover.prevent
+                            @drop.prevent="handleImportFileDrop"
+                        >
+                            <i class="fas fa-cloud-upload-alt" style="font-size: 32px; margin-bottom: 8px; display: block;"></i>
+                            <div>拖拽文件到此处，或 <span style="color: var(--accent-primary); text-decoration: underline;">点击选择文件</span></div>
+                            <div style="font-size: 12px; margin-top: 4px;">支持 .json, .txt 文件</div>
+                            <input type="file" ref="importFileInput" accept=".json,.txt,application/json,text/plain" @change="handleImportFileSelect" style="display: none;">
+                        </div>
+                    </div>
+
+                    <div v-if="importMode === 'json' && !importForm.fileName" class="form-group">
+                        <label class="form-label">或直接粘贴 JSON 数据</label>
+                        <textarea v-model="importForm.text" class="form-textarea" rows="8" placeholder='[
+  { "name": "文档标题", "content": "文档内容", "source": "来源", "tags": ["标签1", "标签2"] },
+  { "name": "第二篇", "content": "内容..." }
+]'></textarea>
+                        <div class="form-hint">
+                            支持导出的 JSON 格式（含 documents 数组）或直接数组格式
+                        </div>
+                    </div>
+
+                    <div v-if="importMode === 'text' && !importForm.fileName" class="form-group">
+                        <label class="form-label">文本内容</label>
+                        <textarea v-model="importForm.text" class="form-textarea" rows="8" placeholder="每行一篇文档，以空行分隔标题和内容&#10;&#10;第一篇文档标题&#10;第一篇文档内容，可以很长...&#10;&#10;第二篇文档标题&#10;第二篇文档内容..."></textarea>
+                        <div class="form-hint">
+                            格式：每篇文档以空行分隔，标题在第一行，内容在后续行
+                        </div>
+                    </div>
+
+                    <div v-if="importResult" class="form-group" style="padding: 12px; background: var(--bg-tertiary); border-radius: 8px;">
+                        <div style="font-weight: 600; margin-bottom: 8px;">导入结果</div>
+                        <div style="color: var(--success);">成功: {{ importResult.imported }}</div>
+                        <div v-if="importResult.failed > 0" style="color: var(--danger);">失败: {{ importResult.failed }}</div>
+                        <div v-if="importResult.errors && importResult.errors.length" style="margin-top: 8px; font-size: 12px; color: var(--text-secondary);">
+                            <div v-for="(err, i) in importResult.errors.slice(0, 5)" :key="i">{{ err.title }}: {{ err.error }}</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary" @click="showImportKnowledgeModal = false">关闭</button>
+                    <button class="btn btn-secondary" @click="testImport" :disabled="(!importForm.text && !importForm.fileName) || isLoading">
+                        <i class="fas fa-eye"></i> 预览
+                    </button>
+                    <button class="btn btn-primary" @click="importKnowledge" :disabled="(!importForm.text && !importForm.fileName) || isLoading">
+                        <span v-if="isLoading"><div class="spinner" style="display: inline-block; margin-right: 8px;"></div>导入中...</span>
+                        <span v-else><i class="fas fa-file-import"></i> 开始导入</span>
+                    </button>
+                </div>
+            </div>
+        </div>
     </div>
 
     <script>
@@ -11373,9 +11464,12 @@
                         description: ''
                     },
                     showImportKnowledgeModal: false,
+                    importMode: 'json',
+                    importResult: null,
                     importForm: {
                         text: '',
-                        file: null
+                        fileName: '',
+                        fileSize: ''
                     },
                     showKnowledgeDetailModal: false,
                     viewingKnowledge: null,
@@ -16886,16 +16980,157 @@ def main(params):
 
                     this.isLoading = true;
                     try {
+                        const res = await api.post('/api/knowledge/rebuild');
+                        await this.loadKnowledge();
+                        this.showToast(`批量索引完成: ${res.data.rebuilt_documents || 0} 个文档`, 'success');
+                    } catch (e) {
+                        // Fallback: 逐个索引
                         for (const doc of unindexed) {
                             await api.post(`/api/knowledge/${doc.id}/index`);
                         }
                         await this.loadKnowledge();
                         this.showToast(`已建立 ${unindexed.length} 个文档的索引`, 'success');
-                    } catch (e) {
-                        this.showToast('批量索引失败', 'error');
                     } finally {
                         this.isLoading = false;
                     }
+                },
+
+                async importKnowledge() {
+                    this.isLoading = true;
+                    this.importResult = null;
+                    try {
+                        let documents = [];
+                        if (this.importMode === 'json') {
+                            // 如果有文件内容但没有 text，尝试从文件读取
+                            let text = this.importForm.text;
+                            if (!text && this.importForm.fileName) {
+                                this.showToast('请等待文件读取完成', 'warning');
+                                this.isLoading = false;
+                                return;
+                            }
+                            const parsed = JSON.parse(text);
+                            // 导出格式: { version, exported_at, total, documents: [...] }
+                            // 直接数组格式: [...]
+                            // 单文档格式: { name, content, ... }
+                            if (parsed.documents && Array.isArray(parsed.documents)) {
+                                documents = parsed.documents;
+                            } else if (Array.isArray(parsed)) {
+                                documents = parsed;
+                            } else {
+                                documents = [parsed];
+                            }
+                        } else {
+                            // 文本模式：每篇文档以空行分隔
+                            const blocks = this.importForm.text.split(/\n\s*\n/);
+                            for (const block of blocks) {
+                                const lines = block.trim().split('\n');
+                                if (lines.length === 0) continue;
+                                const name = lines[0].trim();
+                                const content = lines.slice(1).join('\n').trim();
+                                if (name && content) {
+                                    documents.push({ name, content });
+                                }
+                            }
+                        }
+
+                        const res = await api.post('/api/knowledge/batch', {
+                            documents: documents.map(item => ({
+                                title: item.name || item.title,
+                                content: item.content,
+                                source: item.source || '',
+                                tags: item.tags || []
+                            }))
+                        });
+
+                        this.importResult = res.data;
+                        if (res.data.imported > 0) {
+                            this.showToast(`成功导入 ${res.data.imported} 篇文档`, 'success');
+                            await this.loadKnowledge();
+                            this.importForm.text = '';
+                            this.importForm.fileName = '';
+                            this.importForm.fileSize = '';
+                        }
+                        if (res.data.failed > 0) {
+                            this.showToast(`导入完成，但有 ${res.data.failed} 篇失败`, 'warning');
+                        }
+                    } catch (e) {
+                        if (e.response && e.response.data && e.response.data.error) {
+                            this.showToast('导入失败: ' + e.response.data.error, 'error');
+                        } else {
+                            this.showToast('导入失败: ' + (e.message || '未知错误'), 'error');
+                        }
+                    } finally {
+                        this.isLoading = false;
+                    }
+                },
+
+                testImport() {
+                    try {
+                        let docs = [];
+                        if (this.importMode === 'json') {
+                            if (!this.importForm.text && this.importForm.fileName) {
+                                this.showToast('请等待文件读取完成', 'warning');
+                                return;
+                            }
+                            const parsed = JSON.parse(this.importForm.text);
+                            if (parsed.documents && Array.isArray(parsed.documents)) {
+                                docs = parsed.documents;
+                            } else if (Array.isArray(parsed)) {
+                                docs = parsed;
+                            } else {
+                                docs = [parsed];
+                            }
+                        } else {
+                            const blocks = this.importForm.text.split(/\n\s*\n/);
+                            for (const block of blocks) {
+                                const lines = block.trim().split('\n');
+                                if (lines.length === 0) continue;
+                                docs.push({ name: lines[0].trim(), content: lines.slice(1).join('\n').trim() });
+                            }
+                        }
+                        const valid = docs.filter(d => d.name || d.title || d.content);
+                        this.importResult = { imported: valid.length, failed: docs.length - valid.length, errors: [] };
+                        this.showToast(`预览: 将导入 ${valid.length} 篇文档`, 'success');
+                    } catch (e) {
+                        this.showToast('预览失败: ' + e.message, 'error');
+                    }
+                },
+
+                handleImportFileSelect(event) {
+                    const file = event.target.files[0];
+                    if (!file) return;
+                    this.loadImportFile(file);
+                },
+
+                handleImportFileDrop(event) {
+                    const file = event.dataTransfer.files[0];
+                    if (!file) return;
+                    this.loadImportFile(file);
+                },
+
+                loadImportFile(file) {
+                    const reader = new FileReader();
+                    reader.onload = (e) => {
+                        this.importForm.text = e.target.result;
+                        this.importForm.fileName = file.name;
+                        this.importForm.fileSize = this.formatFileSize(file.size);
+                        // 自动切换到对应模式
+                        if (file.name.endsWith('.json')) {
+                            this.importMode = 'json';
+                        } else {
+                            this.importMode = 'text';
+                        }
+                    };
+                    reader.onerror = () => {
+                        this.showToast('文件读取失败', 'error');
+                    };
+                    reader.readAsText(file);
+                },
+
+                clearImportFile() {
+                    this.importForm.text = '';
+                    this.importForm.fileName = '';
+                    this.importForm.fileSize = '';
                 },
 
                 exportKnowledge(doc) {
@@ -16907,6 +17142,32 @@ def main(params):
                     a.click();
                     URL.revokeObjectURL(url);
                     this.showToast('文档已导出', 'success');
+                },
+
+                async exportAllKnowledge() {
+                    try {
+                        const res = await api.get('/api/knowledge/export');
+                        if (!res.data.success) {
+                            this.showToast('导出失败: ' + res.data.error, 'error');
+                            return;
+                        }
+                        const exportData = {
+                            version: res.data.version || '1.0',
+                            exported_at: res.data.exported_at,
+                            total: res.data.total,
+                            documents: res.data.documents
+                        };
+                        const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
+                        const url = URL.createObjectURL(blob);
+                        const a = document.createElement('a');
+                        a.href = url;
+                        a.download = `knowledge_backup_${new Date().toISOString().slice(0, 10)}.json`;
+                        a.click();
+                        URL.revokeObjectURL(url);
+                        this.showToast(`已导出 ${res.data.total} 篇文档`, 'success');
+                    } catch (e) {
+                        this.showToast('导出失败', 'error');
+                    }
                 },
 
                 async deleteKnowledge(doc) {
