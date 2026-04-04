@@ -4060,6 +4060,100 @@
             background: var(--bg-secondary);
         }
 
+        .pending-queue-panel {
+            margin-bottom: 12px;
+            padding: 10px 12px;
+            border: 1px solid var(--border-color);
+            border-radius: 14px;
+            background: linear-gradient(180deg, color-mix(in srgb, var(--bg-tertiary) 92%, transparent), color-mix(in srgb, var(--bg-secondary) 96%, transparent));
+        }
+
+        .pending-queue-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            margin-bottom: 8px;
+        }
+
+        .pending-queue-title {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+
+        .pending-queue-count {
+            font-size: 12px;
+            color: var(--text-secondary);
+        }
+
+        .pending-queue-list {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            max-height: 176px;
+            overflow-y: auto;
+        }
+
+        .pending-queue-item {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 12px;
+            padding: 10px 12px;
+            border: 1px solid color-mix(in srgb, var(--border-color) 84%, transparent);
+            border-radius: 12px;
+            background: color-mix(in srgb, var(--bg-primary) 68%, transparent);
+        }
+
+        .pending-queue-item-main {
+            min-width: 0;
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .pending-queue-item-text {
+            font-size: 13px;
+            color: var(--text-primary);
+            line-height: 1.45;
+            word-break: break-word;
+        }
+
+        .pending-queue-item-meta {
+            font-size: 12px;
+            color: var(--text-secondary);
+            display: inline-flex;
+            align-items: center;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+
+        .pending-queue-remove {
+            width: 30px;
+            height: 30px;
+            border: 1px solid var(--border-color);
+            border-radius: 10px;
+            background: var(--bg-tertiary);
+            color: var(--text-secondary);
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            flex-shrink: 0;
+        }
+
+        .pending-queue-remove:hover {
+            color: #fff;
+            background: rgba(239, 68, 68, 0.88);
+            border-color: rgba(239, 68, 68, 0.5);
+        }
+
         .chat-input-wrapper {
             display: flex;
             gap: 12px;
@@ -7289,6 +7383,32 @@
                             </div>
                             
                             <div class="chat-input-area">
+                                    <div v-if="getCurrentSessionPendingCount() > 0" class="pending-queue-panel">
+                                        <div class="pending-queue-header">
+                                            <div class="pending-queue-title">
+                                                <i class="fas fa-list-ol"></i>
+                                                <span>待发送消息</span>
+                                            </div>
+                                            <div class="pending-queue-count">共 {{ getCurrentSessionPendingCount() }} 条</div>
+                                        </div>
+                                        <div class="pending-queue-list">
+                                            <div v-for="item in getCurrentSessionPendingQueueItems()" :key="item.id" class="pending-queue-item">
+                                                <div class="pending-queue-item-main">
+                                                    <div class="pending-queue-item-text">
+                                                        {{ item.content_preview }}
+                                                    </div>
+                                                    <div class="pending-queue-item-meta">
+                                                        <span>排队 {{ item.index }}</span>
+                                                        <span v-if="item.file_count > 0">附件 {{ item.file_count }}</span>
+                                                        <span>{{ formatFullTime(item.created_at) }}</span>
+                                                    </div>
+                                                </div>
+                                                <button class="pending-queue-remove" @click="removePendingMessage(item.session_id, item.id)" title="移出队列">
+                                                    <i class="fas fa-times"></i>
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </div>
                                     <!-- 已上传的文件预览 -->
                                     <div v-if="uploadedFiles.length > 0" class="uploaded-files-preview">
                                         <div v-for="(file, index) in uploadedFiles" :key="index" class="uploaded-file-item">
@@ -7457,9 +7577,15 @@
                                                 <input type="file" ref="fileInput" @change="handleFileSelect" multiple accept="image/*,.pdf,.doc,.docx,.txt,.json,.xml" style="display: none;">
                                                 <input type="file" ref="workspaceFileInput" @change="handleWorkspaceFileUpload" multiple accept="*/*" style="display: none;">
                                             </div>
-                                            <button class="btn" :class="isLoading ? 'btn-danger' : 'btn-primary'" @click="isLoading ? stopGeneration() : sendMessage()" :disabled="!isLoading && (!inputMessage.trim() && uploadedFiles.length === 0)">
-                                                <span v-if="isLoading"><i class="fas fa-stop"></i></span>
-                                                <span v-else><div class="spinner" v-if="isLoading"></div><i v-else class="fas fa-paper-plane"></i></span>
+                                            <button
+                                                class="btn"
+                                                :class="isLoading && (!inputMessage.trim() && uploadedFiles.length === 0) ? 'btn-danger' : 'btn-primary'"
+                                                @click="isLoading && (!inputMessage.trim() && uploadedFiles.length === 0) ? stopGeneration() : sendMessage()"
+                                                :disabled="!isLoading && (!inputMessage.trim() && uploadedFiles.length === 0)"
+                                            >
+                                                <span v-if="isLoading && (!inputMessage.trim() && uploadedFiles.length === 0)"><i class="fas fa-stop"></i></span>
+                                                <span v-else-if="isLoading"><i class="fas fa-layer-group"></i></span>
+                                                <span v-else><i class="fas fa-paper-plane"></i></span>
                                             </button>
                                         </div>
                                     </div>
@@ -11339,6 +11465,8 @@
                     },
                     showThemePanel: false,
                     showQqScrollButton: false,
+                    pendingMessageQueues: {},
+                    isProcessingQueuedMessage: false,
                     
                     // 步骤详情模态框
                     showStepDetailModal: false,
@@ -13676,48 +13804,123 @@ def main(params):
                         this.isLoading = false;
                     }
                 },
-                
-                async sendMessage() {
-                    if (!this.currentSession) return;
-                    
-                    // 如果 AI 正在生成，先停止生成
-                    if (this.isLoading) {
-                        await this.stopGeneration();
-                        // 等待一小段时间确保停止完成
-                        await new Promise(resolve => setTimeout(resolve, 100));
+
+                getSessionPendingQueue(sessionId) {
+                    if (!sessionId) return [];
+                    if (!this.pendingMessageQueues[sessionId]) {
+                        this.pendingMessageQueues = {
+                            ...this.pendingMessageQueues,
+                            [sessionId]: []
+                        };
                     }
-                    
-                    const content = this.inputMessage.trim();
-                    this.inputMessage = '';
-                    
-                    // 处理文件上传
-                    const files = this.uploadedFiles;
-                    this.uploadedFiles = [];
-                    
-                    // 检查是否有内容或文件
+                    return this.pendingMessageQueues[sessionId];
+                },
+
+                getCurrentSessionPendingCount() {
+                    const sessionId = this.currentSession?.id;
+                    if (!sessionId) return 0;
+                    return (this.pendingMessageQueues[sessionId] || []).length;
+                },
+
+                getCurrentSessionPendingQueueItems() {
+                    const sessionId = this.currentSession?.id;
+                    if (!sessionId) return [];
+                    return (this.pendingMessageQueues[sessionId] || []).map((item, index) => ({
+                        id: item.id,
+                        session_id: sessionId,
+                        index: index + 1,
+                        created_at: item.createdAt,
+                        file_count: (item.files || []).length,
+                        content_preview: item.content
+                            ? item.content
+                            : ((item.files || []).length > 0 ? '仅发送附件' : '空消息')
+                    }));
+                },
+
+                enqueuePendingMessage(sessionId, payload) {
+                    const queue = [...this.getSessionPendingQueue(sessionId), payload];
+                    this.pendingMessageQueues = {
+                        ...this.pendingMessageQueues,
+                        [sessionId]: queue
+                    };
+                    return queue.length;
+                },
+
+                dequeuePendingMessage(sessionId) {
+                    const queue = [...(this.pendingMessageQueues[sessionId] || [])];
+                    if (!queue.length) return null;
+                    const nextPayload = queue.shift();
+                    this.pendingMessageQueues = {
+                        ...this.pendingMessageQueues,
+                        [sessionId]: queue
+                    };
+                    return nextPayload;
+                },
+
+                async processPendingQueue(sessionId) {
+                    if (!sessionId || this.isLoading || this.isProcessingQueuedMessage) return;
+                    const queue = this.pendingMessageQueues[sessionId] || [];
+                    if (!queue.length) return;
+
+                    const nextPayload = this.dequeuePendingMessage(sessionId);
+                    if (!nextPayload) return;
+
+                    this.isProcessingQueuedMessage = true;
+                    try {
+                        await this.sendPreparedMessage(nextPayload);
+                    } finally {
+                        this.isProcessingQueuedMessage = false;
+                    }
+                },
+
+                buildPendingMessagePayload(content, files, sessionId) {
+                    const clonedFiles = (files || []).map(file => ({ ...file }));
+                    return {
+                        id: 'queued_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7),
+                        sessionId,
+                        content,
+                        files: clonedFiles,
+                        createdAt: new Date().toISOString()
+                    };
+                },
+
+                removePendingMessage(sessionId, queuedId) {
+                    const queue = [...(this.pendingMessageQueues[sessionId] || [])];
+                    const nextQueue = queue.filter(item => item.id !== queuedId);
+                    this.pendingMessageQueues = {
+                        ...this.pendingMessageQueues,
+                        [sessionId]: nextQueue
+                    };
+                    this.showToast('已移出待发送队列', 'success');
+                },
+
+                async sendPreparedMessage(payload) {
+                    const sessionId = payload.sessionId || this.currentSession?.id;
+                    if (!sessionId) return;
+
+                    const content = (payload.content || '').trim();
+                    const files = payload.files || [];
+
                     if (!content && files.length === 0) {
                         this.showToast('请输入消息或选择文件', 'warning');
                         return;
                     }
-                    
-                    // 生成本地临时ID
+
                     const tempId = 'local_' + Date.now();
-                    
-                    // 先上传文件到服务器（如果有文件）
+                    const isCurrentSession = this.currentSession?.id === sessionId;
+
                     this.isLoading = true;
-                    this.loadingSessionId = this.currentSession.id;
+                    this.loadingSessionId = sessionId;
                     let uploadedFilesInfo = [];
-                    
+
                     if (files.length > 0) {
                         try {
                             for (const file of files) {
                                 let uploadFile;
-                                
-                                // 优先使用原始 File 对象（更高效）
+
                                 if (file._file) {
                                     uploadFile = file._file;
                                 } else if (file.data) {
-                                    // 如果没有 _file，从 base64 转换
                                     const base64Data = file.data.split(',')[1];
                                     const byteCharacters = atob(base64Data);
                                     const byteNumbers = new Array(byteCharacters.length);
@@ -13730,46 +13933,45 @@ def main(params):
                                     this.showToast('文件数据丢失，请重新选择', 'error');
                                     continue;
                                 }
-                                
-                                // 创建 FormData
+
                                 const formData = new FormData();
                                 formData.append('file', uploadFile, file.name);
-                                formData.append('session_id', this.currentSession?.id || '');
-                                
-                                // 上传文件
+                                formData.append('session_id', sessionId);
+
                                 const res = await api.post('/api/upload', formData, {
                                     headers: { 'Content-Type': 'multipart/form-data' }
                                 });
-                                
+
                                 if (!res.data.success) {
                                     throw new Error(res.data.error || '上传失败');
                                 }
-                                
+
                                 uploadedFilesInfo.push({
                                     name: res.data.filename,
                                     type: file.type,
                                     size: res.data.size,
                                     path: res.data.path,
-                                    url: res.data.url || res.data.path,  // 用于预览
-                                    content: res.data.content,  // 文件文本内容
-                                    preview: file.preview || res.data.path  // 使用服务器路径作为预览
+                                    url: res.data.url || res.data.path,
+                                    content: res.data.content,
+                                    preview: file.preview || res.data.path
                                 });
                             }
                         } catch (e) {
                             console.error('文件上传失败:', e);
                             this.showToast('文件上传失败: ' + e.message, 'error');
                             this.isLoading = false;
+                            this.loadingSessionId = null;
                             return;
                         }
                     }
-                    
-                    // 本地显示用户消息
+
                     const userMessage = {
                         id: tempId,
                         role: 'user',
                         content: content,
                         timestamp: new Date().toISOString(),
                         source: 'web',
+                        session_id: sessionId,
                         attachments: [...uploadedFilesInfo.map(f => ({
                             name: f.name,
                             type: f.type,
@@ -13780,29 +13982,59 @@ def main(params):
                             content: f.content
                         }))]
                     };
-                    
-                    this.currentMessages.push(userMessage);
-                    this.$nextTick(() => this.scrollToBottom());
-                    
-                    // 设置加载动画
+
+                    if (isCurrentSession) {
+                        this.currentMessages.push(userMessage);
+                        this.$nextTick(() => this.scrollToBottom());
+                    }
+
                     this.isTyping = true;
                     this.isLoading = true;
-                    
+
                     try {
-                        // 通过 WebSocket 发送消息
                         socket.emit('send_message', {
-                            session_id: this.currentSession.id,
+                            session_id: sessionId,
                             content: userMessage.content,
                             sender: this.username,
                             attachments: uploadedFilesInfo,
                             tempId: tempId
                         });
-                        
                     } catch (e) {
                         this.isTyping = false;
+                        this.isLoading = false;
+                        this.loadingSessionId = null;
                         this.showToast('发送失败', 'error');
                         console.error('发送消息失败:', e);
                     }
+                },
+                
+                async sendMessage() {
+                    if (!this.currentSession) return;
+
+                    const content = this.inputMessage.trim();
+                    const files = this.uploadedFiles;
+
+                    if (!content && files.length === 0) {
+                        this.showToast('请输入消息或选择文件', 'warning');
+                        return;
+                    }
+
+                    const payload = this.buildPendingMessagePayload(
+                        content,
+                        files,
+                        this.currentSession.id
+                    );
+
+                    this.inputMessage = '';
+                    this.uploadedFiles = [];
+
+                    if (this.isLoading && this.loadingSessionId === this.currentSession.id) {
+                        const queueLength = this.enqueuePendingMessage(this.currentSession.id, payload);
+                        this.showToast(`已加入待发送队列（第 ${queueLength} 条）`, 'info');
+                        return;
+                    }
+
+                    await this.sendPreparedMessage(payload);
                 },
                 
                 handleFileSelect(event) {
@@ -14026,6 +14258,7 @@ def main(params):
                 
                 async stopGeneration() {
                     if (!this.isLoading) return;
+                    const stoppedSessionId = this.currentSession?.id || this.loadingSessionId;
 
                     // 立即更新 UI 状态，给用户即时反馈
                     this.isLoading = false;
@@ -14037,6 +14270,7 @@ def main(params):
                             session_id: this.currentSession?.id
                         });
                         this.showToast('已停止生成', 'success');
+                        this.processPendingQueue(stoppedSessionId);
                     } catch (e) {
                         console.error('停止生成失败:', e);
                         this.showToast('停止失败: ' + (e.response?.data?.error || e.message), 'error');
@@ -17328,13 +17562,16 @@ def main(params):
                     
                     socket.on('ai_stream_end', (data) => {
                         console.log('[Stream] AI stream end:', data);
+                        const finishedSessionId = data?.session_id || this.loadingSessionId || this.currentSession?.id;
                         this.isLoading = false;
                         this.loadingSessionId = null;
+                        this.processPendingQueue(finishedSessionId);
                     });
                     
                     socket.on('ai_response', (data) => {
                         console.log('Received ai_response:', data);
                         this.isTyping = false;
+                        const finishedSessionId = data?.session_id || this.loadingSessionId || this.currentSession?.id;
                         this.isLoading = false;
                         this.loadingSessionId = null;
                         if (this.currentSession && data.session_id === this.currentSession.id) {
@@ -17355,14 +17592,17 @@ def main(params):
                         } else {
                             console.log('AI response ignored: session mismatch', this.currentSession?.id, data.session_id);
                         }
+                        this.processPendingQueue(finishedSessionId);
                     });
                     
                     socket.on('error', (err) => {
                         console.error('Socket error:', err);
                         this.isTyping = false;
+                        const failedSessionId = err?.session_id || this.loadingSessionId || this.currentSession?.id;
                         this.isLoading = false;
                         this.loadingSessionId = null;
                         this.showToast(err.message || '发生错误', 'error');
+                        this.processPendingQueue(failedSessionId);
                     });
                     
                     // 监听会话重命名事件
