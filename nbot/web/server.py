@@ -49,6 +49,7 @@ from nbot.web.routes import (
     register_session_routes,
     register_skill_routes,
     register_skills_storage_routes,
+    register_task_center_routes,
     register_tool_routes,
     register_workflow_routes,
     register_workspace_private_routes,
@@ -258,7 +259,7 @@ except ImportError:
 
 # 导入统一消息模块
 try:
-    from nbot.core import AgentService, WebSessionStore, message_manager, create_message
+    from nbot.core import AgentService, ChatResponse, WebSessionStore, message_manager, create_message
     from nbot.channels import WebChannelAdapter
 
     MESSAGE_MODULE_AVAILABLE = True
@@ -441,6 +442,8 @@ class WebChatServer:
 
         # Heartbeat 调度器
         self.heartbeat_job = None
+        self.scheduled_tasks: List[Dict[str, Any]] = []
+        self.scheduled_task_jobs: Dict[str, Any] = {}
 
         # 系统启动时间
         self.start_time = time.time()
@@ -515,6 +518,7 @@ class WebChatServer:
                 elif not self.ai_client:
                     self._initialize_ai_client()
                 self._init_workflow_scheduler()
+                self._init_custom_task_scheduler()
                 self.startup_ready = True
                 _log.info("Web server background initialization completed")
             except Exception as e:
@@ -1120,17 +1124,21 @@ class WebChatServer:
                     pass
 
                 # 添加新任务
-                self.scheduler.add_job(
+                job = self.scheduler.add_job(
                     func=self._execute_workflow,
                     trigger=trigger,
                     id=job_id,
                     args=[workflow_id],
                     replace_existing=True,
                 )
+                workflow["next_run"] = (
+                    job.next_run_time.isoformat() if job.next_run_time else None
+                )
                 _log.info(
                     f"Scheduled workflow '{workflow['name']}' with cron: {cron_expr}"
                 )
         except Exception as e:
+            workflow["next_run"] = None
             _log.error(f"Failed to schedule workflow {workflow_id}: {e}")
 
     def _unschedule_workflow(self, workflow_id: str):
@@ -1140,6 +1148,290 @@ class WebChatServer:
                 self.scheduler.remove_job(f"workflow_{workflow_id}")
             except:
                 pass
+        for workflow in self.workflows:
+            if workflow.get("id") == workflow_id:
+                workflow["next_run"] = None
+                break
+
+    def _init_custom_task_scheduler(self):
+        if not self.scheduler:
+            _log.warning("APScheduler not available, custom task scheduling disabled")
+            return
+
+        for task in self.scheduled_tasks:
+            if task.get("enabled"):
+                self._schedule_custom_task(task)
+
+    def _build_custom_task_trigger(self, task: Dict[str, Any]):
+        config = task.get("config") or {}
+        trigger_type = task.get("trigger", "interval")
+
+        if trigger_type == "interval":
+            return {
+                "trigger": "interval",
+                "minutes": max(1, int(config.get("interval_minutes", 60) or 60)),
+            }
+
+        if trigger_type == "date":
+            run_at = config.get("run_at")
+            if not run_at:
+                raise ValueError("run_at is required for date tasks")
+            return {"trigger": "date", "run_date": datetime.fromisoformat(run_at)}
+
+        cron_expr = (config.get("cron") or "0 8 * * *").strip()
+        parts = cron_expr.split()
+        if len(parts) != 5:
+            raise ValueError("cron expression must contain 5 parts")
+
+        minute, hour, day, month, day_of_week = parts
+        return {
+            "trigger": CronTrigger(
+                minute=minute,
+                hour=hour,
+                day=day,
+                month=month,
+                day_of_week=day_of_week,
+            )
+        }
+
+    def _schedule_custom_task(self, task: Dict[str, Any]):
+        if not self.scheduler:
+            return
+
+        task_id = task.get("id")
+        if not task_id:
+            return
+
+        self._unschedule_custom_task(task_id)
+
+        try:
+            trigger_kwargs = self._build_custom_task_trigger(task)
+            job = self.scheduler.add_job(
+                func=self._execute_custom_task,
+                id=f"custom_task_{task_id}",
+                args=[task_id],
+                replace_existing=True,
+                **trigger_kwargs,
+            )
+            self.scheduled_task_jobs[task_id] = job
+            task["next_run"] = (
+                job.next_run_time.isoformat() if job.next_run_time else None
+            )
+        except Exception as e:
+            task["next_run"] = None
+            _log.error(f"Failed to schedule custom task {task_id}: {e}")
+
+    def _unschedule_custom_task(self, task_id: str):
+        if not self.scheduler:
+            return
+
+        try:
+            self.scheduler.remove_job(f"custom_task_{task_id}")
+        except Exception:
+            pass
+
+        self.scheduled_task_jobs.pop(task_id, None)
+        task = self._get_custom_task(task_id)
+        if task:
+            task["next_run"] = None
+
+    def _get_custom_task(self, task_id: str):
+        for task in self.scheduled_tasks:
+            if task.get("id") == task_id:
+                return task
+        return None
+
+    def _execute_custom_task(self, task_id: str):
+        task = self._get_custom_task(task_id)
+        if not task or not task.get("enabled"):
+            return
+
+        prompt = (task.get("prompt") or "").strip()
+        session_id = task.get("target_session_id")
+        if not prompt or not session_id:
+            _log.warning(f"Skip custom task {task_id}: missing prompt or target session")
+            return
+
+        session = self.session_store.get_session(session_id)
+        if not session:
+            _log.warning(
+                f"Skip custom task {task_id}: target session {session_id} not found"
+            )
+            return
+
+        session_type = session.get("type", "web")
+        if session_type in ["qq_private", "qq_group"]:
+            try:
+                from nbot.services.chat_service import chat as run_qq_chat
+
+                qq_id = session.get("qq_id")
+                response_text = run_qq_chat(
+                    prompt,
+                    user_id=qq_id if session_type == "qq_private" else None,
+                    group_id=qq_id if session_type == "qq_group" else None,
+                    group_user_id=None,
+                    image=False,
+                    url=None,
+                    video=None,
+                )
+
+                if response_text and self.qq_bot and qq_id:
+                    def send_qq_task_message():
+                        try:
+                            import asyncio
+
+                            async def _send():
+                                if session_type == "qq_group":
+                                    await self.qq_bot.api.post_group_msg(group_id=qq_id, text=response_text)
+                                else:
+                                    await self.qq_bot.api.post_private_msg(user_id=qq_id, text=response_text)
+
+                            loop = asyncio.new_event_loop()
+                            asyncio.set_event_loop(loop)
+                            loop.run_until_complete(_send())
+                            loop.close()
+                        except Exception as send_error:
+                            _log.error(f"Failed to send scheduled QQ task message: {send_error}", exc_info=True)
+
+                    threading.Thread(target=send_qq_task_message, daemon=True).start()
+
+                task["last_run"] = datetime.now().isoformat()
+                job = self.scheduled_task_jobs.get(task_id)
+                task["next_run"] = (
+                    job.next_run_time.isoformat() if job and job.next_run_time else None
+                )
+
+                if task.get("trigger") == "date":
+                    task["enabled"] = False
+                    self._unschedule_custom_task(task_id)
+
+                self._save_data("scheduled_tasks")
+                return
+            except Exception as e:
+                _log.error(f"Failed to execute QQ custom task {task_id}: {e}", exc_info=True)
+                return
+
+        adapter = _resolve_web_adapter(self.web_channel_adapter)
+        user_message = adapter.build_message(
+            role="user",
+            content=prompt,
+            sender="scheduler",
+            conversation_id=session_id,
+            source="task_center",
+            metadata={
+                "scheduled_task_id": task_id,
+                "scheduled_task_name": task.get("name", "定时任务"),
+            },
+        )
+        self.session_store.append_message(session_id, user_message)
+        self.socketio.emit("new_message", user_message, room=session_id)
+
+        try:
+            self._trigger_ai_response(
+                session_id=session_id,
+                user_content=prompt,
+                sender="scheduler",
+            )
+        except Exception as e:
+            _log.error(f"Failed to execute custom task {task_id}: {e}", exc_info=True)
+
+        task["last_run"] = datetime.now().isoformat()
+        job = self.scheduled_task_jobs.get(task_id)
+        task["next_run"] = (
+            job.next_run_time.isoformat() if job and job.next_run_time else None
+        )
+
+        if task.get("trigger") == "date":
+            task["enabled"] = False
+            self._unschedule_custom_task(task_id)
+
+        self._save_data("scheduled_tasks")
+
+    def get_task_center_items(self):
+        items = [
+            {
+                "id": "heartbeat",
+                "kind": "heartbeat",
+                "name": "Heartbeat 定时任务",
+                "description": "系统级定时提示和心跳执行",
+                "enabled": self.heartbeat_config.get("enabled", False),
+                "trigger": "interval",
+                "trigger_label": f"每 {self.heartbeat_config.get('interval_minutes', 60)} 分钟",
+                "target_session_id": self.heartbeat_config.get("target_session_id", ""),
+                "last_run": self.heartbeat_config.get("last_run"),
+                "next_run": self.heartbeat_config.get("next_run"),
+                "editable": True,
+                "deletable": False,
+            }
+        ]
+
+        for workflow in self.workflows:
+            config = workflow.get("config") or {}
+            trigger = workflow.get("trigger", "manual")
+            trigger_label = "手动触发"
+            if trigger == "cron":
+                trigger_label = config.get("cron", "0 8 * * *")
+            elif trigger == "message":
+                trigger_label = "消息触发"
+            next_run = workflow.get("next_run")
+            if self.scheduler and trigger == "cron":
+                try:
+                    job = self.scheduler.get_job(f"workflow_{workflow.get('id')}")
+                    next_run = (
+                        job.next_run_time.isoformat()
+                        if job and job.next_run_time
+                        else next_run
+                    )
+                except Exception:
+                    pass
+
+            items.append(
+                {
+                    "id": workflow.get("id"),
+                    "kind": "workflow",
+                    "name": workflow.get("name", "工作流"),
+                    "description": workflow.get("description", ""),
+                    "enabled": workflow.get("enabled", True),
+                    "trigger": trigger,
+                    "trigger_label": trigger_label,
+                    "target_session_id": workflow.get("session_id", ""),
+                    "last_run": workflow.get("last_run"),
+                    "next_run": next_run,
+                    "editable": True,
+                    "deletable": False,
+                }
+            )
+
+        for task in self.scheduled_tasks:
+            config = task.get("config") or {}
+            trigger = task.get("trigger", "interval")
+            if trigger == "interval":
+                trigger_label = f"每 {config.get('interval_minutes', 60)} 分钟"
+            elif trigger == "date":
+                trigger_label = config.get("run_at") or "单次执行"
+            else:
+                trigger_label = config.get("cron") or "0 8 * * *"
+
+            items.append(
+                {
+                    "id": task.get("id"),
+                    "kind": "custom",
+                    "name": task.get("name", "定时任务"),
+                    "description": task.get("description", ""),
+                    "enabled": task.get("enabled", True),
+                    "trigger": trigger,
+                    "trigger_label": trigger_label,
+                    "target_session_id": task.get("target_session_id", ""),
+                    "last_run": task.get("last_run"),
+                    "next_run": task.get("next_run"),
+                    "editable": True,
+                    "deletable": True,
+                    "prompt": task.get("prompt", ""),
+                    "config": config,
+                }
+            )
+
+        return items
 
     def _execute_workflow(self, workflow_id: str, trigger_data: Dict = None):
         """执行工作流 - 支持多轮工具调用"""
@@ -1334,6 +1626,18 @@ class WebChatServer:
                         "timestamp": datetime.now().isoformat(),
                     },
                 )
+                workflow["last_run"] = datetime.now().isoformat()
+                if self.scheduler and workflow.get("trigger") == "cron":
+                    try:
+                        job = self.scheduler.get_job(f"workflow_{workflow_id}")
+                        workflow["next_run"] = (
+                            job.next_run_time.isoformat()
+                            if job and job.next_run_time
+                            else None
+                        )
+                    except Exception:
+                        workflow["next_run"] = None
+                self._save_data("workflows")
 
             except Exception as e:
                 _log.error(f"Workflow execution error: {e}", exc_info=True)
@@ -1568,6 +1872,7 @@ class WebChatServer:
         register_qq_overview_routes(self.app, self)
         register_session_routes(self.app, self)
         register_skill_routes(self.app, self)
+        register_task_center_routes(self.app, self)
         register_tool_routes(self.app, self)
         register_workflow_routes(self.app, self)
         register_workspace_private_routes(self.app, self)
@@ -1796,15 +2101,56 @@ class WebChatServer:
         _log.info(f"Executing heartbeat with content from {content_file}")
 
         # 追加到现有会话或创建新会话
-        is_appended_session = bool(
-            target_session_id and self.session_store.get_session(target_session_id)
-        )
+        context_target = None
+        session = None
+        session_id = None
+
+        if target_session_id and self.session_store.get_session(target_session_id):
+            session_id = target_session_id
+            session = self.session_store.get_session(session_id)
+            context_target = f"web:{target_session_id}"
+        else:
+            for target in targets:
+                if not isinstance(target, str):
+                    continue
+                if target.startswith("web:"):
+                    candidate_session_id = target.split(":", 1)[1]
+                    candidate_session = self.session_store.get_session(candidate_session_id)
+                    if candidate_session:
+                        session_id = candidate_session_id
+                        session = candidate_session
+                        context_target = target
+                        break
+                elif target.startswith("qq_private:") or target.startswith("qq_user:"):
+                    qq_user_id = target.split(":", 1)[1]
+                    candidate_session_id = self.sync_qq_messages(
+                        user_id=qq_user_id, create_if_not_exists=True
+                    )
+                    candidate_session = self.session_store.get_session(candidate_session_id) if candidate_session_id else None
+                    if candidate_session:
+                        session_id = candidate_session_id
+                        session = candidate_session
+                        context_target = f"qq_private:{qq_user_id}"
+                        break
+                elif target.startswith("qq_group:"):
+                    qq_group_id = target.split(":", 1)[1]
+                    candidate_session_id = self.sync_qq_messages(
+                        user_id=None, group_id=qq_group_id, create_if_not_exists=True
+                    )
+                    candidate_session = self.session_store.get_session(candidate_session_id) if candidate_session_id else None
+                    if candidate_session:
+                        session_id = candidate_session_id
+                        session = candidate_session
+                        context_target = f"qq_group:{qq_group_id}"
+                        break
+
+        is_appended_session = bool(session_id and session)
         heartbeat_adapter = _resolve_web_adapter(self.web_channel_adapter)
 
         if is_appended_session:
             # 追加到现有会话
-            session_id = target_session_id
-            session = self.session_store.get_session(session_id)
+            session_id = session_id
+            session = session
 
             # 构建带标记的用户消息
             hb_user_message = {
@@ -1848,18 +2194,32 @@ class WebChatServer:
 
         # 调用 AI 处理
         try:
-            from nbot.services.chat_service import chat as do_chat
+            heartbeat_session = self.session_store.get_session(session_id) or session or {}
+            heartbeat_messages = []
+            for msg in heartbeat_session.get("messages", [])[-12:]:
+                role = msg.get("role")
+                if role in ["system", "user", "assistant"]:
+                    heartbeat_messages.append(
+                        {
+                            "role": role,
+                            "content": msg.get("content", ""),
+                        }
+                    )
+
+            if not heartbeat_messages:
+                heartbeat_messages = [
+                    {
+                        "role": "system",
+                        "content": heartbeat_session.get(
+                            "system_prompt",
+                            "你是一个智能助手，请根据任务描述执行相关操作。",
+                        ),
+                    },
+                    {"role": "user", "content": content},
+                ]
 
             # chat 函数是同步的，直接调用
-            response_text = do_chat(
-                content,
-                user_id="heartbeat",
-                group_id=None,
-                group_user_id=None,
-                image=False,
-                url=None,
-                video=None,
-            )
+            response_text = self._get_ai_response(heartbeat_messages)
 
             if response_text:
                 _log.info(f"Heartbeat AI response: {response_text[:200]}...")
@@ -1882,7 +2242,19 @@ class WebChatServer:
                 self.session_store.append_message(session_id, hb_assistant_message)
 
                 # 发送响应到目标（仅发送给配置的 targets）
+                append_target_key = (
+                    context_target
+                    if is_appended_session
+                    and isinstance(context_target, str)
+                    and context_target.startswith("web:")
+                    else None
+                )
                 for target in targets:
+                    if append_target_key and target == append_target_key:
+                        _log.info(
+                            f"Skip duplicated heartbeat target {target} because it is already appended to session {target_session_id}"
+                        )
+                        continue
                     try:
                         await self._send_heartbeat_to_target(target, response_text)
                     except Exception as send_error:
@@ -1905,6 +2277,26 @@ class WebChatServer:
             _log.info(f"Heartbeat: 已通知前端刷新会话 {session_id}")
 
         # 更新最后运行时间
+        if (not is_appended_session) and self.socketio:
+            heartbeat_session = self.session_store.get_session(session_id) or {}
+            self.socketio.emit(
+                "session_updated",
+                {
+                    "session_id": session_id,
+                    "action": "heartbeat_created",
+                    "session": {
+                        "id": session_id,
+                        "name": heartbeat_session.get("name", f"Heartbeat {session_id[-8:]}"),
+                        "type": heartbeat_session.get("type", "heartbeat"),
+                        "user_id": heartbeat_session.get("user_id"),
+                        "created_at": heartbeat_session.get("created_at"),
+                        "message_count": len(heartbeat_session.get("messages", [])),
+                        "system_prompt": heartbeat_session.get("system_prompt", ""),
+                    },
+                },
+            )
+            _log.info(f"Heartbeat: 宸查€氱煡鍓嶇鏂颁細璇?{session_id}")
+
         self.heartbeat_config["last_run"] = datetime.now().isoformat()
         self._save_data("heartbeat")
 
@@ -1998,13 +2390,13 @@ class WebChatServer:
 
         if existing_session_id:
             session_id = existing_session_id
-        elif create_if_not_exists and not group_id:
+        elif create_if_not_exists:
             # 私聊消息：创建新会话
             session_id = str(uuid.uuid4())
             session = {
                 "id": session_id,
                 "name": f"私聊 {target_id}",
-                "type": "qq_private",
+                "type": session_type,
                 "qq_id": target_id,
                 "created_at": datetime.now().isoformat(),
                 "messages": [],

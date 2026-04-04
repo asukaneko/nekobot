@@ -7696,19 +7696,9 @@
                                         <div class="form-hint">任务内容保存在 resources 目录下的 md 文件中</div>
                                     </div>
                                     <div class="form-group">
-                                        <label class="form-label">追加到会话</label>
-                                        <select v-model="heartbeatConfig.target_session_id" class="form-select" @change="saveHeartbeatConfig">
-                                            <option value="">不追加（创建新会话）</option>
-                                            <option v-for="session in sessions.filter(s => s.type === 'web')" :key="session.id" :value="session.id">
-                                                {{ session.name || '未命名会话' }}
-                                            </option>
-                                        </select>
-                                        <div class="form-hint">选择现有 Web 会话，Heartbeat 将在该会话末尾追加内容并调用 AI；不选择则创建新会话</div>
-                                    </div>
-                                    <div class="form-group">
                                         <label class="form-label">发送目标</label>
                                         <div class="target-selector">
-                                            <div v-for="group in availableTargets" :key="group.title" class="target-group">
+                                            <div v-for="group in heartbeatSelectableTargets" :key="group.title" class="target-group">
                                                 <div class="target-group-header">
                                                     <i :class="group.icon"></i>
                                                     <span>{{ group.title }}</span>
@@ -7718,9 +7708,8 @@
                                                     <div v-for="target in group.targets" :key="target.id" class="target-item" :class="{ active: heartbeatConfig.targets.includes(target.id) }">
                                                         <input 
                                                             type="checkbox" 
-                                                            :value="target.id" 
-                                                            v-model="heartbeatConfig.targets"
-                                                            @change="saveHeartbeatConfig"
+                                                            :checked="heartbeatConfig.targets.includes(target.id)"
+                                                            @change="toggleHeartbeatTarget(target.id)"
                                                         >
                                                         <i :class="target.icon"></i>
                                                         <span>{{ target.name }}</span>
@@ -7728,7 +7717,7 @@
                                                 </div>
                                             </div>
                                         </div>
-                                        <div class="form-hint">AI 响应将发送到勾选的目标</div>
+                                        <div class="form-hint">只保留一套目标配置：选中的 Web 会话会作为执行上下文并显示回复，QQ 私聊和群聊会收到结果消息</div>
                                     </div>
                                     <div class="heartbeat-status">
                                         <div class="status-item">
@@ -7764,6 +7753,81 @@
                                         rows="15"
                                         placeholder="输入任务描述，例如：&#10;请总结今天的群聊热点话题，并分享一个有趣的发现。&#10;&#10;要求：&#10;1. 简洁明了&#10;2. 重点突出"
                                     ></textarea>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Task Center -->
+                    <div v-if="currentPage === 'task-center'" class="fade-in">
+                        <div class="card">
+                            <div class="card-header">
+                                <span class="card-title">任务中心</span>
+                                <button class="btn btn-primary" @click="openTaskCenterModal()" :disabled="isLoading">
+                                    <i class="fas fa-plus"></i> 新建任务
+                                </button>
+                            </div>
+                            <div class="card-body">
+                                <div v-if="taskCenterItems.length === 0" class="empty-state">
+                                    <div class="empty-state-icon">⏰</div>
+                                    <div class="empty-state-title">暂无任务</div>
+                                    <div class="empty-state-subtitle">统一查看 Heartbeat、工作流和自定义定时任务。</div>
+                                </div>
+                                <div v-else style="display: flex; flex-direction: column; gap: 18px;">
+                                    <div v-for="group in taskCenterGroups" :key="group.kind">
+                                        <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 12px;">
+                                            <i :class="getTaskCenterIcon(group.kind)" style="color: var(--accent-primary);"></i>
+                                            <div style="font-weight: 700;">{{ group.label }}</div>
+                                            <span class="badge badge-secondary">{{ group.items.length }}</span>
+                                        </div>
+                                        <div class="grid-3">
+                                            <div
+                                                v-for="item in group.items"
+                                                :key="`${item.kind}-${item.id}`"
+                                                class="card"
+                                                :style="{ borderLeft: item.enabled ? '4px solid var(--success)' : '4px solid var(--warning)' }"
+                                            >
+                                                <div class="card-header" style="padding: 12px 16px;">
+                                                    <div style="display: flex; align-items: center; gap: 10px; min-width: 0;">
+                                                        <i :class="getTaskCenterIcon(item.kind)" style="color: var(--accent-primary);"></i>
+                                                        <div style="min-width: 0;">
+                                                            <div style="font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{{ item.name }}</div>
+                                                            <div style="font-size: 12px; color: var(--text-muted);">{{ getTaskCenterKindLabel(item.kind) }}</div>
+                                                        </div>
+                                                    </div>
+                                                    <span class="badge" :class="item.enabled ? 'badge-success' : 'badge-warning'">
+                                                        {{ item.enabled ? '启用' : '禁用' }}
+                                                    </span>
+                                                </div>
+                                                <div class="card-body" style="padding: 16px;">
+                                                    <p style="font-size: 13px; color: var(--text-secondary); margin-bottom: 12px; min-height: 40px;">
+                                                        {{ item.description || '暂无描述' }}
+                                                    </p>
+                                                    <div style="display: flex; flex-direction: column; gap: 8px; margin-bottom: 14px; font-size: 12px; color: var(--text-secondary);">
+                                                        <div><i class="fas fa-clock"></i> {{ item.trigger_label || getTaskCenterTriggerLabel(item) }}</div>
+                                                        <div><i class="fas fa-history"></i> 上次执行：{{ item.last_run ? formatFullTime(item.last_run) : '从未执行' }}</div>
+                                                        <div><i class="fas fa-forward"></i> 下次执行：{{ item.next_run ? formatFullTime(item.next_run) : '待触发 / 未调度' }}</div>
+                                                        <div v-if="item.target_session_id"><i class="fas fa-comments"></i> 目标会话：{{ getSessionDisplayName(item.target_session_id) }}</div>
+                                                    </div>
+                                                    <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                                                        <button class="btn btn-secondary" style="flex: 1; padding: 6px; font-size: 12px;" @click="toggleTaskCenterItem(item)" :disabled="isLoading">
+                                                            <i :class="item.enabled ? 'fas fa-pause' : 'fas fa-play'"></i>
+                                                            {{ item.enabled ? '停用' : '启用' }}
+                                                        </button>
+                                                        <button class="btn btn-primary" style="flex: 1; padding: 6px; font-size: 12px;" @click="runTaskCenterItem(item)" :disabled="isLoading">
+                                                            <i class="fas fa-bolt"></i> 执行
+                                                        </button>
+                                                        <button v-if="item.editable" class="btn btn-secondary" style="flex: 1; padding: 6px; font-size: 12px;" @click="openTaskCenterEditor(item)" :disabled="isLoading">
+                                                            <i class="fas fa-edit"></i> 编辑
+                                                        </button>
+                                                        <button v-if="item.deletable" class="btn btn-danger" style="padding: 6px 10px; font-size: 12px;" @click="deleteTaskCenterItem(item)" :disabled="isLoading">
+                                                            <i class="fas fa-trash"></i>
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -10351,6 +10415,73 @@
             </div>
         </div>
 
+        <!-- Task Center Modal -->
+        <div v-if="showTaskCenterModal" class="modal-overlay" @click.self="showTaskCenterModal = false">
+            <div class="modal" style="max-width: 640px; max-height: 90vh; overflow-y: auto;">
+                <div class="modal-header">
+                    <span class="modal-title">{{ editingTaskCenterItem ? '编辑任务' : '新建任务' }}</span>
+                    <button class="modal-close" @click="showTaskCenterModal = false">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <div class="form-group">
+                        <label class="form-label">任务名称</label>
+                        <input v-model="taskCenterForm.name" type="text" class="form-input" placeholder="例如：早间总结">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">任务描述</label>
+                        <textarea v-model="taskCenterForm.description" class="form-textarea" rows="3" placeholder="简要说明这条任务做什么"></textarea>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">触发方式</label>
+                        <div class="radio-group">
+                            <label class="radio-label"><input type="radio" v-model="taskCenterForm.trigger" value="interval"> <i class="fas fa-repeat"></i> 间隔</label>
+                            <label class="radio-label"><input type="radio" v-model="taskCenterForm.trigger" value="cron"> <i class="fas fa-clock"></i> Cron</label>
+                            <label class="radio-label"><input type="radio" v-model="taskCenterForm.trigger" value="date"> <i class="fas fa-calendar-day"></i> 单次</label>
+                        </div>
+                    </div>
+                    <div v-if="taskCenterForm.trigger === 'interval'" class="form-group">
+                        <label class="form-label">间隔分钟</label>
+                        <input v-model.number="taskCenterForm.config.interval_minutes" type="number" class="form-input" min="1">
+                    </div>
+                    <div v-if="taskCenterForm.trigger === 'cron'" class="form-group">
+                        <label class="form-label">Cron 表达式</label>
+                        <input v-model="taskCenterForm.config.cron" type="text" class="form-input" placeholder="0 8 * * *">
+                        <div class="form-hint">格式：分 时 日 月 周</div>
+                    </div>
+                    <div v-if="taskCenterForm.trigger === 'date'" class="form-group">
+                        <label class="form-label">执行时间</label>
+                        <input v-model="taskCenterForm.config.run_at" type="datetime-local" class="form-input">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">目标会话</label>
+                        <select v-model="taskCenterForm.target_session_id" class="form-select">
+                            <option value="">请选择目标会话</option>
+                            <option v-for="session in getTaskCenterTargetSessions()" :key="session.id" :value="session.id">
+                                {{ getSessionDisplayName(session.id) }}
+                            </option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">发送内容</label>
+                        <textarea v-model="taskCenterForm.prompt" class="form-textarea" rows="5" placeholder="任务触发时，会自动把这段内容发送到目标会话"></textarea>
+                    </div>
+                    <div class="form-group" style="display: flex; align-items: center; gap: 12px;">
+                        <label class="toggle-switch">
+                            <input type="checkbox" v-model="taskCenterForm.enabled">
+                            <span class="toggle-slider"></span>
+                        </label>
+                        <span style="color: var(--text-secondary);">创建后立即启用</span>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary" @click="showTaskCenterModal = false">取消</button>
+                    <button class="btn btn-primary" @click="saveTaskCenterTask" :disabled="isLoading || !taskCenterForm.name || !taskCenterForm.prompt || !taskCenterForm.target_session_id">
+                        <i class="fas fa-save"></i> 保存
+                    </button>
+                </div>
+            </div>
+        </div>
+
         <!-- Workflow Edit Modal -->
         <div v-if="showWorkflowModal" class="modal-overlay" @click.self="showWorkflowModal = false">
             <div class="modal" style="max-width: 700px; max-height: 90vh; overflow-y: auto;">
@@ -11034,6 +11165,7 @@
                             { id: 'sessions', label: '会话管理', icon: 'fas fa-list' }
                         ],
                         config: [
+                            { id: 'task-center', label: '任务中心', icon: 'fas fa-calendar-check' },
                             { id: 'workflows', label: '工作流', icon: 'fas fa-project-diagram' },
                             { id: 'heartbeat', label: '定时任务', icon: 'fas fa-heartbeat' },
                             { id: 'personality', label: '人格设置', icon: 'fas fa-user-circle' },
@@ -11125,6 +11257,23 @@
                     
                     // Workflows
                     workflows: [],
+                    taskCenterItems: [],
+                    showTaskCenterModal: false,
+                    editingTaskCenterItem: null,
+                    taskCenterForm: {
+                        id: null,
+                        name: '',
+                        description: '',
+                        enabled: true,
+                        trigger: 'interval',
+                        config: {
+                            interval_minutes: 60,
+                            cron: '0 8 * * *',
+                            run_at: ''
+                        },
+                        target_session_id: '',
+                        prompt: ''
+                    },
                     showWorkflowModal: false,
                     editingWorkflow: null,
                     workflowForm: {
@@ -11775,6 +11924,25 @@
                     return this.sessions.filter(s => s.type === 'qq_private');
                 },
 
+                taskCenterGroups() {
+                    const groups = [
+                        { kind: 'heartbeat', label: '系统任务', items: [] },
+                        { kind: 'workflow', label: '工作流任务', items: [] },
+                        { kind: 'custom', label: '自定义任务', items: [] }
+                    ];
+                    this.taskCenterItems.forEach(item => {
+                        const group = groups.find(g => g.kind === item.kind);
+                        if (group) {
+                            group.items.push(item);
+                        }
+                    });
+                    return groups.filter(group => group.items.length > 0);
+                },
+
+                heartbeatSelectableTargets() {
+                    return this.availableTargets || [];
+                },
+
                 sessionCount() {
                     return this.sessions.length;
                 }
@@ -12138,6 +12306,7 @@
                     await Promise.all([
                         this.loadStats(),
                         this.loadSessions(),
+                        this.loadTaskCenter(),
                         this.loadWorkflows(),
                         this.loadHeartbeat(),
                         this.loadPersonality(),
@@ -12172,6 +12341,9 @@
                             break;
                         case 'workflows':
                             await this.loadWorkflows();
+                            break;
+                        case 'task-center':
+                            await this.loadTaskCenter();
                             break;
                         case 'personality':
                             // 如果有未保存的修改，不重新加载服务器数据，保留本地修改
@@ -12609,19 +12781,41 @@
                     }
                 },
 
+                async loadTaskCenter() {
+                    try {
+                        const res = await api.get('/api/task-center');
+                        this.taskCenterItems = Array.isArray(res.data?.items) ? res.data.items : [];
+                    } catch (e) {
+                        console.error('Failed to load task center:', e);
+                        this.taskCenterItems = [];
+                    }
+                },
+
                 async loadHeartbeat() {
                     try {
-                        // 先确保会话已加载
-                        if (this.sessions.length === 0) {
-                            await this.loadSessions();
-                        }
-                        
-                        // 生成可用目标列表（必须在会话加载后）
+                        // 先确保会话和 QQ 目标已加载
+                        await Promise.all([
+                            this.sessions.length === 0 ? this.loadSessions() : Promise.resolve(),
+                            this.loadQqPrivateUsers(),
+                            this.loadQqGroups()
+                        ]);
+
+                        // 生成可用目标列表（必须在目标数据加载后）
                         this.generateAvailableTargets();
                         
                         // 加载配置
                         const res = await api.get('/api/heartbeat');
                         this.heartbeatConfig = { ...this.heartbeatConfig, ...res.data };
+                        const derivedWebTarget = this.heartbeatConfig.target_session_id
+                            ? `web:${this.heartbeatConfig.target_session_id}`
+                            : null;
+                        let normalizedTargets = Array.isArray(this.heartbeatConfig.targets)
+                            ? [...this.heartbeatConfig.targets]
+                            : [];
+                        if (derivedWebTarget && !normalizedTargets.includes(derivedWebTarget)) {
+                            normalizedTargets.unshift(derivedWebTarget);
+                        }
+                        this.heartbeatConfig.targets = [...new Set(normalizedTargets)];
                         
                         // 加载内容
                         const contentRes = await api.get('/api/heartbeat/content', {
@@ -12648,11 +12842,6 @@
                         web_sessions: {
                             title: 'Web 会话',
                             icon: 'fas fa-comments',
-                            targets: []
-                        },
-                        broadcast: {
-                            title: '广播',
-                            icon: 'fas fa-broadcast-tower',
                             targets: []
                         }
                     };
@@ -12688,13 +12877,6 @@
                         });
                     });
 
-                    // 添加 Web 广播选项
-                    groups.broadcast.targets.push({
-                        id: 'web',
-                        name: 'Web 广播',
-                        icon: 'fas fa-globe'
-                    });
-
                     // 只保留有目标的分组
                     this.availableTargets = Object.values(groups).filter(g => g.targets.length > 0);
                     console.log('Available target groups:', this.availableTargets);
@@ -12702,11 +12884,35 @@
 
                 async saveHeartbeatConfig() {
                     try {
-                        await api.put('/api/heartbeat', this.heartbeatConfig);
+                        const webTargets = (this.heartbeatConfig.targets || []).filter(target => String(target).startsWith('web:'));
+                        const payload = {
+                            ...this.heartbeatConfig,
+                            target_session_id: webTargets.length ? webTargets[0].split(':', 2)[1] : ''
+                        };
+                        await api.put('/api/heartbeat', payload);
+                        this.heartbeatConfig.target_session_id = payload.target_session_id;
                         this.showToast('配置已保存', 'success');
                     } catch (e) {
                         this.showToast('保存失败', 'error');
                     }
+                },
+
+                async toggleHeartbeatTarget(targetId) {
+                    const currentTargets = Array.isArray(this.heartbeatConfig.targets)
+                        ? [...this.heartbeatConfig.targets]
+                        : [];
+                    const alreadySelected = currentTargets.includes(targetId);
+                    let nextTargets = currentTargets.filter(target => target !== targetId);
+
+                    if (!alreadySelected) {
+                        if (String(targetId).startsWith('web:')) {
+                            nextTargets = nextTargets.filter(target => !String(target).startsWith('web:'));
+                        }
+                        nextTargets.push(targetId);
+                    }
+
+                    this.heartbeatConfig.targets = nextTargets;
+                    await this.saveHeartbeatConfig();
                 },
 
                 async saveHeartbeatContent() {
@@ -15944,6 +16150,187 @@ def main(params):
                 },
                 
                 // Workflow Functions
+                getTaskCenterIcon(kind) {
+                    if (kind === 'heartbeat') return 'fas fa-heartbeat';
+                    if (kind === 'workflow') return 'fas fa-project-diagram';
+                    return 'fas fa-calendar-check';
+                },
+
+                getTaskCenterKindLabel(kind) {
+                    if (kind === 'heartbeat') return '系统任务';
+                    if (kind === 'workflow') return '工作流';
+                    return '自定义任务';
+                },
+
+                getTaskCenterTriggerLabel(item) {
+                    if (!item) return '未知';
+                    if (item.trigger === 'interval') {
+                        return `每 ${item.config?.interval_minutes || 60} 分钟`;
+                    }
+                    if (item.trigger === 'date') {
+                        return item.config?.run_at || '单次执行';
+                    }
+                    if (item.trigger === 'cron') {
+                        return item.config?.cron || '0 8 * * *';
+                    }
+                    return item.trigger || '手动触发';
+                },
+
+                getSessionDisplayName(sessionId) {
+                    const session = this.sessions.find(s => s.id === sessionId);
+                    if (!session) return sessionId;
+                    const prefix = session.type === 'qq_group'
+                        ? 'QQ群'
+                        : session.type === 'qq_private'
+                            ? 'QQ私聊'
+                            : 'Web';
+                    return `${prefix} · ${session.name || `会话 ${session.id.substring(0, 8)}`}`;
+                },
+
+                getTaskCenterTargetSessions() {
+                    return this.sessions.filter(s => ['web', 'qq_group', 'qq_private'].includes(s.type));
+                },
+
+                async openTaskCenterEditor(item) {
+                    if (item.kind === 'heartbeat') {
+                        this.navigateTo('heartbeat');
+                        return;
+                    }
+                    if (item.kind === 'workflow') {
+                        if (!this.workflows.length) {
+                            await this.loadWorkflows();
+                        }
+                        const workflow = this.workflows.find(w => w.id === item.id);
+                        if (workflow) {
+                            this.openWorkflowModal(workflow);
+                        } else {
+                            this.navigateTo('workflows');
+                        }
+                        return;
+                    }
+                    this.openTaskCenterModal(item);
+                },
+
+                openTaskCenterModal(task = null) {
+                    if (task) {
+                        this.editingTaskCenterItem = task;
+                        this.taskCenterForm = {
+                            id: task.id,
+                            name: task.name || '',
+                            description: task.description || '',
+                            enabled: task.enabled !== false,
+                            trigger: task.trigger || 'interval',
+                            config: {
+                                interval_minutes: task.config?.interval_minutes || 60,
+                                cron: task.config?.cron || '0 8 * * *',
+                                run_at: task.config?.run_at || ''
+                            },
+                            target_session_id: task.target_session_id || '',
+                            prompt: task.prompt || ''
+                        };
+                    } else {
+                        this.editingTaskCenterItem = null;
+                        this.taskCenterForm = {
+                            id: null,
+                            name: '',
+                            description: '',
+                            enabled: true,
+                            trigger: 'interval',
+                            config: {
+                                interval_minutes: 60,
+                                cron: '0 8 * * *',
+                                run_at: ''
+                            },
+                            target_session_id: this.currentSession?.id || '',
+                            prompt: ''
+                        };
+                    }
+                    this.showTaskCenterModal = true;
+                },
+
+                async saveTaskCenterTask() {
+                    this.isLoading = true;
+                    try {
+                        const payload = {
+                            name: this.taskCenterForm.name,
+                            description: this.taskCenterForm.description,
+                            enabled: this.taskCenterForm.enabled,
+                            trigger: this.taskCenterForm.trigger,
+                            config: { ...this.taskCenterForm.config },
+                            target_session_id: this.taskCenterForm.target_session_id,
+                            prompt: this.taskCenterForm.prompt
+                        };
+
+                        if (this.editingTaskCenterItem) {
+                            await api.put(`/api/task-center/${this.editingTaskCenterItem.id}`, payload);
+                            this.showToast('任务已更新', 'success');
+                        } else {
+                            await api.post('/api/task-center', payload);
+                            this.showToast('任务已创建', 'success');
+                        }
+
+                        this.showTaskCenterModal = false;
+                        await this.loadTaskCenter();
+                    } catch (e) {
+                        console.error('Failed to save task center task:', e);
+                        this.showToast('保存失败', 'error');
+                    } finally {
+                        this.isLoading = false;
+                    }
+                },
+
+                async toggleTaskCenterItem(item) {
+                    this.isLoading = true;
+                    try {
+                        await api.post(`/api/task-center/${item.id}/toggle`);
+                        await Promise.all([this.loadTaskCenter(), this.loadHeartbeat(), this.loadWorkflows()]);
+                        this.showToast(`任务已${item.enabled ? '停用' : '启用'}`, 'success');
+                    } catch (e) {
+                        console.error('Failed to toggle task center item:', e);
+                        this.showToast('操作失败', 'error');
+                    } finally {
+                        this.isLoading = false;
+                    }
+                },
+
+                async runTaskCenterItem(item) {
+                    this.isLoading = true;
+                    try {
+                        await api.post(`/api/task-center/${item.id}/run`);
+                        this.showToast('任务已开始执行', 'success');
+                        setTimeout(() => this.loadTaskCenter(), 1200);
+                    } catch (e) {
+                        console.error('Failed to run task center item:', e);
+                        this.showToast('执行失败', 'error');
+                    } finally {
+                        this.isLoading = false;
+                    }
+                },
+
+                async deleteTaskCenterItem(item) {
+                    this.showConfirm({
+                        title: '删除任务',
+                        message: `确定要删除“${item.name}”吗？此操作不可恢复。`,
+                        confirmText: '删除',
+                        icon: 'fa-trash',
+                        iconColor: 'var(--error)',
+                        danger: true,
+                        action: async () => {
+                            this.isLoading = true;
+                            try {
+                                await api.delete(`/api/task-center/${item.id}`);
+                                await this.loadTaskCenter();
+                                this.showToast('任务已删除', 'success');
+                            } catch (e) {
+                                console.error('Failed to delete task center item:', e);
+                                this.showToast('删除失败', 'error');
+                            } finally {
+                                this.isLoading = false;
+                            }
+                        }
+                    });
+                },
+
                 getTriggerIcon(trigger) {
                     const type = this.workflowTriggerTypes.find(t => t.value === trigger);
                     return type ? type.icon : 'fas fa-question';
@@ -17285,11 +17672,22 @@ def main(params):
                     });
 
                     // 处理会话更新事件（如 heartbeat 追加到会话）
-                    socket.on('session_updated', (data) => {
+                    socket.on('session_updated', async (data) => {
                         console.log('Session updated:', data);
                         if (data.action === 'heartbeat_completed' && data.session_id) {
                             // 刷新该会话的消息
                             this.refreshSessionMessages(data.session_id);
+                            await this.loadSessions();
+                        } else if (data.action === 'heartbeat_created' && data.session_id) {
+                            await this.loadSessions();
+                            const createdSession = this.sessions.find(s => s.id === data.session_id) || data.session;
+                            if (createdSession) {
+                                if (this.currentPage === 'chat') {
+                                    await this.selectSession(createdSession);
+                                } else {
+                                    this.showToast(`Heartbeat 已创建新会话：${createdSession.name || data.session_id}`, 'success');
+                                }
+                            }
                         }
                     });
 

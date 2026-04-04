@@ -110,6 +110,7 @@ def init_default_data(server):
         "supports_reasoning": True,
         "supports_stream": True,
     }
+    server.scheduled_tasks = []
 
     # 默认 Token 统计
     server.token_stats = {
@@ -470,6 +471,11 @@ def load_all_data(server):
                 saved_heartbeat = json.load(f)
                 server.heartbeat_config.update(saved_heartbeat)
 
+        tasks_file = os.path.join(server.data_dir, "scheduled_tasks.json")
+        if os.path.exists(tasks_file):
+            with open(tasks_file, "r", encoding="utf-8") as f:
+                server.scheduled_tasks = json.load(f)
+
         # 加载多模型配置
         server._load_ai_models()
 
@@ -565,6 +571,13 @@ def save_data(server, data_type: str):
                 os.path.join(server.data_dir, "heartbeat.json"), "w", encoding="utf-8"
             ) as f:
                 json.dump(server.heartbeat_config, f, ensure_ascii=False, indent=2)
+        elif data_type == "scheduled_tasks":
+            with open(
+                os.path.join(server.data_dir, "scheduled_tasks.json"),
+                "w",
+                encoding="utf-8",
+            ) as f:
+                json.dump(server.scheduled_tasks, f, ensure_ascii=False, indent=2)
         elif data_type == "ai_models":
             with open(
                 os.path.join(server.data_dir, "ai_models.json"), "w", encoding="utf-8"

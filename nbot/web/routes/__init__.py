@@ -12,6 +12,7 @@ from nbot.web.routes.qq_overview import register_qq_overview_routes
 from nbot.web.routes.sessions import register_session_routes
 from nbot.web.routes.skills import register_skill_routes
 from nbot.web.routes.skills_storage import register_skills_storage_routes
+from nbot.web.routes.task_center import register_task_center_routes
 from nbot.web.routes.tools import register_tool_routes
 from nbot.web.routes.workflows import register_workflow_routes
 from nbot.web.routes.workspace_private import register_workspace_private_routes
@@ -33,6 +34,7 @@ __all__ = [
     "register_session_routes",
     "register_skill_routes",
     "register_skills_storage_routes",
+    "register_task_center_routes",
     "register_tool_routes",
     "register_workflow_routes",
     "register_workspace_private_routes",

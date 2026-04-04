@@ -23,6 +23,12 @@ def register_heartbeat_routes(app, server):
             "target_session_id", server.heartbeat_config.get("target_session_id", "")
         )
         targets = data.get("targets", server.heartbeat_config.get("targets", []))
+        if not target_session_id and isinstance(targets, list):
+            web_targets = [
+                target for target in targets if isinstance(target, str) and target.startswith("web:")
+            ]
+            if web_targets:
+                target_session_id = web_targets[0].split(":", 1)[1]
 
         server.heartbeat_config = {
             "enabled": enabled,
