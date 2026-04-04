@@ -12,6 +12,52 @@ _log = logging.getLogger(__name__)
 
 
 def register_admin_misc_routes(app, server):
+    @app.route("/api/commands")
+    def get_commands_catalog():
+        try:
+            from nbot.commands import command_handlers
+
+            category_names = {
+                "1": "漫画相关",
+                "2": "聊天设置",
+                "3": "娱乐功能",
+                "4": "系统处理",
+                "5": "群聊管理",
+                "6": "轻小说",
+                "7": "定时任务",
+                "8": "帮助",
+            }
+
+            commands = []
+            seen = set()
+            for aliases, handler in command_handlers.items():
+                alias_list = [alias for alias in aliases if isinstance(alias, str) and alias.startswith("/")]
+                if not alias_list:
+                    continue
+
+                primary = alias_list[0]
+                if primary in seen:
+                    continue
+                seen.add(primary)
+
+                help_text = getattr(handler, "help_text", "") or primary
+                commands.append(
+                    {
+                        "name": primary,
+                        "aliases": alias_list[1:],
+                        "help_text": help_text,
+                        "category": getattr(handler, "category", "0"),
+                        "category_name": category_names.get(getattr(handler, "category", "0"), "其他"),
+                        "admin_only": bool(getattr(handler, "admin_show", False)),
+                    }
+                )
+
+            commands.sort(key=lambda item: (item["category"], item["name"]))
+            return jsonify({"commands": commands})
+        except Exception as e:
+            _log.error(f"Failed to load commands catalog: {e}", exc_info=True)
+            return jsonify({"commands": [], "error": str(e)}), 500
+
     @app.route("/api/startup-status")
     def get_startup_status():
         return jsonify(

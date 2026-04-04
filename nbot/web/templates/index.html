@@ -3062,6 +3062,43 @@
                 padding: 8px 12px;
             }
 
+            .command-suggestions {
+                left: 0;
+                right: 0;
+                bottom: calc(100% + 8px);
+                padding: 8px;
+                border-radius: 14px;
+                max-height: min(42vh, 280px);
+                gap: 4px;
+            }
+
+            .command-suggestion-item {
+                padding: 9px 10px;
+                gap: 10px;
+                border-radius: 10px;
+            }
+
+            .command-suggestion-icon {
+                width: 28px;
+                height: 28px;
+                border-radius: 8px;
+            }
+
+            .command-suggestion-head {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 4px;
+            }
+
+            .command-suggestion-name {
+                font-size: 13px;
+            }
+
+            .command-suggestion-help {
+                font-size: 11px;
+                line-height: 1.45;
+            }
+
             /* 上下文指示器在移动端隐藏 */
             .context-indicator {
                 display: none;
@@ -3217,6 +3254,37 @@
 
             .chat-input-container {
                 width: 100%;
+            }
+
+            .command-suggestions {
+                bottom: calc(100% + 6px);
+                padding: 6px;
+                border-radius: 12px;
+                max-height: min(48vh, 320px);
+            }
+
+            .command-suggestion-item {
+                padding: 8px 9px;
+                gap: 8px;
+            }
+
+            .command-suggestion-icon {
+                width: 26px;
+                height: 26px;
+                font-size: 12px;
+            }
+
+            .command-suggestion-name {
+                font-size: 12px;
+            }
+
+            .command-suggestion-category,
+            .command-suggestion-alias {
+                font-size: 10px;
+            }
+
+            .command-suggestion-help {
+                font-size: 10px;
             }
 
             /* 移动端操作按钮放在下一行 */
@@ -3957,6 +4025,7 @@
             display: flex;
             flex-direction: column;
             gap: 8px;
+            position: relative;
         }
 
         .chat-input-header {
@@ -4000,6 +4069,110 @@
         }
 
         .chat-input:focus { border-color: var(--accent-primary); }
+
+        .command-suggestions {
+            position: absolute;
+            left: 0;
+            right: 0;
+            bottom: calc(100% + 10px);
+            z-index: 30;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            padding: 10px;
+            border: 1px solid var(--border-color);
+            border-radius: 16px;
+            background: color-mix(in srgb, var(--bg-secondary) 92%, transparent);
+            backdrop-filter: blur(16px);
+            box-shadow: 0 20px 48px rgba(0, 0, 0, 0.24);
+            max-height: 320px;
+            overflow-y: auto;
+        }
+
+        .command-suggestion-item {
+            display: flex;
+            align-items: flex-start;
+            gap: 12px;
+            width: 100%;
+            padding: 10px 12px;
+            border: 1px solid transparent;
+            border-radius: 12px;
+            background: transparent;
+            color: var(--text-primary);
+            text-align: left;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .command-suggestion-item:hover,
+        .command-suggestion-item.active {
+            background: rgba(236, 72, 153, 0.12);
+            border-color: rgba(236, 72, 153, 0.24);
+            transform: translateY(-1px);
+        }
+
+        .command-suggestion-icon {
+            flex: none;
+            width: 32px;
+            height: 32px;
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: linear-gradient(135deg, rgba(236, 72, 153, 0.22), rgba(88, 166, 255, 0.18));
+            color: var(--accent-primary);
+        }
+
+        .command-suggestion-body {
+            min-width: 0;
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .command-suggestion-head {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+        }
+
+        .command-suggestion-name {
+            font-size: 14px;
+            font-weight: 700;
+            color: var(--text-primary);
+        }
+
+        .command-suggestion-category {
+            flex: none;
+            padding: 2px 8px;
+            border-radius: 999px;
+            font-size: 11px;
+            color: var(--text-secondary);
+            background: rgba(255,255,255,0.06);
+        }
+
+        .command-suggestion-help {
+            font-size: 12px;
+            line-height: 1.5;
+            color: var(--text-secondary);
+            word-break: break-word;
+        }
+
+        .command-suggestion-aliases {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+        }
+
+        .command-suggestion-alias {
+            padding: 2px 6px;
+            border-radius: 8px;
+            background: rgba(88, 166, 255, 0.12);
+            color: var(--info);
+            font-size: 11px;
+        }
 
         .chat-actions {
             display: flex;
@@ -7067,11 +7240,79 @@
                                         <div class="chat-input-container">
                                             <textarea
                                                 v-model="inputMessage"
+                                                ref="chatInput"
                                                 class="chat-input"
                                                 placeholder="输入消息... (Shift+Enter 换行)"
-                                                @keydown.enter.prevent="handleEnter"
+                                                @input="handleInputMessageChange"
+                                                @keydown="handleChatInputKeydown"
                                                 rows="1"
                                             ></textarea>
+                                            <div v-if="showCommandCategorySuggestions || showCommandSuggestions" class="command-suggestions">
+                                                <template v-if="showCommandCategorySuggestions">
+                                                    <button
+                                                        v-for="(category, index) in commandCategoryCatalog"
+                                                        :key="category.name"
+                                                        type="button"
+                                                        class="command-suggestion-item"
+                                                        :class="{ active: index === activeCommandSuggestionIndex }"
+                                                        @mousedown.prevent="selectCommandCategory(category.name)"
+                                                    >
+                                                        <span class="command-suggestion-icon">
+                                                            <i class="fas fa-folder-open"></i>
+                                                        </span>
+                                                        <span class="command-suggestion-body">
+                                                            <span class="command-suggestion-head">
+                                                                <span class="command-suggestion-name">{{ category.name }}</span>
+                                                                <span class="command-suggestion-category">{{ category.count }} 条</span>
+                                                            </span>
+                                                            <span class="command-suggestion-help">点击查看这个分类下的命令</span>
+                                                        </span>
+                                                    </button>
+                                                </template>
+                                                <template v-else>
+                                                    <button
+                                                        v-if="selectedCommandCategory && commandQuery === '/'"
+                                                        type="button"
+                                                        class="command-suggestion-item"
+                                                        @mousedown.prevent="clearCommandCategory()"
+                                                    >
+                                                        <span class="command-suggestion-icon">
+                                                            <i class="fas fa-arrow-left"></i>
+                                                        </span>
+                                                        <span class="command-suggestion-body">
+                                                            <span class="command-suggestion-head">
+                                                                <span class="command-suggestion-name">{{ selectedCommandCategory }}</span>
+                                                                <span class="command-suggestion-category">返回分类</span>
+                                                            </span>
+                                                            <span class="command-suggestion-help">返回上一层，重新选择命令分类</span>
+                                                        </span>
+                                                    </button>
+                                                </template>
+                                                <template v-if="showCommandSuggestions">
+                                                <button
+                                                    v-for="(command, index) in filteredCommandCatalog"
+                                                    :key="command.name"
+                                                    type="button"
+                                                    class="command-suggestion-item"
+                                                    :class="{ active: index === activeCommandSuggestionIndex }"
+                                                    @mousedown.prevent="applyCommandSuggestion(command)"
+                                                >
+                                                    <span class="command-suggestion-icon">
+                                                        <i class="fas fa-terminal"></i>
+                                                    </span>
+                                                    <span class="command-suggestion-body">
+                                                        <span class="command-suggestion-head">
+                                                            <span class="command-suggestion-name">{{ command.name }}</span>
+                                                            <span class="command-suggestion-category">{{ command.category_name }}</span>
+                                                        </span>
+                                                        <span class="command-suggestion-help">{{ command.help_text }}</span>
+                                                        <span v-if="command.aliases && command.aliases.length" class="command-suggestion-aliases">
+                                                            <span v-for="alias in command.aliases" :key="alias" class="command-suggestion-alias">{{ alias }}</span>
+                                                        </span>
+                                                    </span>
+                                                </button>
+                                                </template>
+                                            </div>
                                         </div>
                                         <div class="chat-actions">
                                             <!-- Context Length Indicator -->
@@ -10657,6 +10898,9 @@
                     currentSession: null,
                     currentMessages: [],
                     inputMessage: '',
+                    commandCatalog: [],
+                    selectedCommandCategory: null,
+                    activeCommandSuggestionIndex: 0,
                     uploadedFiles: [],
                     isTyping: false,
                     thinkingCards: [],  // 进度卡片列表
@@ -11218,6 +11462,74 @@
                     const search = this.sessionSearch.toLowerCase();
                     return this.sessions.filter(s => s.name.toLowerCase().includes(search));
                 },
+
+                commandQuery() {
+                    const message = (this.inputMessage || '').trimStart();
+                    if (!message.startsWith('/')) return '';
+                    if (/\s/.test(message)) return '';
+                    return message.toLowerCase();
+                },
+
+                commandCategoryCatalog() {
+                    if (this.commandQuery !== '/') return [];
+                    const categories = new Map();
+                    for (const command of this.commandCatalog) {
+                        const key = command.category_name || '其他';
+                        if (!categories.has(key)) {
+                            categories.set(key, {
+                                name: key,
+                                count: 0,
+                                category: command.category || '0',
+                            });
+                        }
+                        categories.get(key).count += 1;
+                    }
+                    return Array.from(categories.values()).sort((a, b) => {
+                        if (a.category !== b.category) {
+                            return String(a.category).localeCompare(String(b.category), 'zh-CN', { numeric: true });
+                        }
+                        return a.name.localeCompare(b.name, 'zh-CN');
+                    });
+                },
+
+                filteredCommandCatalog() {
+                    const query = this.commandQuery;
+                    if (!query) return [];
+                    if (query === '/') {
+                        if (!this.selectedCommandCategory) {
+                            return [];
+                        }
+                        return this.commandCatalog
+                            .filter(command => command.category_name === this.selectedCommandCategory)
+                            .slice(0, 20);
+                    }
+                    return this.commandCatalog
+                        .filter(command => {
+                            const names = [command.name, ...(command.aliases || [])];
+                            return names.some(name => name.toLowerCase().startsWith(query));
+                        })
+                        .slice(0, 8);
+                },
+
+                showCommandCategorySuggestions() {
+                    return (
+                        this.currentPage === 'chat' &&
+                        !!this.currentSession &&
+                        this.commandQuery === '/' &&
+                        !this.selectedCommandCategory &&
+                        this.commandCategoryCatalog.length > 0
+                    );
+                },
+
+                showCommandSuggestions() {
+                    return (
+                        this.currentPage === 'chat' &&
+                        !!this.currentSession &&
+                        !!this.commandQuery &&
+                        !this.showCommandCategorySuggestions &&
+                        this.filteredCommandCatalog.length > 0
+                    );
+                },
                 
                 isAllSessionsSelected() {
                     if (this.filteredSessions.length === 0) return false;
@@ -11298,7 +11610,8 @@
                                 this.loadStats(),
                                 this.loadSessions(),
                                 this.loadSettings(),
-                                this.loadPersonality()
+                                this.loadPersonality(),
+                                this.loadCommandCatalog()
                             ]);
                             // 延迟初始化图表
                             setTimeout(() => this.initCharts(), 100);
@@ -11319,7 +11632,8 @@
                         this.loadStats(),
                         this.loadSessions(),
                         this.loadSettings(),
-                        this.loadPersonality()
+                        this.loadPersonality(),
+                        this.loadCommandCatalog()
                     ]);
                     setTimeout(() => this.initCharts(), 100);
                 }
@@ -11640,6 +11954,7 @@
                         this.loadKnowledge(),
                         this.loadAIConfig(),
                         this.loadAIModels(),
+                        this.loadCommandCatalog(),
                         this.loadTokenStats(),
                         this.loadLogs(),
                         this.loadSettings(),
@@ -11657,7 +11972,10 @@
                             break;
                         case 'chat':
                         case 'sessions':
-                            await this.loadSessions();
+                            await Promise.all([
+                                this.loadSessions(),
+                                this.loadCommandCatalog()
+                            ]);
                             break;
                         case 'workflows':
                             await this.loadWorkflows();
@@ -12076,6 +12394,16 @@
                     } catch (e) {
                         console.error('Failed to load sessions:', e);
                         this.showToast('加载会话失败', 'error');
+                    }
+                },
+
+                async loadCommandCatalog() {
+                    try {
+                        const res = await api.get('/api/commands');
+                        this.commandCatalog = Array.isArray(res.data?.commands) ? res.data.commands : [];
+                    } catch (e) {
+                        console.error('Failed to load commands:', e);
+                        this.commandCatalog = [];
                     }
                 },
                 
@@ -13522,15 +13850,115 @@ def main(params):
                     }
                 },
 
-                handleEnter(e) {
-                    if (e.shiftKey) {
-                        // Shift+Enter 换行
+                handleInputMessageChange() {
+                    if (this.commandQuery !== '/') {
+                        this.selectedCommandCategory = null;
+                    }
+                    if (!this.showCommandCategorySuggestions && !this.showCommandSuggestions) {
+                        this.activeCommandSuggestionIndex = 0;
                         return;
                     }
-                    e.preventDefault();
-                    this.sendMessage();
+                    const visibleCount = this.showCommandCategorySuggestions
+                        ? this.commandCategoryCatalog.length
+                        : this.filteredCommandCatalog.length;
+                    if (this.activeCommandSuggestionIndex >= visibleCount) {
+                        this.activeCommandSuggestionIndex = 0;
+                    }
                 },
 
+                handleChatInputKeydown(e) {
+                    if (this.showCommandCategorySuggestions || this.showCommandSuggestions) {
+                        const visibleCount = this.showCommandCategorySuggestions
+                            ? this.commandCategoryCatalog.length
+                            : this.filteredCommandCatalog.length;
+                        if (e.key === 'ArrowDown') {
+                            e.preventDefault();
+                            this.activeCommandSuggestionIndex =
+                                (this.activeCommandSuggestionIndex + 1) % visibleCount;
+                            return;
+                        }
+                        if (e.key === 'ArrowUp') {
+                            e.preventDefault();
+                            this.activeCommandSuggestionIndex =
+                                (this.activeCommandSuggestionIndex - 1 + visibleCount) % visibleCount;
+                            return;
+                        }
+                        if (e.key === 'Tab') {
+                            e.preventDefault();
+                            if (this.showCommandCategorySuggestions) {
+                                const category = this.commandCategoryCatalog[this.activeCommandSuggestionIndex];
+                                if (category) {
+                                    this.selectCommandCategory(category.name);
+                                }
+                            } else {
+                                const command = this.filteredCommandCatalog[this.activeCommandSuggestionIndex];
+                                if (command) {
+                                    this.applyCommandSuggestion(command);
+                                }
+                            }
+                            return;
+                        }
+                        if (e.key === 'Backspace' && this.selectedCommandCategory && this.commandQuery === '/' && !this.inputMessage.slice(1)) {
+                            this.clearCommandCategory();
+                            return;
+                        }
+                        if (e.key === 'Enter' && !e.shiftKey) {
+                            e.preventDefault();
+                            if (this.showCommandCategorySuggestions) {
+                                const category = this.commandCategoryCatalog[this.activeCommandSuggestionIndex];
+                                if (category) {
+                                    this.selectCommandCategory(category.name);
+                                }
+                            } else {
+                                const command = this.filteredCommandCatalog[this.activeCommandSuggestionIndex];
+                                if (command) {
+                                    this.applyCommandSuggestion(command);
+                                } else {
+                                    this.sendMessage();
+                                }
+                            }
+                            return;
+                        }
+                    }
+
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault();
+                        this.sendMessage();
+                    }
+                },
+
+                applyCommandSuggestion(command) {
+                    if (!command) return;
+                    this.inputMessage = `${command.name} `;
+                    this.selectedCommandCategory = null;
+                    this.activeCommandSuggestionIndex = 0;
+                    this.$nextTick(() => {
+                        if (this.$refs.chatInput) {
+                            this.$refs.chatInput.focus();
+                        }
+                    });
+                },
+
+                selectCommandCategory(categoryName) {
+                    this.selectedCommandCategory = categoryName;
+                    this.activeCommandSuggestionIndex = 0;
+                    this.$nextTick(() => {
+                        if (this.$refs.chatInput) {
+                            this.$refs.chatInput.focus();
+                        }
+                    });
+                },
+
+                clearCommandCategory() {
+                    this.selectedCommandCategory = null;
+                    this.activeCommandSuggestionIndex = 0;
+                    this.$nextTick(() => {
+                        if (this.$refs.chatInput) {
+                            this.$refs.chatInput.focus();
+                        }
+                    });
+                },
+                
                 async stopGeneration() {
                     if (!this.isLoading) return;
 
@@ -16757,9 +17185,17 @@ def main(params):
                         console.log('[Stream] currentSession.id:', this.currentSession?.id);
                         this.isTyping = false;
                         if (this.currentSession && data.session_id === this.currentSession.id) {
-                            // 添加消息到列表
-                            const msg = {...data.message, content: ''};
-                            this.currentMessages.push(msg);
+                            const existingIdx = this.currentMessages.findIndex(m => m.id === data.message.id);
+                            const msg = { ...data.message, content: '' };
+                            if (existingIdx !== -1) {
+                                this.currentMessages.splice(existingIdx, 1, {
+                                    ...this.currentMessages[existingIdx],
+                                    ...msg,
+                                    content: ''
+                                });
+                            } else {
+                                this.currentMessages.push(msg);
+                            }
                             console.log('[Stream] 消息已添加，当前消息数:', this.currentMessages.length);
                             this.$nextTick(() => this.scrollToBottom());
                         } else {
@@ -16770,13 +17206,25 @@ def main(params):
                     socket.on('ai_stream_chunk', (data) => {
                         console.log('[Stream] AI stream chunk:', data.chunk);
                         if (this.currentSession && data.session_id === this.currentSession.id) {
-                            // 找到对应的消息并追加内容
                             const msgIdx = this.currentMessages.findIndex(m => m.id === data.message_id);
                             if (msgIdx !== -1) {
-                                this.currentMessages[msgIdx].content += data.chunk;
+                                const currentMessage = this.currentMessages[msgIdx];
+                                this.currentMessages.splice(msgIdx, 1, {
+                                    ...currentMessage,
+                                    content: (currentMessage.content || '') + (data.chunk || '')
+                                });
                                 this.$nextTick(() => this.scrollToBottom());
                             } else {
-                                console.log('[Stream] 未找到消息:', data.message_id);
+                                console.log('[Stream] 未找到消息，创建占位消息:', data.message_id);
+                                this.currentMessages.push({
+                                    id: data.message_id,
+                                    role: 'assistant',
+                                    sender: 'AI',
+                                    content: data.chunk || '',
+                                    timestamp: new Date().toISOString(),
+                                    session_id: data.session_id
+                                });
+                                this.$nextTick(() => this.scrollToBottom());
                             }
                         }
                     });
@@ -16793,9 +17241,17 @@ def main(params):
                         this.isLoading = false;
                         this.loadingSessionId = null;
                         if (this.currentSession && data.session_id === this.currentSession.id) {
-                            // 避免重复添加消息
-                            const exists = this.currentMessages.find(m => m.id === data.message.id);
-                            if (!exists) {
+                            const existingIdx = this.currentMessages.findIndex(m => m.id === data.message.id);
+                            if (existingIdx !== -1) {
+                                const existingMessage = this.currentMessages[existingIdx];
+                                this.currentMessages.splice(existingIdx, 1, {
+                                    ...existingMessage,
+                                    ...data.message,
+                                    thinking_cards: data.message.thinking_cards || existingMessage.thinking_cards || [],
+                                    change_cards: data.message.change_cards || existingMessage.change_cards || []
+                                });
+                                this.$nextTick(() => this.scrollToBottom());
+                            } else {
                                 this.currentMessages.push(data.message);
                                 this.$nextTick(() => this.scrollToBottom());
                             }
@@ -17527,3 +17983,4 @@ def main(params):
     </script>
 </body>
 </html>
+
