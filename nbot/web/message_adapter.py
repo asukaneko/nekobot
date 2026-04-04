@@ -316,6 +316,23 @@ class WebMessageAdapter:
             _log.error(f"Failed to copy file for web delivery: {e}")
             return False
 
+        if getattr(self.server, "WORKSPACE_AVAILABLE", False):
+            try:
+                session = self.session_store.get_session(self.session_id) or {}
+                session_type = session.get("type", "web")
+                self.server.workspace_manager.register_file_reference(
+                    self.session_id,
+                    dest_path,
+                    file_name,
+                    session_type=session_type,
+                    metadata={
+                        "download_url": f"/static/files/{safe_name}",
+                        "source": "web_message_adapter",
+                    },
+                )
+            except Exception as ref_err:
+                _log.warning(f"Failed to register workspace file reference: {ref_err}")
+
         download_url = f"/static/files/{safe_name}"
         file_info = self.channel_adapter.build_assistant_message(
             ChatResponse(final_content=f"[File: {file_name}]"),

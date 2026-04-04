@@ -1,7 +1,7 @@
 import os
 import re
 
-from flask import jsonify, request, send_from_directory
+from flask import jsonify, request, send_file
 
 from nbot.core import WebSessionStore
 
@@ -67,9 +67,11 @@ def register_workspace_private_routes(app, server):
         if not file_path:
             return jsonify({"error": "File not found"}), 404
 
-        directory = os.path.dirname(file_path)
-        fname = os.path.basename(file_path)
-        response = send_from_directory(directory, fname, as_attachment=True)
+        response = send_file(
+            file_path,
+            as_attachment=True,
+            download_name=os.path.basename(filename),
+        )
         response.headers["Access-Control-Allow-Origin"] = "*"
         response.headers["Access-Control-Expose-Headers"] = "Content-Disposition"
         return response

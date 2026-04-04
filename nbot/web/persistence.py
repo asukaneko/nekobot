@@ -6,6 +6,55 @@ from datetime import datetime
 _log = logging.getLogger(__name__)
 
 
+def _derive_session_name(session_id, session):
+    existing_name = (session or {}).get("name")
+    if existing_name:
+        return existing_name
+
+    messages = (session or {}).get("messages", [])
+    for message in messages:
+        if message.get("role") == "user":
+            content = (message.get("content") or "").strip()
+            if content:
+                return content[:24] + ("..." if len(content) > 24 else "")
+
+    return f"会话 {session_id[:8]}"
+
+
+def _normalize_session_record(session_id, session):
+    session = dict(session or {})
+    messages = session.get("messages")
+    if not isinstance(messages, list):
+        messages = []
+
+    system_prompt = session.get("system_prompt")
+    if not system_prompt:
+        for message in messages:
+            if message.get("role") == "system":
+                system_prompt = message.get("content", "")
+                break
+
+    created_at = session.get("created_at")
+    if not created_at:
+        for message in messages:
+            if message.get("timestamp"):
+                created_at = message.get("timestamp")
+                break
+    if not created_at:
+        created_at = datetime.now().isoformat()
+
+    normalized = {
+        **session,
+        "id": session.get("id") or session_id,
+        "name": _derive_session_name(session_id, session),
+        "type": session.get("type") or "web",
+        "created_at": created_at,
+        "messages": messages,
+        "system_prompt": system_prompt or "",
+    }
+    return normalized
+
+
 def init_default_data(server):
     """初始化默认数据"""
     # 默认工作流
@@ -298,8 +347,15 @@ def load_all_data(server):
         if os.path.exists(sessions_file):
             with open(sessions_file, "r", encoding="utf-8") as f:
                 loaded_sessions = json.load(f)
+            normalized_sessions = {
+                session_id: _normalize_session_record(session_id, session)
+                for session_id, session in loaded_sessions.items()
+            }
             server.sessions.clear()
-            server.sessions.update(loaded_sessions)
+            server.sessions.update(normalized_sessions)
+            if normalized_sessions != loaded_sessions:
+                with open(sessions_file, "w", encoding="utf-8") as f:
+                    json.dump(normalized_sessions, f, ensure_ascii=False, indent=2)
             # 重新设置 sessions 到 ProgressCardManager
             if server.PROGRESS_CARD_AVAILABLE and server.progress_card_manager:
                 server.progress_card_manager.set_sessions(server.sessions)

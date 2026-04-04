@@ -9950,8 +9950,8 @@
                         </div>
                         <div v-for="item in workspaceFiles" :key="item.name" 
                              class="workspace-file-item" 
-                             :class="{ 'is-folder': item.type === 'directory', 'drag-over': dragOverItem === item.path }"
-                             :draggable="item.type === 'file' || item.type === 'directory'"
+                             :class="{ 'is-folder': item.type === 'directory', 'drag-over': dragOverItem === item.path, 'is-reference': item.reference }"
+                             :draggable="item.type === 'directory' || (item.type === 'file' && !item.reference)"
                              @click="item.type === 'directory' ? navigateToFolder(item.path) : previewWorkspaceFile(item)"
                              @dragstart="onDragFileStart($event, item)"
                              @dragend="onDragFileEnd"
@@ -9967,6 +9967,7 @@
                                 <div class="workspace-file-meta">
                                     <span v-if="item.type === 'file'">{{ formatFileSize(item.size) }}</span>
                                     <span v-if="item.type === 'directory'">文件夹</span>
+                                    <span v-if="item.reference">引用文件</span>
                                 </div>
                             </div>
                             <div class="workspace-file-actions">
@@ -14474,7 +14475,8 @@ def main(params):
                                     type: f.type,
                                     size: f.size,
                                     path: f.path,
-                                    scope: 'shared'
+                                    scope: 'shared',
+                                    reference: !!f.reference
                                 }));
                             }
                         } catch (e) {
@@ -14502,7 +14504,8 @@ def main(params):
                                     type: f.type,
                                     size: f.size,
                                     path: f.path,
-                                    scope: 'private'
+                                    scope: 'private',
+                                    reference: !!f.reference
                                 }));
                             }
                         } catch (e) {
@@ -14739,6 +14742,10 @@ def main(params):
                 },
                 
                 onDragFileStart(event, item) {
+                    if (item.reference) {
+                        event.preventDefault();
+                        return;
+                    }
                     this.draggingFile = item;
                     this.draggingFileScope = item.scope || this.workspaceScope;
                     event.dataTransfer.effectAllowed = 'move';

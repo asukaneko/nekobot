@@ -879,7 +879,7 @@ class WorkspaceManager:
             return {'success': False, 'error': '路径不合法'}
 
         if not os.path.exists(file_path):
-            return {'success': False, 'error': f'文件不存在: {filename}'}
+            return self.delete_file_reference(session_id, filename)
 
         try:
             if os.path.isdir(file_path):
@@ -958,6 +958,22 @@ class WorkspaceManager:
                     })
         except Exception as e:
             return {'success': False, 'error': str(e)}
+
+        if not path:
+            for ref in self._get_file_references(session_id):
+                source_path = ref.get("source_path")
+                if not source_path or not os.path.exists(source_path):
+                    continue
+                files.append({
+                    'name': ref.get('name', os.path.basename(source_path)),
+                    'type': 'file',
+                    'size': ref.get('size', os.path.getsize(source_path)),
+                    'mime_type': ref.get('mime_type', 'application/octet-stream'),
+                    'path': ref.get('path', ref.get('name', '')),
+                    'scope': 'private',
+                    'reference': True,
+                    'reference_kind': ref.get('reference_kind', 'external'),
+                })
 
         return {'success': True, 'files': files, 'count': len(files)}
 
@@ -1071,6 +1087,9 @@ class WorkspaceManager:
 
         if os.path.exists(file_path):
             return file_path
+        ref = self.get_file_reference(session_id, filename)
+        if ref:
+            return ref.get("source_path")
         return None
 
     # ========== 工具方法 ==========
@@ -1090,6 +1109,80 @@ class WorkspaceManager:
             if safe:
                 safe_parts.append(safe)
         return '/'.join(safe_parts) if safe_parts else 'unnamed_file'
+
+    def _get_file_references(self, session_id: str) -> List[Dict[str, Any]]:
+        info = self._meta.get(session_id)
+        if not info:
+            return []
+        refs = info.get("file_references")
+        if isinstance(refs, list):
+            return refs
+        info["file_references"] = []
+        return info["file_references"]
+
+    def register_file_reference(
+        self,
+        session_id: str,
+        source_path: str,
+        display_name: str,
+        *,
+        session_type: str = "web",
+        relative_path: str = "",
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        ws_path = self.get_or_create(session_id, session_type)
+        if not ws_path:
+            return {"success": False, "error": "Workspace not found"}
+
+        normalized_source = os.path.normpath(source_path)
+        if not os.path.exists(normalized_source):
+            return {"success": False, "error": "Source file not found"}
+
+        safe_name = self._safe_filename(display_name)
+        safe_relative = self._safe_filename(relative_path) if relative_path else ""
+        reference_path = f"{safe_relative}/{safe_name}" if safe_relative else safe_name
+
+        refs = self._get_file_references(session_id)
+        refs[:] = [ref for ref in refs if ref.get("path") != reference_path]
+
+        mime_type, _ = mimetypes.guess_type(normalized_source)
+        reference = {
+            "name": safe_name,
+            "path": reference_path,
+            "source_path": normalized_source,
+            "size": os.path.getsize(normalized_source),
+            "mime_type": mime_type or "application/octet-stream",
+            "reference": True,
+            "reference_kind": "external",
+            "created_at": datetime.now().isoformat(),
+        }
+        if metadata:
+            reference["metadata"] = metadata
+
+        refs.append(reference)
+        self._save_meta()
+        return {"success": True, "reference": reference}
+
+    def get_file_reference(
+        self, session_id: str, filename: str
+    ) -> Optional[Dict[str, Any]]:
+        normalized_name = filename.replace("\\", "/")
+        for ref in self._get_file_references(session_id):
+            if ref.get("path") == normalized_name:
+                source_path = ref.get("source_path")
+                if source_path and os.path.exists(source_path):
+                    return ref
+        return None
+
+    def delete_file_reference(self, session_id: str, filename: str) -> Dict[str, Any]:
+        refs = self._get_file_references(session_id)
+        normalized_name = filename.replace("\\", "/")
+        original_count = len(refs)
+        refs[:] = [ref for ref in refs if ref.get("path") != normalized_name]
+        if len(refs) == original_count:
+            return {"success": False, "error": "File not found"}
+        self._save_meta()
+        return {"success": True, "filename": normalized_name, "reference": True}
 
     def get_all_workspaces(self) -> List[Dict[str, Any]]:
         """获取所有工作区信息"""
