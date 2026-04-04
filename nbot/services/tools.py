@@ -477,7 +477,7 @@ class ToolExecutor:
     def search_web(query: str, num_results: int = 3) -> Dict[str, Any]:
         """
         网页搜索
-        使用 DuckDuckGo HTML 搜索（无需 API key），并抓取页面正文获取详细内容
+        使用搜狗搜索（无需 API key），并抓取页面正文获取详细内容
         """
         try:
             import requests
@@ -486,34 +486,49 @@ class ToolExecutor:
 
             _log.info(f"[Search] 发送搜索请求: {query}")
 
-            # DuckDuckGo HTML 搜索
-            search_url = "https://html.duckduckgo.com/html/"
             headers = {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                "Accept-Language": "zh-CN,zh;q=0.9",
             }
 
-            data = {"q": query, "kl": "cn-zh"}
-            response = requests.post(search_url, headers=headers, data=data, timeout=15)
-            response.raise_for_status()
+            # 搜狗搜索
+            search_url = "https://www.sogou.com/web"
+            search_params = {"query": query, "num": str(num_results * 2)}
+            response = requests.get(search_url, headers=headers, params=search_params, timeout=15)
+            response.encoding = 'utf-8'
 
             soup = BeautifulSoup(response.text, 'html.parser')
-            result_divs = soup.find_all('div', class_='result')
+            vrwraps = soup.find_all('div', class_='vrwrap')
 
-            # 第一步：收集搜索结果基本信息
             formatted_results = []
-            for i, result_div in enumerate(result_divs[:num_results]):
+            for i, vr in enumerate(vrwraps):
+                if len(formatted_results) >= num_results:
+                    break
                 try:
-                    title_tag = result_div.find('a', class_='result__a')
-                    if not title_tag:
+                    h3 = vr.find('h3')
+                    if not h3:
                         continue
-                    title = title_tag.get_text(strip=True)
-                    url = title_tag.get('href', '')
-                    snippet_tag = result_div.find('a', class_='result__snippet')
-                    snippet = snippet_tag.get_text(strip=True) if snippet_tag else ""
+                    link_tag = h3.find('a')
+                    if not link_tag:
+                        continue
+                    title = link_tag.get_text(strip=True)
+                    href = link_tag.get('href', '')
+
+                    # 处理搜狗链接：相对路径补全，已有完整 URL 的直接用
+                    if href.startswith('/link'):
+                        href = 'https://www.sogou.com' + href
+
+                    # 摘要：找容器内最长的有意义文本
+                    snippet = ""
+                    for tag in vr.find_all(['p', 'div', 'span']):
+                        text = tag.get_text(strip=True)
+                        if len(text) > len(snippet) and len(text) > 30 and text != title:
+                            snippet = text
+
                     formatted_results.append({
                         "title": title,
-                        "snippet": snippet,
-                        "url": url,
+                        "snippet": snippet[:500],
+                        "url": href,
                         "content": ""
                     })
                 except Exception as e:
@@ -527,19 +542,35 @@ class ToolExecutor:
                     "query": query
                 }
 
-            # 第二步：并发抓取每个页面的正文内容
-            def fetch_page_content(url: str) -> str:
-                """抓取页面并提取正文文本"""
+            # 并发抓取每个页面的正文内容
+            def resolve_sogou_url(url: str) -> str:
+                """解析搜狗跳转链接，提取真实 URL"""
+                if 'sogou.com/link' not in url:
+                    return url
                 try:
-                    resp = requests.get(url, headers=headers, timeout=8, allow_redirects=True)
+                    import re as _re
+                    resp = requests.get(url, headers=headers, timeout=5)
+                    match = _re.search(r'window\.location\.replace\("(.*?)"\)', resp.text)
+                    if match:
+                        return match.group(1)
+                    match = _re.search(r"content=[\"']0;URL='(.*?)'", resp.text)
+                    if match:
+                        return match.group(1)
+                except Exception:
+                    pass
+                return url
+
+            def fetch_page_content(url: str) -> tuple:
+                """抓取页面并提取正文文本，返回 (真实URL, 正文内容)"""
+                try:
+                    real_url = resolve_sogou_url(url)
+                    resp = requests.get(real_url, headers=headers, timeout=8, allow_redirects=True)
                     resp.encoding = resp.apparent_encoding or 'utf-8'
                     page_soup = BeautifulSoup(resp.text, 'html.parser')
 
-                    # 移除无关标签
                     for tag in page_soup.find_all(['script', 'style', 'nav', 'header', 'footer', 'aside', 'iframe', 'noscript']):
                         tag.decompose()
 
-                    # 优先从 article / main 标签提取
                     main_content = page_soup.find('article') or page_soup.find('main') or page_soup.find('div', class_=lambda c: c and ('content' in c or 'article' in c or 'post' in c))
 
                     if main_content:
@@ -547,19 +578,12 @@ class ToolExecutor:
                     else:
                         paragraphs = page_soup.find_all('p')
 
-                    texts = []
-                    for p in paragraphs:
-                        text = p.get_text(strip=True)
-                        if len(text) > 15:  # 过滤太短的段落
-                            texts.append(text)
-
-                    content = '\n'.join(texts)
-                    return content[:1500]  # 每个页面最多1500字
+                    texts = [p.get_text(strip=True) for p in paragraphs if len(p.get_text(strip=True)) > 15]
+                    return (real_url, '\n'.join(texts)[:1500])
                 except Exception as e:
                     _log.warning(f"[Search] 抓取页面失败 {url}: {e}")
-                    return ""
+                    return (url, "")
 
-            # 并发抓取
             with ThreadPoolExecutor(max_workers=num_results) as executor:
                 future_map = {
                     executor.submit(fetch_page_content, r['url']): i
@@ -568,7 +592,9 @@ class ToolExecutor:
                 for future in as_completed(future_map):
                     idx = future_map[future]
                     try:
-                        formatted_results[idx]['content'] = future.result()
+                        real_url, content = future.result()
+                        formatted_results[idx]['url'] = real_url
+                        formatted_results[idx]['content'] = content
                     except Exception:
                         pass
 

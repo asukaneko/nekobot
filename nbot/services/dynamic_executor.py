@@ -193,7 +193,7 @@ class DynamicExecutor:
         }
     
     def _execute_minimax_search(self, implementation: Dict, params: Dict, context: Dict) -> Dict[str, Any]:
-        """执行 Web Search（使用 DuckDuckGo HTML 搜索，无需 API key），并抓取页面正文"""
+        """执行 Web Search（使用搜狗搜索，无需 API key），并抓取页面正文"""
         query = params.get('query', '')
         num_results = params.get('num_results', 3)
 
@@ -205,32 +205,46 @@ class DynamicExecutor:
             from concurrent.futures import ThreadPoolExecutor, as_completed
 
             headers = {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                "Accept-Language": "zh-CN,zh;q=0.9",
             }
 
-            search_url = "https://html.duckduckgo.com/html/"
-            data = {"q": query, "kl": "cn-zh"}
+            search_url = "https://www.sogou.com/web"
+            search_params = {"query": query, "num": str(num_results * 2)}
 
-            response = requests.post(search_url, headers=headers, data=data, timeout=15)
-            response.raise_for_status()
+            response = requests.get(search_url, headers=headers, params=search_params, timeout=15)
+            response.encoding = 'utf-8'
 
             soup = BeautifulSoup(response.text, 'html.parser')
-            result_divs = soup.find_all('div', class_='result')
+            vrwraps = soup.find_all('div', class_='vrwrap')
 
             results = []
-            for result_div in result_divs[:num_results]:
+            for vr in vrwraps:
+                if len(results) >= num_results:
+                    break
                 try:
-                    title_tag = result_div.find('a', class_='result__a')
-                    if not title_tag:
+                    h3 = vr.find('h3')
+                    if not h3:
                         continue
-                    title = title_tag.get_text(strip=True)
-                    url = title_tag.get('href', '')
-                    snippet_tag = result_div.find('a', class_='result__snippet')
-                    snippet = snippet_tag.get_text(strip=True) if snippet_tag else ""
+                    link_tag = h3.find('a')
+                    if not link_tag:
+                        continue
+                    title = link_tag.get_text(strip=True)
+                    href = link_tag.get('href', '')
+
+                    if href.startswith('/link'):
+                        href = 'https://www.sogou.com' + href
+
+                    snippet = ""
+                    for tag in vr.find_all(['p', 'div', 'span']):
+                        text = tag.get_text(strip=True)
+                        if len(text) > len(snippet) and len(text) > 30 and text != title:
+                            snippet = text
+
                     results.append({
                         "title": title,
-                        "snippet": snippet,
-                        "url": url,
+                        "snippet": snippet[:500],
+                        "url": href,
                         "content": ""
                     })
                 except Exception:
@@ -240,9 +254,26 @@ class DynamicExecutor:
                 return {'success': False, 'error': '未找到搜索结果'}
 
             # 并发抓取页面正文
-            def fetch_page_content(url: str) -> str:
+            def resolve_sogou_url(url: str) -> str:
+                if 'sogou.com/link' not in url:
+                    return url
                 try:
-                    resp = requests.get(url, headers=headers, timeout=8, allow_redirects=True)
+                    import re as _re
+                    resp = requests.get(url, headers=headers, timeout=5)
+                    match = _re.search(r'window\.location\.replace\("(.*?)"\)', resp.text)
+                    if match:
+                        return match.group(1)
+                    match = _re.search(r"content=[\"']0;URL='(.*?)'", resp.text)
+                    if match:
+                        return match.group(1)
+                except Exception:
+                    pass
+                return url
+
+            def fetch_page_content(url: str) -> tuple:
+                try:
+                    real_url = resolve_sogou_url(url)
+                    resp = requests.get(real_url, headers=headers, timeout=8, allow_redirects=True)
                     resp.encoding = resp.apparent_encoding or 'utf-8'
                     page_soup = BeautifulSoup(resp.text, 'html.parser')
                     for tag in page_soup.find_all(['script', 'style', 'nav', 'header', 'footer', 'aside', 'iframe', 'noscript']):
@@ -253,9 +284,9 @@ class DynamicExecutor:
                     else:
                         paragraphs = page_soup.find_all('p')
                     texts = [p.get_text(strip=True) for p in paragraphs if len(p.get_text(strip=True)) > 15]
-                    return '\n'.join(texts)[:1500]
+                    return (real_url, '\n'.join(texts)[:1500])
                 except Exception:
-                    return ""
+                    return (url, "")
 
             with ThreadPoolExecutor(max_workers=num_results) as executor:
                 future_map = {
@@ -265,7 +296,9 @@ class DynamicExecutor:
                 for future in as_completed(future_map):
                     idx = future_map[future]
                     try:
-                        results[idx]['content'] = future.result()
+                        real_url, content = future.result()
+                        results[idx]['url'] = real_url
+                        results[idx]['content'] = content
                     except Exception:
                         pass
 
@@ -277,13 +310,13 @@ class DynamicExecutor:
             }
 
         except requests.exceptions.RequestException as e:
-            _log.error(f"DuckDuckGo search request failed: {e}")
+            _log.error(f"Sogou search request failed: {e}")
             return {
                 'success': False,
                 'error': f'搜索请求失败: {str(e)}'
             }
         except Exception as e:
-            _log.error(f"DuckDuckGo search failed: {e}")
+            _log.error(f"Sogou search failed: {e}")
             return {
                 'success': False,
                 'error': f'搜索失败: {str(e)}'
