@@ -122,27 +122,10 @@ def register_knowledge_routes(app, server):
             ), 503
         try:
             km = server.get_knowledge_manager()
-            doc = km.store.load_document(doc_id)
-            if not doc:
-                return jsonify({"success": False, "error": "Document not found"}), 404
-
-            chunk_file = km.store.chunks_dir / f"{doc_id}_0.json"
-            if chunk_file.exists():
-                chunk_file.unlink()
-
-            doc_file = km.store.documents_dir / f"{doc_id}.json"
-            if doc_file.exists():
-                doc_file.unlink()
-
-            for kb_file in km.store.bases_dir.glob("*.json"):
-                with open(kb_file, "r", encoding="utf-8") as f:
-                    kb_data = json.load(f)
-                if doc_id in kb_data.get("documents", []):
-                    kb_data["documents"].remove(doc_id)
-                    with open(kb_file, "w", encoding="utf-8") as f:
-                        json.dump(kb_data, f, ensure_ascii=False, indent=2)
-
-            return jsonify({"success": True})
+            success = km.delete_document("default", doc_id)
+            if success:
+                return jsonify({"success": True})
+            return jsonify({"success": False, "error": "Document not found"}), 404
         except Exception as e:
             return jsonify({"success": False, "error": str(e)}), 500
 
@@ -153,3 +136,64 @@ def register_knowledge_routes(app, server):
                 {"success": False, "error": "Knowledge manager not available"}
             ), 503
         return jsonify({"success": True, "message": "知识库索引会在后台自动处理"})
+
+    @app.route("/api/knowledge/stats")
+    def knowledge_stats():
+        """获取知识库统计信息"""
+        if not getattr(server, "KNOWLEDGE_MANAGER_AVAILABLE", False):
+            return jsonify({"error": "Knowledge manager not available"}), 503
+        try:
+            km = server.get_knowledge_manager()
+            stats = km.get_stats()
+            return jsonify(stats)
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
+
+    @app.route("/api/knowledge/search", methods=["POST"])
+    def search_knowledge():
+        """搜索知识库"""
+        if not getattr(server, "KNOWLEDGE_MANAGER_AVAILABLE", False):
+            return jsonify(
+                {"success": False, "error": "Knowledge manager not available"}
+            ), 503
+        try:
+            data = request.json or {}
+            query = data.get("query", "")
+            top_k = data.get("top_k", 5)
+
+            if not query:
+                return jsonify({"success": False, "error": "Query is required"}), 400
+
+            km = server.get_knowledge_manager()
+            results = km.search(query, top_k=top_k)
+
+            return jsonify({
+                "success": True,
+                "results": [
+                    {
+                        "doc_id": doc.id,
+                        "title": doc.title,
+                        "similarity": round(sim, 4),
+                        "chunk": chunk[:200] + "..." if len(chunk) > 200 else chunk,
+                    }
+                    for doc, sim, chunk in results
+                ]
+            })
+        except Exception as e:
+            _log.error(f"Search failed: {e}")
+            return jsonify({"success": False, "error": str(e)}), 500
+
+    @app.route("/api/knowledge/rebuild", methods=["POST"])
+    def rebuild_knowledge_index():
+        """重建知识库向量索引"""
+        if not getattr(server, "KNOWLEDGE_MANAGER_AVAILABLE", False):
+            return jsonify(
+                {"success": False, "error": "Knowledge manager not available"}
+            ), 503
+        try:
+            km = server.get_knowledge_manager()
+            result = km.rebuild_index()
+            return jsonify(result)
+        except Exception as e:
+            _log.error(f"Rebuild failed: {e}")
+            return jsonify({"success": False, "error": str(e)}), 500

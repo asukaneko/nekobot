@@ -1,6 +1,6 @@
 """
 知识库系统 (RAG - Retrieval Augmented Generation)
-支持用户创建和管理知识库，进行向量检索
+支持用户创建和管理知识库，使用 ChromaDB 进行向量检索
 """
 import os
 import json
@@ -14,6 +14,24 @@ import re
 
 _log = logging.getLogger(__name__)
 
+# 尝试导入 chromadb
+try:
+    import chromadb
+    from chromadb.config import Settings
+    CHROMA_AVAILABLE = True
+except ImportError:
+    chromadb = None
+    CHROMA_AVAILABLE = False
+    _log.warning("chromadb not installed, knowledge base will use simple fallback")
+
+# 尝试导入 httpx 用于 embedding API
+try:
+    import httpx
+    HTTPX_AVAILABLE = True
+except ImportError:
+    httpx = None
+    HTTPX_AVAILABLE = False
+
 
 @dataclass
 class Document:
@@ -24,17 +42,6 @@ class Document:
     source: str = ""
     tags: List[str] = field(default_factory=list)
     created_at: str = field(default_factory=lambda: datetime.now().isoformat())
-    metadata: Dict[str, Any] = field(default_factory=dict)
-
-
-@dataclass
-class Chunk:
-    """文档分块"""
-    id: str
-    document_id: str
-    content: str
-    index: int
-    vector: List[float] = field(default_factory=list)
     metadata: Dict[str, Any] = field(default_factory=dict)
 
 
@@ -72,9 +79,12 @@ class TextProcessor:
             end = start + chunk_size
 
             if end < len(text):
-                newline_pos = text.rfind('\n', start, end)
-                if newline_pos > start:
-                    end = newline_pos
+                # 优先在句号、换行处分块
+                for sep in ['\n\n', '\n', '。', '！', '？', '.', '!', '?']:
+                    pos = text.rfind(sep, start, end)
+                    if pos > start:
+                        end = pos + len(sep)
+                        break
 
             chunk = text[start:end].strip()
             if chunk:
@@ -94,99 +104,166 @@ class TextProcessor:
         return text
 
 
-class SimpleVectorizer:
-    """简单的向量化器 - 基于词频"""
+class EmbeddingService:
+    """Embedding 服务"""
 
-    def __init__(self):
-        self.vocab: Dict[str, int] = {}
-        self.doc_vectors: Dict[str, List[float]] = {}
+    def __init__(self, api_key: str = "", base_url: str = "", model: str = "text-embedding-3-small"):
+        self.api_key = api_key
+        self.base_url = (base_url or "").rstrip("/")
+        self.model = model
+        self._cache: Dict[str, List[float]] = {}
 
-    def _tokenize(self, text: str) -> List[str]:
-        """简单分词"""
-        text = text.lower()
-        words = re.findall(r'[\w]+', text)
-        return words
+    def _get_cache_key(self, text: str) -> str:
+        return hashlib.md5(f"{self.model}:{text}".encode()).hexdigest()
 
-    def _build_vocab(self, documents: List[str]):
-        """构建词表"""
-        vocab = {}
-        for doc in documents:
-            words = self._tokenize(doc)
-            for word in set(words):
-                if word not in vocab:
-                    vocab[word] = len(vocab)
-        self.vocab = vocab
+    def get_embeddings(self, texts: List[str]) -> List[List[float]]:
+        """获取文本的嵌入向量"""
+        if not self.api_key or not self.model:
+            return self._get_fallback_embeddings(texts)
 
-    def _text_to_vector(self, text: str) -> List[float]:
-        """文本转向量"""
-        words = self._tokenize(text)
-        vector = [0.0] * len(self.vocab)
+        results = []
+        uncached_texts = []
+        uncached_indices = []
 
-        for word in words:
-            if word in self.vocab:
-                vector[self.vocab[word]] += 1
+        # 检查缓存
+        for i, text in enumerate(texts):
+            cache_key = self._get_cache_key(text)
+            if cache_key in self._cache:
+                results.append(self._cache[cache_key])
+            else:
+                results.append(None)
+                uncached_texts.append(text)
+                uncached_indices.append(i)
 
+        # 调用 API 获取未缓存的 embedding
+        if uncached_texts:
+            try:
+                new_embeddings = self._call_embedding_api(uncached_texts)
+                for j, emb in enumerate(new_embeddings):
+                    idx = uncached_indices[j]
+                    results[idx] = emb
+                    cache_key = self._get_cache_key(uncached_texts[j])
+                    self._cache[cache_key] = emb
+            except Exception as e:
+                _log.error(f"[Embedding] API call failed: {e}")
+                # 使用 fallback
+                for j, text in enumerate(uncached_texts):
+                    idx = uncached_indices[j]
+                    fallback = self._get_fallback_embedding(text)
+                    results[idx] = fallback
+
+        return results
+
+    def _call_embedding_api(self, texts: List[str]) -> List[List[float]]:
+        """调用 OpenAI 兼容的 embedding API"""
+        if not HTTPX_AVAILABLE:
+            raise RuntimeError("httpx not available")
+
+        # 构建 embedding 端点
+        if "/v1" in self.base_url:
+            url = self.base_url.replace("/chat/completions", "").rstrip("/")
+            if not url.endswith("/embeddings"):
+                url = f"{url}/embeddings"
+        else:
+            url = f"{self.base_url}/v1/embeddings"
+
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json"
+        }
+
+        payload = {
+            "model": self.model,
+            "input": texts,
+            "encoding_format": "float"
+        }
+
+        with httpx.Client(timeout=30.0) as client:
+            response = client.post(url, headers=headers, json=payload)
+            response.raise_for_status()
+            data = response.json()
+
+        embeddings = []
+        for item in sorted(data.get("data", []), key=lambda x: x.get("index", 0)):
+            embeddings.append(item.get("embedding", []))
+
+        return embeddings
+
+    def _get_fallback_embeddings(self, texts: List[str]) -> List[List[float]]:
+        """简化的后备 embedding，基于词频"""
+        return [self._get_fallback_embedding(text) for text in texts]
+
+    def _get_fallback_embedding(self, text: str) -> List[float]:
+        """单个文本的后备 embedding"""
+        # 使用简单的哈希向量化
+        words = re.findall(r'[\w]+', text.lower())
+        vector = [0.0] * 256
+
+        for word in set(words):
+            hash_val = int(hashlib.md5(word.encode()).hexdigest()[:8], 16)
+            idx = hash_val % 256
+            vector[idx] += 1.0
+
+        # 归一化
         norm = sum(v * v for v in vector) ** 0.5
         if norm > 0:
             vector = [v / norm for v in vector]
 
         return vector
 
-    def fit_transform(self, documents: List[str], doc_ids: List[str]) -> Dict[str, List[float]]:
-        """拟合并转换"""
-        self._build_vocab(documents)
 
-        vectors = {}
-        for doc_id, doc in zip(doc_ids, documents):
-            vectors[doc_id] = self._text_to_vector(doc)
-
-        self.doc_vectors = vectors
-        return vectors
-
-    def transform(self, text: str) -> List[float]:
-        """转换单个文本"""
-        return self._text_to_vector(text)
-
-    @staticmethod
-    def cosine_similarity(vec1: List[float], vec2: List[float]) -> float:
-        """计算余弦相似度"""
-        if not vec1 or not vec2:
-            return 0.0
-
-        dot = sum(a * b for a, b in zip(vec1, vec2))
-        norm1 = sum(a * a for a in vec1) ** 0.5
-        norm2 = sum(b * b for b in vec2) ** 0.5
-
-        if norm1 == 0 or norm2 == 0:
-            return 0.0
-
-        return dot / (norm1 * norm2)
-
-
-class KnowledgeBaseStore:
-    """知识库存储"""
+class ChromaKnowledgeStore:
+    """基于 ChromaDB 的知识库存储"""
 
     def __init__(self, base_dir: str = "saved_message/knowledge"):
         self.base_dir = Path(base_dir)
         self.bases_dir = self.base_dir / "bases"
         self.documents_dir = self.base_dir / "documents"
-        self.chunks_dir = self.base_dir / "chunks"
 
         self.bases_dir.mkdir(parents=True, exist_ok=True)
         self.documents_dir.mkdir(parents=True, exist_ok=True)
-        self.chunks_dir.mkdir(parents=True, exist_ok=True)
+
+        self._chroma_client = None
+        self._embedding_service: Optional[EmbeddingService] = None
 
     def _get_base_file(self, base_id: str) -> Path:
         return self.bases_dir / f"{base_id}.json"
 
     def _get_doc_file(self, doc_id: str) -> Path:
+
         return self.documents_dir / f"{doc_id}.json"
 
-    def _get_chunk_file(self, chunk_id: str) -> Path:
-        return self.chunks_dir / f"{chunk_id}.json"
+    def _get_chroma_client(self):
+        """获取 ChromaDB 客户端"""
+        if self._chroma_client is None and CHROMA_AVAILABLE:
+            chroma_path = self.base_dir / "chroma"
+            chroma_path.mkdir(parents=True, exist_ok=True)
+            self._chroma_client = chromadb.PersistentClient(
+                path=str(chroma_path),
+                settings=Settings(anonymized_telemetry=False)
+            )
+        return self._chroma_client
+
+    def _get_collection(self, base_id: str):
+        """获取或创建指定知识库的 collection"""
+        client = self._get_chroma_client()
+        if client is None:
+            return None
+        try:
+            return client.get_or_create_collection(
+                name=f"kb_{base_id}",
+                metadata={"hnsw:space": "cosine"}
+            )
+        except Exception as e:
+            _log.error(f"[Chroma] Failed to get collection: {e}")
+            return None
+
+    def set_embedding_service(self, service: EmbeddingService):
+        """设置 embedding 服务"""
+        self._embedding_service = service
 
     def save_base(self, base: KnowledgeBase):
-        """保存知识库"""
+        """保存知识库元数据"""
         file_path = self._get_base_file(base.id)
         with open(file_path, "w", encoding="utf-8") as f:
             json.dump({
@@ -202,7 +279,7 @@ class KnowledgeBaseStore:
             }, f, ensure_ascii=False, indent=2)
 
     def load_base(self, base_id: str) -> Optional[KnowledgeBase]:
-        """加载知识库"""
+        """加载知识库元数据"""
         file_path = self._get_base_file(base_id)
         if not file_path.exists():
             return None
@@ -213,20 +290,29 @@ class KnowledgeBaseStore:
 
     def delete_base(self, base_id: str) -> bool:
         """删除知识库"""
+        # 删除元数据文件
         file_path = self._get_base_file(base_id)
         if file_path.exists():
             file_path.unlink()
-            return True
-        return False
+
+        # 删除 ChromaDB collection
+        client = self._get_chroma_client()
+        if client:
+            try:
+                client.delete_collection(f"kb_{base_id}")
+            except Exception:
+                pass
+
+        return True
 
     def save_document(self, doc: Document):
-        """保存文档"""
+        """保存文档元数据"""
         file_path = self._get_doc_file(doc.id)
         with open(file_path, "w", encoding="utf-8") as f:
             json.dump(doc.__dict__, f, ensure_ascii=False, indent=2)
 
     def load_document(self, doc_id: str) -> Optional[Document]:
-        """加载文档"""
+        """加载文档元数据"""
         file_path = self._get_doc_file(doc_id)
         if not file_path.exists():
             return None
@@ -235,29 +321,108 @@ class KnowledgeBaseStore:
             data = json.load(f)
             return Document(**data)
 
-    def save_chunk(self, chunk: Chunk):
-        """保存分块"""
-        file_path = self._get_chunk_file(chunk.id)
-        with open(file_path, "w", encoding="utf-8") as f:
-            json.dump(chunk.__dict__, f, ensure_ascii=False, indent=2)
+    def add_chunks_to_chroma(self, base_id: str, doc_id: str, chunks: List[str]):
+        """将文档分块添加到 ChromaDB"""
+        if not CHROMA_AVAILABLE:
+            return
 
-    def load_chunk(self, chunk_id: str) -> Optional[Chunk]:
-        """加载分块"""
-        file_path = self._get_chunk_file(chunk_id)
-        if not file_path.exists():
-            return None
+        collection = self._get_collection(base_id)
+        if collection is None:
+            return
 
-        with open(file_path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-            return Chunk(**data)
+        # 获取 embeddings
+        if self._embedding_service:
+            embeddings = self._embedding_service.get_embeddings(chunks)
+        else:
+            embeddings = [None] * len(chunks)
+
+        # 添加到 collection
+        ids = [f"{doc_id}_{i}" for i in range(len(chunks))]
+        metadatas = [{"doc_id": doc_id, "chunk_index": i} for i in range(len(chunks))]
+
+        try:
+            if embeddings and embeddings[0]:
+                collection.add(
+                    ids=ids,
+                    documents=chunks,
+                    embeddings=embeddings,
+                    metadatas=metadatas
+                )
+            else:
+                # 让 ChromaDB 使用默认 embedding
+                collection.add(
+                    ids=ids,
+                    documents=chunks,
+                    metadatas=metadatas
+                )
+        except Exception as e:
+            _log.error(f"[Chroma] Failed to add chunks: {e}")
+
+    def search_chunks(self, base_id: str, query: str, top_k: int = 5) -> List[Tuple[str, float, Dict]]:
+        """搜索相关分块"""
+        if not CHROMA_AVAILABLE:
+            return []
+
+        collection = self._get_collection(base_id)
+        if collection is None:
+            return []
+
+        try:
+            # 获取查询的 embedding
+            if self._embedding_service:
+                query_embedding = self._embedding_service.get_embeddings([query])[0]
+                results = collection.query(
+                    query_embeddings=[query_embedding],
+                    n_results=top_k,
+                    include=["documents", "distances", "metadatas"]
+                )
+            else:
+                results = collection.query(
+                    query_texts=[query],
+                    n_results=top_k,
+                    include=["documents", "distances", "metadatas"]
+                )
+
+            # 格式化结果
+            formatted = []
+            if results and results.get("documents"):
+                for i, doc in enumerate(results["documents"][0]):
+                    distance = results["distances"][0][i] if results.get("distances") else 0
+                    metadata = results["metadatas"][0][i] if results.get("metadatas") else {}
+                    # 转换距离为相似度 (cosine distance -> similarity)
+                    similarity = 1.0 - distance
+                    formatted.append((doc, similarity, metadata))
+
+            return formatted
+        except Exception as e:
+            _log.error(f"[Chroma] Search failed: {e}")
+            return []
+
+    def delete_document_chunks(self, base_id: str, doc_id: str):
+        """删除文档的所有分块"""
+        if not CHROMA_AVAILABLE:
+            return
+
+        collection = self._get_collection(base_id)
+        if collection is None:
+            return
+
+        try:
+            # 查询该文档的所有 chunk id
+            results = collection.get(
+                where={"doc_id": doc_id}
+            )
+            if results and results.get("ids"):
+                collection.delete(ids=results["ids"])
+        except Exception as e:
+            _log.warning(f"[Chroma] Failed to delete document chunks: {e}")
 
 
 class KnowledgeManager:
     """知识库管理器"""
 
     def __init__(self):
-        self.store = KnowledgeBaseStore()
-        self.vectorizer = SimpleVectorizer()
+        self.store = ChromaKnowledgeStore()
         self._init_default_knowledge()
 
     def _init_default_knowledge(self):
@@ -275,6 +440,16 @@ class KnowledgeManager:
     def _generate_id(self, text: str) -> str:
         """生成ID"""
         return hashlib.md5(text.encode()).hexdigest()[:16]
+
+    def configure_embedding(self, api_key: str, base_url: str, model: str):
+        """配置 embedding 服务"""
+        if model:
+            service = EmbeddingService(api_key=api_key, base_url=base_url, model=model)
+            self.store.set_embedding_service(service)
+            _log.info(f"[Knowledge] Embedding service configured: model={model}")
+        else:
+            self.store.set_embedding_service(None)
+            _log.info("[Knowledge] Embedding service disabled")
 
     def create_knowledge_base(
         self,
@@ -298,7 +473,7 @@ class KnowledgeManager:
         )
 
         self.store.save_base(kb)
-        _log.info(f"Created knowledge base: {kb_id}")
+        _log.info(f"[Knowledge] Created knowledge base: {kb_id}")
 
         return kb
 
@@ -315,7 +490,7 @@ class KnowledgeManager:
         if not kb:
             raise ValueError(f"Knowledge base not found: {base_id}")
 
-        doc_id = self._generate_id(content)
+        doc_id = self._generate_id(f"{title}_{content[:100]}_{datetime.now().isoformat()}")
 
         doc = Document(
             id=doc_id,
@@ -327,24 +502,40 @@ class KnowledgeManager:
 
         self.store.save_document(doc)
 
+        # 分块并添加到 ChromaDB
         chunks = TextProcessor.chunk_text(content)
-        for i, chunk_content in enumerate(chunks):
-            chunk_id = f"{doc_id}_{i}"
-            chunk = Chunk(
-                id=chunk_id,
-                document_id=doc_id,
-                content=chunk_content,
-                index=i
-            )
-            self.store.save_chunk(chunk)
+        self.store.add_chunks_to_chroma(base_id, doc_id, chunks)
 
+        # 更新知识库元数据
         kb.documents.append(doc_id)
         kb.updated_at = datetime.now().isoformat()
         self.store.save_base(kb)
 
-        _log.info(f"Added document to base {base_id}: {doc_id}")
+        _log.info(f"[Knowledge] Added document to base {base_id}: {doc_id} ({len(chunks)} chunks)")
 
         return doc
+
+    def delete_document(self, base_id: str, doc_id: str) -> bool:
+        """从知识库删除文档"""
+        kb = self.store.load_base(base_id)
+        if not kb:
+            return False
+
+        # 从元数据中移除
+        if doc_id in kb.documents:
+            kb.documents.remove(doc_id)
+            kb.updated_at = datetime.now().isoformat()
+            self.store.save_base(kb)
+
+        # 删除 ChromaDB 中的分块
+        self.store.delete_document_chunks(base_id, doc_id)
+
+        # 删除文档文件
+        doc_file = self.store._get_doc_file(doc_id)
+        if doc_file.exists():
+            doc_file.unlink()
+
+        return True
 
     def search(
         self,
@@ -353,57 +544,38 @@ class KnowledgeManager:
         top_k: int = 3
     ) -> List[Tuple[Document, float, str]]:
         """检索知识库"""
+        # 确定要搜索的知识库
         if base_id:
-            bases = [self.store.load_base(base_id)] if self.store.load_base(base_id) else []
+            kb = self.store.load_base(base_id)
+            bases = [kb] if kb else []
         else:
-            bases = [self.store.load_base("default")]
+            kb = self.store.load_base("default")
+            bases = [kb] if kb else []
 
-        all_chunks = []
+        all_results = []
+        seen_docs = set()
+
         for kb in bases:
             if not kb:
                 continue
-            for doc_id in kb.documents:
-                doc = self.store.load_document(doc_id)
-                if not doc:
+
+            # 从 ChromaDB 搜索
+            chunk_results = self.store.search_chunks(kb.id, query, top_k=top_k * 2)
+
+            for chunk_content, similarity, metadata in chunk_results:
+                doc_id = metadata.get("doc_id", "")
+                if not doc_id or doc_id in seen_docs:
                     continue
 
-                chunks = []
-                for i in range(len(TextProcessor.chunk_text(doc.content))):
-                    chunk_id = f"{doc_id}_{i}"
-                    chunk = self.store.load_chunk(chunk_id)
-                    if chunk:
-                        chunks.append((chunk, doc))
+                doc = self.store.load_document(doc_id)
+                if doc:
+                    seen_docs.add(doc_id)
+                    all_results.append((doc, similarity, chunk_content))
 
-                all_chunks.extend(chunks)
+        # 按相似度排序
+        all_results.sort(key=lambda x: x[1], reverse=True)
 
-        if not all_chunks:
-            return []
-
-        chunk_texts = [c[0].content for c in all_chunks]
-        chunk_ids = [c[0].id for c in all_chunks]
-
-        self.vectorizer.fit_transform(chunk_texts, chunk_ids)
-
-        query_vector = self.vectorizer.transform(query)
-
-        results = []
-        for chunk, doc in all_chunks:
-            if not chunk.vector:
-                chunk.vector = self.vectorizer.transform(chunk.content)
-
-            sim = SimpleVectorizer.cosine_similarity(query_vector, chunk.vector)
-            results.append((doc, sim, chunk.content))
-
-        results.sort(key=lambda x: x[1], reverse=True)
-
-        unique_results = []
-        seen_docs = set()
-        for doc, sim, chunk in results:
-            if doc.id not in seen_docs:
-                seen_docs.add(doc.id)
-                unique_results.append((doc, sim, chunk))
-
-        return unique_results[:top_k]
+        return all_results[:top_k]
 
     def list_knowledge_bases(
         self,
@@ -416,19 +588,147 @@ class KnowledgeManager:
 
         bases = []
         for file in self.store.bases_dir.glob("*.json"):
-            with open(file, "r", encoding="utf-8") as f:
-                data = json.load(f)
-                kb = KnowledgeBase(**data)
-                if kb.owner_id == owner_id or kb.owner_type == "system":
-                    bases.append(kb)
+            try:
+                with open(file, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    kb = KnowledgeBase(**data)
+                    if kb.owner_id == owner_id or kb.owner_type == "system":
+                        bases.append(kb)
+            except Exception:
+                continue
 
         return bases
 
     def delete_knowledge_base(self, base_id: str) -> bool:
         """删除知识库"""
+        kb = self.store.load_base(base_id)
+        if not kb:
+            return False
+
+        # 删除所有文档
+        for doc_id in kb.documents:
+            doc_file = self.store._get_doc_file(doc_id)
+            if doc_file.exists():
+                doc_file.unlink()
+
+        # 删除知识库（包括 ChromaDB collection）
         return self.store.delete_base(base_id)
 
+    def get_stats(self, base_id: str = None) -> Dict[str, Any]:
+        """获取知识库统计信息"""
+        if base_id:
+            kb = self.store.load_base(base_id)
+            bases = [kb] if kb else []
+        else:
+            bases = []
+            for file in self.store.bases_dir.glob("*.json"):
+                try:
+                    with open(file, "r", encoding="utf-8") as f:
+                        data = json.load(f)
+                        bases.append(KnowledgeBase(**data))
+                except Exception:
+                    continue
 
+        total_docs = 0
+        total_bases = len(bases)
+
+        for kb in bases:
+            total_docs += len(kb.documents)
+
+        return {
+            "total_bases": total_bases,
+            "total_documents": total_docs,
+            "chroma_available": CHROMA_AVAILABLE
+        }
+
+    def rebuild_index(self, base_id: str = None) -> Dict[str, Any]:
+        """
+        重建知识库的向量索引
+        用于迁移旧数据或修复损坏的索引
+        """
+        if not CHROMA_AVAILABLE:
+            return {"success": False, "error": "ChromaDB not available"}
+
+        if base_id:
+            kb = self.store.load_base(base_id)
+            bases = [kb] if kb else []
+        else:
+            # 重建所有知识库
+            bases = []
+            for file in self.store.bases_dir.glob("*.json"):
+                try:
+                    with open(file, "r", encoding="utf-8") as f:
+                        data = json.load(f)
+                        bases.append(KnowledgeBase(**data))
+                except Exception:
+                    continue
+
+        rebuilt_docs = 0
+        rebuilt_chunks = 0
+
+        for kb in bases:
+            if not kb:
+                continue
+
+            _log.info(f"[Knowledge] Rebuilding index for: {kb.name}")
+
+            for doc_id in kb.documents:
+                doc = self.store.load_document(doc_id)
+                if not doc:
+                    continue
+
+                # 先删除旧的索引
+                self.store.delete_document_chunks(kb.id, doc_id)
+
+                # 重新分块并索引
+                chunks = TextProcessor.chunk_text(doc.content)
+                self.store.add_chunks_to_chroma(kb.id, doc_id, chunks)
+
+                rebuilt_docs += 1
+                rebuilt_chunks += len(chunks)
+
+        _log.info(f"[Knowledge] Rebuild complete: {rebuilt_docs} docs, {rebuilt_chunks} chunks")
+
+        return {
+            "success": True,
+            "rebuilt_documents": rebuilt_docs,
+            "rebuilt_chunks": rebuilt_chunks
+        }
+
+    def check_and_rebuild_if_needed(self) -> bool:
+        """
+        检查是否需要重建索引，如果需要则自动重建
+        返回是否执行了重建
+        """
+        if not CHROMA_AVAILABLE:
+            return False
+
+        try:
+            # 获取默认知识库
+            kb = self.store.load_base("default")
+            if not kb or not kb.documents:
+                return False
+
+            # 检查 ChromaDB 中是否有数据
+            collection = self.store._get_collection("default")
+            if collection is None:
+                return False
+
+            existing_count = collection.count()
+
+            # 如果文档数不一致，需要重建
+            if existing_count == 0 and len(kb.documents) > 0:
+                _log.info(f"[Knowledge] Detected {len(kb.documents)} docs without vector index, rebuilding...")
+                self.rebuild_index("default")
+                return True
+
+            return False
+        except Exception as e:
+            _log.warning(f"[Knowledge] Check rebuild failed: {e}")
+            return False
+
+
+# 全局单例
 knowledge_manager: Optional[KnowledgeManager] = None
 
 
@@ -438,3 +738,9 @@ def get_knowledge_manager() -> KnowledgeManager:
     if knowledge_manager is None:
         knowledge_manager = KnowledgeManager()
     return knowledge_manager
+
+
+def configure_knowledge_embedding(api_key: str, base_url: str, model: str):
+    """配置知识库的 embedding 服务（快捷方法）"""
+    km = get_knowledge_manager()
+    km.configure_embedding(api_key=api_key, base_url=base_url, model=model)

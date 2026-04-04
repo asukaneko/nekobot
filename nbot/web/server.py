@@ -249,11 +249,12 @@ except ImportError:
 
 # 导入知识库管理器
 try:
-    from nbot.core.knowledge import get_knowledge_manager
+    from nbot.core.knowledge import get_knowledge_manager, configure_knowledge_embedding
 
     KNOWLEDGE_MANAGER_AVAILABLE = True
 except ImportError:
     get_knowledge_manager = None
+    configure_knowledge_embedding = None
     KNOWLEDGE_MANAGER_AVAILABLE = False
     _log.warning("Knowledge manager not available")
 
@@ -519,6 +520,8 @@ class WebChatServer:
                     self._initialize_ai_client()
                 self._init_workflow_scheduler()
                 self._init_custom_task_scheduler()
+                # 检查并重建知识库索引（如有需要）
+                self._check_knowledge_index()
                 self.startup_ready = True
                 _log.info("Web server background initialization completed")
             except Exception as e:
@@ -814,7 +817,7 @@ class WebChatServer:
             results = km.search(query, base_id=None, top_k=max_docs)
 
             # 方法2: 关键词匹配（当向量检索无结果时使用）
-            if not results or all(sim < 0.1 for _, sim, _ in results):
+            if not results or all(sim < 0.3 for _, sim, _ in results):
                 _log.info("[Knowledge] 向量检索无结果，尝试关键词匹配...")
                 results = self._keyword_search(km, query, max_docs)
 
@@ -1060,7 +1063,19 @@ class WebChatServer:
                         "supports_stream": model.get("supports_stream", True),
                     }
                 )
+                # 配置知识库 embedding 服务
+                embedding_model = model.get("embedding_model", "")
+                if configure_knowledge_embedding and embedding_model:
+                    try:
+                        configure_knowledge_embedding(
+                            api_key=self.ai_api_key,
+                            base_url=self.ai_base_url,
+                            model=embedding_model
+                        )
+                    except Exception as e:
+                        _log.warning(f"Failed to configure knowledge embedding: {e}")
                 self._save_data("ai_models")
+                return True
                 return True
 
             # 重新初始化AI客户端
@@ -1115,6 +1130,17 @@ class WebChatServer:
         except Exception as e:
             _log.error(f"Failed to apply AI model: {e}")
             return False
+
+    def _check_knowledge_index(self):
+        """检查知识库索引状态，如有需要自动重建"""
+        if not KNOWLEDGE_MANAGER_AVAILABLE:
+            return
+        try:
+            km = get_knowledge_manager()
+            if km:
+                km.check_and_rebuild_if_needed()
+        except Exception as e:
+            _log.warning(f"Failed to check knowledge index: {e}")
 
     def _init_workflow_scheduler(self):
         """初始化工作流调度器"""
