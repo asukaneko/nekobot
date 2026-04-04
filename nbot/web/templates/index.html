@@ -3568,6 +3568,8 @@
             cursor: pointer;
             transition: background 0.2s;
             max-width: 280px;
+            position: relative;
+            padding-right: 52px;
         }
 
         .message.assistant .attachment-card {
@@ -3648,6 +3650,41 @@
             height: 80px;
             object-fit: cover;
             border-radius: 6px;
+        }
+
+        .attachment-actions {
+            position: absolute;
+            top: 50%;
+            right: 8px;
+            display: flex;
+            gap: 6px;
+            z-index: 2;
+            transform: translateY(-50%);
+        }
+
+        .attachment-action-btn {
+            width: 30px;
+            height: 30px;
+            border: 1px solid rgba(255, 255, 255, 0.16);
+            border-radius: 8px;
+            background: rgba(15, 23, 42, 0.78);
+            color: #f8fafc;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: background 0.18s ease, transform 0.18s ease, border-color 0.18s ease;
+            backdrop-filter: blur(8px);
+        }
+
+        .attachment-action-btn:hover {
+            background: rgba(37, 99, 235, 0.92);
+            border-color: rgba(96, 165, 250, 0.55);
+            transform: translateY(-1px);
+        }
+
+        .attachment-action-btn i {
+            font-size: 12px;
         }
         
         /* 文件预览模态框 */
@@ -7087,6 +7124,15 @@
                                                 <!-- 用户上传的附件 -->
                                                 <div v-if="msg.attachments && msg.attachments.length > 0" class="message-attachments">
                                                     <div v-for="(att, idx) in msg.attachments" :key="idx" class="attachment-card" @click="previewAttachment(att)">
+                                                        <div class="attachment-actions">
+                                                            <button
+                                                                class="attachment-action-btn"
+                                                                @click.stop="downloadFile({ ...att, filename: att.name })"
+                                                                title="下载文件"
+                                                            >
+                                                                <i class="fas fa-download"></i>
+                                                            </button>
+                                                        </div>
                                                         <img v-if="att.type && att.type.startsWith('image/')" :src="att.url || att.data || att.preview" class="attachment-preview" @error="handleImageError">
                                                         <div v-else class="attachment-icon" :class="getAttachmentIconClass(att.type)">
                                                             <i :class="getAttachmentIcon(att.type)"></i>
@@ -7100,6 +7146,15 @@
                                                 <!-- 机器人发送的文件 -->
                                                 <div v-if="msg.file" class="message-attachments">
                                                     <div class="attachment-card" @click.stop="msg.session_id && msg.file.name ? previewFile(msg) : downloadFile(msg.file)">
+                                                        <div class="attachment-actions">
+                                                            <button
+                                                                class="attachment-action-btn"
+                                                                @click.stop="downloadFile({ ...msg.file, filename: msg.file.name, sessionId: msg.session_id })"
+                                                                title="下载文件"
+                                                            >
+                                                                <i class="fas fa-download"></i>
+                                                            </button>
+                                                        </div>
                                                         <!-- 图片直接显示 -->
                                                         <img v-if="msg.file.is_image" :src="msg.file.data || msg.file.url || msg.file.preview" class="attachment-preview" style="max-width: 200px; max-height: 150px; object-fit: cover;" @error="handleImageError">
                                                         <!-- 文本文件显示预览 -->
