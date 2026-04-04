@@ -334,29 +334,35 @@ class ChromaKnowledgeStore:
         if self._embedding_service:
             embeddings = self._embedding_service.get_embeddings(chunks)
         else:
-            embeddings = [None] * len(chunks)
+            # 使用本地简单向量化，避免下载 ONNX 模型
+            embeddings = [self._local_embedding(text) for text in chunks]
 
         # 添加到 collection
         ids = [f"{doc_id}_{i}" for i in range(len(chunks))]
         metadatas = [{"doc_id": doc_id, "chunk_index": i} for i in range(len(chunks))]
 
         try:
-            if embeddings and embeddings[0]:
-                collection.add(
-                    ids=ids,
-                    documents=chunks,
-                    embeddings=embeddings,
-                    metadatas=metadatas
-                )
-            else:
-                # 让 ChromaDB 使用默认 embedding
-                collection.add(
-                    ids=ids,
-                    documents=chunks,
-                    metadatas=metadatas
-                )
+            collection.add(
+                ids=ids,
+                documents=chunks,
+                embeddings=embeddings,
+                metadatas=metadatas
+            )
         except Exception as e:
             _log.error(f"[Chroma] Failed to add chunks: {e}")
+
+    def _local_embedding(self, text: str) -> List[float]:
+        """本地简单向量化（不依赖外部模型）"""
+        words = re.findall(r'[\w]+', text.lower())
+        vector = [0.0] * 256
+        for word in set(words):
+            hash_val = int(hashlib.md5(word.encode()).hexdigest()[:8], 16)
+            idx = hash_val % 256
+            vector[idx] += 1.0
+        norm = sum(v * v for v in vector) ** 0.5
+        if norm > 0:
+            vector = [v / norm for v in vector]
+        return vector
 
     def search_chunks(self, base_id: str, query: str, top_k: int = 5) -> List[Tuple[str, float, Dict]]:
         """搜索相关分块"""
@@ -371,17 +377,13 @@ class ChromaKnowledgeStore:
             # 获取查询的 embedding
             if self._embedding_service:
                 query_embedding = self._embedding_service.get_embeddings([query])[0]
-                results = collection.query(
-                    query_embeddings=[query_embedding],
-                    n_results=top_k,
-                    include=["documents", "distances", "metadatas"]
-                )
             else:
-                results = collection.query(
-                    query_texts=[query],
-                    n_results=top_k,
-                    include=["documents", "distances", "metadatas"]
-                )
+                query_embedding = self._local_embedding(query)
+            results = collection.query(
+                query_embeddings=[query_embedding],
+                n_results=top_k,
+                include=["documents", "distances", "metadatas"]
+            )
 
             # 格式化结果
             formatted = []
