@@ -33,7 +33,32 @@ def resolve_runtime_api_key(configured_api_key: str = "", provider: str = "") ->
             or os.getenv("API_KEY")
             or configured_api_key
         )
-    return os.getenv("API_KEY") or configured_api_key
+    if provider_name in {"siliconflow", "silicon"}:
+        return (
+            os.getenv("SILICON_API_KEY")
+            or configured_api_key
+            or os.getenv("API_KEY")
+        )
+    if provider_name in {"anthropic", "claude"}:
+        return (
+            os.getenv("ANTHROPIC_API_KEY")
+            or configured_api_key
+            or os.getenv("API_KEY")
+        )
+    if provider_name in {"google", "gemini"}:
+        return (
+            os.getenv("GEMINI_API_KEY")
+            or os.getenv("GOOGLE_API_KEY")
+            or configured_api_key
+            or os.getenv("API_KEY")
+        )
+    if provider_name in {"openai", "openai_compatible", "custom", "deepseek"}:
+        return (
+            os.getenv("OPENAI_API_KEY")
+            or configured_api_key
+            or os.getenv("API_KEY")
+        )
+    return configured_api_key or os.getenv("API_KEY")
 
 
 def _load_shared_web_ai_config() -> dict:

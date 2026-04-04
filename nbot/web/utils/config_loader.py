@@ -27,7 +27,32 @@ def resolve_runtime_api_key(configured_api_key: str = "", provider_type: str = "
     provider = (provider_type or "").strip().lower()
     if provider == "minimax":
         return os.getenv("MINIMAX_API_KEY") or os.getenv("API_KEY") or configured_api_key
-    return os.getenv("API_KEY") or configured_api_key
+    if provider in {"siliconflow", "silicon"}:
+        return (
+            os.getenv("SILICON_API_KEY")
+            or configured_api_key
+            or os.getenv("API_KEY")
+        )
+    if provider in {"anthropic", "claude"}:
+        return (
+            os.getenv("ANTHROPIC_API_KEY")
+            or configured_api_key
+            or os.getenv("API_KEY")
+        )
+    if provider in {"google", "gemini"}:
+        return (
+            os.getenv("GEMINI_API_KEY")
+            or os.getenv("GOOGLE_API_KEY")
+            or configured_api_key
+            or os.getenv("API_KEY")
+        )
+    if provider in {"openai", "openai_compatible", "custom", "deepseek"}:
+        return (
+            os.getenv("OPENAI_API_KEY")
+            or configured_api_key
+            or os.getenv("API_KEY")
+        )
+    return configured_api_key or os.getenv("API_KEY")
 
 
 def load_config():
