@@ -4008,6 +4008,15 @@
             background: white;
         }
 
+        .html-preview-frame {
+            width: 100%;
+            height: 100%;
+            min-height: 70vh;
+            border: none;
+            background: white;
+            display: block;
+        }
+
         .chat-input-area {
             padding: 16px 20px;
             border-top: 1px solid var(--border-color);
@@ -15034,6 +15043,10 @@ def main(params):
                             this.filePreviewData = {
                                 ...this.filePreviewData,
                                 ...res.data,
+                                filename: originalFilename || this.filePreviewData.filename,
+                                safe_name: safeName,
+                                url: res.data.url || `/static/files/${encodeURIComponent(safeName)}`,
+                                download_url: res.data.download_url || `/static/files/${encodeURIComponent(safeName)}`,
                                 loading: false
                             };
                             
@@ -15044,6 +15057,10 @@ def main(params):
                                     if (img) {
                                         img.src = res.data.url;
                                     }
+                                });
+                            } else if (this.isHtmlFile(originalFilename || this.filePreviewData.filename)) {
+                                this.$nextTick(() => {
+                                    this.renderHtml(res.data.content || '');
                                 });
                             }
                         } else {
@@ -15462,7 +15479,12 @@ def main(params):
                             this.filePreviewData.error = '预览容器未就绪，请重试';
                             return;
                         }
-                        container.innerHTML = content;
+                        container.innerHTML = '';
+                        const iframe = document.createElement('iframe');
+                        iframe.className = 'html-preview-frame';
+                        iframe.setAttribute('sandbox', 'allow-same-origin allow-scripts allow-popups allow-forms');
+                        iframe.srcdoc = content;
+                        container.appendChild(iframe);
                     });
                 },
                 
@@ -15497,7 +15519,7 @@ def main(params):
                 
                 downloadFile(fileData) {
                     console.log('downloadFile called:', JSON.stringify(fileData));
-                    // 优先级：blob缓存 > download_url > url > path > content > 其他
+                    // 优先级：blob缓存 > download_url > url > path > session文件下载 > content兜底
                     
                     // 1. 优先使用缓存的 blob 数据
                     if (fileData && fileData.blob) {
@@ -15578,21 +15600,7 @@ def main(params):
                         return;
                     }
                     
-                    // 5. content → Blob 下载
-                    if (fileData && fileData.content) {
-                        const blob = new Blob([fileData.content], { type: 'text/plain;charset=utf-8' });
-                        const url = window.URL.createObjectURL(blob);
-                        const link = document.createElement('a');
-                        link.href = url;
-                        link.download = fileData.filename || fileData.name || 'download.txt';
-                        document.body.appendChild(link);
-                        link.click();
-                        document.body.removeChild(link);
-                        window.URL.revokeObjectURL(url);
-                        return;
-                    }
-                    
-                    // 6. 其他情况：尝试用 sessionId + filename
+                    // 5. 其他情况：优先尝试用 sessionId + filename 下载原始文件
                     if (fileData && fileData.sessionId && fileData.filename) {
                         const filename = encodeURIComponent(fileData.filename);
                         const originalFilename = fileData.filename;
@@ -15611,8 +15619,35 @@ def main(params):
                             })
                             .catch(e => {
                                 console.error('下载失败:', e);
-                                this.showToast('下载失败', 'error');
+                                // 只有原始文件下载失败时，才退回预览内容下载
+                                if (fileData.content) {
+                                    const blob = new Blob([fileData.content], { type: 'text/plain;charset=utf-8' });
+                                    const blobUrl = window.URL.createObjectURL(blob);
+                                    const link = document.createElement('a');
+                                    link.href = blobUrl;
+                                    link.download = fileData.filename || fileData.name || 'download.txt';
+                                    document.body.appendChild(link);
+                                    link.click();
+                                    document.body.removeChild(link);
+                                    window.URL.revokeObjectURL(blobUrl);
+                                } else {
+                                    this.showToast('下载失败', 'error');
+                                }
                             });
+                        return;
+                    }
+
+                    // 6. 最后兜底：仅当拿不到真实文件时，才用预览内容下载
+                    if (fileData && fileData.content) {
+                        const blob = new Blob([fileData.content], { type: 'text/plain;charset=utf-8' });
+                        const url = window.URL.createObjectURL(blob);
+                        const link = document.createElement('a');
+                        link.href = url;
+                        link.download = fileData.filename || fileData.name || 'download.txt';
+                        document.body.appendChild(link);
+                        link.click();
+                        document.body.removeChild(link);
+                        window.URL.revokeObjectURL(url);
                         return;
                     }
                     
@@ -17646,11 +17681,33 @@ def main(params):
                 },
                 
                 async previewUserFile(att) {
-                    // 使用预览模态框预览用户上传的文件
+                    // 文件卡片预览统一复用工作区/静态文件的预览链，避免和工作区行为分叉
+                    const staticFileUrl = att.download_url || att.url || '';
+                    let safeName = att.safe_name;
+                    if (!safeName && typeof staticFileUrl === 'string') {
+                        const staticMatch = staticFileUrl.match(/\/static\/files\/([^?#]+)/);
+                        if (staticMatch && staticMatch[1]) {
+                            try {
+                                safeName = decodeURIComponent(staticMatch[1]);
+                            } catch (e) {
+                                safeName = staticMatch[1];
+                            }
+                        }
+                    }
+
+                    if (safeName) {
+                        return this.previewStaticFile(safeName, att.name || '文件预览');
+                    }
+
+                    const sessionId = att.session_id || this.currentSession?.id || '';
+                    if (sessionId && att.name) {
+                        return this.previewFile(sessionId, att.name);
+                    }
+
                     this.showFilePreview = true;
                     this.filePreviewMaximized = false;
                     this.filePreviewData = {
-                        sessionId: att.session_id || this.currentSession?.id || '',
+                        sessionId: sessionId,
                         filename: att.name || '文件预览',
                         type: att.type || '',
                         content: '',
@@ -17661,136 +17718,23 @@ def main(params):
                         extracted_length: 0,
                         original_length: 0
                     };
-                    
-                    // 如果是图片，直接显示
+
+                    // 兜底：没有工作区路径也没有 static/files 路径时，尽量按原始附件渲染
                     if (att.type && att.type.startsWith('image/')) {
                         this.filePreviewData.type = 'image';
                         this.filePreviewData.url = att.url || att.data || att.preview;
                         this.filePreviewData.loading = false;
                         return;
                     }
-                    
-                    // docx 文件特殊处理
-                    if (this.isDocxFile(att.name)) {
-                        try {
-                            const response = await fetch(att.url);
-                            if (response.ok) {
-                                const blob = await response.blob();
-                                this.filePreviewData.loading = false;
-                                this.filePreviewData.blob = blob;
-                                this.$nextTick(() => {
-                                    this.renderDocx(blob);
-                                });
-                            } else {
-                                this.filePreviewData.error = '无法加载文档';
-                                this.filePreviewData.loading = false;
-                            }
-                        } catch (e) {
-                            this.filePreviewData.error = '文档加载失败';
-                            this.filePreviewData.loading = false;
-                        }
-                        return;
-                    }
-                    
-                    // excel 文件特殊处理
-                    if (this.isExcelFile(att.name)) {
-                        try {
-                            const response = await fetch(att.url);
-                            if (response.ok) {
-                                const blob = await response.blob();
-                                this.filePreviewData.loading = false;
-                                this.filePreviewData.blob = blob;
-                                this.$nextTick(() => {
-                                    this.renderExcel(blob);
-                                });
-                            } else {
-                                this.filePreviewData.error = '无法加载表格';
-                                this.filePreviewData.loading = false;
-                            }
-                        } catch (e) {
-                            this.filePreviewData.error = '表格加载失败';
-                            this.filePreviewData.loading = false;
-                        }
-                        return;
-                    }
-                    
-                    // PDF 文件特殊处理
-                    if (this.isPdfFile(att.name)) {
-                        try {
-                            const response = await fetch(att.url);
-                            if (response.ok) {
-                                const blob = await response.blob();
-                                this.filePreviewData.loading = false;
-                                this.filePreviewData.blob = blob;
-                                this.$nextTick(() => {
-                                    this.renderPdf(blob);
-                                });
-                            } else {
-                                this.filePreviewData.error = '无法加载 PDF';
-                                this.filePreviewData.loading = false;
-                            }
-                        } catch (e) {
-                            this.filePreviewData.error = 'PDF 加载失败';
-                            this.filePreviewData.loading = false;
-                        }
-                        return;
-                    }
-                    
-                    // PPTX 文件特殊处理
-                    if (this.isPptxFile(att.name)) {
-                        try {
-                            const response = await fetch(att.url);
-                            if (response.ok) {
-                                const blob = await response.blob();
-                                this.filePreviewData.loading = false;
-                                this.filePreviewData.blob = blob;
-                                this.$nextTick(() => {
-                                    this.renderPptx(blob);
-                                });
-                            } else {
-                                this.filePreviewData.error = '无法加载 PPTX';
-                                this.filePreviewData.loading = false;
-                            }
-                        } catch (e) {
-                            this.filePreviewData.error = 'PPTX 加载失败';
-                            this.filePreviewData.loading = false;
-                        }
-                        return;
-                    }
-                    
-                    // HTML 文件特殊处理
-                    if (this.isHtmlFile(att.name)) {
-                        try {
-                            const response = await fetch(att.url);
-                            if (response.ok) {
-                                const text = await response.text();
-                                this.filePreviewData.content = text;
-                                this.filePreviewData.loading = false;
-                                this.$nextTick(() => {
-                                    this.renderHtml(text);
-                                });
-                            } else {
-                                this.filePreviewData.error = '无法加载页面';
-                                this.filePreviewData.loading = false;
-                            }
-                        } catch (e) {
-                            this.filePreviewData.error = '页面加载失败';
-                            this.filePreviewData.loading = false;
-                        }
-                        return;
-                    }
-                    
-                    // 如果有内嵌内容（文本文件），直接显示
+
                     if (att.content) {
                         this.filePreviewData.content = att.content;
                         this.filePreviewData.loading = false;
                         return;
                     }
-                    
-                    // 如果有 URL 但没有内容，尝试通过 API 获取
+
                     if (att.url) {
                         try {
-                            // 尝试直接 fetch 内容
                             const response = await fetch(att.url);
                             if (response.ok && response.status !== 206) {
                                 const text = await response.text();
@@ -17802,8 +17746,7 @@ def main(params):
                             console.log('无法直接 fetch 文件:', e);
                         }
                     }
-                    
-                    // 如果无法获取内容，显示提示
+
                     if (!this.filePreviewData.content) {
                         this.filePreviewData.loading = false;
                         this.filePreviewData.error = '无法预览此文件，请下载后查看';

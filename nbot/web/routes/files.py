@@ -13,7 +13,7 @@ def register_file_routes(app, server, workspace_available, workspace_manager):
     )
 
     max_file_size = 50 * 1024 * 1024
-    max_text_content_size = 100 * 1024
+    preview_text_size_limit = 10 * 1024 * 1024
 
     @app.route("/static/files/<path:filename>")
     def serve_file(filename):
@@ -35,7 +35,13 @@ def register_file_routes(app, server, workspace_available, workspace_manager):
         image_exts = [".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp", ".svg"]
         if ext in image_exts:
             return jsonify(
-                {"success": True, "type": "image", "url": f"/static/files/{safe_name}"}
+                {
+                    "success": True,
+                    "type": "image",
+                    "url": f"/static/files/{safe_name}",
+                    "download_url": f"/static/files/{safe_name}",
+                    "safe_name": safe_name,
+                }
             )
 
         frontend_render_exts = [
@@ -54,10 +60,16 @@ def register_file_routes(app, server, workspace_available, workspace_manager):
                     "type": ext[1:],
                     "is_blob": True,
                     "url": f"/static/files/{safe_name}",
+                    "download_url": f"/static/files/{safe_name}",
+                    "safe_name": safe_name,
                 }
             )
 
-        parse_result = FileParser.parse_file(file_path, safe_name, max_chars=50000)
+        parse_result = FileParser.parse_file(
+            file_path,
+            safe_name,
+            max_chars=preview_text_size_limit,
+        )
         if not parse_result or not parse_result.get("success"):
             return jsonify(
                 {
@@ -74,6 +86,9 @@ def register_file_routes(app, server, workspace_available, workspace_manager):
                 "type": parse_result.get("type", "text"),
                 "content": parse_result.get("content", ""),
                 "filename": safe_name,
+                "url": f"/static/files/{safe_name}",
+                "download_url": f"/static/files/{safe_name}",
+                "safe_name": safe_name,
                 "extracted_length": parse_result.get("extracted_length", 0),
                 "original_length": parse_result.get("original_length", 0),
                 "truncated": parse_result.get("truncated", False),
@@ -152,9 +167,9 @@ def register_file_routes(app, server, workspace_available, workspace_manager):
                                 content = f.read()
                                 if (
                                     len(content.encode("utf-8"))
-                                    > max_text_content_size
+                                    > preview_text_size_limit
                                 ):
-                                    content = content[:max_text_content_size]
+                                    content = content[:preview_text_size_limit]
                     except Exception as e:
                         server.log_message(
                             "warning", f"Read workspace text preview failed: {e}"
@@ -191,16 +206,16 @@ def register_file_routes(app, server, workspace_available, workspace_manager):
                 if file_ext.lower() in [".txt", ".md", ".json", ".xml", ".csv"]:
                     with open(file_path, "r", encoding="utf-8") as f:
                         content = f.read()
-                        if len(content.encode("utf-8")) > max_text_content_size:
-                            content = content[:max_text_content_size]
+                        if len(content.encode("utf-8")) > preview_text_size_limit:
+                            content = content[:preview_text_size_limit]
                 elif file_ext.lower() in [".docx"]:
                     try:
                         import docx
 
                         doc = docx.Document(file_path)
                         content = "\n".join([para.text for para in doc.paragraphs])
-                        if len(content.encode("utf-8")) > max_text_content_size:
-                            content = content[:max_text_content_size]
+                        if len(content.encode("utf-8")) > preview_text_size_limit:
+                            content = content[:preview_text_size_limit]
                     except ImportError:
                         content = None
             except Exception as e:

@@ -10,6 +10,7 @@ def register_workspace_private_routes(app, server):
     session_store = WebSessionStore(
         server.sessions, save_callback=lambda: server._save_data("sessions")
     )
+    preview_text_size_limit = 10 * 1024 * 1024
 
     @app.route("/api/sessions/<session_id>/workspace/files", methods=["GET"])
     def get_workspace_files(session_id):
@@ -186,7 +187,11 @@ def register_workspace_private_routes(app, server):
 
         from nbot.core.file_parser import FileParser
 
-        parse_result = FileParser.parse_file(file_path, filename, max_chars=50000)
+        parse_result = FileParser.parse_file(
+            file_path,
+            filename,
+            max_chars=preview_text_size_limit,
+        )
         if not parse_result or not parse_result.get("success"):
             return jsonify(
                 {

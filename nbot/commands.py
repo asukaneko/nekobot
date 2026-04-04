@@ -7,6 +7,9 @@ from nbot.services.chat_service import group_messages, user_messages, chat, gene
 from nbot.services.chat_service import delete_session_workspace, get_qq_session_id, ensure_workspace, WORKSPACE_AVAILABLE
 from nbot.services.ai import ai_client
 from nbot.services.tts import tts
+import base64
+import hashlib
+import html
 import jmcomic,requests,random,configparser,json,yaml,re,os,asyncio,time,smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
@@ -15,6 +18,7 @@ from email import encoders
 from jmcomic import *
 from typing import Dict, List
 from datetime import datetime
+from PIL import Image as PILImage
 from difflib import get_close_matches  # 用于模糊匹配
 from ncatbot.core import (
     MessageChain,  
@@ -460,21 +464,44 @@ def load_novel_data():
     with open("resources/config/novel_details2.json", "r", encoding="utf-8") as f:
         books.update(json.load(f))
 
-def fetch_cover_url(id:str) -> str:
+def fetch_cover_url(id:str, client=None) -> str:
     """
     获取指定本子的第一张图片URL
     :param album_id: 本子ID
     :return: 第一张图片的URL
     """
-    """
-    client = JmOption.default().new_jm_client()
-    album = client.get_album_detail(id)
-    first_photo = album[0]
-    photo_detail = client.get_photo_detail(first_photo.photo_id, False)
-    first_image = next(iter(photo_detail))
-    return first_image.img_url
-    """
-    return f"https://cdn-msp3.jmapinodeudzn.net/media/photos/{id}/00001.webp"
+    filename = "00001.webp"
+    fallback_url = f"https://cdn-msp3.jmapinodeudzn.net/media/photos/{id}/{filename}"
+    cache_dir = os.path.join(load_address(), "jm_cover_cache")
+    os.makedirs(cache_dir, exist_ok=True)
+    cache_path = os.path.join(cache_dir, f"{id}.jpg")
+
+    try:
+        if not os.path.exists(cache_path):
+            client = client or JmOption.default().new_jm_client()
+            album = client.get_album_detail(id)
+            decoded_path = os.path.join(cache_dir, f"{id}_decoded.jpg")
+            client.download_image(
+                fallback_url,
+                decoded_path,
+                int(album.scramble_id),
+                decode_image=True,
+            )
+
+            with PILImage.open(decoded_path) as image:
+                image = image.convert("RGB")
+                image.thumbnail((260, 380))
+                image.save(cache_path, format="JPEG", quality=72, optimize=True)
+
+            if os.path.exists(decoded_path):
+                os.remove(decoded_path)
+
+        with open(cache_path, "rb") as file_obj:
+            encoded = base64.b64encode(file_obj.read()).decode("ascii")
+            return f"data:image/jpeg;base64,{encoded}"
+    except Exception as e:
+        _log.warning(f"获取JM封面失败，回退原图链接: album_id={id}, error={e}")
+        return fallback_url
 
 
 class SwitchManager:
@@ -633,6 +660,7 @@ async def handle_tts(msg, is_group=True):
 
 # ---------------漫画类命令----------------
 comic_cache = []
+JM_RANK_DECODE_LIMIT = 50
 @register_command("/jmrank",help_text = "/jmrank <月排行/周排行> -> 获取排行榜",category = "1")
 async def handle_jmrank(msg, is_group=True):
     if is_group:
@@ -656,15 +684,41 @@ async def handle_jmrank(msg, is_group=True):
         page: JmCategoryPage = cl.week_ranking(1)
     cache_dir = os.path.join(load_address(),"rank")
     os.makedirs(cache_dir,exist_ok = True)
-    # 使用固定文件名，每次操作只保留一份
-    filename = f"{select}.md"
+    # 使用唯一文件名，避免工作区/预览链按同名文件命中旧缓存
+    file_token = hashlib.md5(f"{select}_{time.time()}".encode("utf-8")).hexdigest()[:8]
+    filename = f"{file_token}_{select}.html"
     filepath = os.path.join(cache_dir, filename)
     tot = 0
     fg=0
     comic_cache.clear()
-    # 先清空文件
+
+    html_head = f"""<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{html.escape(select)} - JM 排行</title>
+  <style>
+    body {{ font-family: 'Segoe UI', 'PingFang SC', sans-serif; background:#111827; color:#f3f4f6; margin:0; padding:24px; }}
+    h1 {{ font-size:24px; margin:0 0 20px; }}
+    .note {{ color:#9ca3af; font-size:13px; margin:-8px 0 18px; }}
+    .grid {{ display:grid; grid-template-columns:repeat(auto-fill, minmax(220px, 1fr)); gap:18px; }}
+    .card {{ background:#1f2937; border:1px solid rgba(255,255,255,0.08); border-radius:16px; overflow:hidden; box-shadow:0 10px 24px rgba(0,0,0,0.22); }}
+    .cover {{ width:100%; aspect-ratio: 13 / 18; object-fit:cover; display:block; background:#0b1220; }}
+    .meta {{ padding:12px 14px 16px; }}
+    .rank {{ color:#60a5fa; font-weight:700; font-size:13px; margin-bottom:6px; }}
+    .title {{ font-size:14px; line-height:1.45; word-break:break-word; }}
+    .aid {{ color:#9ca3af; font-size:12px; margin-top:8px; }}
+  </style>
+</head>
+<body>
+  <h1>{html.escape(select)} · JM 排行</h1>
+  <div class="note">前 {JM_RANK_DECODE_LIMIT} 张封面会做顺序修复，后续封面直接展示以保证生成速度。</div>
+  <div class="grid">
+"""
+
     with open(filepath, "w", encoding="utf-8") as f:
-        f.write(f"## {select}：  \n")
+        f.write(html_head)
     for page in cl.categories_filter_gen(page=1,  # 起始页码
                                          # 下面是分类参数
                                          time=JmMagicConstants.TIME_WEEK,
@@ -673,15 +727,28 @@ async def handle_jmrank(msg, is_group=True):
                                          ):
         for aid, atitle in page:
             tot += 1
-            cover_url = fetch_cover_url(aid)
+            if tot <= JM_RANK_DECODE_LIMIT:
+                cover_url = fetch_cover_url(aid, client=cl)
+            else:
+                cover_url = f"https://cdn-msp3.jmapinodeudzn.net/media/photos/{aid}/00001.webp"
             with open(filepath, "a", encoding="utf-8") as f:
-                f.write(f"{tot}: {aid} {atitle}  \n ![]({cover_url})    \n\n")
+                f.write(
+                    f'    <article class="card">'
+                    f'<img class="cover" src="{html.escape(cover_url, quote=True)}" alt="{html.escape(atitle, quote=True)}">'
+                    f'<div class="meta">'
+                    f'<div class="rank">#{tot}</div>'
+                    f'<div class="title">{html.escape(atitle)}</div>'
+                    f'<div class="aid">ID: {html.escape(str(aid))}</div>'
+                    f'</div></article>\n'
+                )
             comic_cache.append(aid)
-            if tot >=100:
+            if tot >=50:
                 fg=1
                 break
         if fg:
             break
+    with open(filepath, "a", encoding="utf-8") as f:
+        f.write("  </div>\n</body>\n</html>\n")
     if not os.path.exists(filepath):
         if is_group:
             await msg.reply(text="获取排行失败喵~，文件不存在")
