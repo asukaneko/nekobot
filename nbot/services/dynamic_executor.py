@@ -193,62 +193,97 @@ class DynamicExecutor:
         }
     
     def _execute_minimax_search(self, implementation: Dict, params: Dict, context: Dict) -> Dict[str, Any]:
-        """执行 MiniMax Web Search（使用专门的搜索 API）"""
-        api_key_template = implementation.get('api_key', '')
-        
-        variables = self._prepare_variables(params, context)
-        api_key = self._render_template(api_key_template, variables)
+        """执行 Web Search（使用 DuckDuckGo HTML 搜索，无需 API key），并抓取页面正文"""
         query = params.get('query', '')
-        
-        if not api_key:
-            return {'success': False, 'error': 'MiniMax API key 未配置，请检查 config.ini 中的 api_key'}
-        
+        num_results = params.get('num_results', 3)
+
         if not query:
             return {'success': False, 'error': 'Query is empty'}
-        
+
         try:
+            from bs4 import BeautifulSoup
+            from concurrent.futures import ThreadPoolExecutor, as_completed
+
             headers = {
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {api_key}"
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
             }
-            
-            # MiniMax 专门的搜索 API
-            search_url = "https://api.minimaxi.com/v1/coding_plan/search"
-            payload = {"q": query}
-            
-            response = requests.post(search_url, headers=headers, json=payload, timeout=30)
+
+            search_url = "https://html.duckduckgo.com/html/"
+            data = {"q": query, "kl": "cn-zh"}
+
+            response = requests.post(search_url, headers=headers, data=data, timeout=15)
             response.raise_for_status()
-            
-            result = response.json()
-            
-            # 解析搜索结果
-            answer = ""
-            if "content" in result:
-                answer = result.get("content", "")
-            elif "answer" in result:
-                answer = result.get("answer", "")
-            
-            if answer:
-                return {
-                    'success': True,
-                    'content': answer,
-                    'data': result
+
+            soup = BeautifulSoup(response.text, 'html.parser')
+            result_divs = soup.find_all('div', class_='result')
+
+            results = []
+            for result_div in result_divs[:num_results]:
+                try:
+                    title_tag = result_div.find('a', class_='result__a')
+                    if not title_tag:
+                        continue
+                    title = title_tag.get_text(strip=True)
+                    url = title_tag.get('href', '')
+                    snippet_tag = result_div.find('a', class_='result__snippet')
+                    snippet = snippet_tag.get_text(strip=True) if snippet_tag else ""
+                    results.append({
+                        "title": title,
+                        "snippet": snippet,
+                        "url": url,
+                        "content": ""
+                    })
+                except Exception:
+                    continue
+
+            if not results:
+                return {'success': False, 'error': '未找到搜索结果'}
+
+            # 并发抓取页面正文
+            def fetch_page_content(url: str) -> str:
+                try:
+                    resp = requests.get(url, headers=headers, timeout=8, allow_redirects=True)
+                    resp.encoding = resp.apparent_encoding or 'utf-8'
+                    page_soup = BeautifulSoup(resp.text, 'html.parser')
+                    for tag in page_soup.find_all(['script', 'style', 'nav', 'header', 'footer', 'aside', 'iframe', 'noscript']):
+                        tag.decompose()
+                    main_content = page_soup.find('article') or page_soup.find('main') or page_soup.find('div', class_=lambda c: c and ('content' in c or 'article' in c or 'post' in c))
+                    if main_content:
+                        paragraphs = main_content.find_all(['p', 'h1', 'h2', 'h3', 'li'])
+                    else:
+                        paragraphs = page_soup.find_all('p')
+                    texts = [p.get_text(strip=True) for p in paragraphs if len(p.get_text(strip=True)) > 15]
+                    return '\n'.join(texts)[:1500]
+                except Exception:
+                    return ""
+
+            with ThreadPoolExecutor(max_workers=num_results) as executor:
+                future_map = {
+                    executor.submit(fetch_page_content, r['url']): i
+                    for i, r in enumerate(results) if r['url']
                 }
-            
+                for future in as_completed(future_map):
+                    idx = future_map[future]
+                    try:
+                        results[idx]['content'] = future.result()
+                    except Exception:
+                        pass
+
             return {
                 'success': True,
-                'content': json.dumps(result, ensure_ascii=False)[:2000],
-                'data': result
+                'query': query,
+                'results': results,
+                'count': len(results)
             }
-            
+
         except requests.exceptions.RequestException as e:
-            _log.error(f"MiniMax search request failed: {e}")
+            _log.error(f"DuckDuckGo search request failed: {e}")
             return {
                 'success': False,
                 'error': f'搜索请求失败: {str(e)}'
             }
         except Exception as e:
-            _log.error(f"MiniMax search failed: {e}")
+            _log.error(f"DuckDuckGo search failed: {e}")
             return {
                 'success': False,
                 'error': f'搜索失败: {str(e)}'

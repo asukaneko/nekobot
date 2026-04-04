@@ -224,8 +224,6 @@ def init_default_tools(server):
             },
             "implementation": {
                 "type": "minimax_web_search",
-                "api_key": "{{minimax_api_key}}",
-                "model": "{{minimax_model}}",
             },
         },
         {
@@ -274,8 +272,6 @@ def init_default_tools(server):
             },
             "implementation": {
                 "type": "minimax_web_search",
-                "api_key": "{{minimax_api_key}}",
-                "model": "{{minimax_model}}",
             },
         },
         {

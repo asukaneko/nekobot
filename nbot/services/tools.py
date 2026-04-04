@@ -39,11 +39,10 @@ def get_minimax_api_key() -> str:
         or config_parser.get("ApiKey", "api_key", fallback="")
     )
 
-# MiniMax API 配置（仅用于 search_web 和 understand_image 工具）
+# MiniMax API 配置（仅用于 understand_image 工具）
 MINIMAX_API_KEY = config_parser.get('ApiKey', 'api_key', fallback="")
 
 # 固定工具 API URL
-MINIMAX_SEARCH_URL = "https://api.minimaxi.com/v1/coding_plan/search"
 MINIMAX_VLM_URL = "https://api.minimaxi.com/v1/coding_plan/vlm"
 
 # Web 配置数据目录
@@ -478,84 +477,117 @@ class ToolExecutor:
     def search_web(query: str, num_results: int = 3) -> Dict[str, Any]:
         """
         网页搜索
-        使用 MiniMax API 的直接搜索端点
+        使用 DuckDuckGo HTML 搜索（无需 API key），并抓取页面正文获取详细内容
         """
         try:
-            # 检查配置是否完整
-            api_key = get_minimax_api_key()
-            if not api_key:
-                _log.error("MiniMax API密钥未配置，请在config.ini中配置[ApiKey]部分的api_key")
+            import requests
+            from bs4 import BeautifulSoup
+            from concurrent.futures import ThreadPoolExecutor, as_completed
+
+            _log.info(f"[Search] 发送搜索请求: {query}")
+
+            # DuckDuckGo HTML 搜索
+            search_url = "https://html.duckduckgo.com/html/"
+            headers = {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            }
+
+            data = {"q": query, "kl": "cn-zh"}
+            response = requests.post(search_url, headers=headers, data=data, timeout=15)
+            response.raise_for_status()
+
+            soup = BeautifulSoup(response.text, 'html.parser')
+            result_divs = soup.find_all('div', class_='result')
+
+            # 第一步：收集搜索结果基本信息
+            formatted_results = []
+            for i, result_div in enumerate(result_divs[:num_results]):
+                try:
+                    title_tag = result_div.find('a', class_='result__a')
+                    if not title_tag:
+                        continue
+                    title = title_tag.get_text(strip=True)
+                    url = title_tag.get('href', '')
+                    snippet_tag = result_div.find('a', class_='result__snippet')
+                    snippet = snippet_tag.get_text(strip=True) if snippet_tag else ""
+                    formatted_results.append({
+                        "title": title,
+                        "snippet": snippet,
+                        "url": url,
+                        "content": ""
+                    })
+                except Exception as e:
+                    _log.warning(f"[Search] 解析结果 {i} 失败: {e}")
+                    continue
+
+            if not formatted_results:
                 return {
                     "success": False,
-                    "error": "MiniMax API密钥未配置",
+                    "error": "未找到搜索结果",
                     "query": query
                 }
 
-            # 使用 MiniMax 专门的搜索 API（固定URL）
-            headers = {
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {api_key}"
-            }
-            
-            payload = {"q": query}
-            
-            _log.info(f"[Search] 发送搜索请求: {query}")
-            _log.info(f"[Search] API URL: {MINIMAX_SEARCH_URL}")
-            
-            # 发送请求
-            import requests
-            response = requests.post(MINIMAX_SEARCH_URL, headers=headers, json=payload, timeout=30)
-            response.raise_for_status()
-            
-            # 解析响应
-            result = response.json()
-            
-            _log.info(f"[Search] API响应: {json.dumps(result, ensure_ascii=False)[:500]}")
-            
-            # 解析搜索结果
-            # MiniMax 搜索 API 返回格式可能是:
-            # {"content": "搜索结果内容", ...} 或 {"results": [...], ...}
-            formatted_results = []
-            answer = ""
-            
-            # 方式1: 直接从 content 字段获取
-            if "content" in result:
-                answer = result.get("content", "")
-                # 尝试提取 URL
-                import re
-                urls = re.findall(r'https?://[^\s\)\"\'\]]+', answer)
-                for i, url in enumerate(urls[:num_results]):
-                    formatted_results.append({
-                        "title": f"搜索结果 {i+1}",
-                        "snippet": answer[max(0, answer.find(url)-50):answer.find(url)+200] if url in answer else answer[:300],
-                        "url": url
-                    })
-            
-            # 方式2: 从 results 字段获取
-            elif "results" in result:
-                results_list = result.get("results", [])
-                for i, item in enumerate(results_list[:num_results]):
-                    formatted_results.append({
-                        "title": item.get("title", f"结果 {i+1}"),
-                        "snippet": item.get("snippet", item.get("content", ""))[:300],
-                        "url": item.get("url", "")
-                    })
-                answer = "\n".join([f"{r['title']}: {r['url']}" for r in formatted_results])
-            
-            # 方式3: 原始返回
-            else:
-                answer = json.dumps(result, ensure_ascii=False, indent=2)
-                formatted_results.append({
-                    "title": "搜索结果",
-                    "snippet": answer[:500],
-                    "url": ""
-                })
-            
+            # 第二步：并发抓取每个页面的正文内容
+            def fetch_page_content(url: str) -> str:
+                """抓取页面并提取正文文本"""
+                try:
+                    resp = requests.get(url, headers=headers, timeout=8, allow_redirects=True)
+                    resp.encoding = resp.apparent_encoding or 'utf-8'
+                    page_soup = BeautifulSoup(resp.text, 'html.parser')
+
+                    # 移除无关标签
+                    for tag in page_soup.find_all(['script', 'style', 'nav', 'header', 'footer', 'aside', 'iframe', 'noscript']):
+                        tag.decompose()
+
+                    # 优先从 article / main 标签提取
+                    main_content = page_soup.find('article') or page_soup.find('main') or page_soup.find('div', class_=lambda c: c and ('content' in c or 'article' in c or 'post' in c))
+
+                    if main_content:
+                        paragraphs = main_content.find_all(['p', 'h1', 'h2', 'h3', 'li'])
+                    else:
+                        paragraphs = page_soup.find_all('p')
+
+                    texts = []
+                    for p in paragraphs:
+                        text = p.get_text(strip=True)
+                        if len(text) > 15:  # 过滤太短的段落
+                            texts.append(text)
+
+                    content = '\n'.join(texts)
+                    return content[:1500]  # 每个页面最多1500字
+                except Exception as e:
+                    _log.warning(f"[Search] 抓取页面失败 {url}: {e}")
+                    return ""
+
+            # 并发抓取
+            with ThreadPoolExecutor(max_workers=num_results) as executor:
+                future_map = {
+                    executor.submit(fetch_page_content, r['url']): i
+                    for i, r in enumerate(formatted_results) if r['url']
+                }
+                for future in as_completed(future_map):
+                    idx = future_map[future]
+                    try:
+                        formatted_results[idx]['content'] = future.result()
+                    except Exception:
+                        pass
+
+            # 生成易读的答案摘要
+            answer = f"搜索「{query}」找到 {len(formatted_results)} 条结果：\n\n"
+            for i, r in enumerate(formatted_results, 1):
+                answer += f"【{i}】{r['title']}\n"
+                answer += f"链接: {r['url']}\n"
+                if r['content']:
+                    answer += f"正文摘要:\n{r['content'][:600]}\n"
+                else:
+                    answer += f"摘要: {r['snippet']}\n"
+                answer += "\n"
+
             return {
                 "success": True,
                 "query": query,
                 "results": formatted_results,
-                "answer": answer if answer else "未找到相关结果"
+                "answer": answer.strip()
             }
 
         except requests.exceptions.RequestException as e:

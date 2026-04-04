@@ -22,3 +22,4 @@ python-pptx>=0.6.0
 openpyxl>=3.1.0
 PyPDF2>=3.0.0
 python-dotenv
+beautifulsoup4>=4.12.0
