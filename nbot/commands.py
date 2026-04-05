@@ -504,6 +504,64 @@ def fetch_cover_url(id:str, client=None) -> str:
         return fallback_url
 
 
+# ----------------------
+# 公共 HTML 卡片模板
+# ----------------------
+
+def build_jm_grid_html(title: str, filepath: str):
+    """写入 JM 卡片网格的 HTML 头部（需要调用方后续追加 card，再调用 close_jm_grid_html）"""
+    html_head = f"""<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{html.escape(title)}</title>
+  <style>
+    body {{ font-family: 'Segoe UI', 'PingFang SC', sans-serif; background:#111827; color:#f3f4f6; margin:0; padding:24px; }}
+    h1 {{ font-size:24px; margin:0 0 20px; }}
+    .note {{ color:#9ca3af; font-size:13px; margin:-8px 0 18px; }}
+    .grid {{ display:grid; grid-template-columns:repeat(auto-fill, minmax(220px, 1fr)); gap:18px; }}
+    .card {{ background:#1f2937; border:1px solid rgba(255,255,255,0.08); border-radius:16px; overflow:hidden; box-shadow:0 10px 24px rgba(0,0,0,0.22); }}
+    .cover {{ width:100%; aspect-ratio: 13 / 18; object-fit:cover; display:block; background:#0b1220; }}
+    .meta {{ padding:12px 14px 16px; }}
+    .num {{ color:#60a5fa; font-weight:700; font-size:13px; margin-bottom:6px; }}
+    .title {{ font-size:14px; line-height:1.45; word-break:break-word; }}
+    .aid {{ color:#9ca3af; font-size:12px; margin-top:8px; }}
+  </style>
+</head>
+<body>
+  <h1>{html.escape(title)}</h1>
+  <div class="note">前 {JM_RANK_DECODE_LIMIT} 张封面会做顺序修复，后续封面直接展示以保证生成速度。</div>
+  <div class="grid">
+"""
+    with open(filepath, "w", encoding="utf-8") as f:
+        f.write(html_head)
+
+
+def append_jm_card(filepath: str, album_id: int, title: str, seq: int, client=None):
+    """追加一张卡片到已打开的 HTML 文件（流式写入）"""
+    if seq <= JM_RANK_DECODE_LIMIT:
+        cover_url = fetch_cover_url(str(album_id), client=client)
+    else:
+        cover_url = f"https://cdn-msp3.jmapinodeudzn.net/media/photos/{album_id}/00001.webp"
+    with open(filepath, "a", encoding="utf-8") as f:
+        f.write(
+            f'    <article class="card">'
+            f'<img class="cover" src="{html.escape(cover_url, quote=True)}" alt="{html.escape(title, quote=True)}">'
+            f'<div class="meta">'
+            f'<div class="num">#{seq}</div>'
+            f'<div class="title">{html.escape(title)}</div>'
+            f'<div class="aid">ID: {html.escape(str(album_id))}</div>'
+            f'</div></article>\n'
+        )
+
+
+def close_jm_grid_html(filepath: str):
+    """关闭 HTML 网格文件"""
+    with open(filepath, "a", encoding="utf-8") as f:
+        f.write("  </div>\n</body>\n</html>\n")
+
+
 class SwitchManager:
     """
     开关管理器，支持群聊和个人开关的批量管理
@@ -688,67 +746,29 @@ async def handle_jmrank(msg, is_group=True):
     file_token = hashlib.md5(f"{select}_{time.time()}".encode("utf-8")).hexdigest()[:8]
     filename = f"{file_token}_{select}.html"
     filepath = os.path.join(cache_dir, filename)
-    tot = 0
-    fg=0
     comic_cache.clear()
 
-    html_head = f"""<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>{html.escape(select)} - JM 排行</title>
-  <style>
-    body {{ font-family: 'Segoe UI', 'PingFang SC', sans-serif; background:#111827; color:#f3f4f6; margin:0; padding:24px; }}
-    h1 {{ font-size:24px; margin:0 0 20px; }}
-    .note {{ color:#9ca3af; font-size:13px; margin:-8px 0 18px; }}
-    .grid {{ display:grid; grid-template-columns:repeat(auto-fill, minmax(220px, 1fr)); gap:18px; }}
-    .card {{ background:#1f2937; border:1px solid rgba(255,255,255,0.08); border-radius:16px; overflow:hidden; box-shadow:0 10px 24px rgba(0,0,0,0.22); }}
-    .cover {{ width:100%; aspect-ratio: 13 / 18; object-fit:cover; display:block; background:#0b1220; }}
-    .meta {{ padding:12px 14px 16px; }}
-    .rank {{ color:#60a5fa; font-weight:700; font-size:13px; margin-bottom:6px; }}
-    .title {{ font-size:14px; line-height:1.45; word-break:break-word; }}
-    .aid {{ color:#9ca3af; font-size:12px; margin-top:8px; }}
-  </style>
-</head>
-<body>
-  <h1>{html.escape(select)} · JM 排行</h1>
-  <div class="note">前 {JM_RANK_DECODE_LIMIT} 张封面会做顺序修复，后续封面直接展示以保证生成速度。</div>
-  <div class="grid">
-"""
+    build_jm_grid_html(f"{html.escape(select)} · JM 排行", filepath)
 
-    with open(filepath, "w", encoding="utf-8") as f:
-        f.write(html_head)
-    for page in cl.categories_filter_gen(page=1,  # 起始页码
-                                         # 下面是分类参数
+    tot = 0
+    fg = 0
+    for page in cl.categories_filter_gen(page=1,
                                          time=JmMagicConstants.TIME_WEEK,
                                          category=JmMagicConstants.CATEGORY_ALL,
                                          order_by=JmMagicConstants.ORDER_BY_VIEW,
                                          ):
         for aid, atitle in page:
             tot += 1
-            if tot <= JM_RANK_DECODE_LIMIT:
-                cover_url = fetch_cover_url(aid, client=cl)
-            else:
-                cover_url = f"https://cdn-msp3.jmapinodeudzn.net/media/photos/{aid}/00001.webp"
-            with open(filepath, "a", encoding="utf-8") as f:
-                f.write(
-                    f'    <article class="card">'
-                    f'<img class="cover" src="{html.escape(cover_url, quote=True)}" alt="{html.escape(atitle, quote=True)}">'
-                    f'<div class="meta">'
-                    f'<div class="rank">#{tot}</div>'
-                    f'<div class="title">{html.escape(atitle)}</div>'
-                    f'<div class="aid">ID: {html.escape(str(aid))}</div>'
-                    f'</div></article>\n'
-                )
+            append_jm_card(filepath, aid, atitle, tot, client=cl)
             comic_cache.append(aid)
-            if tot >=50:
-                fg=1
+            if tot >= 50:
+                fg = 1
                 break
         if fg:
             break
-    with open(filepath, "a", encoding="utf-8") as f:
-        f.write("  </div>\n</body>\n</html>\n")
+
+    close_jm_grid_html(filepath)
+
     if not os.path.exists(filepath):
         if is_group:
             await msg.reply(text="获取排行失败喵~，文件不存在")
@@ -771,46 +791,95 @@ async def handle_search(msg, is_group=True):
     os.makedirs(cache_dir,exist_ok = True)
     client = JmOption.default().new_jm_client()
     content = msg.raw_message[len("/jm_search"):].strip()
-    
+
     if not content or content == " ":
         if is_group:
             await msg.reply(text="搜索内容不能为空喵~")
         else:
             await bot.api.post_private_msg(msg.user_id, text="搜索内容不能为空喵~")
         return
-    
-    if re.match(r'^\d+$', content):  # 检查是否为纯数字
+
+    file_token = hashlib.md5(f"{content}_{time.time()}".encode("utf-8")).hexdigest()[:8]
+    filename = f"{file_token}_{content}.html"
+    filepath = os.path.join(cache_dir, filename)
+    comic_cache.clear()
+
+    if re.match(r'^\d+$', content):  # 检查是否为纯数字，搜索单个本子
         id = content
-        # 直接搜索禁漫车号
-        page = client.search_site(search_query=id)
-        album: JmAlbumDetail = page.single_album
-        with open(os.path.join(cache_dir , f"{id}.md"), "w", encoding="utf-8") as f:
-            f.write(f"标题：{album.title}  \n标签：{album.tags}  \n页数：{album.page_count}  \n浏览次数：{album.views}  \n评论数：{album.comment_count}  \n ![](https://cdn-msp3.jmapinodeudzn.net/media/photos/{id}/00001.webp)")
+        # 直接搜索禁漫车号，生成单本卡片HTML
+        album: JmAlbumDetail = client.get_album_detail(id)
+        cover_url = fetch_cover_url(id, client=client)
+        html_head = f"""<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{html.escape(album.title)} - JM 本子</title>
+  <style>
+    body {{ font-family: 'Segoe UI', 'PingFang SC', sans-serif; background:#111827; color:#f3f4f6; margin:0; padding:24px; }}
+    .card {{ background:#1f2937; border:1px solid rgba(255,255,255,0.08); border-radius:16px; overflow:hidden; box-shadow:0 10px 24px rgba(0,0,0,0.22); max-width:400px; margin:0 auto; }}
+    .cover {{ width:100%; aspect-ratio: 13 / 18; object-fit:cover; display:block; background:#0b1220; }}
+    .meta {{ padding:16px 20px 20px; }}
+    .title {{ font-size:18px; font-weight:700; line-height:1.4; word-break:break-word; margin-bottom:10px; }}
+    .info {{ color:#9ca3af; font-size:13px; line-height:1.8; }}
+    .tag {{ display:inline-block; background:#374151; border-radius:6px; padding:2px 8px; margin:2px; font-size:12px; }}
+  </style>
+</head>
+<body>
+  <div class="card">
+    <img class="cover" src="{html.escape(cover_url, quote=True)}" alt="{html.escape(album.title, quote=True)}">
+    <div class="meta">
+      <div class="title">{html.escape(album.title)}</div>
+      <div class="info">
+        <div>ID: {html.escape(str(id))}</div>
+        <div>页数: {album.page_count}</div>
+        <div>浏览: {album.views}</div>
+        <div>评论: {album.comment_count}</div>
+        <div style="margin-top:8px;">{''.join(f'<span class="tag">{html.escape(str(tag))}</span>' for tag in album.tags)}</div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>"""
+        with open(filepath, "w", encoding="utf-8") as f:
+            f.write(html_head)
         if is_group:
-            await bot.api.post_group_file(msg.group_id, file=os.path.join(cache_dir , f"{id}.md"))
+            await bot.api.post_group_file(msg.group_id, file=filepath)
         else:
-            await bot.api.upload_private_file(msg.user_id, os.path.join(cache_dir , f"{id}.md"), f"{id}.md")
+            await bot.api.upload_private_file(msg.user_id, filepath, filename)
         return
 
-    name = content + str(time.time()).replace(".", "")
-    
-    with open(os.path.join(cache_dir , f"{name}.md"), "w", encoding="utf-8") as f:
-        f.write(f"搜索结果：{content}  \n")
+    # 多本搜索，生成卡片网格HTML
+    build_jm_grid_html(f"{html.escape(content)} · JM 搜索", filepath)
+
     tot = 0
-    for i in range(5):# 搜索5页，可以自己修改
-        page: JmSearchPage = client.search_site(search_query=content, page=i+1,order_by=JmMagicConstants.ORDER_BY_VIEW)
+    for i in range(5):  # 搜索5页
+        page: JmSearchPage = client.search_site(search_query=content, page=i+1)
+        if len(page) == 0:
+            break
         for album_id, title in page:
             tot += 1
-            url = fetch_cover_url(album_id)
-            with open(os.path.join(cache_dir , f"{name}.md"), "a", encoding="utf-8") as f:
-                f.write(f"{tot}: {album_id}  {title}  \n![]({url})     \n\n")
-    if is_group:
-        await bot.api.post_group_file(msg.group_id, file=os.path.join(cache_dir , f"{name}.md"))
-    else:
-        await bot.api.upload_private_file(msg.user_id, os.path.join(cache_dir , f"{name}.md"), f"{content}.md")
+            append_jm_card(filepath, album_id, title, tot, client=client)
+            comic_cache.append(album_id)
+        if tot >= 50:
+            break
 
-@register_command("/tag",help_text = "/tag <标签> -> 搜索漫画标签",category = "1")
-async def handle_search(msg, is_group=True):
+    close_jm_grid_html(filepath)
+
+    if not os.path.exists(filepath):
+        if is_group:
+            await msg.reply(text="搜索失败喵~，文件不存在")
+        else:
+            await bot.api.post_private_msg(msg.user_id, text="搜索失败喵~，文件不存在")
+        return
+
+    if is_group:
+        await bot.api.post_group_file(msg.group_id, file=filepath)
+    else:
+        await bot.api.upload_private_file(msg.user_id, filepath, filename)
+
+@register_command("/jm_tag",help_text = "/jm_tag <标签> -> 搜索漫画标签",category = "1")
+async def handle_tag(msg, is_group=True):
     if is_group:
         await msg.reply(text="正在搜索喵~")
     else:
@@ -819,23 +888,33 @@ async def handle_search(msg, is_group=True):
     cache_dir = os.path.join(load_address(),"search")
     os.makedirs(cache_dir,exist_ok = True)
     content = msg.raw_message[len("/tag"):].strip()
-    name = content + str(time.time()).replace(".", "")
     client = JmOption.default().new_jm_client()
- 
-    with open(os.path.join(cache_dir , f"{name}.md"), "w", encoding="utf-8") as f:
-        f.write(f"搜索标签结果：{content}  \n")
+
+    file_token = hashlib.md5(f"tag_{content}_{time.time()}".encode("utf-8")).hexdigest()[:8]
+    filename = f"{file_token}_{content}.html"
+    filepath = os.path.join(cache_dir, filename)
+    comic_cache.clear()
+
+    build_jm_grid_html(f"{html.escape(content)} · JM 标签搜索", filepath)
+
     tot = 0
-    for i in range(5):# 搜索5页，可以自己修改
-        page: JmSearchPage = client.search_tag(search_query=content, page=i+1,order_by=JmMagicConstants.ORDER_BY_VIEW)
+    for i in range(5):  # 搜索5页
+        page: JmSearchPage = client.search_tag(search_query=content, page=i+1)
+        if len(page) == 0:
+            break
         for album_id, title in page:
             tot += 1
-            url = fetch_cover_url(album_id)
-            with open(os.path.join(cache_dir , f"{name}.md"), "a", encoding="utf-8") as f:
-                f.write(f"{tot}: {album_id}  {title}  \n![]({url})    \n\n")
+            append_jm_card(filepath, album_id, title, tot, client=client)
+            comic_cache.append(album_id)
+        if tot >= 50:
+            break
+
+    close_jm_grid_html(filepath)
+
     if is_group:
-        await bot.api.post_group_file(msg.group_id, file=os.path.join(cache_dir , f"{name}.md"))
+        await bot.api.post_group_file(msg.group_id, file=filepath)
     else:
-        await bot.api.upload_private_file(msg.user_id, os.path.join(cache_dir , f"{name}.md"), f"{content}.md")
+        await bot.api.upload_private_file(msg.user_id, filepath, filename)
 
 @register_command("/get_fav",help_text = "/get_fav <用户名> <密码> -> 获取收藏夹(群聊请私聊)",category = "1")
 async def handle_get_fav(msg, is_group=True):
@@ -858,12 +937,16 @@ async def handle_get_fav(msg, is_group=True):
 
     cache_dir = os.path.join(load_address(),"fav")
     os.makedirs(cache_dir, exist_ok=True)
-    name = username + str(time.time()).replace(".", "")
+
+    file_token = hashlib.md5(f"fav_{username}_{time.time()}".encode("utf-8")).hexdigest()[:8]
+    filename = f"{file_token}_{username}.html"
+    filepath = os.path.join(cache_dir, filename)
+    comic_cache.clear()
 
     option = JmOption.default()
     cl = option.new_jm_client()
     try:
-        cl.login(username, password)# 也可以使用login插件/配置cookies
+        cl.login(username, password)  # 也可以使用login插件/配置cookies
     except Exception as e:
         if is_group:
             await msg.reply(text=f"登录失败喵~：{e}")
@@ -871,16 +954,24 @@ async def handle_get_fav(msg, is_group=True):
             await bot.api.post_private_msg(msg.user_id, text=f"登录失败喵~：{e}")
         return
 
+    build_jm_grid_html(f"{html.escape(username)} · JM 收藏夹", filepath)
+
+    tot = 0
     # 遍历全部收藏的所有页
     for page in cl.favorite_folder_gen():  # 如果你只想获取特定收藏夹，需要添加folder_id参数
         for aid, atitle in page.iter_id_title():
-            url = fetch_cover_url(aid)
-            with open(os.path.join(cache_dir , f"{name}.md"), "a", encoding="utf-8") as f:
-                f.write(f"{aid}  {atitle}    \n![{atitle}]({url})    \n\n")
+            tot += 1
+            append_jm_card(filepath, aid, atitle, tot, client=cl)
+            comic_cache.append(aid)
+        if tot >= 50:
+            break
+
+    close_jm_grid_html(filepath)
+
     if is_group:
-        await bot.api.post_group_file(msg.group_id, file=os.path.join(cache_dir , f"{name}.md"))
+        await bot.api.post_group_file(msg.group_id, file=filepath)
     else:
-        await bot.api.upload_private_file(msg.user_id, os.path.join(cache_dir , f"{name}.md"), f"{username}.md")
+        await bot.api.upload_private_file(msg.user_id, filepath, filename)
 
 @register_command("/jm",help_text = "/jm <漫画ID> -> 下载漫画",category = "1")
 async def handle_jmcomic(msg, is_group=True):
