@@ -37,6 +37,17 @@ logging.getLogger("nbot").setLevel(logging.WARNING)
 logging.getLogger("nbot.services.tools").setLevel(logging.WARNING)
 logging.getLogger("nbot.services.dynamic_executor").setLevel(logging.WARNING)
 
+
+def escape_rich_tags(text: str) -> str:
+    """转义Rich标签，防止解析错误
+    将 [ 替换为 &#91;，] 替换为 &#93; (HTML实体编码)
+    这样Rich不会解析它们，但显示时看起来还是方括号
+    """
+    if not isinstance(text, str):
+        text = str(text)
+    # 使用HTML实体编码，Rich不会解析，但显示效果相同
+    return text.replace("[", "&#91;").replace("]", "&#93;")
+
 # 尝试导入pyfiglet用于ASCII艺术字
 try:
     from pyfiglet import Figlet
@@ -89,11 +100,21 @@ except ImportError:
 
 # 导入项目核心模块
 try:
-    from nbot.services.tools import TOOL_DEFINITIONS, execute_tool
+    from nbot.services.tools import TOOL_DEFINITIONS, WORKSPACE_TOOL_DEFINITIONS, execute_tool
     TOOLS_AVAILABLE = True
 except ImportError:
     TOOLS_AVAILABLE = False
     TOOL_DEFINITIONS = []
+    WORKSPACE_TOOL_DEFINITIONS = []
+
+# 尝试导入工具注册表
+try:
+    from nbot.services.tool_registry import get_all_tool_definitions as get_registered_tools
+    TOOL_REGISTRY_AVAILABLE = True
+except ImportError:
+    TOOL_REGISTRY_AVAILABLE = False
+    def get_registered_tools():
+        return []
 
 
 class CCStyleCLI:
@@ -251,7 +272,8 @@ class CCStyleCLI:
         model_provider = current_model.get('provider_type', 'Unknown') if current_model else 'Unknown'
         
         # 转义模型名称中的特殊字符
-        model_name = model_name.replace("[", "\\[").replace("]", "\\]")
+        model_name = escape_rich_tags(model_name)
+        model_provider = escape_rich_tags(model_provider)
 
         tips_text = f"""[bold]Tips for getting started[/bold]
 
@@ -262,7 +284,7 @@ Press [red]Ctrl+C[/red] to interrupt AI
 
 [dim]Current Model:[/dim] [cyan]{model_name}[/cyan]
 [dim]Provider:[/dim] [cyan]{model_provider}[/cyan]
-[dim]Tools:[/dim] [cyan]{len(TOOL_DEFINITIONS) if TOOLS_AVAILABLE else 0} available[/cyan]
+[dim]Tools:[/dim] [cyan]{len(self._get_all_tool_names())} available[/cyan]
 
 [dim]Recent activity[/dim]
 No recent activity
@@ -366,16 +388,21 @@ No recent activity
                 # 按命令名排序
                 sorted_matches = sorted(matches, key=lambda x: x[0])
                 for cmd, desc in sorted_matches:
+                    cmd = escape_rich_tags(cmd)
+                    desc = escape_rich_tags(desc)
                     self.console.print(f"  [yellow]/{cmd}[/yellow] - {desc}")
                 self.console.print()
         elif len(matches) == 1:
             # 只有一个匹配，直接提示
             cmd, desc = matches[0]
+            desc = escape_rich_tags(desc)
             self.console.print(f"[dim]↳ {desc}[/dim]")
         elif len(matches) > 1:
             # 多个匹配，显示列表
             self.console.print(f"[dim]Candidates ({len(matches)}):[/dim]")
             for cmd, desc in matches:
+                cmd = escape_rich_tags(cmd)
+                desc = escape_rich_tags(desc)
                 self.console.print(f"  [yellow]/{cmd}[/yellow] - {desc}")
 
     def _render_inline_thinking(self, thinking: str):
@@ -383,11 +410,17 @@ No recent activity
         if not thinking or not self.show_thinking:
             return
         
-        # 使用灰色斜体显示思考过程，与对话融为一体
+        # 使用Text对象显示思考过程，避免Rich标签解析问题
+        from rich.text import Text
         thinking_lines = thinking.strip().split('\n')
         for line in thinking_lines:
             if line.strip():
-                self.console.print(f"[dim italic]💭 {line}[/dim italic]")
+                # 转义思考内容中的特殊字符
+                line = escape_rich_tags(line)
+                text = Text()
+                text.append("💭 ", style="dim italic")
+                text.append(line, style="dim italic")
+                self.console.print(text)
 
     def _render_inline_tool_call(self, tool_name: str, arguments: Dict):
         """内联渲染工具调用"""
@@ -395,8 +428,8 @@ No recent activity
         if len(args_str) > 100:
             args_str = args_str[:100] + "..."
         # 转义特殊字符避免Rich标签解析问题
-        args_str = args_str.replace("[", r"\[").replace("]", r"\]")
-        tool_name = tool_name.replace("[", r"\[").replace("]", r"\]")
+        args_str = escape_rich_tags(args_str)
+        tool_name = escape_rich_tags(tool_name)
         # 使用Text对象避免Rich标签解析问题
         from rich.text import Text
         text = Text()
@@ -406,11 +439,22 @@ No recent activity
 
     def _render_inline_tool_result(self, result: Dict, success: bool):
         """内联渲染工具结果"""
+        from rich.text import Text
         icon = "✓" if success else "✗"
+        text = Text()
         if success:
-            self.console.print(f"[dim green]{icon} Done[/dim]")
+            text.append(f"{icon} ", style="dim green")
+            text.append("Done", style="dim green")
         else:
-            self.console.print(f"[dim red]{icon} Failed[/dim]")
+            # 转义错误信息中的特殊字符
+            error_msg = result.get("error", "")
+            text.append(f"{icon} ", style="dim red")
+            if error_msg:
+                error_msg = escape_rich_tags(error_msg)
+                text.append(f"Failed: {error_msg}", style="dim red")
+            else:
+                text.append("Failed", style="dim red")
+        self.console.print(text)
 
     def _call_ai(self, messages: List[Dict]) -> Dict[str, Any]:
         """调用AI，支持工具调用和多轮思考"""
@@ -463,35 +507,37 @@ No recent activity
                     "messages": tool_messages,
                     "temperature": model.get("temperature", 0.7),
                     "max_tokens": model.get("max_tokens", 2000),
-                    "stream": False
+                    "stream": True  # 启用流式输出
                 }
 
                 if tools and supports_tools:
                     payload["tools"] = tools
                     payload["tool_choice"] = "auto"
 
-                response = requests.post(url, headers=headers, json=payload, timeout=120)
+                # 发送流式请求
+                response = requests.post(url, headers=headers, json=payload, timeout=120, stream=True)
                 response.raise_for_status()
-                data = response.json()
 
-                choice = data.get("choices", [{}])[0]
-                message = choice.get("message", {})
-
-                # 提取并显示思考内容
-                thinking = message.get("reasoning_content", "") or message.get("thinking", "")
+                # 处理流式响应
+                result = self._process_stream_response(response, supports_tools)
+                
+                if result.get("interrupted"):
+                    return result
+                
+                # 提取思考内容
+                thinking = result.get("thinking", "")
                 if thinking:
                     all_thinking.append(f"Round {iteration + 1}: {thinking}")
-                    # 内联显示思考过程
                     self._render_inline_thinking(thinking)
-
-                # 检查是否有工具调用
-                if message.get("tool_calls") and supports_tools:
-                    tool_calls = message["tool_calls"]
+                
+                # 处理工具调用
+                if result.get("tool_calls") and supports_tools:
+                    tool_calls = result["tool_calls"]
                     all_tool_calls.extend(tool_calls)
 
                     tool_messages.append({
                         "role": "assistant",
-                        "content": message.get("content", ""),
+                        "content": result.get("content", ""),
                         "tool_calls": [
                             {
                                 "id": tc.get("id"),
@@ -526,23 +572,21 @@ No recent activity
                         self._render_inline_tool_call(tool_name, arguments)
 
                         # 执行工具
-                        result = self._execute_tool(tool_name, arguments)
-                        success = result.get("success", False)
+                        exec_result = self._execute_tool(tool_name, arguments)
+                        success = exec_result.get("success", False)
 
                         # 内联显示工具结果
-                        self._render_inline_tool_result(result, success)
+                        self._render_inline_tool_result(exec_result, success)
 
                         tool_messages.append({
                             "role": "tool",
                             "tool_call_id": tool_call.get("id"),
-                            "content": json.dumps(result, ensure_ascii=False)
+                            "content": json.dumps(exec_result, ensure_ascii=False)
                         })
                 else:
                     # 没有工具调用，得到最终回复
-                    final_content = message.get("content", "")
-                    if not final_content and "base_resp" in data:
-                        final_content = data.get("reply", "")
-
+                    final_content = result.get("content", "")
+                    
                     return {
                         "content": final_content,
                         "thinking": "\n\n".join(all_thinking),
@@ -564,11 +608,198 @@ No recent activity
         except Exception as e:
             return {"content": f"error: {str(e)}", "thinking": "", "tool_calls": [], "interrupted": False}
 
+    def _process_stream_response(self, response, supports_tools: bool) -> Dict:
+        """处理流式响应，流式显示纯文本，结束后渲染 Markdown
+        
+        返回: {"content": str, "thinking": str, "tool_calls": list, "interrupted": bool}
+        """
+        import json
+        from rich.live import Live
+        from rich.text import Text
+        
+        content_parts = []
+        thinking_parts = []
+        tool_calls = []
+        current_tool_call = None
+        
+        # 创建 Live 对象用于流式显示
+        live_content = Text("🐱 ", style="cyan")
+        
+        with Live(live_content, console=self.console, refresh_per_second=20, auto_refresh=True, transient=True) as live:
+            for line in response.iter_lines():
+                if self.interrupt_requested:
+                    return {
+                        "content": "".join(content_parts),
+                        "thinking": "".join(thinking_parts),
+                        "tool_calls": tool_calls,
+                        "interrupted": True
+                    }
+                
+                if not line:
+                    continue
+                
+                line_str = line.decode('utf-8')
+                
+                # SSE 格式: data: {...}
+                if line_str.startswith('data: '):
+                    data_str = line_str[6:]  # 去掉 "data: " 前缀
+                    
+                    # 检查是否是结束标记
+                    if data_str.strip() == '[DONE]':
+                        break
+                    
+                    try:
+                        data = json.loads(data_str)
+                        choice = data.get("choices", [{}])[0]
+                        delta = choice.get("delta", {})
+                        
+                        # 提取思考内容（如果支持）
+                        thinking = delta.get("reasoning_content", "") or delta.get("thinking", "")
+                        if thinking:
+                            thinking_parts.append(thinking)
+                        
+                        # 提取内容
+                        content = delta.get("content", "")
+                        if content:
+                            content_parts.append(content)
+                            # 更新 Live 内容，显示纯文本
+                            full_content = "".join(content_parts)
+                            live_content = Text("🐱 " + full_content, style="white")
+                            live.update(live_content)
+                        
+                        # 提取工具调用（如果支持）
+                        if supports_tools and delta.get("tool_calls"):
+                            for tc_delta in delta["tool_calls"]:
+                                index = tc_delta.get("index", 0)
+                                
+                                # 确保 tool_calls 列表足够长
+                                while len(tool_calls) <= index:
+                                    tool_calls.append({
+                                        "id": "",
+                                        "type": "function",
+                                        "function": {"name": "", "arguments": ""}
+                                    })
+                                
+                                # 更新工具调用信息
+                                if tc_delta.get("id"):
+                                    tool_calls[index]["id"] = tc_delta["id"]
+                                if tc_delta.get("function", {}).get("name"):
+                                    tool_calls[index]["function"]["name"] = tc_delta["function"]["name"]
+                                if tc_delta.get("function", {}).get("arguments"):
+                                    tool_calls[index]["function"]["arguments"] += tc_delta["function"]["arguments"]
+                        
+                    except json.JSONDecodeError:
+                        continue
+        
+        # Live 结束后（transient=True 会自动清除），渲染完整的 Markdown
+        final_content = "".join(content_parts)
+        if final_content:
+            self._render_markdown(final_content)
+        
+        return {
+            "content": final_content,
+            "thinking": "".join(thinking_parts),
+            "tool_calls": tool_calls if tool_calls else [],
+            "interrupted": False
+        }
+    
+    def _render_markdown_to_text(self, content: str) -> Text:
+        """将 Markdown 渲染为 Text 对象（用于 Live 更新）"""
+        from rich.text import Text
+        import re
+        
+        if not content:
+            return Text("🐱 ", style="cyan")
+        
+        # 简单的 Markdown 渲染为 Text
+        text = Text()
+        text.append("🐱 ", style="cyan")
+        
+        # 转义 Rich 标签
+        safe_content = self._escape_rich_tags_in_markdown(content)
+        
+        # 处理基本格式
+        lines = safe_content.split('\n')
+        for i, line in enumerate(lines):
+            if i > 0:
+                text.append('\n')
+            
+            # 处理标题
+            if line.strip().startswith('#'):
+                level = len(line) - len(line.lstrip('#'))
+                title_text = line.lstrip('#').strip()
+                if level == 1:
+                    text.append(title_text, style="bold cyan")
+                elif level == 2:
+                    text.append(title_text, style="bold green")
+                elif level == 3:
+                    text.append(title_text, style="bold yellow")
+                else:
+                    text.append(title_text, style="bold")
+            # 处理粗体
+            elif '**' in line:
+                parts = re.split(r'\*\*(.+?)\*\*', line)
+                for j, part in enumerate(parts):
+                    if j % 2 == 1:
+                        text.append(part, style="bold")
+                    else:
+                        text.append(part)
+            # 处理斜体
+            elif '*' in line:
+                parts = re.split(r'\*(.+?)\*', line)
+                for j, part in enumerate(parts):
+                    if j % 2 == 1:
+                        text.append(part, style="italic")
+                    else:
+                        text.append(part)
+            else:
+                text.append(line)
+        
+        return text
+
     def _get_tool_definitions(self) -> List[Dict]:
-        """获取工具定义列表"""
-        if not TOOLS_AVAILABLE:
-            return []
-        return TOOL_DEFINITIONS
+        """获取工具定义列表（包括内置工具和注册表工具）"""
+        tools = []
+        
+        # 1. 添加内置工具
+        if TOOLS_AVAILABLE:
+            tools.extend(TOOL_DEFINITIONS)
+        
+        # 2. 添加工作区工具
+        if TOOLS_AVAILABLE and WORKSPACE_TOOL_DEFINITIONS:
+            existing_names = {t.get("function", {}).get("name", "") for t in tools}
+            for tool in WORKSPACE_TOOL_DEFINITIONS:
+                name = tool.get("function", {}).get("name", "")
+                if name and name not in existing_names:
+                    tools.append(tool)
+                    existing_names.add(name)
+        
+        # 3. 添加注册表工具（包括 skills）
+        if TOOL_REGISTRY_AVAILABLE:
+            try:
+                registered = get_registered_tools()
+                # 去重：只添加不在已有工具中的注册工具
+                existing_names = {t.get("function", {}).get("name", "") for t in tools}
+                for tool in registered:
+                    name = tool.get("function", {}).get("name", "")
+                    if name and name not in existing_names:
+                        tools.append(tool)
+                        existing_names.add(name)
+            except Exception as e:
+                pass
+        
+        return tools
+    
+    def _get_all_tool_names(self) -> List[str]:
+        """获取所有工具名称列表（用于显示）"""
+        tools = self._get_tool_definitions()
+        names = []
+        for tool in tools:
+            func = tool.get("function", {})
+            name = func.get("name", "")
+            if name:
+                names.append(name)
+        return names
 
     def _execute_tool(self, tool_name: str, arguments: Dict) -> Dict:
         """执行工具"""
@@ -771,8 +1002,8 @@ No recent activity
 
         for i, model in enumerate(self.available_models, 1):
             marker = "●" if model.get("id") == self.current_model_id else "○"
-            name = model.get('name', 'Unknown')
-            provider = model.get('provider_type', 'Unknown')
+            name = escape_rich_tags(model.get('name', 'Unknown'))
+            provider = escape_rich_tags(model.get('provider_type', 'Unknown'))
             self.console.print(f"  {marker} {i}. {name} ([dim]{provider}[/dim])")
 
         self.console.print()
@@ -783,7 +1014,7 @@ No recent activity
             if 0 <= idx < len(self.available_models):
                 model = self.available_models[idx]
                 self._set_active_model(model.get("id"))
-                model_name = model.get('name', '').replace("[", "\\[").replace("]", "\\]")
+                model_name = escape_rich_tags(model.get('name', ''))
                 self.console.print(f"[green]✓ switched to {model_name}[/green]")
         else:
             self._switch_model_by_name(choice)
@@ -794,7 +1025,7 @@ No recent activity
         for model in self.available_models:
             if name in model.get('name', '').lower() or name in model.get('model', '').lower():
                 self._set_active_model(model.get("id"))
-                model_name = model.get('name', '').replace("[", "\\[").replace("]", "\\]")
+                model_name = escape_rich_tags(model.get('name', ''))
                 self.console.print(f"[green]✓ switched to {model_name}[/green]")
                 return
         self.console.print(f"[red]model not found: {name}[/red]")
@@ -836,17 +1067,19 @@ No recent activity
         return []
 
     def _show_tools(self):
-        """显示可用工具"""
-        if not TOOLS_AVAILABLE or not TOOL_DEFINITIONS:
+        """显示可用工具（包括内置和注册表工具）"""
+        all_tools = self._get_tool_definitions()
+        
+        if not all_tools:
             self.console.print("[dim]no tools available[/dim]")
             return
 
-        self.console.print(f"\n[bold cyan]Available Tools ({len(TOOL_DEFINITIONS)}):[/bold cyan]\n")
+        self.console.print(f"\n[bold cyan]Available Tools ({len(all_tools)}):[/bold cyan]\n")
 
-        for tool in TOOL_DEFINITIONS:
+        for tool in all_tools:
             func = tool.get("function", {})
-            name = func.get("name", "Unknown")
-            desc = func.get("description", "")
+            name = escape_rich_tags(func.get("name", "Unknown"))
+            desc = escape_rich_tags(func.get("description", ""))
             self.console.print(f"  [bold]{name}[/bold] - {desc}")
 
         self.console.print()
@@ -879,7 +1112,7 @@ No recent activity
 
         for session in sessions:
             sid = session.get("id", "")[:8]
-            name = session.get("name", "Untitled")
+            name = escape_rich_tags(session.get("name", "Untitled"))
             count = len(session.get("messages", []))
             updated = session.get("updated_at", "")
 
@@ -917,9 +1150,9 @@ No recent activity
 
             for mem in memories[:20]:
                 mid = mem.get("id", "")[:6]
-                title = mem.get("title", mem.get("key", "Untitled"))
-                mem_type = mem.get("type", "long")
-                target = mem.get("target_id", "global")[:8]
+                title = escape_rich_tags(mem.get("title", mem.get("key", "Untitled")))
+                mem_type = escape_rich_tags(mem.get("type", "long"))
+                target = escape_rich_tags(mem.get("target_id", "global")[:8])
                 table.add_row(mid, title, mem_type, target)
 
             self.console.print(table)
@@ -951,8 +1184,8 @@ No recent activity
 
             for doc in docs[:20]:
                 did = doc.get("id", "")[:6]
-                title = doc.get("title", "Untitled")
-                source = doc.get("source", "unknown")
+                title = escape_rich_tags(doc.get("title", "Untitled"))
+                source = escape_rich_tags(doc.get("source", "unknown"))
                 size = len(doc.get("content", ""))
                 table.add_row(did, title, source, f"{size} chars")
 
@@ -972,7 +1205,7 @@ No recent activity
             with open(personality_file, 'r', encoding='utf-8') as f:
                 personality = json.load(f)
 
-            name = personality.get("name", "Unknown")
+            name = escape_rich_tags(personality.get("name", "Unknown"))
             prompt = personality.get("prompt", "")
 
             self.console.print(f"[bold cyan]Personality: {name}[/bold cyan]\n")
@@ -980,6 +1213,8 @@ No recent activity
                 # 截断过长的prompt
                 if len(prompt) > 500:
                     prompt = prompt[:500] + "\n... (truncated)"
+                # 转义prompt中的特殊字符
+                prompt = escape_rich_tags(prompt)
                 self.console.print(prompt)
             else:
                 self.console.print("[dim]no prompt configured[/dim]")
@@ -1009,8 +1244,8 @@ No recent activity
 
             for task in tasks[:20]:
                 tid = task.get("id", "")[:6]
-                name = task.get("name", "Untitled")
-                trigger = task.get("trigger", "manual")
+                name = escape_rich_tags(task.get("name", "Untitled"))
+                trigger = escape_rich_tags(task.get("trigger", "manual"))
                 enabled = "✓" if task.get("enabled", True) else "✗"
                 table.add_row(tid, name, trigger, enabled)
 
@@ -1042,8 +1277,8 @@ No recent activity
 
             for wf in workflows[:20]:
                 wid = wf.get("id", "")[:6]
-                name = wf.get("name", "Untitled")
-                trigger = wf.get("trigger", "manual")
+                name = escape_rich_tags(wf.get("name", "Untitled"))
+                trigger = escape_rich_tags(wf.get("trigger", "manual"))
                 enabled = "✓" if wf.get("enabled", True) else "✗"
                 table.add_row(wid, name, trigger, enabled)
 
@@ -1068,7 +1303,7 @@ No recent activity
             table.add_column("Value", style="white")
 
             for key, value in config.items():
-                value_str = str(value)
+                value_str = escape_rich_tags(str(value))
                 if len(value_str) > 50:
                     value_str = value_str[:50] + "..."
                 table.add_row(key, value_str)
@@ -1084,13 +1319,15 @@ No recent activity
         # 模型状态
         current_model = self._get_current_model()
         if current_model:
-            self.console.print(f"[green]●[/green] Model: {current_model.get('name', 'Unknown')}")
+            model_name = escape_rich_tags(current_model.get('name', 'Unknown'))
+            self.console.print(f"[green]●[/green] Model: {model_name}")
         else:
             self.console.print(f"[red]●[/red] Model: Not configured")
 
         # 工具状态
-        if TOOLS_AVAILABLE:
-            self.console.print(f"[green]●[/green] Tools: {len(TOOL_DEFINITIONS)} available")
+        tool_count = len(self._get_all_tool_names())
+        if tool_count > 0:
+            self.console.print(f"[green]●[/green] Tools: {tool_count} available")
         else:
             self.console.print(f"[red]●[/red] Tools: Not available")
 
@@ -1129,39 +1366,266 @@ No recent activity
 
     def _print_footer(self):
         """打印底部状态栏"""
+        from rich.text import Text
+        
         current_model = self._get_current_model()
         model_name = current_model.get('name', 'Unknown') if current_model else 'Unknown'
         
         # 转义模型名称中的特殊字符，避免Rich标签解析错误
-        model_name = model_name.replace("[", "\\[").replace("]", "\\]")
+        model_name = escape_rich_tags(model_name)
 
-        footer_text = f"[dim]? for shortcuts[/dim]"
-        footer_text += f"  [cyan]● {model_name}[/cyan]"
+        text = Text()
+        text.append("? for shortcuts", style="dim")
+        text.append(f"  ● {model_name}", style="cyan")
 
-        if TOOLS_AVAILABLE:
-            footer_text += f"  [green]● {len(TOOL_DEFINITIONS)} tools[/green]"
+        tool_count = len(self._get_all_tool_names())
+        if tool_count > 0:
+            text.append(f"  ● {tool_count} tools", style="green")
         
         # 显示队列中的消息数
         with self.queue_lock:
             if self.message_queue:
-                footer_text += f"  [yellow]● {len(self.message_queue)} queued[/yellow]"
+                text.append(f"  ● {len(self.message_queue)} queued", style="yellow")
 
         self.console.print()
-        self.console.print(footer_text)
+        self.console.print(text)
 
     def _render_markdown(self, content: str):
-        """渲染Markdown内容，优化列表展示"""
+        """渲染Markdown内容，向左对齐（包括标题、表格）"""
         if not content:
             return
         
-        # 使用自定义Markdown选项优化列表显示
-        from rich.markdown import Markdown
-        md = Markdown(
-            content, 
-            code_theme="monokai",
-            justify="left"
-        )
-        self.console.print(md)
+        import re
+        from rich.text import Text
+        from rich.syntax import Syntax
+        from rich.table import Table
+        from rich.box import ROUNDED
+        
+        # 检测是否包含可能的 Rich 标签模式
+        rich_tag_pattern = r'\[/?[a-zA-Z_][a-zA-Z0-9_]*(?:\s+[^\]]*)?\]'
+        
+        # 如果检测到 Rich 标签，需要特殊处理
+        if re.search(rich_tag_pattern, content):
+            safe_content = self._escape_rich_tags_in_markdown(content)
+        else:
+            safe_content = content
+        
+        # 逐行处理，实现左对齐的 Markdown 渲染
+        lines = safe_content.split('\n')
+        in_code_block = False
+        code_lines = []
+        code_lang = ""
+        in_table = False
+        table_rows = []
+        table_headers = []
+        
+        def _render_table(headers, rows):
+            """渲染表格"""
+            if not headers:
+                return
+            table = Table(show_header=True, header_style="bold cyan", box=ROUNDED)
+            for header in headers:
+                table.add_column(header, style="white")
+            
+            for row in rows:
+                table.add_row(*row)
+            
+            self.console.print(table)
+        
+        for line in lines:
+            # 检测代码块
+            if line.strip().startswith('```'):
+                # 结束表格（如果正在渲染）
+                if in_table:
+                    _render_table(table_headers, table_rows)
+                    in_table = False
+                    table_rows = []
+                
+                if in_code_block:
+                    # 结束代码块，打印累积的代码
+                    if code_lines:
+                        code_content = '\n'.join(code_lines)
+                        syntax = Syntax(code_content, code_lang or "text", theme="monokai", line_numbers=False)
+                        self.console.print(syntax)
+                        code_lines = []
+                    in_code_block = False
+                    code_lang = ""
+                else:
+                    # 开始代码块
+                    in_code_block = True
+                    code_lang = line.strip()[3:].strip()
+                continue
+            
+            if in_code_block:
+                code_lines.append(line)
+                continue
+            
+            # 检测表格行
+            if line.strip().startswith('|') and line.strip().endswith('|'):
+                # 分隔符行，跳过
+                if '---' in line or ':--' in line or '--:' in line:
+                    in_table = True
+                    continue
+                
+                # 解析表格行
+                cells = [cell.strip() for cell in line.split('|')[1:-1]]
+                
+                if not in_table:
+                    # 第一行是表头
+                    table_headers = cells
+                    table_rows = []
+                    in_table = True
+                else:
+                    # 数据行
+                    table_rows.append(cells)
+                continue
+            else:
+                # 非表格行
+                if in_table:
+                    # 渲染表格
+                    _render_table(table_headers, table_rows)
+                    in_table = False
+                    table_rows = []
+                    table_headers = []
+            
+            # 处理普通行
+            if not line.strip():
+                self.console.print()
+                continue
+            
+            # 处理标题（左对齐）
+            if line.strip().startswith('#'):
+                level = len(line) - len(line.lstrip('#'))
+                title_text = line.lstrip('#').strip()
+                text = Text()
+                if level == 1:
+                    text.append(title_text, style="bold cyan")
+                elif level == 2:
+                    text.append(title_text, style="bold green")
+                elif level == 3:
+                    text.append(title_text, style="bold yellow")
+                else:
+                    text.append(title_text, style="bold")
+                self.console.print(text)
+                continue
+            
+            # 处理列表项
+            if line.strip().startswith('- ') or line.strip().startswith('* '):
+                item_text = line.strip()[2:]
+                text = Text()
+                text.append("  • ", style="dim")
+                # 处理粗体和斜体
+                self._render_inline_formatting(text, item_text)
+                self.console.print(text)
+                continue
+            
+            # 处理数字列表
+            num_list_match = re.match(r'^(\s*)(\d+)\.\s+(.+)$', line)
+            if num_list_match:
+                indent = num_list_match.group(1)
+                num = num_list_match.group(2)
+                item_text = num_list_match.group(3)
+                text = Text()
+                text.append(f"  {num}. ", style="dim")
+                self._render_inline_formatting(text, item_text)
+                self.console.print(text)
+                continue
+            
+            # 普通文本行，处理内联格式
+            text = Text()
+            self._render_inline_formatting(text, line)
+            self.console.print(text)
+        
+        # 渲染最后的表格（如果有）
+        if in_table:
+            _render_table(table_headers, table_rows)
+    
+    def _render_inline_formatting(self, text: Text, content: str):
+        """渲染内联格式（粗体、斜体、代码等）"""
+        import re
+        
+        # 保护行内代码
+        parts = []
+        last_end = 0
+        for match in re.finditer(r'`([^`]+)`', content):
+            # 添加前面的文本
+            if match.start() > last_end:
+                parts.append(('text', content[last_end:match.start()]))
+            # 添加代码
+            parts.append(('code', match.group(1)))
+            last_end = match.end()
+        
+        # 添加剩余文本
+        if last_end < len(content):
+            parts.append(('text', content[last_end:]))
+        
+        # 如果没有匹配到代码，直接处理整个内容
+        if not parts:
+            parts = [('text', content)]
+        
+        # 处理每个部分
+        for part_type, part_content in parts:
+            if part_type == 'code':
+                text.append(part_content, style="bold yellow on black")
+            else:
+                # 处理粗体和斜体
+                # 先处理粗体 **text**
+                bold_parts = re.split(r'\*\*(.+?)\*\*', part_content)
+                for i, bold_part in enumerate(bold_parts):
+                    if i % 2 == 1:  # 粗体内容
+                        text.append(bold_part, style="bold")
+                    else:
+                        # 处理斜体 *text*
+                        italic_parts = re.split(r'\*(.+?)\*', bold_part)
+                        for j, italic_part in enumerate(italic_parts):
+                            if j % 2 == 1:  # 斜体内容
+                                text.append(italic_part, style="italic")
+                            else:
+                                text.append(italic_part)
+    
+    def _escape_rich_tags_in_markdown(self, content: str) -> str:
+        """在 Markdown 内容中转义 Rich 标签，保留 Markdown 语法"""
+        import re
+        
+        # 匹配 Rich 标签模式：[tag] 或 [/tag] 或 [tag=val] 等
+        # 但不匹配 Markdown 语法：**text**、*text*、`code` 等
+        
+        def replace_tag(match):
+            tag = match.group(0)
+            # 检查是否是 Markdown 语法
+            # 如果是代码块内的内容，不转义
+            return tag.replace("[", "&#91;").replace("]", "&#93;")
+        
+        # 正则匹配可能的 Rich 标签
+        # 匹配 [/word] 或 [word] 或 [word=...] 等
+        pattern = r'\[/?[a-zA-Z_][a-zA-Z0-9_]*(?:\s*[=:]\s*[^\]]*)?\]'
+        
+        # 但排除 Markdown 标准语法
+        # 先保护 Markdown 标准语法
+        protected = []
+        
+        # 保护代码块
+        code_blocks = re.findall(r'```[\s\S]*?```', content)
+        for i, block in enumerate(code_blocks):
+            placeholder = f"___CODE_BLOCK_{i}___"
+            protected.append((placeholder, block))
+            content = content.replace(block, placeholder, 1)
+        
+        # 保护行内代码
+        inline_codes = re.findall(r'`[^`]+`', content)
+        for i, code in enumerate(inline_codes):
+            placeholder = f"___INLINE_CODE_{i}___"
+            protected.append((placeholder, code))
+            content = content.replace(code, placeholder, 1)
+        
+        # 现在安全地转义 Rich 标签
+        content = re.sub(pattern, replace_tag, content)
+        
+        # 恢复保护的内容
+        for placeholder, original in protected:
+            content = content.replace(placeholder, original, 1)
+        
+        return content
 
     def run(self):
         """运行CLI - 直接进入输入模式"""
@@ -1262,10 +1726,7 @@ No recent activity
             "timestamp": datetime.now().isoformat()
         })
 
-        # 显示AI正在思考
-        self.console.print(f"[bold cyan]🐱 NekoBot[/bold cyan] [dim]thinking...[/dim]")
-
-        # 调用AI（内联显示思考过程）
+        # 调用AI（流式输出已包含思考过程和回复）
         result = self._call_ai(self.messages)
 
         content = result.get("content", "")
@@ -1278,11 +1739,8 @@ No recent activity
             "timestamp": datetime.now().isoformat()
         })
 
-        # 显示AI回复（如果未被打断）
-        if not interrupted:
-            self.console.print()
-            self._render_markdown(content)
-        else:
+        # 如果被打断，显示提示
+        if interrupted:
             self.console.print(f"\n[dim][interrupted][/dim]")
 
         self.console.print()
