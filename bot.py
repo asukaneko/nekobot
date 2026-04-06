@@ -129,11 +129,29 @@ def run_bot():
     commands.bot.run(enable_webui_interaction=False)
 
 
+def run_cli():
+    """启动CLI模式"""
+    _log.info("Starting NekoBot CLI mode...")
+    try:
+        from nbot.cli_cc_style import CCStyleCLI
+        cli = CCStyleCLI()
+        cli.run()
+    except ImportError as e:
+        _log.error(f"Failed to import CLI module: {e}")
+        _log.info("Install rich to enable CLI: pip install rich")
+        print(f"\n错误: 需要安装 rich 库")
+        print("请运行: pip install rich")
+    except Exception as e:
+        _log.error(f"CLI error: {e}")
+        print(f"\nCLI错误: {e}")
+
+
 if __name__ == "__main__":
     import sys
 
     web_disabled = "--no-web" in sys.argv
     only_web = "--only-web" in sys.argv
+    cli_mode = "--cli" in sys.argv
     web_port = 5000
     web_host = "0.0.0.0"
 
@@ -143,7 +161,10 @@ if __name__ == "__main__":
         if arg == "--web-host" and i + 1 < len(sys.argv):
             web_host = sys.argv[i + 1]
 
-    if web_disabled:
+    if cli_mode:
+        # CLI模式 - 启动命令行界面
+        run_cli()
+    elif web_disabled:
         _log.info("Starting NekoBot (Web disabled)...")
         run_bot()
     elif only_web:
