@@ -6,6 +6,13 @@ from nbot.core import (
     normalize_chat_completion_data,
     resolve_chat_completion_url,
 )
+from nbot.web.utils.config_loader import (
+    get_vision_model_config,
+    get_video_model_config,
+    get_tts_model_config,
+    get_stt_model_config,
+    get_embedding_model_config,
+)
 
 config_parser = configparser.ConfigParser()
 config_parser.read('config.ini', encoding='utf-8')
@@ -296,22 +303,57 @@ class AIClient:
         }
         return requests.post(url, json=payload, headers=headers)
 
-    def describe_image(self, image_url: str, text: str) -> str:
+    def describe_image(self, image_url: str, text: str = None) -> str:
         print(f"[图片识别] 开始识别图片, URL: {image_url}")
+        
+        # 获取图片理解模型配置
+        vision_config = get_vision_model_config()
+        if vision_config and vision_config.get("api_key"):
+            # 使用配置的图片理解模型
+            api_key = vision_config.get("api_key")
+            base_url = vision_config.get("base_url", "")
+            model = vision_config.get("model", "zai-org/GLM-4.6V")
+            provider_type = vision_config.get("provider_type", "openai_compatible")
+            system_prompt = vision_config.get("system_prompt", "请详细描述这张图片的内容。")
+            
+            messages = [
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": image_url}
+                        },
+                        {
+                            "type": "text",
+                            "text": text or system_prompt
+                        }
+                    ]
+                }
+            ]
+            
+            try:
+                url = resolve_chat_completion_url(base_url, model=model, provider_type=provider_type)
+                headers = {
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json"
+                }
+                payload = build_chat_completion_payload(model, messages)
+                response = requests.post(url, json=payload, headers=headers, timeout=60)
+                response.raise_for_status()
+                result = self.clean_response(response.json()["choices"][0]["message"]["content"])
+                print(f"[图片识别] 识别成功(使用配置模型), 结果: {result[:100]}...")
+                return result
+            except Exception as e:
+                print(f"[图片识别] 使用配置模型失败, 回退到默认模型: {e}")
+        
+        # 回退到默认的silicon_chat
         messages = [
             {
                 "role": "user",
                 "content": [
-                    {
-                        "type": "image_url",
-                        "image_url": {
-                            "url": image_url
-                        }
-                    },
-                    {
-                        "type": "text",
-                        "text": text
-                    }
+                    {"type": "image_url", "image_url": {"url": image_url}},
+                    {"type": "text", "text": text or "请详细描述这张图片的内容。"}
                 ]
             }
         ]
@@ -506,37 +548,51 @@ class AIClient:
         except Exception:
             return ""
 
-    def describe_video(self, video_url: str) -> str:
-        url = self.base_url + "/chat/completions"
-        payload = {
-            "model": "zai-org/GLM-4.6V",
-            "messages": [
-                {
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "video_url",
-                            "video_url": {
-                                "url": video_url
-                            }
-                        },
-                        {
-                            "type": "text",
-                            "text": "请分析这个视频的内容"
-                        }
-                    ]
-                }
-            ]
-        }
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json"
-        }
-        response = requests.post(url, json=payload, headers=headers)
+    def describe_video(self, video_url: str, text: str = None) -> str:
+        print(f"[视频识别] 开始识别视频, URL: {video_url}")
+        
+        # 获取视频理解模型配置
+        video_config = get_video_model_config()
+        if video_config and video_config.get("api_key"):
+            api_key = video_config.get("api_key")
+            base_url = video_config.get("base_url", "")
+            model = video_config.get("model", "zai-org/GLM-4.6V")
+            provider_type = video_config.get("provider_type", "openai_compatible")
+            system_prompt = video_config.get("system_prompt", "请分析这个视频的内容。")
+        else:
+            # 使用默认配置
+            api_key = self.api_key
+            base_url = self.base_url
+            model = "zai-org/GLM-4.6V"
+            provider_type = self.provider_type
+            system_prompt = "请分析这个视频的内容。"
+        
         try:
-            return self.clean_response(response.json()["choices"][0]["message"]["content"])
-        except Exception:
-            return "链接失效,完整json:" + str(response.json())
+            url = resolve_chat_completion_url(base_url, model=model, provider_type=provider_type)
+            payload = {
+                "model": model,
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "video_url", "video_url": {"url": video_url}},
+                            {"type": "text", "text": text or system_prompt}
+                        ]
+                    }
+                ]
+            }
+            headers = {
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json"
+            }
+            response = requests.post(url, json=payload, headers=headers, timeout=120)
+            response.raise_for_status()
+            result = self.clean_response(response.json()["choices"][0]["message"]["content"])
+            print(f"[视频识别] 识别成功, 结果: {result[:100]}...")
+            return result
+        except Exception as e:
+            print(f"[视频识别] 识别失败: {e}")
+            return f"链接失效,错误: {str(e)}"
 
 
 ai_client = AIClient(

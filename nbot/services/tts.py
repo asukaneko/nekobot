@@ -1,13 +1,33 @@
 import os, time
 import configparser
 from ncatbot.core.element import Record, MessageChain
+from nbot.web.utils.config_loader import get_tts_model_config
 
 config_parser = configparser.ConfigParser()
 config_parser.read('config.ini', encoding='utf-8')
 
 cache_address = config_parser.get('cache', 'cache_address')
-silicon_api_key = config_parser.get('ApiKey', 'silicon_api_key')
-voice = config_parser.get('voice', 'voice')
+
+
+def _get_tts_config():
+    """获取TTS配置，优先使用新架构的配置"""
+    tts_config = get_tts_model_config()
+    if tts_config and tts_config.get("api_key"):
+        return {
+            "api_key": tts_config.get("api_key"),
+            "base_url": tts_config.get("base_url", "https://api.siliconflow.cn/v1"),
+            "model": tts_config.get("model", "fnlp/MOSS-TTSD-v0.5"),
+            "voice": tts_config.get("voice", "default"),
+            "speed": tts_config.get("speed", 1.0),
+        }
+    # 回退到传统配置
+    return {
+        "api_key": config_parser.get('ApiKey', 'silicon_api_key', fallback=""),
+        "base_url": "https://api.siliconflow.cn/v1",
+        "model": "fnlp/MOSS-TTSD-v0.5",
+        "voice": config_parser.get('voice', 'voice', fallback="fnlp/MOSS-TTSD-v0.5:diana").split(":")[-1],
+        "speed": 1.0,
+    }
 
 
 def remove_brackets_content(text: str) -> str:
@@ -28,15 +48,22 @@ def tts(content: str) -> MessageChain:
 
     speech_file_path = os.path.join(file_path, f"{name}.mp3")
 
+    # 获取TTS配置
+    tts_config = _get_tts_config()
+    api_key = tts_config["api_key"]
+    base_url = tts_config["base_url"]
+    model = tts_config["model"]
+    voice = tts_config["voice"]
+
     try:
         from openai import OpenAI
         client = OpenAI(
-            api_key=silicon_api_key,
-            base_url="https://api.siliconflow.cn/v1"
+            api_key=api_key,
+            base_url=base_url
         )
 
         with client.audio.speech.with_streaming_response.create(
-                model="fnlp/MOSS-TTSD-v0.5",
+                model=model,
                 voice=voice,
                 input=remove_brackets_content(content),
                 response_format="mp3"

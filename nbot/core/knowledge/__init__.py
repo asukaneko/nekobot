@@ -14,6 +14,14 @@ import re
 
 _log = logging.getLogger(__name__)
 
+# 导入新的配置加载器
+try:
+    from nbot.web.utils.config_loader import get_embedding_model_config
+    NEW_CONFIG_AVAILABLE = True
+except ImportError:
+    NEW_CONFIG_AVAILABLE = False
+    _log.warning("New config loader not available, using fallback")
+
 # 尝试导入 chromadb
 try:
     import chromadb
@@ -443,8 +451,23 @@ class KnowledgeManager:
         """生成ID"""
         return hashlib.md5(text.encode()).hexdigest()[:16]
 
-    def configure_embedding(self, api_key: str, base_url: str, model: str):
-        """配置 embedding 服务"""
+    def configure_embedding(self, api_key: str = None, base_url: str = None, model: str = None):
+        """配置 embedding 服务
+        
+        如果没有提供参数，会自动从配置中加载
+        """
+        # 尝试从新的配置架构加载
+        if NEW_CONFIG_AVAILABLE:
+            try:
+                embedding_config = get_embedding_model_config()
+                if embedding_config:
+                    api_key = api_key or embedding_config.get("api_key", "")
+                    base_url = base_url or embedding_config.get("base_url", "")
+                    model = model or embedding_config.get("model", "text-embedding-3-small")
+                    _log.info(f"[Knowledge] Loaded embedding config from new architecture: model={model}")
+            except Exception as e:
+                _log.warning(f"[Knowledge] Failed to load embedding config from new architecture: {e}")
+        
         if model:
             service = EmbeddingService(api_key=api_key, base_url=base_url, model=model)
             self.store.set_embedding_service(service)

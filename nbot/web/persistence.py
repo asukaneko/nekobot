@@ -582,6 +582,7 @@ def save_data(server, data_type: str):
                     {
                         "models": server.ai_models,
                         "active_model_id": server.active_model_id,
+                        "active_models_by_purpose": getattr(server, "active_models_by_purpose", {}),
                     },
                     f,
                     ensure_ascii=False,

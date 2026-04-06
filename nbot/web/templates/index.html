@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
@@ -114,6 +114,33 @@
         @keyframes boot-loading {
             0% { transform: translateX(-120%); }
             100% { transform: translateX(320%); }
+        }
+        /* 左右拖动式开关 */
+        .toggle-switch {
+            position: relative;
+            width: 48px;
+            height: 26px;
+            background: var(--border-color);
+            border-radius: 13px;
+            cursor: pointer;
+            transition: background 0.3s ease;
+        }
+        .toggle-switch.active {
+            background: var(--success);
+        }
+        .toggle-slider {
+            position: absolute;
+            top: 3px;
+            left: 3px;
+            width: 20px;
+            height: 20px;
+            background: white;
+            border-radius: 50%;
+            transition: transform 0.3s ease;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+        }
+        .toggle-switch.active .toggle-slider {
+            transform: translateX(22px);
         }
     </style>
     <style>
@@ -7577,6 +7604,16 @@
                                                 <input type="file" ref="fileInput" @change="handleFileSelect" multiple accept="image/*,.pdf,.doc,.docx,.txt,.json,.xml" style="display: none;">
                                                 <input type="file" ref="workspaceFileInput" @change="handleWorkspaceFileUpload" multiple accept="*/*" style="display: none;">
                                             </div>
+                                            <!-- 语音录音按钮 -->
+                                            <button
+                                                class="btn btn-icon"
+                                                :class="{ 'btn-danger': isRecording, 'btn-secondary': !isRecording }"
+                                                @click="toggleRecording"
+                                                :disabled="isLoading"
+                                                :title="isRecording ? '停止录音' : '语音输入'"
+                                            >
+                                                <i :class="isRecording ? 'fas fa-stop' : 'fas fa-microphone'"></i>
+                                            </button>
                                             <button
                                                 class="btn"
                                                 :class="isLoading && (!inputMessage.trim() && uploadedFiles.length === 0) ? 'btn-danger' : 'btn-primary'"
@@ -8289,6 +8326,7 @@
 
                     <!-- AI Config -->
                     <div v-if="currentPage === 'ai-config'" class="fade-in ai-config-shell">
+                        <!-- 顶部标题栏 -->
                         <div class="ai-hero ai-config-fade">
                             <div class="ai-hero-grid">
                                 <div>
@@ -8298,13 +8336,16 @@
                                         </div>
                                         <div class="ai-hero-copy">
                                             <h2>AI 配置中心</h2>
-                                            <p>先确认服务能连通，再决定模型能力和运行策略。这样连接问题、能力问题和调参问题会被清楚地分开。</p>
+                                            <p>为不同AI能力配置专用模型，实现图片理解、视频分析、语音合成等高级功能。</p>
                                         </div>
                                     </div>
                                     <div class="ai-toolbar">
                                         <div class="ai-action-group">
                                             <button class="btn btn-secondary" @click="openModelEditModal()">
-                                                <i class="fas fa-plus"></i> 新增模型
+                                                <i class="fas fa-plus"></i> 新增模型配置
+                                            </button>
+                                            <button class="btn btn-secondary" @click="openApiKeyManager()">
+                                                <i class="fas fa-key"></i> API Key管理
                                             </button>
                                             <button class="btn btn-secondary" @click="showAIConfigDetails = !showAIConfigDetails">
                                                 <i class="fas" :class="showAIConfigDetails ? 'fa-eye-slash' : 'fa-sliders-h'"></i>
@@ -8321,34 +8362,107 @@
                                     <div class="ai-status-panel">
                                         <div class="ai-status-top">
                                             <div>
-                                                <div class="ai-status-title">当前生效模型</div>
+                                                <div class="ai-status-title">系统状态</div>
                                                 <div class="ai-status-name">
-                                                    {{ activeModelId ? (aiModels.find(m => m.id === activeModelId)?.name || '未知模型') : (aiConfig.model || '未设置模型') }}
+                                                    {{ Object.values(activeModelsByPurpose).filter(m => m && m.has_config).length }}/6 种能力已配置
                                                 </div>
                                             </div>
                                             <span class="badge" :class="aiStatus.class">{{ aiStatus.text }}</span>
                                         </div>
                                         <div class="ai-summary-grid">
                                             <div class="ai-summary-card">
-                                                <div class="ai-summary-label">Provider</div>
-                                                <div class="ai-summary-value">{{ getProviderLabel(aiConfig.provider) }}</div>
-                                                <div class="ai-summary-note">{{ aiConfig.provider_type || 'openai_compatible' }}</div>
+                                                <div class="ai-summary-label">对话模型</div>
+                                                <div class="ai-summary-value">{{ activeModelsByPurpose.chat?.model?.name || '未配置' }}</div>
+                                                <div class="ai-summary-note">{{ activeModelsByPurpose.chat?.has_config ? '已启用' : '点击卡片配置' }}</div>
                                             </div>
                                             <div class="ai-summary-card">
-                                                <div class="ai-summary-label">模型标识</div>
-                                                <div class="ai-summary-value">{{ aiConfig.custom_model || aiConfig.model || '未设置' }}</div>
-                                                <div class="ai-summary-note">切换后建议先做一次连接测试</div>
+                                                <div class="ai-summary-label">图片理解</div>
+                                                <div class="ai-summary-value">{{ activeModelsByPurpose.vision?.model?.name || '未配置' }}</div>
+                                                <div class="ai-summary-note">{{ activeModelsByPurpose.vision?.has_config ? '已启用' : '点击卡片配置' }}</div>
                                             </div>
                                             <div class="ai-summary-card">
-                                                <div class="ai-summary-label">能力状态</div>
-                                                <div class="ai-summary-value">{{ aiConfig.supports_tools ? '工具已开' : '无工具' }}</div>
-                                                <div class="ai-summary-note">{{ aiConfig.supports_reasoning ? '展示思考内容' : '不展示思考内容' }}</div>
+                                                <div class="ai-summary-label">视频理解</div>
+                                                <div class="ai-summary-value">{{ activeModelsByPurpose.video?.model?.name || '未配置' }}</div>
+                                                <div class="ai-summary-note">{{ activeModelsByPurpose.video?.has_config ? '已启用' : '点击卡片配置' }}</div>
                                             </div>
                                             <div class="ai-summary-card">
-                                                <div class="ai-summary-label">上下文预算</div>
-                                                <div class="ai-summary-value">{{ Math.round((contextTokenEstimate || 0) / (aiConfig.max_context_length || 30000) * 100) }}%</div>
-                                                <div class="ai-summary-note">预计 {{ formatNumber(contextTokenEstimate || 0) }} / {{ formatNumber(aiConfig.max_context_length || 30000) }} Token</div>
+                                                <div class="ai-summary-label">语音合成</div>
+                                                <div class="ai-summary-value">{{ activeModelsByPurpose.tts?.model?.name || '未配置' }}</div>
+                                                <div class="ai-summary-note">{{ activeModelsByPurpose.tts?.has_config ? '已启用' : '点击卡片配置' }}</div>
                                             </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- 模型用途配置卡片 -->
+                        <div class="ai-pane ai-config-fade">
+                            <div class="ai-pane-header">
+                                <div class="ai-pane-title">
+                                    <i class="fas fa-th-large"></i>
+                                    <span>模型用途配置</span>
+                                </div>
+                            </div>
+                            <div class="ai-pane-subtitle">为6种AI能力配置专用模型，点击卡片查看详情或编辑配置。</div>
+                            <div class="ai-pane-body">
+                                <div class="purpose-cards-grid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 16px;">
+                                    <div 
+                                        v-for="(info, purpose) in modelPurposes" 
+                                        :key="purpose"
+                                        class="purpose-card"
+                                        :class="{ 'has-config': activeModelsByPurpose[purpose]?.has_config }"
+                                        @click="openPurposeConfig(purpose)"
+                                        style="
+                                            background: var(--surface-color);
+                                            border: 2px solid var(--border-color);
+                                            border-radius: 12px;
+                                            padding: 20px;
+                                            cursor: pointer;
+                                            transition: all 0.2s ease;
+                                            position: relative;
+                                            overflow: hidden;
+                                        "
+                                        :style="activeModelsByPurpose[purpose]?.has_config ? { borderColor: info.color } : {}"
+                                    >
+                                        <div class="purpose-card-header" style="display: flex; align-items: center; gap: 12px; margin-bottom: 12px;">
+                                            <div class="purpose-icon" style="
+                                                width: 48px;
+                                                height: 48px;
+                                                border-radius: 12px;
+                                                display: flex;
+                                                align-items: center;
+                                                justify-content: center;
+                                                font-size: 24px;
+                                                background: linear-gradient(135deg, rgba(255,255,255,0.1), rgba(255,255,255,0.05));
+                                            " :style="{ backgroundColor: info.color + '20' }">
+                                                {{ info.icon }}
+                                            </div>
+                                            <div class="purpose-info">
+                                                <div class="purpose-name" style="font-weight: 600; font-size: 16px; color: var(--text-primary);">
+                                                    {{ info.name }}
+                                                </div>
+                                                <div class="purpose-desc" style="font-size: 12px; color: var(--text-secondary); margin-top: 2px;">
+                                                    {{ info.description }}
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div class="purpose-status" style="
+                                            display: flex;
+                                            align-items: center;
+                                            justify-content: space-between;
+                                            padding-top: 12px;
+                                            border-top: 1px solid var(--border-color);
+                                        ">
+                                            <div class="status-text" style="font-size: 13px; color: var(--text-secondary);">
+                                                <template v-if="activeModelsByPurpose[purpose]?.has_config">
+                                                    <span style="color: #10b981;">●</span> 已配置: {{ activeModelsByPurpose[purpose].model.name }}
+                                                </template>
+                                                <template v-else>
+                                                    <span style="color: #9ca3af;">○</span> 未配置
+                                                </template>
+                                            </div>
+                                            <i class="fas fa-chevron-right" style="color: var(--text-secondary); font-size: 12px;"></i>
                                         </div>
                                     </div>
                                 </div>
@@ -8401,19 +8515,14 @@
                                             <span class="ai-saved-flag">{{ model.supports_stream ? '支持流式' : '无流式' }}</span>
                                         </div>
                                         <div class="ai-saved-actions">
-                                            <button
-                                                v-if="activeModelId !== model.id && model.enabled"
-                                                class="btn btn-primary btn-sm"
-                                                @click="applyModel(model)"
-                                                :disabled="isLoading"
-                                            >
-                                                <i class="fas fa-check"></i> 应用
-                                            </button>
                                             <button class="btn btn-secondary btn-sm" @click="testModel(model)" :disabled="isTesting">
                                                 <i class="fas" :class="isTesting ? 'fa-spinner fa-spin' : 'fa-vial'"></i> 测试
                                             </button>
                                             <button class="btn btn-text btn-sm" @click="openModelEditModal(model)">
                                                 <i class="fas fa-edit"></i> 编辑
+                                            </button>
+                                            <button class="btn btn-danger btn-sm" @click="deleteModel(model)" :disabled="isDeleting">
+                                                <i class="fas" :class="isDeleting ? 'fa-spinner fa-spin' : 'fa-trash'"></i> 删除
                                             </button>
                                         </div>
                                         <div class="ai-saved-watermark" aria-hidden="true">
@@ -8879,6 +8988,19 @@
                                     </div>
 
                                     <div class="form-group">
+                                        <label class="form-label">模型用途 <span class="required">*</span></label>
+                                        <select v-model="modelForm.purpose" class="form-select" @change="onModelPurposeChange">
+                                            <option value="chat">💬 对话模型 - 用于日常对话和问答</option>
+                                            <option value="vision">🖼️ 图片理解模型 - 用于识别和理解图片</option>
+                                            <option value="video">🎬 视频理解模型 - 用于分析视频内容</option>
+                                            <option value="tts">🔊 TTS语音合成 - 用于文字转语音</option>
+                                            <option value="stt">🎤 STT语音识别 - 用于语音转文字</option>
+                                            <option value="embedding">📊 向量嵌入模型 - 用于知识库和语义搜索</option>
+                                        </select>
+                                        <div class="form-hint">选择模型用途后，会自动应用该用途的推荐默认配置</div>
+                                    </div>
+
+                                    <div class="form-group">
                                         <label class="form-label">AI 提供商 <span class="required">*</span></label>
                                         <select v-model="modelForm.provider" class="form-select" @change="onModelProviderChange">
                                             <option value="openai">OpenAI</option>
@@ -8893,8 +9015,14 @@
 
                                     <div class="form-group">
                                         <label class="form-label">API Key <span class="required">*</span></label>
-                                        <input v-model="modelForm.api_key" type="password" class="form-input" placeholder="输入 API Key">
-                                        <div class="form-hint">您的 API Key 将被安全存储</div>
+                                        <div style="display: flex; gap: 8px;">
+                                            <input v-model="modelForm.api_key" type="password" class="form-input" placeholder="输入 API Key" style="flex: 1;">
+                                            <select v-model="modelForm.selectedApiKeyId" class="form-select" style="width: 150px;" @change="onApiKeySelectChange">
+                                                <option value="">选择已保存的Key</option>
+                                                <option v-for="key in apiKeys" :key="key.id" :value="key.id">{{ key.name }}</option>
+                                            </select>
+                                        </div>
+                                        <div class="form-hint">您的 API Key 将被安全存储，或从已保存的Key中选择</div>
                                     </div>
 
                                     <div class="form-group">
@@ -8977,11 +9105,268 @@
                                             </label>
                                         </div>
                                     </div>
+
+                                    <!-- TTS特有配置 -->
+                                    <template v-if="modelForm.purpose === 'tts'">
+                                        <div class="form-group" style="margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--border-color);">
+                                            <label class="form-label" style="color: var(--primary-color); font-weight: 600;">🔊 TTS特有配置</label>
+                                        </div>
+                                        <div class="form-group">
+                                            <label class="form-label">音色</label>
+                                            <input v-model="modelForm.voice" type="text" class="form-input" placeholder="default">
+                                        </div>
+                                        <div class="form-row">
+                                            <div class="form-group">
+                                                <label class="form-label">语速</label>
+                                                <input v-model.number="modelForm.speed" type="number" min="0.5" max="2" step="0.1" class="form-input">
+                                            </div>
+                                            <div class="form-group">
+                                                <label class="form-label">音调</label>
+                                                <input v-model.number="modelForm.pitch" type="number" min="0.5" max="2" step="0.1" class="form-input">
+                                            </div>
+                                            <div class="form-group">
+                                                <label class="form-label">音量</label>
+                                                <input v-model.number="modelForm.volume" type="number" min="0" max="2" step="0.1" class="form-input">
+                                            </div>
+                                        </div>
+                                    </template>
+
+                                    <!-- STT特有配置 -->
+                                    <template v-if="modelForm.purpose === 'stt'">
+                                        <div class="form-group" style="margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--border-color);">
+                                            <label class="form-label" style="color: var(--primary-color); font-weight: 600;">🎤 STT特有配置</label>
+                                        </div>
+                                        <div class="form-group">
+                                            <label class="form-label">识别语言</label>
+                                            <select v-model="modelForm.language" class="form-select">
+                                                <option value="zh">中文</option>
+                                                <option value="en">英文</option>
+                                                <option value="ja">日文</option>
+                                                <option value="ko">韩文</option>
+                                                <option value="auto">自动检测</option>
+                                            </select>
+                                        </div>
+                                    </template>
+
+                                    <!-- Embedding特有配置 -->
+                                    <template v-if="modelForm.purpose === 'embedding'">
+                                        <div class="form-group" style="margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--border-color);">
+                                            <label class="form-label" style="color: var(--primary-color); font-weight: 600;">📊 Embedding特有配置</label>
+                                        </div>
+                                        <div class="form-group">
+                                            <label class="form-label">向量维度</label>
+                                            <select v-model.number="modelForm.dimensions" class="form-select">
+                                                <option value="384">384 (轻量级)</option>
+                                                <option value="768">768 (标准)</option>
+                                                <option value="1024">1024 (高精度)</option>
+                                                <option value="1536">1536 (OpenAI默认)</option>
+                                                <option value="3072">3072 (超高精度)</option>
+                                            </select>
+                                        </div>
+                                    </template>
                                 </div>
                                 <div class="modal-footer">
                                     <button class="btn btn-secondary" @click="closeModelEditModal">取消</button>
                                     <button class="btn btn-primary" @click="saveModel" :disabled="isLoading">
                                         <i class="fas fa-save"></i> {{ isLoading ? '保存中...' : '保存' }}
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- API Key管理器弹窗 -->
+                        <div v-if="showApiKeyManager" class="modal-overlay" @click.self="closeApiKeyManager">
+                            <div class="modal" style="max-width: 600px; max-height: 90vh;">
+                                <div class="modal-header">
+                                    <h3 class="modal-title">
+                                        <i class="fas fa-key" style="margin-right: 8px;"></i>
+                                        API Key 管理器
+                                    </h3>
+                                    <button class="modal-close" @click="closeApiKeyManager">
+                                        <i class="fas fa-times"></i>
+                                    </button>
+                                </div>
+                                <div class="modal-body" style="overflow-y: auto;">
+                                    <!-- 添加/编辑表单 -->
+                                    <div class="form-group">
+                                        <label class="form-label">API Key 名称</label>
+                                        <input v-model="apiKeyForm.name" type="text" class="form-input" placeholder="例如：OpenAI Key">
+                                    </div>
+                                    <div class="form-group">
+                                        <label class="form-label">API Key 值</label>
+                                        <input v-model="apiKeyForm.key" type="password" class="form-input" placeholder="输入 API Key">
+                                        <div class="form-hint" v-if="apiKeyForm.id">留空表示不修改已有的Key</div>
+                                    </div>
+                                    <div style="margin-bottom: 20px;">
+                                        <button class="btn btn-primary" @click="saveApiKey" :disabled="isSavingApiKey">
+                                            <i class="fas fa-save"></i> {{ isSavingApiKey ? '保存中...' : (apiKeyForm.id ? '更新' : '添加') }}
+                                        </button>
+                                        <button v-if="apiKeyForm.id" class="btn btn-secondary" @click="resetApiKeyForm" style="margin-left: 8px;">
+                                            取消编辑
+                                        </button>
+                                    </div>
+
+                                    <!-- 已保存的Key列表 -->
+                                    <div v-if="apiKeys.length > 0">
+                                        <h4 style="margin-bottom: 12px; color: var(--text-primary);">已保存的 API Keys</h4>
+                                        <div style="display: flex; flex-direction: column; gap: 8px;">
+                                            <div v-for="key in apiKeys" :key="key.id" style="display: flex; align-items: center; justify-content: space-between; padding: 12px; background: var(--bg-tertiary); border-radius: 8px;">
+                                                <div style="display: flex; align-items: center; gap: 8px;">
+                                                    <i class="fas fa-key" style="color: var(--accent-primary);"></i>
+                                                    <span style="font-weight: 500;">{{ key.name }}</span>
+                                                </div>
+                                                <div style="display: flex; gap: 8px;">
+                                                    <button class="btn btn-text btn-sm" @click="editApiKey(key)">
+                                                        <i class="fas fa-edit"></i> 编辑
+                                                    </button>
+                                                    <button class="btn btn-danger btn-sm" @click="deleteApiKey(key)">
+                                                        <i class="fas fa-trash"></i> 删除
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div v-else style="text-align: center; padding: 40px; color: var(--text-secondary);">
+                                        <i class="fas fa-key" style="font-size: 48px; margin-bottom: 16px; opacity: 0.5;"></i>
+                                        <p>还没有保存的 API Key</p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- 用途配置弹窗 -->
+                        <div v-if="showPurposeConfigModal && editingPurpose" class="modal-overlay" @click.self="closePurposeConfigModal">
+                            <div class="modal" style="max-width: 700px; max-height: 90vh;">
+                                <div class="modal-header">
+                                    <h3 class="modal-title">
+                                        <span style="font-size: 24px; margin-right: 8px;">{{ modelPurposes[editingPurpose].icon }}</span>
+                                        {{ modelPurposes[editingPurpose].name }}配置
+                                    </h3>
+                                    <button class="modal-close" @click="closePurposeConfigModal">
+                                        <i class="fas fa-times"></i>
+                                    </button>
+                                </div>
+                                <div class="modal-body" style="overflow-y: auto;">
+                                    <div class="purpose-intro" style="
+                                        background: linear-gradient(135deg, v-bind('modelPurposes[editingPurpose].color') + '15', v-bind('modelPurposes[editingPurpose].color') + '05');
+                                        border-left: 4px solid v-bind('modelPurposes[editingPurpose].color');
+                                        padding: 16px;
+                                        border-radius: 8px;
+                                        margin-bottom: 20px;
+                                    ">
+                                        <div style="font-weight: 600; margin-bottom: 4px;">{{ modelPurposes[editingPurpose].name }}</div>
+                                        <div style="color: var(--text-secondary); font-size: 14px;">{{ modelPurposes[editingPurpose].description }}</div>
+                                    </div>
+
+                                    <!-- 当前配置状态 -->
+                                    <div v-if="activeModelsByPurpose[editingPurpose]?.has_config" class="current-config" style="
+                                        background: var(--surface-color);
+                                        border: 1px solid var(--border-color);
+                                        border-radius: 8px;
+                                        padding: 16px;
+                                        margin-bottom: 20px;
+                                    ">
+                                        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px;">
+                                            <div style="font-weight: 600;">当前配置</div>
+                                            <span class="badge badge-success">已启用</span>
+                                        </div>
+                                        <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; font-size: 14px;">
+                                            <div>
+                                                <span style="color: var(--text-secondary);">配置名称：</span>
+                                                <span>{{ activeModelsByPurpose[editingPurpose].model.name }}</span>
+                                            </div>
+                                            <div>
+                                                <span style="color: var(--text-secondary);">提供商：</span>
+                                                <span>{{ getProviderLabel(activeModelsByPurpose[editingPurpose].model.provider) }}</span>
+                                            </div>
+                                            <div>
+                                                <span style="color: var(--text-secondary);">模型：</span>
+                                                <span>{{ activeModelsByPurpose[editingPurpose].model.model }}</span>
+                                            </div>
+                                            <div>
+                                                <span style="color: var(--text-secondary);">状态：</span>
+                                                <span>{{ activeModelsByPurpose[editingPurpose].model.enabled ? '已启用' : '已禁用' }}</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div v-else class="no-config" style="
+                                        background: var(--surface-color);
+                                        border: 1px dashed var(--border-color);
+                                        border-radius: 8px;
+                                        padding: 24px;
+                                        text-align: center;
+                                        margin-bottom: 20px;
+                                    ">
+                                        <i class="fas fa-exclamation-circle" style="font-size: 32px; color: var(--text-secondary); margin-bottom: 8px;"></i>
+                                        <div style="color: var(--text-secondary);">尚未配置{{ modelPurposes[editingPurpose].name }}</div>
+                                        <div style="font-size: 12px; color: var(--text-secondary); margin-top: 4px;">点击下方按钮创建配置</div>
+                                    </div>
+
+                                    <!-- 该用途的模型列表 -->
+                                    <div class="purpose-models">
+                                        <div style="font-weight: 600; margin-bottom: 12px;">{{ modelPurposes[editingPurpose].name }}配置列表</div>
+                                        <div v-if="getModelsByPurpose(editingPurpose).length === 0" class="empty-state" style="padding: 20px; text-align: center;">
+                                            <p style="color: var(--text-secondary);">暂无{{ modelPurposes[editingPurpose].name }}配置</p>
+                                        </div>
+                                        <div v-else class="purpose-models-list" style="display: flex; flex-direction: column; gap: 8px;">
+                                            <div 
+                                                v-for="model in getModelsByPurpose(editingPurpose)" 
+                                                :key="model.id"
+                                                class="purpose-model-item"
+                                                style="
+                                                    display: flex;
+                                                    align-items: center;
+                                                    justify-content: space-between;
+                                                    padding: 12px;
+                                                    background: var(--surface-color);
+                                                    border: 1px solid var(--border-color);
+                                                    border-radius: 8px;
+                                                "
+                                                :style="activeModelId === model.id ? { borderColor: 'var(--primary-color)', background: 'var(--primary-color)05' } : {}"
+                                            >
+                                                <div style="display: flex; align-items: center; gap: 12px;">
+                                                    <div style="
+                                                        width: 36px;
+                                                        height: 36px;
+                                                        border-radius: 8px;
+                                                        display: flex;
+                                                        align-items: center;
+                                                        justify-content: center;
+                                                        font-size: 18px;
+                                                        background: v-bind('modelPurposes[editingPurpose].color') + '20';
+                                                    ">
+                                                        {{ modelPurposes[editingPurpose].icon }}
+                                                    </div>
+                                                    <div>
+                                                        <div style="font-weight: 500;">{{ model.name }}</div>
+                                                        <div style="font-size: 12px; color: var(--text-secondary);">
+                                                            {{ getProviderLabel(model.provider) }} · {{ model.model }}
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                                <div style="display: flex; align-items: center; gap: 8px;">
+                                                    <span v-if="activeModelsByPurpose[editingPurpose]?.active_model_id === model.id" class="badge badge-primary">当前使用</span>
+                                                    <span v-else-if="model.enabled" class="badge badge-success">已启用</span>
+                                                    <span v-else class="badge badge-secondary">已禁用</span>
+                                                    <button 
+                                                        v-if="activeModelsByPurpose[editingPurpose]?.active_model_id !== model.id && model.enabled"
+                                                        class="btn btn-primary btn-sm"
+                                                        @click="applyPurposeModel(model)"
+                                                    >
+                                                        应用
+                                                    </button>
+                                                    <button class="btn btn-text btn-sm" @click="openModelEditModal(model)">
+                                                        <i class="fas fa-edit"></i>
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="modal-footer">
+                                    <button class="btn btn-secondary" @click="closePurposeConfigModal">关闭</button>
+                                    <button class="btn btn-primary" @click="openModelEditModal(); closePurposeConfigModal();">
+                                        <i class="fas fa-plus"></i> 新建{{ modelPurposes[editingPurpose].name }}配置
                                     </button>
                                 </div>
                             </div>
@@ -9295,6 +9680,16 @@
                                             <input v-model="showThinkingCard" type="checkbox">
                                             <span>显示进度卡片</span>
                                         </label>
+                                        <!-- Web端TTS开关 -->
+                                        <div style="display: flex; align-items: center; gap: 12px; grid-column: span 2;">
+                                            <span style="color: var(--text-secondary);">Web端语音播报 (TTS)</span>
+                                            <label class="toggle-switch" :class="{ active: ttsEnabled }" @click="toggleTTS">
+                                                <div class="toggle-slider"></div>
+                                            </label>
+                                            <span :style="{ color: ttsEnabled ? 'var(--success)' : 'var(--text-muted)' }">
+                                                {{ ttsEnabled ? '开启' : '关闭' }}
+                                            </span>
+                                        </div>
                                     </div>
                                 </div>
                             </div>
@@ -9857,10 +10252,11 @@
                     <!-- 返回结果 -->
                     <div v-if="stepDetailData.full_result" style="margin-bottom: 16px;">
                         <div style="color: var(--text-secondary); font-size: 13px; margin-bottom: 4px;">
-                            <i class="fas fa-check-circle" :style="{ color: stepDetailData.full_result.success ? 'var(--success)' : 'var(--error)' }"></i>
+                            <i class="fas fa-check-circle" :style="{ color: (typeof stepDetailData.full_result === 'object' && stepDetailData.full_result.success) ? 'var(--success)' : 'var(--success)' }"></i>
                             返回结果 (Result)
                         </div>
-                        <pre class="code-block">{{ formatJson(stepDetailData.full_result) }}</pre>
+                        <pre class="code-block" v-if="typeof stepDetailData.full_result === 'object'">{{ formatJson(stepDetailData.full_result) }}</pre>
+                        <div v-else style="background: var(--bg-tertiary); padding: 12px; border-radius: 6px; white-space: pre-wrap; word-break: break-all; font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace; font-size: 13px; line-height: 1.6;">{{ stepDetailData.full_result }}</div>
                     </div>
 
                     <!-- 文件变更预览 -->
@@ -11503,6 +11899,21 @@
                     showApiKey: false,
                     showAIConfigDetails: false,
                     isTesting: false,
+                    isDeleting: false,
+                    // 语音相关
+                    isRecording: false,
+                    mediaRecorder: null,
+                    audioChunks: [],
+                    ttsEnabled: localStorage.getItem('ttsEnabled') === 'true' || false,
+                    // API Key管理
+                    apiKeys: [],
+                    showApiKeyManager: false,
+                    apiKeyForm: {
+                        id: null,
+                        name: '',
+                        key: ''
+                    },
+                    isSavingApiKey: false,
                     currentPreset: '',
                     aiStatus: { text: '未配置', class: 'badge-warning' },
                     aiPresets: [
@@ -11522,6 +11933,7 @@
                     modelForm: {
                         id: null,
                         name: '',
+                        purpose: 'chat',
                         provider: 'openai',
                         provider_type: 'openai_compatible',
                         api_key: '',
@@ -11544,8 +11956,36 @@
                         image_model: '',
                         search_api_key: '',
                         embedding_model: '',
-                        max_context_length: 30000
+                        max_context_length: 30000,
+                        // TTS/STT/Embedding特有配置
+                        voice: 'default',
+                        speed: 1.0,
+                        pitch: 1.0,
+                        volume: 1.0,
+                        language: 'zh',
+                        dimensions: 1536
                     },
+                    // 模型用途配置
+                    modelPurposes: {
+                        chat: { name: '对话模型', icon: '💬', description: '用于日常对话和问答', color: '#3b82f6' },
+                        vision: { name: '图片理解模型', icon: '🖼️', description: '用于识别和理解图片内容', color: '#8b5cf6' },
+                        video: { name: '视频理解模型', icon: '🎬', description: '用于分析视频内容', color: '#ec4899' },
+                        tts: { name: 'TTS语音合成', icon: '🔊', description: '用于文字转语音', color: '#10b981' },
+                        stt: { name: 'STT语音识别', icon: '🎤', description: '用于语音转文字', color: '#f59e0b' },
+                        embedding: { name: '向量嵌入模型', icon: '📊', description: '用于知识库和语义搜索', color: '#6366f1' }
+                    },
+                    // 各用途的活跃模型
+                    activeModelsByPurpose: {
+                        chat: null,
+                        vision: null,
+                        video: null,
+                        tts: null,
+                        stt: null,
+                        embedding: null
+                    },
+                    // 显示用途配置弹窗
+                    showPurposeConfigModal: false,
+                    editingPurpose: null,
 
                     // Skills 配置
                     skills: [],
@@ -13704,6 +14144,8 @@ def main(params):
                         const res = await api.get('/api/ai-models');
                         this.aiModels = res.data.models || [];
                         this.activeModelId = res.data.active_model_id;
+                        // 同时加载各用途的活跃模型
+                        await this.loadActiveModelsByPurpose();
                     } catch (e) {
                         console.error('Failed to load AI models:', e);
                     }
@@ -14579,7 +15021,217 @@ def main(params):
                         this.loadingSessionId = this.currentSession?.id;
                     }
                 },
-                
+
+                // ========== 语音功能 ==========
+                async toggleRecording() {
+                    if (this.isRecording) {
+                        await this.stopRecording();
+                    } else {
+                        await this.startRecording();
+                    }
+                },
+
+                async startRecording() {
+                    try {
+                        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                        this.mediaRecorder = new MediaRecorder(stream);
+                        this.audioChunks = [];
+
+                        this.mediaRecorder.ondataavailable = (event) => {
+                            if (event.data.size > 0) {
+                                this.audioChunks.push(event.data);
+                            }
+                        };
+
+                        this.mediaRecorder.onstop = async () => {
+                            const audioBlob = new Blob(this.audioChunks, { type: 'audio/webm' });
+                            await this.transcribeAudio(audioBlob);
+                            // 停止所有音轨
+                            stream.getTracks().forEach(track => track.stop());
+                        };
+
+                        this.mediaRecorder.start();
+                        this.isRecording = true;
+                        this.showToast('开始录音，请说话...', 'info');
+                    } catch (err) {
+                        console.error('录音失败:', err);
+                        this.showToast('无法访问麦克风: ' + err.message, 'error');
+                    }
+                },
+
+                async stopRecording() {
+                    if (this.mediaRecorder && this.isRecording) {
+                        this.mediaRecorder.stop();
+                        this.isRecording = false;
+                        this.showToast('录音结束，正在识别...', 'info');
+                    }
+                },
+
+                async transcribeAudio(audioBlob) {
+                    try {
+                        const formData = new FormData();
+                        formData.append('audio', audioBlob, 'recording.webm');
+
+                        const res = await api.post('/api/stt/transcribe', formData, {
+                            headers: { 'Content-Type': 'multipart/form-data' }
+                        });
+
+                        if (res.data.success && res.data.text) {
+                            this.inputMessage += (this.inputMessage ? ' ' : '') + res.data.text;
+                            this.showToast('语音识别成功', 'success');
+                            // 自动调整输入框高度
+                            this.$nextTick(() => {
+                                this.autoResizeTextarea();
+                            });
+                        } else {
+                            this.showToast('语音识别失败: ' + (res.data.error || '未知错误'), 'error');
+                        }
+                    } catch (e) {
+                        console.error('语音识别失败:', e);
+                        this.showToast('语音识别失败: ' + (e.response?.data?.error || e.message), 'error');
+                    }
+                },
+
+                async speakText(text) {
+                    if (!this.ttsEnabled) return;
+                    
+                    try {
+                        const res = await api.post('/api/tts/synthesize', {
+                            text: text,
+                            voice: 'zh-CN-XiaoxiaoNeural',
+                            speed: 1.0
+                        });
+
+                        if (res.data.success && res.data.audio_url) {
+                            const audio = new Audio(res.data.audio_url);
+                            audio.play();
+                        }
+                    } catch (e) {
+                        console.error('语音合成失败:', e);
+                    }
+                },
+
+                toggleTTS() {
+                    this.ttsEnabled = !this.ttsEnabled;
+                    localStorage.setItem('ttsEnabled', this.ttsEnabled);
+                    this.showToast(this.ttsEnabled ? '语音播报已开启' : '语音播报已关闭', 'info');
+                },
+
+                // ========== API Key 管理 ==========
+                async loadApiKeys() {
+                    try {
+                        const res = await api.get('/api/api-keys');
+                        if (res.data.success) {
+                            this.apiKeys = res.data.keys || [];
+                        }
+                    } catch (e) {
+                        console.error('加载API Keys失败:', e);
+                    }
+                },
+
+                openApiKeyManager() {
+                    this.showApiKeyManager = true;
+                    this.loadApiKeys();
+                },
+
+                closeApiKeyManager() {
+                    this.showApiKeyManager = false;
+                    this.resetApiKeyForm();
+                },
+
+                resetApiKeyForm() {
+                    this.apiKeyForm = {
+                        id: null,
+                        name: '',
+                        key: ''
+                    };
+                },
+
+                editApiKey(key) {
+                    this.apiKeyForm = {
+                        id: key.id,
+                        name: key.name,
+                        key: '' // 不显示已有的key值
+                    };
+                },
+
+                async saveApiKey() {
+                    if (!this.apiKeyForm.name.trim()) {
+                        this.showToast('请输入API Key名称', 'error');
+                        return;
+                    }
+                    if (!this.apiKeyForm.key.trim() && !this.apiKeyForm.id) {
+                        this.showToast('请输入API Key', 'error');
+                        return;
+                    }
+
+                    this.isSavingApiKey = true;
+                    try {
+                        if (this.apiKeyForm.id) {
+                            // 更新
+                            const res = await api.put(`/api/api-keys/${this.apiKeyForm.id}`, {
+                                name: this.apiKeyForm.name,
+                                key: this.apiKeyForm.key
+                            });
+                            if (res.data.success) {
+                                this.showToast('API Key已更新', 'success');
+                                this.resetApiKeyForm();
+                                await this.loadApiKeys();
+                            }
+                        } else {
+                            // 创建
+                            const res = await api.post('/api/api-keys', {
+                                name: this.apiKeyForm.name,
+                                key: this.apiKeyForm.key
+                            });
+                            if (res.data.success) {
+                                this.showToast('API Key已保存', 'success');
+                                this.resetApiKeyForm();
+                                await this.loadApiKeys();
+                            }
+                        }
+                    } catch (e) {
+                        this.showToast('保存失败: ' + (e.response?.data?.error || e.message), 'error');
+                    } finally {
+                        this.isSavingApiKey = false;
+                    }
+                },
+
+                async deleteApiKey(key) {
+                    if (!confirm(`确定要删除API Key "${key.name}" 吗？`)) {
+                        return;
+                    }
+                    try {
+                        const res = await api.delete(`/api/api-keys/${key.id}`);
+                        if (res.data.success) {
+                            this.showToast('API Key已删除', 'success');
+                            await this.loadApiKeys();
+                        }
+                    } catch (e) {
+                        this.showToast('删除失败: ' + (e.response?.data?.error || e.message), 'error');
+                    }
+                },
+
+                async getApiKeyValue(keyId) {
+                    try {
+                        const res = await api.get(`/api/api-keys/${keyId}`);
+                        if (res.data.success && res.data.key) {
+                            return res.data.key.key;
+                        }
+                    } catch (e) {
+                        console.error('获取API Key失败:', e);
+                    }
+                    return null;
+                },
+
+                async applyApiKeyToModel(keyId) {
+                    const keyValue = await this.getApiKeyValue(keyId);
+                    if (keyValue) {
+                        this.modelForm.api_key = keyValue;
+                        this.showToast('API Key已应用', 'success');
+                    }
+                },
+
                 async clearSession() {
                     this.showConfirm({
                         title: '清空会话',
@@ -17397,6 +18049,133 @@ def main(params):
                     this.applyProviderCapabilities(this.modelForm);
                 },
 
+                async onApiKeySelectChange() {
+                    if (this.modelForm.selectedApiKeyId) {
+                        const keyValue = await this.getApiKeyValue(this.modelForm.selectedApiKeyId);
+                        if (keyValue) {
+                            this.modelForm.api_key = keyValue;
+                        }
+                    }
+                },
+
+                onModelPurposeChange() {
+                    // 根据用途应用默认配置
+                    const purposeDefaults = {
+                        chat: {
+                            temperature: 0.7,
+                            max_tokens: 2000,
+                            supports_tools: true,
+                            supports_reasoning: true,
+                            supports_stream: true,
+                            system_prompt: ''
+                        },
+                        vision: {
+                            temperature: 0.5,
+                            max_tokens: 1000,
+                            supports_tools: false,
+                            supports_reasoning: false,
+                            supports_stream: true,
+                            system_prompt: '请详细描述这张图片的内容。'
+                        },
+                        video: {
+                            temperature: 0.5,
+                            max_tokens: 1500,
+                            supports_tools: false,
+                            supports_reasoning: false,
+                            supports_stream: true,
+                            system_prompt: '请分析这个视频的内容。'
+                        },
+                        tts: {
+                            supports_tools: false,
+                            supports_reasoning: false,
+                            supports_stream: false,
+                            voice: 'default',
+                            speed: 1.0,
+                            pitch: 1.0,
+                            volume: 1.0
+                        },
+                        stt: {
+                            supports_tools: false,
+                            supports_reasoning: false,
+                            supports_stream: false,
+                            language: 'zh'
+                        },
+                        embedding: {
+                            supports_tools: false,
+                            supports_reasoning: false,
+                            supports_stream: false,
+                            dimensions: 1536
+                        }
+                    };
+                    
+                    const defaults = purposeDefaults[this.modelForm.purpose];
+                    if (defaults) {
+                        Object.assign(this.modelForm, defaults);
+                    }
+                    
+                    // 更新配置名称
+                    if (!this.editingModel) {
+                        const purposeNames = {
+                            chat: '对话模型',
+                            vision: '图片理解模型',
+                            video: '视频理解模型',
+                            tts: 'TTS语音合成',
+                            stt: 'STT语音识别',
+                            embedding: '向量嵌入模型'
+                        };
+                        this.modelForm.name = `新${purposeNames[this.modelForm.purpose]}配置`;
+                    }
+                },
+
+                // 打开用途配置
+                openPurposeConfig(purpose) {
+                    this.editingPurpose = purpose;
+                    this.showPurposeConfigModal = true;
+                },
+
+                // 关闭用途配置弹窗
+                closePurposeConfigModal() {
+                    this.showPurposeConfigModal = false;
+                    this.editingPurpose = null;
+                },
+
+                // 获取指定用途的模型列表
+                getModelsByPurpose(purpose) {
+                    return this.aiModels.filter(m => (m.purpose || 'chat') === purpose);
+                },
+
+                // 应用指定用途的模型
+                async applyPurposeModel(model) {
+                    try {
+                        const purpose = model.purpose || 'chat';
+                        const res = await api.post(`/api/ai-models/${model.id}/apply`, {
+                            purpose: purpose
+                        });
+                        if (res.data.success) {
+                            // 只有对话模型才更新全局activeModelId
+                            if (purpose === 'chat') {
+                                this.activeModelId = model.id;
+                            }
+                            await this.loadActiveModelsByPurpose();
+                            this.showToast(res.data.message || `已应用 ${model.name}`, 'success');
+                        }
+                    } catch (e) {
+                        this.showToast('应用模型失败: ' + (e.response?.data?.message || e.message), 'error');
+                    }
+                },
+
+                // 加载各用途的活跃模型
+                async loadActiveModelsByPurpose() {
+                    try {
+                        const res = await api.get('/api/ai-models/active-by-purpose');
+                        if (res.data.success) {
+                            this.activeModelsByPurpose = res.data.active_models;
+                        }
+                    } catch (e) {
+                        console.error('加载活跃模型失败:', e);
+                    }
+                },
+
                 getProviderTypeByProvider(provider) {
                     const mapping = {
                         openai: 'openai_compatible',
@@ -17538,9 +18317,25 @@ def main(params):
                 },
 
                 openModelEditModal(model = null) {
+                    // 加载API Keys列表
+                    this.loadApiKeys();
+
                     if (model) {
                         this.editingModel = model;
-                        this.modelForm = { ...model };
+                        this.modelForm = {
+                            ...model,
+                            // 确保purpose字段存在
+                            purpose: model.purpose || 'chat',
+                            // 确保特有配置字段存在
+                            voice: model.voice || 'default',
+                            speed: model.speed || 1.0,
+                            pitch: model.pitch || 1.0,
+                            volume: model.volume || 1.0,
+                            language: model.language || 'zh',
+                            dimensions: model.dimensions || 1536,
+                            // API Key选择
+                            selectedApiKeyId: ''
+                        };
                         this.modelForm.provider_type = this.modelForm.provider_type || this.getProviderTypeByProvider(this.modelForm.provider);
                         if (typeof this.modelForm.supports_tools !== 'boolean' ||
                             typeof this.modelForm.supports_reasoning !== 'boolean' ||
@@ -17549,12 +18344,24 @@ def main(params):
                         }
                     } else {
                         this.editingModel = null;
+                        // 如果当前正在编辑某个用途，则默认使用该用途
+                        const defaultPurpose = this.editingPurpose || 'chat';
+                        const purposeNames = {
+                            chat: '对话模型',
+                            vision: '图片理解模型',
+                            video: '视频理解模型',
+                            tts: 'TTS语音合成',
+                            stt: 'STT语音识别',
+                            embedding: '向量嵌入模型'
+                        };
                         this.modelForm = {
                             id: null,
-                            name: '新配置',
+                            name: `新${purposeNames[defaultPurpose]}配置`,
+                            purpose: defaultPurpose,
                             provider: 'openai',
                             provider_type: 'openai_compatible',
                             api_key: '',
+                            selectedApiKeyId: '',
                             base_url: '',
                             model: 'gpt-4',
                             enabled: true,
@@ -17574,8 +18381,17 @@ def main(params):
                             image_model: '',
                             search_api_key: '',
                             embedding_model: '',
-                            max_context_length: 30000
+                            max_context_length: 30000,
+                            // TTS/STT/Embedding特有配置
+                            voice: 'default',
+                            speed: 1.0,
+                            pitch: 1.0,
+                            volume: 1.0,
+                            language: 'zh',
+                            dimensions: 1536
                         };
+                        // 应用该用途的默认配置
+                        this.onModelPurposeChange();
                     }
                     this.showModelEditModal = true;
                 },
@@ -17685,6 +18501,31 @@ def main(params):
                         this.showToast('测试失败: ' + (e.response?.data?.message || e.message), 'error');
                     } finally {
                         this.isTesting = false;
+                    }
+                },
+
+                async deleteModel(model) {
+                    // 确认对话框
+                    if (!confirm(`确定要删除配置 "${model.name}" 吗？此操作不可恢复。`)) {
+                        return;
+                    }
+                    
+                    this.isDeleting = true;
+                    try {
+                        const res = await api.delete(`/api/ai-models/${model.id}`);
+                        if (res.data.success) {
+                            // 从列表中移除
+                            this.aiModels = this.aiModels.filter(m => m.id !== model.id);
+                            this.showToast('配置已删除', 'success');
+                            // 刷新各用途的活跃模型状态
+                            await this.loadActiveModelsByPurpose();
+                        } else {
+                            this.showToast(res.data.error || '删除失败', 'error');
+                        }
+                    } catch (e) {
+                        this.showToast('删除失败: ' + (e.response?.data?.error || e.message), 'error');
+                    } finally {
+                        this.isDeleting = false;
                     }
                 },
 
@@ -18165,6 +19006,10 @@ def main(params):
                                 this.isTyping = false;
                                 this.isLoading = false;
                                 this.loadingSessionId = null;
+                                // 如果开启了TTS，播放语音
+                                if (this.ttsEnabled && msg.content) {
+                                    this.speakText(msg.content);
+                                }
                             }
                         }
                     });

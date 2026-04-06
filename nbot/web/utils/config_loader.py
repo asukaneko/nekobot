@@ -188,3 +188,172 @@ def get_pdf_config():
     )
 
     return {"api_key": api_key}
+
+
+# ========== 按用途获取模型配置（新架构） ==========
+
+# 数据目录路径
+DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))), "data", "web")
+
+
+def _load_ai_models_from_file():
+    """从文件加载AI模型配置列表"""
+    import json
+    ai_models_path = os.path.join(DATA_DIR, "ai_models.json")
+    if os.path.exists(ai_models_path):
+        try:
+            with open(ai_models_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                # 返回模型列表，如果是字典格式则取"models"字段
+                if isinstance(data, dict):
+                    return data.get("models", [])
+                elif isinstance(data, list):
+                    return data
+        except Exception:
+            pass
+    return []
+
+
+def get_model_config_by_purpose(purpose: str) -> dict:
+    """根据用途获取对应的活跃模型配置
+    
+    Args:
+        purpose: 模型用途 (chat, vision, video, tts, stt, embedding)
+    
+    Returns:
+        模型配置字典，如果没有找到则返回None
+    """
+    ai_models = _load_ai_models_from_file()
+    
+    for model in ai_models:
+        if model.get("purpose", "chat") == purpose and model.get("enabled", True):
+            config = {
+                "api_key": resolve_runtime_api_key(
+                    model.get("api_key", ""),
+                    model.get("provider_type", "openai_compatible")
+                ),
+                "base_url": model.get("base_url", ""),
+                "model": model.get("model", ""),
+                "provider_type": model.get("provider_type", "openai_compatible"),
+                "provider": model.get("provider", "custom"),
+                "temperature": model.get("temperature", 0.7),
+                "max_tokens": model.get("max_tokens", 2000),
+                "top_p": model.get("top_p", 0.9),
+                "system_prompt": model.get("system_prompt", ""),
+                "supports_tools": model.get("supports_tools", True),
+                "supports_reasoning": model.get("supports_reasoning", True),
+                "supports_stream": model.get("supports_stream", True),
+            }
+            
+            # 根据用途添加特有配置
+            if purpose == "tts":
+                config.update({
+                    "voice": model.get("voice", "default"),
+                    "speed": model.get("speed", 1.0),
+                    "pitch": model.get("pitch", 1.0),
+                    "volume": model.get("volume", 1.0),
+                })
+            elif purpose == "stt":
+                config.update({
+                    "language": model.get("language", "zh"),
+                })
+            elif purpose == "embedding":
+                config.update({
+                    "dimensions": model.get("dimensions", 1536),
+                })
+            
+            return config
+    
+    return None
+
+
+def get_chat_model_config() -> dict:
+    """获取对话模型配置"""
+    config = get_model_config_by_purpose("chat")
+    if config:
+        return config
+    # 回退到传统配置
+    return get_api_config()
+
+
+def get_vision_model_config() -> dict:
+    """获取图片理解模型配置"""
+    config = get_model_config_by_purpose("vision")
+    if config:
+        return config
+    # 回退到pic配置
+    pic_config = get_pic_config()
+    api_config = get_api_config()
+    return {
+        "api_key": api_config.get("api_key", ""),
+        "base_url": api_config.get("base_url", ""),
+        "model": pic_config.get("model", "zai-org/GLM-4.6V"),
+        "provider_type": api_config.get("provider_type", "openai_compatible"),
+    }
+
+
+def get_video_model_config() -> dict:
+    """获取视频理解模型配置"""
+    config = get_model_config_by_purpose("video")
+    if config:
+        return config
+    # 回退到video配置
+    video_config = get_video_config()
+    api_config = get_api_config()
+    return {
+        "api_key": video_config.get("api_key") or api_config.get("api_key", ""),
+        "base_url": api_config.get("base_url", ""),
+        "model": api_config.get("model", ""),
+        "provider_type": api_config.get("provider_type", "openai_compatible"),
+    }
+
+
+def get_tts_model_config() -> dict:
+    """获取TTS语音合成模型配置"""
+    config = get_model_config_by_purpose("tts")
+    if config:
+        return config
+    # 回退到voice配置
+    voice_config = get_voice_config()
+    api_config = get_api_config()
+    voice = voice_config.get("voice", "fnlp/MOSS-TTSD-v0.5:diana")
+    voice_parts = voice.split(":") if ":" in voice else [voice, "default"]
+    return {
+        "api_key": api_config.get("silicon_api_key") or api_config.get("api_key", ""),
+        "base_url": "https://api.siliconflow.cn/v1",
+        "model": voice_parts[0],
+        "voice": voice_parts[1] if len(voice_parts) > 1 else "default",
+        "provider_type": "siliconflow",
+    }
+
+
+def get_stt_model_config() -> dict:
+    """获取STT语音识别模型配置"""
+    config = get_model_config_by_purpose("stt")
+    if config:
+        return config
+    # 默认配置
+    api_config = get_api_config()
+    return {
+        "api_key": api_config.get("api_key", ""),
+        "base_url": api_config.get("base_url", ""),
+        "model": "whisper-1",
+        "language": "zh",
+        "provider_type": api_config.get("provider_type", "openai_compatible"),
+    }
+
+
+def get_embedding_model_config() -> dict:
+    """获取向量嵌入模型配置"""
+    config = get_model_config_by_purpose("embedding")
+    if config:
+        return config
+    # 回退到api_config中的embedding配置
+    api_config = get_api_config()
+    return {
+        "api_key": api_config.get("api_key", ""),
+        "base_url": api_config.get("base_url", ""),
+        "model": "text-embedding-3-small",
+        "dimensions": 1536,
+        "provider_type": api_config.get("provider_type", "openai_compatible"),
+    }

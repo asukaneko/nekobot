@@ -3,7 +3,15 @@ import logging
 from flask import jsonify, request
 
 from nbot.core import build_chat_completion_payload, resolve_chat_completion_url
-from nbot.web.utils.config_loader import resolve_runtime_api_key
+from nbot.web.utils.config_loader import (
+    resolve_runtime_api_key,
+    get_chat_model_config,
+    get_vision_model_config,
+    get_video_model_config,
+    get_tts_model_config,
+    get_stt_model_config,
+    get_embedding_model_config,
+)
 
 _log = logging.getLogger(__name__)
 
@@ -131,3 +139,67 @@ def register_ai_config_routes(app, server):
             return jsonify({"success": False, "message": error_msg})
         except Exception as e:
             return jsonify({"success": False, "message": f"Test failed: {str(e)}"})
+
+    # ========== 按用途获取模型配置API ==========
+    
+    @app.route("/api/ai-config/by-purpose/<purpose>")
+    def get_config_by_purpose(purpose):
+        """获取指定用途的模型配置"""
+        purpose_map = {
+            "chat": get_chat_model_config,
+            "vision": get_vision_model_config,
+            "video": get_video_model_config,
+            "tts": get_tts_model_config,
+            "stt": get_stt_model_config,
+            "embedding": get_embedding_model_config,
+        }
+        
+        if purpose not in purpose_map:
+            return jsonify({"error": "Invalid purpose"}), 400
+        
+        try:
+            config = purpose_map[purpose]()
+            if config:
+                # 隐藏API Key
+                config_copy = config.copy()
+                if "api_key" in config_copy:
+                    config_copy["api_key"] = "********" if config_copy["api_key"] else ""
+                return jsonify({
+                    "success": True,
+                    "purpose": purpose,
+                    "config": config_copy
+                })
+            else:
+                return jsonify({
+                    "success": False,
+                    "message": f"No active model configured for purpose: {purpose}"
+                }), 404
+        except Exception as e:
+            _log.error(f"Error getting config for purpose {purpose}: {e}")
+            return jsonify({"error": str(e)}), 500
+    
+    @app.route("/api/ai-config/all-purposes")
+    def get_all_purpose_configs():
+        """获取所有用途的模型配置"""
+        try:
+            configs = {
+                "chat": get_chat_model_config(),
+                "vision": get_vision_model_config(),
+                "video": get_video_model_config(),
+                "tts": get_tts_model_config(),
+                "stt": get_stt_model_config(),
+                "embedding": get_embedding_model_config(),
+            }
+            
+            # 隐藏API Key
+            for purpose, config in configs.items():
+                if config and "api_key" in config:
+                    config["api_key"] = "********" if config["api_key"] else ""
+            
+            return jsonify({
+                "success": True,
+                "configs": configs
+            })
+        except Exception as e:
+            _log.error(f"Error getting all purpose configs: {e}")
+            return jsonify({"error": str(e)}), 500

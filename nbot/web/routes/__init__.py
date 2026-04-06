@@ -1,6 +1,7 @@
 from nbot.web.routes.admin_misc import register_admin_misc_routes
 from nbot.web.routes.ai_config import register_ai_config_routes
 from nbot.web.routes.ai_models import register_ai_model_routes
+from nbot.web.routes.api_keys import register_api_key_routes
 from nbot.web.routes.auth import register_auth_routes
 from nbot.web.routes.config_legacy import register_config_legacy_routes
 from nbot.web.routes.files import register_file_routes
@@ -14,6 +15,7 @@ from nbot.web.routes.skills import register_skill_routes
 from nbot.web.routes.skills_storage import register_skills_storage_routes
 from nbot.web.routes.task_center import register_task_center_routes
 from nbot.web.routes.tools import register_tool_routes
+from nbot.web.routes.voice import register_voice_routes
 from nbot.web.routes.workflows import register_workflow_routes
 from nbot.web.routes.workspace_private import register_workspace_private_routes
 from nbot.web.routes.workspace_shared import register_workspace_shared_routes
@@ -23,6 +25,7 @@ __all__ = [
     "register_admin_misc_routes",
     "register_ai_config_routes",
     "register_ai_model_routes",
+    "register_api_key_routes",
     "register_auth_routes",
     "register_config_legacy_routes",
     "register_file_routes",
@@ -36,6 +39,7 @@ __all__ = [
     "register_skills_storage_routes",
     "register_task_center_routes",
     "register_tool_routes",
+    "register_voice_routes",
     "register_workflow_routes",
     "register_workspace_private_routes",
     "register_workspace_shared_routes",

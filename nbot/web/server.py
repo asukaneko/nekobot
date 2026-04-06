@@ -38,6 +38,7 @@ from nbot.web.routes import (
     register_admin_misc_routes,
     register_ai_config_routes,
     register_ai_model_routes,
+    register_api_key_routes,
     register_auth_routes,
     register_config_legacy_routes,
     register_file_routes,
@@ -51,6 +52,7 @@ from nbot.web.routes import (
     register_skills_storage_routes,
     register_task_center_routes,
     register_tool_routes,
+    register_voice_routes,
     register_workflow_routes,
     register_workspace_private_routes,
     register_workspace_shared_routes,
@@ -457,7 +459,8 @@ class WebChatServer:
 
         # 多模型配置管理
         self.ai_models: List[Dict] = []  # 存储多个AI模型配置
-        self.active_model_id: str = None  # 当前激活的模型配置ID
+        self.active_model_id: str = None  # 当前激活的模型配置ID（兼容旧版本）
+        self.active_models_by_purpose: Dict[str, str] = {}  # 各用途的活跃模型ID {purpose: model_id}
 
         # 数据存储目录
         self.data_dir = os.path.join(
@@ -975,6 +978,7 @@ class WebChatServer:
                     data = json.load(f)
                     self.ai_models = data.get("models", [])
                     self.active_model_id = data.get("active_model_id")
+                    self.active_models_by_purpose = data.get("active_models_by_purpose", {})
 
             # 如果没有模型配置，从当前配置创建一个默认的
             if not self.ai_models and self.ai_api_key:
@@ -1002,8 +1006,13 @@ class WebChatServer:
         except Exception as e:
             _log.error(f"Failed to load AI models: {e}")
 
-    def _apply_ai_model(self, model_id: str) -> bool:
-        """应用指定的AI模型配置"""
+    def _apply_ai_model(self, model_id: str, purpose: str = None) -> bool:
+        """应用指定的AI模型配置
+        
+        Args:
+            model_id: 模型配置ID
+            purpose: 模型用途 (chat, vision, video, tts, stt, embedding)，为None时自动从模型配置中获取
+        """
         try:
             model = None
             for m in self.ai_models:
@@ -1014,69 +1023,80 @@ class WebChatServer:
             if not model or not model.get("enabled", True):
                 return False
 
-            # 更新当前AI配置
-            model_provider_type = model.get(
-                "provider_type", model.get("provider", "openai_compatible")
-            )
-            if resolve_runtime_api_key:
-                self.ai_api_key = resolve_runtime_api_key(
-                    model.get("api_key", ""),
-                    model_provider_type,
+            # 获取模型用途
+            model_purpose = purpose or model.get("purpose", "chat")
+            
+            # 更新该用途的活跃模型ID
+            self.active_models_by_purpose[model_purpose] = model_id
+            
+            # 对于对话模型，同时更新全局active_model_id（兼容旧版本）
+            if model_purpose == "chat":
+                self.active_model_id = model_id
+                
+                # 更新当前AI配置（仅对话模型需要）
+                model_provider_type = model.get(
+                    "provider_type", model.get("provider", "openai_compatible")
                 )
-            else:
-                self.ai_api_key = model.get("api_key", "")
-            self.ai_base_url = model.get("base_url", "")
-            self.ai_model = model.get("model", "")
-            self.active_model_id = model_id
+                if resolve_runtime_api_key:
+                    self.ai_api_key = resolve_runtime_api_key(
+                        model.get("api_key", ""),
+                        model_provider_type,
+                    )
+                else:
+                    self.ai_api_key = model.get("api_key", "")
+                self.ai_base_url = model.get("base_url", "")
+                self.ai_model = model.get("model", "")
 
-            if self.ai_api_key and self.ai_base_url and self._initialize_ai_client(
-                provider_type=model_provider_type,
-                supports_tools=model.get("supports_tools", True),
-                supports_reasoning=model.get("supports_reasoning", True),
-                supports_stream=model.get("supports_stream", True),
-            ):
-                self.ai_config.update(
-                    {
-                        "provider": model.get("provider", "custom"),
-                        "provider_type": model.get(
-                            "provider_type", model.get("provider", "openai_compatible")
-                        ),
-                        "api_key": self.ai_api_key,
-                        "base_url": self.ai_base_url,
-                        "model": self.ai_model,
-                        "temperature": model.get("temperature", 0.7),
-                        "max_tokens": model.get("max_tokens", 2000),
-                        "top_p": model.get("top_p", 0.9),
-                        "frequency_penalty": model.get("frequency_penalty", 0),
-                        "presence_penalty": model.get("presence_penalty", 0),
-                        "system_prompt": model.get("system_prompt", ""),
-                        "timeout": model.get("timeout", 60),
-                        "retry_count": model.get("retry_count", 3),
-                        "stream": model.get("stream", True),
-                        "enable_memory": model.get("enable_memory", True),
-                        "image_model": model.get("image_model", ""),
-                        "search_api_key": model.get("search_api_key", ""),
-                        "embedding_model": model.get("embedding_model", ""),
-                        "max_context_length": model.get("max_context_length", 30000),
-                        "supports_tools": model.get("supports_tools", True),
-                        "supports_reasoning": model.get("supports_reasoning", True),
-                        "supports_stream": model.get("supports_stream", True),
-                    }
-                )
-                # 配置知识库 embedding 服务
-                embedding_model = model.get("embedding_model", "")
-                if configure_knowledge_embedding and embedding_model:
-                    try:
-                        configure_knowledge_embedding(
-                            api_key=self.ai_api_key,
-                            base_url=self.ai_base_url,
-                            model=embedding_model
-                        )
-                    except Exception as e:
-                        _log.warning(f"Failed to configure knowledge embedding: {e}")
-                self._save_data("ai_models")
-                return True
-                return True
+                if self.ai_api_key and self.ai_base_url and self._initialize_ai_client(
+                    provider_type=model_provider_type,
+                    supports_tools=model.get("supports_tools", True),
+                    supports_reasoning=model.get("supports_reasoning", True),
+                    supports_stream=model.get("supports_stream", True),
+                ):
+                    self.ai_config.update(
+                        {
+                            "provider": model.get("provider", "custom"),
+                            "provider_type": model.get(
+                                "provider_type", model.get("provider", "openai_compatible")
+                            ),
+                            "api_key": self.ai_api_key,
+                            "base_url": self.ai_base_url,
+                            "model": self.ai_model,
+                            "temperature": model.get("temperature", 0.7),
+                            "max_tokens": model.get("max_tokens", 2000),
+                            "top_p": model.get("top_p", 0.9),
+                            "frequency_penalty": model.get("frequency_penalty", 0),
+                            "presence_penalty": model.get("presence_penalty", 0),
+                            "system_prompt": model.get("system_prompt", ""),
+                            "timeout": model.get("timeout", 60),
+                            "retry_count": model.get("retry_count", 3),
+                            "stream": model.get("stream", True),
+                            "enable_memory": model.get("enable_memory", True),
+                            "image_model": model.get("image_model", ""),
+                            "search_api_key": model.get("search_api_key", ""),
+                            "embedding_model": model.get("embedding_model", ""),
+                            "max_context_length": model.get("max_context_length", 30000),
+                            "supports_tools": model.get("supports_tools", True),
+                            "supports_reasoning": model.get("supports_reasoning", True),
+                            "supports_stream": model.get("supports_stream", True),
+                        }
+                    )
+                    # 配置知识库 embedding 服务
+                    embedding_model = model.get("embedding_model", "")
+                    if configure_knowledge_embedding and embedding_model:
+                        try:
+                            configure_knowledge_embedding(
+                                api_key=self.ai_api_key,
+                                base_url=self.ai_base_url,
+                                model=embedding_model
+                            )
+                        except Exception as e:
+                            _log.warning(f"Failed to configure knowledge embedding: {e}")
+            
+            # 保存配置
+            self._save_data("ai_models")
+            _log.info(f"Applied model {model_id} for purpose {model_purpose}")
+            return True
 
             # 重新初始化AI客户端
             if False and self.ai_api_key and self.ai_base_url:
@@ -2568,5 +2588,9 @@ def create_web_app(config: Dict[str, Any] = None) -> tuple[Flask, SocketIO]:
     register_file_routes(app, server, WORKSPACE_AVAILABLE, workspace_manager)
 
     register_skills_storage_routes(app, server)
+
+    register_voice_routes(app, server)
+
+    register_api_key_routes(app, server)
 
     return app, socketio, server

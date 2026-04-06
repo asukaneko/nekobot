@@ -23,6 +23,7 @@ from nbot.core import (
     WebSessionStore,
     run_tool_loop_session,
 )
+from nbot.web.utils.config_loader import get_vision_model_config
 
 try:
     from nbot.core.knowledge import get_knowledge_manager
@@ -31,6 +32,8 @@ try:
 except ImportError:
     get_knowledge_manager = None
     KNOWLEDGE_MANAGER_AVAILABLE = False
+
+# WORKSPACE_AVAILABLE 会在函数中从 server 对象获取
 
 _log = logging.getLogger(__name__)
 
@@ -244,6 +247,8 @@ def trigger_ai_response_for_request(server, chat_request: ChatRequest, adapter=N
 
             image_urls = []
             file_contents = []
+            stopped_prematurely = False  # 初始化变量
+            tool_messages = []  # 初始化变量
 
             # 支持的文本文件MIME类型
             TEXT_MIME_TYPES = [
@@ -362,6 +367,9 @@ def trigger_ai_response_for_request(server, chat_request: ChatRequest, adapter=N
                         att_data = att.get("data", "")
                         att_path = att.get("path", "")
                         att_name = att.get("name", "unknown")
+                        att_url = att.get("url", "")
+
+
 
                         if isinstance(att_type, str):
                             # 图片附件 - 优先使用 data URL，其次使用文件路径
@@ -376,38 +384,95 @@ def trigger_ai_response_for_request(server, chat_request: ChatRequest, adapter=N
                                 if att_data:
                                     image_urls.append(att_data)
                                     image_loaded = True
-                                elif att_path:
-                                    # 尝试读取服务器上的图片文件
-                                    try:
-                                        file_path = os.path.join(
-                                            server.static_folder,
-                                            att_path.replace("/static/", ""),
-                                        )
-                                        if os.path.exists(file_path):
-                                            with open(file_path, "rb") as f:
-                                                import base64
-
-                                                b64_data = base64.b64encode(
-                                                    f.read()
-                                                ).decode("utf-8")
-                                                image_urls.append(
-                                                    f"data:{att_type};base64,{b64_data}"
+                                else:
+                                    # 优先使用path，如果没有path则使用url
+                                    path_to_use = att_path if att_path else att_url
+                                    if path_to_use:
+                                        # 尝试读取服务器上的图片文件
+                                        try:
+                                            file_path = None
+                                            
+                                            # 处理不同格式的路径
+                                            if path_to_use.startswith("/static/"):
+                                                # 静态文件路径
+                                                file_path = os.path.join(
+                                                    server.static_folder,
+                                                    path_to_use.replace("/static/", ""),
                                                 )
-                                                image_loaded = True
-                                        else:
+                                            elif "/workspace/files/" in path_to_use:
+                                                # 工作区文件路径
+                                                try:
+                                                    # 从URL中提取文件名
+                                                    filename = path_to_use.split("/workspace/files/")[-1]
+                                                    
+                                                    # 尝试从workspace_manager获取文件路径
+                                                    workspace_available = getattr(server, 'WORKSPACE_AVAILABLE', False)
+                                                    if workspace_available and server.workspace_manager:
+                                                        # 从attachments中获取session_id
+                                                        session_id_from_att = None
+                                                        if isinstance(att, dict):
+                                                            # 尝试从url中提取session_id
+                                                            url = att.get("url", "")
+                                                            if "/sessions/" in url:
+                                                                parts = url.split("/sessions/")
+                                                                if len(parts) > 1:
+                                                                    session_id_from_att = parts[1].split("/")[0]
+                                                        
+                                                        if session_id_from_att:
+                                                            file_path = server.workspace_manager.get_file_path(session_id_from_att, filename)
+                                                    
+                                                    # 如果还没找到，尝试使用workspace_manager获取工作区路径
+                                                    if not file_path:
+                                                        try:
+                                                            if "/sessions/" in path_to_use:
+                                                                parts = path_to_use.split("/sessions/")
+                                                                if len(parts) > 1:
+                                                                    session_id_from_path = parts[1].split("/")[0]
+                                                                    # 使用workspace_manager获取正确的工作区路径
+                                                                    if server.workspace_manager:
+                                                                        ws_path = server.workspace_manager.get_workspace(session_id_from_path)
+                                                                        if ws_path:
+                                                                            file_path = os.path.join(ws_path, filename)
+                                                                        else:
+                                                                            # 工作区不存在，尝试使用get_or_create创建
+                                                                            ws_path = server.workspace_manager.get_or_create(session_id_from_path, "web")
+                                                                            file_path = os.path.join(ws_path, filename)
+                                                                    else:
+                                                                        # 没有workspace_manager，尝试直接构造路径
+                                                                        file_path = os.path.join(
+                                                                            server.data_dir, "workspace", f"web_{session_id_from_path[:8]}", filename
+                                                                        )
+                                                            else:
+                                                                file_path = os.path.join(
+                                                                    server.data_dir, "workspace", filename
+                                                                )
+                                                        except Exception as e:
+                                                            pass
+                                                except Exception as e:
+                                                    pass
+                                            else:
+                                                # 其他路径，尝试直接使用
+                                                file_path = path_to_use if os.path.exists(path_to_use) else None
+                                            
+                                            if file_path and os.path.exists(file_path):
+                                                with open(file_path, "rb") as f:
+                                                    import base64
+                                                    file_content = f.read()
+                                                    b64_data = base64.b64encode(file_content).decode("utf-8")
+                                                    image_urls.append(
+                                                        f"data:{att_type};base64,{b64_data}"
+                                                    )
+                                                    image_loaded = True
+                                            else:
+                                                _log.warning(
+                                                    f"图片文件不存在: file_path={file_path}, 原始path/url={path_to_use}"
+                                                )
+                                        except Exception as e:
                                             _log.warning(
-                                                f"图片文件不存在: {file_path}"
+                                                f"读取图片文件失败: {att_name}, {e}"
                                             )
-                                    except Exception as e:
-                                        _log.warning(
-                                            f"读取图片文件失败: {att_name}, {e}"
-                                        )
-
                                 # 无论成功还是失败，都更新完成状态
                                 if progress_card:
-                                    _log.info(
-                                        f"[ProgressCard] 准备更新 IMAGE_DONE，图片: {att_name}, 成功: {image_loaded}"
-                                    )
                                     if image_loaded:
                                         progress_card.update(
                                             StepType.IMAGE_DONE,
@@ -420,7 +485,6 @@ def trigger_ai_response_for_request(server, chat_request: ChatRequest, adapter=N
                                             f"图片加载失败: {att_name}",
                                             False,
                                         )
-                                    _log.info(f"[ProgressCard] IMAGE_DONE 更新完成")
 
                             # 文本文件 - 优先使用 data URL，其次使用文件路径
                             elif att_type in TEXT_MIME_TYPES:
@@ -788,15 +852,43 @@ def trigger_ai_response_for_request(server, chat_request: ChatRequest, adapter=N
                     except Exception as e:
                         _log.warning(f"[ThinkingCard] 标记完成失败: {e}")
 
-            # 检查是否有图片附件，如果有则使用多模态AI
+            # 检查是否有图片附件，如果有则使用多模态AI进行图片识别
+            image_recognition_result = None
             if image_urls:
-                # 使用多模态AI处理图片，传递用户的原始问题
-                assistant_content = server._get_ai_response_with_images(
+                # 使用多模态AI处理图片，获取图片识别结果
+                image_recognition_result = server._get_ai_response_with_images(
                     messages_for_ai, image_urls, enhanced_content
                 )
-                final_content = assistant_content
-                # 完成进度卡片
-                complete_thinking_card()
+                
+                # 更新进度卡片，保存图片识别结果
+                if progress_card:
+                    try:
+                        from nbot.core.progress_card import StepType
+                        # 更新图片处理步骤，添加识别结果
+                        for step in reversed(progress_card.steps):
+                            if step['type'] == 'image' and step['status'] == 'done':
+                                step['full_result'] = image_recognition_result
+                                step['detail'] = f"图片识别完成 ({len(image_recognition_result)} 字符)"
+                                break
+                        progress_card._emit_update()
+                    except Exception as e:
+                        pass
+            
+            # 如果有图片识别结果，将其加入对话上下文
+            if image_recognition_result:
+                # 构建增强的用户消息，包含图片识别结果
+                enhanced_user_content = user_content
+                if user_content:
+                    enhanced_user_content = f"{user_content}\n\n[图片内容描述]\n{image_recognition_result}"
+                else:
+                    enhanced_user_content = f"[图片内容描述]\n{image_recognition_result}"
+                
+                # 更新messages_for_ai，将图片识别结果加入上下文
+                if messages_for_ai and messages_for_ai[-1].get("role") == "user":
+                    messages_for_ai[-1]["content"] = enhanced_user_content            
+            # 继续正常的对话流程（工具调用或普通对话）
+            if False:  # 占位，实际逻辑在下面
+                pass  # 这个分支不会执行，只是为了保持代码结构
             else:
                 # 尝试使用工具调用（多轮）
                 try:
@@ -1610,56 +1702,60 @@ server, session_id: str, message: Dict, thinking_content: str = None
 
 
 def get_ai_response_with_images(
-server, messages: List[Dict], image_urls: List[str], user_question: str = None
+    server, messages: List[Dict], image_urls: List[str], user_question: str = None
 ) -> str:
     """获取带图片的 AI 回复（多模态）"""
-    if not self.ai_client:
-        _log.warning("AI client not initialized")
-        return "AI 服务未配置，请在 AI 配置页面设置 API Key 和 Base URL。"
-
     try:
-        # 获取图片模型
-        pic_model = getattr(self.ai_client, "pic_model", None)
-        if not pic_model:
-            try:
-                import configparser
+        # 获取图片理解模型配置（新架构）
+        vision_config = get_vision_model_config()
+        api_key = None
+        base_url = ""
+        model = "zai-org/GLM-4.6V"
+        provider_type = "openai_compatible"
+        system_prompt = "请详细描述这张图片的内容。"
 
-                config = configparser.ConfigParser()
-                config.read("config.ini", encoding="utf-8")
-                pic_model = config.get("pic", "model", fallback="glm-4v-flash")
-            except:
-                pic_model = "glm-4v-flash"
+        if vision_config and vision_config.get("api_key"):
+            # 使用新架构的配置
+            api_key = vision_config.get("api_key")
+            base_url = vision_config.get("base_url", "")
+            model = vision_config.get("model", "zai-org/GLM-4.6V")
+            provider_type = vision_config.get("provider_type", "openai_compatible")
+            system_prompt = vision_config.get("system_prompt", "请详细描述这张图片的内容。")
+        else:
+            # 回退到旧的配置方式
+            if not server.ai_client:
+                return "AI 服务未配置，请在 AI 配置页面设置 API Key 和 Base URL。"
 
-        # 获取 silicon API key
-        silicon_api_key = getattr(self.ai_client, "silicon_api_key", None)
-        if not silicon_api_key:
-            try:
-                import configparser
+            api_key = getattr(server.ai_client, "api_key", None)
+            base_url = getattr(server.ai_client, "base_url", None)
+            model = getattr(server.ai_client, "pic_model", None) or "zai-org/GLM-4.6V"
+            provider_type = getattr(server.ai_client, "provider_type", "openai_compatible")
+            system_prompt = "请详细描述这张图片的内容。"
 
-                config = configparser.ConfigParser()
-                config.read("config.ini", encoding="utf-8")
-                silicon_api_key = config.get(
-                    "ApiKey", "silicon_api_key", fallback=""
-                )
-            except:
-                silicon_api_key = ""
+            # 尝试从config.ini获取silicon_api_key
+            if not api_key:
+                try:
+                    import configparser
+                    config = configparser.ConfigParser()
+                    config.read("config.ini", encoding="utf-8")
+                    api_key = config.get("ApiKey", "silicon_api_key", fallback="") or config.get("ApiKey", "api_key", fallback="")
+                    base_url = "https://api.siliconflow.cn/v1"
+                    model = config.get("pic", "model", fallback="zai-org/GLM-4.6V")
+                except Exception as e:
+                    pass
 
-        if not silicon_api_key:
-            _log.warning("Silicon API key not configured")
-            return "图片处理服务未配置 Silicon API Key。"
+        if not api_key:
+            _log.warning("API key not configured for image processing")
+            return "图片处理服务未配置 API Key，请在 AI 配置中心配置图片理解模型。"
 
-        # 构建多模态消息
+        # 构建多模态消息 - 简化版本，只包含当前图片，不包含历史记录
         multimodal_messages = []
 
         # 添加系统提示
-        if messages and messages[0].get("role") == "system":
-            multimodal_messages.append(messages[0])
-
-        # 处理历史消息，只保留文本内容
-        for msg in messages[1:]:
-            role = msg.get("role", "user")
-            content = msg.get("content", "")
-            multimodal_messages.append({"role": role, "content": content})
+        multimodal_messages.append({
+            "role": "system",
+            "content": "你是一个专业的图片分析助手。请详细描述图片中的内容，包括场景、人物、物体、颜色、氛围等细节。如果用户有具体问题，请结合图片内容回答。"
+        })
 
         # 构建用户内容（图片 + 文本）
         user_content = []
@@ -1668,25 +1764,30 @@ server, messages: List[Dict], image_urls: List[str], user_question: str = None
                 {"type": "image_url", "image_url": {"url": img_url}}
             )
 
-        # 添加用户的原始问题
+        # 添加用户的原始问题或默认提示
         if user_question:
             user_text = user_question
         else:
-            user_text = "请描述这些图片的内容并回答我的问题。"
+            user_text = system_prompt
         user_content.append({"type": "text", "text": user_text})
 
         multimodal_messages.append({"role": "user", "content": user_content})
 
-        # 使用 Silicon API 调用多模态模型
+        # 调用多模态模型
         import requests
 
-        url = "https://api.siliconflow.cn/v1/chat/completions"
+        # 构建请求URL
+        if provider_type == "siliconflow" or "siliconflow" in base_url:
+            url = "https://api.siliconflow.cn/v1/chat/completions"
+        else:
+            url = resolve_chat_completion_url(base_url, model=model, provider_type=provider_type)
+
         headers = {
-            "Authorization": f"Bearer {silicon_api_key}",
+            "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
         }
         payload = {
-            "model": pic_model,
+            "model": model,
             "messages": multimodal_messages,
             "stream": False,
         }
@@ -1701,11 +1802,9 @@ server, messages: List[Dict], image_urls: List[str], user_question: str = None
         content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
         return content.strip() if content else "图片处理完成，但未返回内容。"
 
-    except ImportError:
-        _log.error("requests library not available")
+    except ImportError as e:
         return "图片处理失败：缺少 requests 库。"
     except Exception as e:
-        _log.error(f"AI multimodal response error: {e}", exc_info=True)
         # 回退到普通响应
         if user_question:
             temp_messages = messages.copy()
