@@ -365,11 +365,15 @@ class WebMessageAdapter:
             except Exception as e:
                 _log.error(f"Failed to inline image as base64: {e}")
         elif is_text and file_size < 102400:
-            try:
-                with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
-                    file_info["file"]["content"] = f.read()[:5000]
-            except Exception as e:
-                _log.warning(f"Failed to read text preview: {e}")
+            # 对于HTML文件，不显示代码预览，而是显示为可下载的文件卡片
+            if mime_type == "text/html":
+                file_info["file"]["is_html"] = True
+            else:
+                try:
+                    with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
+                        file_info["file"]["content"] = f.read()[:5000]
+                except Exception as e:
+                    _log.warning(f"Failed to read text preview: {e}")
 
         if self.session_id in self.server.sessions:
             self.session_store.append_message(self.session_id, file_info)

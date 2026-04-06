@@ -521,7 +521,9 @@ def build_jm_grid_html(title: str, filepath: str):
     h1 {{ font-size:24px; margin:0 0 20px; }}
     .note {{ color:#9ca3af; font-size:13px; margin:-8px 0 18px; }}
     .grid {{ display:grid; grid-template-columns:repeat(auto-fill, minmax(220px, 1fr)); gap:18px; }}
-    .card {{ background:#1f2937; border:1px solid rgba(255,255,255,0.08); border-radius:16px; overflow:hidden; box-shadow:0 10px 24px rgba(0,0,0,0.22); }}
+    .card {{ background:#1f2937; border:1px solid rgba(255,255,255,0.08); border-radius:16px; overflow:hidden; box-shadow:0 10px 24px rgba(0,0,0,0.22); transition: transform 0.2s, box-shadow 0.2s; }}
+    .card:hover {{ transform: translateY(-4px); box-shadow:0 14px 28px rgba(0,0,0,0.3); }}
+    .card a {{ text-decoration:none; color:inherit; display:block; }}
     .cover {{ width:100%; aspect-ratio: 13 / 18; object-fit:cover; display:block; background:#0b1220; }}
     .meta {{ padding:12px 14px 16px; }}
     .num {{ color:#60a5fa; font-weight:700; font-size:13px; margin-bottom:6px; }}
@@ -544,15 +546,17 @@ def append_jm_card(filepath: str, album_id: int, title: str, seq: int, client=No
         cover_url = fetch_cover_url(str(album_id), client=client)
     else:
         cover_url = f"https://cdn-msp3.jmapinodeudzn.net/media/photos/{album_id}/00001.webp"
+    album_url = f"https://jmcm.la/album/{album_id}"
     with open(filepath, "a", encoding="utf-8") as f:
         f.write(
             f'    <article class="card">'
+            f'<a href="{html.escape(album_url, quote=True)}" target="_blank">'
             f'<img class="cover" src="{html.escape(cover_url, quote=True)}" alt="{html.escape(title, quote=True)}">'
             f'<div class="meta">'
             f'<div class="num">#{seq}</div>'
             f'<div class="title">{html.escape(title)}</div>'
             f'<div class="aid">ID: {html.escape(str(album_id))}</div>'
-            f'</div></article>\n'
+            f'</div></a></article>\n'
         )
 
 
@@ -560,6 +564,140 @@ def close_jm_grid_html(filepath: str):
     """关闭 HTML 网格文件"""
     with open(filepath, "a", encoding="utf-8") as f:
         f.write("  </div>\n</body>\n</html>\n")
+
+
+def build_novel_grid_html(title: str, filepath: str):
+    """写入轻小说卡片网格的 HTML 头部"""
+    html_head = f"""<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{html.escape(title)}</title>
+  <style>
+    body {{ font-family: 'Segoe UI', 'PingFang SC', sans-serif; background:#111827; color:#f3f4f6; margin:0; padding:24px; }}
+    h1 {{ font-size:24px; margin:0 0 20px; }}
+    .note {{ color:#9ca3af; font-size:13px; margin:-8px 0 18px; }}
+    .grid {{ display:grid; grid-template-columns:repeat(auto-fill, minmax(220px, 1fr)); gap:18px; }}
+    .card {{ background:#1f2937; border:1px solid rgba(255,255,255,0.08); border-radius:16px; overflow:hidden; box-shadow:0 10px 24px rgba(0,0,0,0.22); transition: transform 0.2s, box-shadow 0.2s; }}
+    .card:hover {{ transform: translateY(-4px); box-shadow:0 14px 28px rgba(0,0,0,0.3); }}
+    .card a {{ text-decoration:none; color:inherit; display:block; }}
+    .cover {{ width:100%; aspect-ratio: 3 / 4; object-fit:cover; display:block; background:#0b1220; }}
+    .meta {{ padding:12px 14px 16px; }}
+    .author {{ color:#60a5fa; font-weight:700; font-size:13px; margin-bottom:6px; }}
+    .title {{ font-size:14px; line-height:1.45; word-break:break-word; }}
+    .info {{ color:#9ca3af; font-size:12px; margin-top:8px; }}
+  </style>
+</head>
+<body>
+  <h1>{html.escape(title)}</h1>
+  <div class="note">点击卡片查看小说详情或下载喵~</div>
+  <div class="grid">
+"""
+    with open(filepath, "w", encoding="utf-8") as f:
+        f.write(html_head)
+
+
+def append_novel_card(filepath: str, book_id: str, title: str, author: str, seq: int, cover_url: str = None):
+    """追加一张轻小说卡片到已打开的 HTML 文件"""
+    node = int(book_id) // 1000 if book_id.isdigit() else 0
+    if not cover_url:
+        cover_url = f"https://img.wenku8.com/image/{node}/{book_id}/{book_id}s.jpg"
+    page_url = f"https://www.wenku8.net/book/{book_id}.htm"
+    with open(filepath, "a", encoding="utf-8") as f:
+        f.write(
+            f'    <article class="card">'
+            f'<a href="{html.escape(page_url, quote=True)}" target="_blank">'
+            f'<img class="cover" src="{html.escape(cover_url, quote=True)}" alt="{html.escape(title, quote=True)}">'
+            f'<div class="meta">'
+            f'<div class="author">{html.escape(author)}</div>'
+            f'<div class="title">{html.escape(title)}</div>'
+            f'<div class="info">ID: {html.escape(book_id)}</div>'
+            f'</div></a></article>\n'
+        )
+
+
+def close_novel_grid_html(filepath: str):
+    """关闭轻小说 HTML 网格文件"""
+    with open(filepath, "a", encoding="utf-8") as f:
+        f.write("  </div>\n</body>\n</html>\n")
+
+
+def build_novel_detail_html(title: str, info: dict, filepath: str):
+    """生成单本轻小说详情页 HTML"""
+    book_id_match = re.search(r'/book/(\d+)\.htm', info.get('page', ''))
+    book_id = book_id_match.group(1) if book_id_match else "0"
+    node = int(book_id) // 1000 if book_id.isdigit() else 0
+    cover_url = info.get('cover_url') or f"https://img.wenku8.com/image/{node}/{book_id}/{book_id}s.jpg"
+    page_url = info.get('page') or f"https://www.wenku8.net/book/{book_id}.htm"
+    download_url = info.get('download_url') or f"https://dl.wenku8.com/down.php?type=txt&node={node}&id={book_id}"
+    
+    html_content = f"""<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{html.escape(title)} - 轻小说详情</title>
+  <style>
+    body {{ font-family: 'Segoe UI', 'PingFang SC', sans-serif; background:#111827; color:#f3f4f6; margin:0; padding:24px; }}
+    .card {{ background:#1f2937; border:1px solid rgba(255,255,255,0.08); border-radius:16px; overflow:hidden; box-shadow:0 10px 24px rgba(0,0,0,0.22); max-width:500px; margin:0 auto; }}
+    .cover {{ width:100%; aspect-ratio: 3 / 4; object-fit:cover; display:block; background:#0b1220; }}
+    .meta {{ padding:20px; }}
+    .title {{ font-size:20px; font-weight:700; margin-bottom:12px; line-height:1.4; }}
+    .author {{ color:#60a5fa; font-size:14px; margin-bottom:16px; }}
+    .info-row {{ display:flex; justify-content:space-between; padding:8px 0; border-bottom:1px solid rgba(255,255,255,0.05); font-size:13px; }}
+    .info-label {{ color:#9ca3af; }}
+    .info-value {{ color:#f3f4f6; }}
+    .intro {{ margin-top:16px; padding:12px; background:rgba(0,0,0,0.2); border-radius:8px; font-size:13px; line-height:1.6; }}
+    .intro-title {{ color:#60a5fa; font-weight:600; margin-bottom:8px; }}
+    .actions {{ display:flex; gap:12px; margin-top:20px; }}
+    .btn {{ flex:1; padding:12px; border-radius:8px; text-align:center; text-decoration:none; font-size:14px; font-weight:600; transition:opacity 0.2s; }}
+    .btn:hover {{ opacity:0.9; }}
+    .btn-primary {{ background:#4a9eff; color:white; }}
+    .btn-secondary {{ background:#374151; color:white; }}
+  </style>
+</head>
+<body>
+  <div class="card">
+    <img class="cover" src="{html.escape(cover_url, quote=True)}" alt="{html.escape(title, quote=True)}">
+    <div class="meta">
+      <div class="title">{html.escape(title)}</div>
+      <div class="author">作者：{html.escape(info.get('author', '未知'))}</div>
+      <div class="info-row">
+        <span class="info-label">分类</span>
+        <span class="info-value">{html.escape(info.get('category', '未知'))}</span>
+      </div>
+      <div class="info-row">
+        <span class="info-label">字数</span>
+        <span class="info-value">{html.escape(info.get('word_count', '未知'))}</span>
+      </div>
+      <div class="info-row">
+        <span class="info-label">状态</span>
+        <span class="info-value">{html.escape(info.get('is_serialize', '未知'))}</span>
+      </div>
+      <div class="info-row">
+        <span class="info-label">更新日期</span>
+        <span class="info-value">{html.escape(info.get('last_date', '未知'))}</span>
+      </div>
+      <div class="info-row">
+        <span class="info-label">热度</span>
+        <span class="info-value">{html.escape(str(info.get('hot', '未知')))}</span>
+      </div>
+      <div class="intro">
+        <div class="intro-title">简介</div>
+        <div>{html.escape(info.get('introduction', '暂无简介'))}</div>
+      </div>
+      <div class="actions">
+        <a href="{html.escape(page_url, quote=True)}" target="_blank" class="btn btn-secondary">查看详情</a>
+        <a href="{html.escape(download_url, quote=True)}" target="_blank" class="btn btn-primary">下载小说</a>
+      </div>
+    </div>
+  </div>
+</body>
+</html>"""
+    
+    with open(filepath, "w", encoding="utf-8") as f:
+        f.write(html_content)
 
 
 class SwitchManager:
@@ -751,20 +889,11 @@ async def handle_jmrank(msg, is_group=True):
     build_jm_grid_html(f"{html.escape(select)} · JM 排行", filepath)
 
     tot = 0
-    fg = 0
-    for page in cl.categories_filter_gen(page=1,
-                                         time=JmMagicConstants.TIME_WEEK,
-                                         category=JmMagicConstants.CATEGORY_ALL,
-                                         order_by=JmMagicConstants.ORDER_BY_VIEW,
-                                         ):
-        for aid, atitle in page:
-            tot += 1
-            append_jm_card(filepath, aid, atitle, tot, client=cl)
-            comic_cache.append(aid)
-            if tot >= 50:
-                fg = 1
-                break
-        if fg:
+    for aid, atitle in page:
+        tot += 1
+        append_jm_card(filepath, aid, atitle, tot, client=cl)
+        comic_cache.append(aid)
+        if tot >= 50:
             break
 
     close_jm_grid_html(filepath)
@@ -809,6 +938,7 @@ async def handle_search(msg, is_group=True):
         # 直接搜索禁漫车号，生成单本卡片HTML
         album: JmAlbumDetail = client.get_album_detail(id)
         cover_url = fetch_cover_url(id, client=client)
+        album_url = f"https://jmcm.la/album/{id}"
         html_head = f"""<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
@@ -817,7 +947,8 @@ async def handle_search(msg, is_group=True):
   <title>{html.escape(album.title)} - JM 本子</title>
   <style>
     body {{ font-family: 'Segoe UI', 'PingFang SC', sans-serif; background:#111827; color:#f3f4f6; margin:0; padding:24px; }}
-    .card {{ background:#1f2937; border:1px solid rgba(255,255,255,0.08); border-radius:16px; overflow:hidden; box-shadow:0 10px 24px rgba(0,0,0,0.22); max-width:400px; margin:0 auto; }}
+    .card {{ background:#1f2937; border:1px solid rgba(255,255,255,0.08); border-radius:16px; overflow:hidden; box-shadow:0 10px 24px rgba(0,0,0,0.22); max-width:400px; margin:0 auto; transition: transform 0.2s, box-shadow 0.2s; cursor:pointer; }}
+    .card:hover {{ transform: translateY(-4px); box-shadow:0 14px 28px rgba(0,0,0,0.3); }}
     .cover {{ width:100%; aspect-ratio: 13 / 18; object-fit:cover; display:block; background:#0b1220; }}
     .meta {{ padding:16px 20px 20px; }}
     .title {{ font-size:18px; font-weight:700; line-height:1.4; word-break:break-word; margin-bottom:10px; }}
@@ -826,6 +957,7 @@ async def handle_search(msg, is_group=True):
   </style>
 </head>
 <body>
+  <a href="{html.escape(album_url, quote=True)}" target="_blank" style="text-decoration:none; color:inherit;">
   <div class="card">
     <img class="cover" src="{html.escape(cover_url, quote=True)}" alt="{html.escape(album.title, quote=True)}">
     <div class="meta">
@@ -839,6 +971,7 @@ async def handle_search(msg, is_group=True):
       </div>
     </div>
   </div>
+  </a>
 </body>
 </html>"""
         with open(filepath, "w", encoding="utf-8") as f:
@@ -2834,33 +2967,95 @@ async def handle_find_book(msg, is_group=True):
             await bot.api.post_private_msg(msg.user_id, text=reply)
         return
 
-    matches = search_wenku8_books(search_term, "articlename")
+    # 发送通知
+    if is_group:
+        await msg.reply(text="正在搜索轻小说喵~")
+    else:
+        await bot.api.post_private_msg(msg.user_id, text="正在搜索轻小说喵~")
+
+    # 创建HTML文件
+    cache_dir = os.path.join(load_address(), "novel_search")
+    os.makedirs(cache_dir, exist_ok=True)
+    file_token = hashlib.md5(f"novel_{search_term}_{time.time()}".encode("utf-8")).hexdigest()[:8]
+    filename = f"{file_token}_{search_term}.html"
+    filepath = os.path.join(cache_dir, filename)
+
+    build_novel_grid_html(f"{html.escape(search_term)} · 轻小说搜索", filepath)
+
+    # 1. 先搜索本地缓存
+    local_matches = search_local_novel_cache(search_term)
+    
+    # 2. 如果本地结果不够（少于5本），再去网站搜索
+    web_matches = []
+    if len(local_matches) < 5:
+        web_matches = search_wenku8_books(search_term, "articlename")
+    
+    # 3. 合并结果并去重（以书名作为唯一标识）
+    seen_titles = set()
+    matches = []
+    
+    # 先添加本地结果
+    for author, title, download_url in local_matches:
+        if title not in seen_titles:
+            seen_titles.add(title)
+            matches.append((author, title, download_url))
+    
+    # 再添加网站搜索结果（去重）
+    for author, title, download_url in web_matches:
+        if title not in seen_titles:
+            seen_titles.add(title)
+            matches.append((author, title, download_url))
+    
+    # 4. 搜索API书籍
     api_book[msg.user_id] = find_book_from_api(search_term)
 
     if not matches and not api_book[msg.user_id]:
+        close_novel_grid_html(filepath)
         reply = f"没有找到包含'{search_term}'的轻小说喵~"
         if is_group:
             await msg.reply(text=reply)
+            await bot.api.post_group_file(msg.group_id, file=filepath)
         else:
             await bot.api.post_private_msg(msg.user_id, text=reply)
+            await bot.api.upload_private_file(msg.user_id, filepath, filename)
         return
-    
-    # 生成选择列表
-    choices = "\n".join([f"{i+1}. {title} -- {author}" for i, (author,title, _) in enumerate(matches)])
-    if api_book[msg.user_id]:
-        api_text = "\n".join([f"{i+1+len(matches)}. {title}" for i, (_, title) in enumerate(api_book[msg.user_id].items())])
-        choices += f"\n\nAPI找到以下匹配的小说喵~:\n{api_text}"
 
-    reply = f"找到以下匹配的轻小说喵~:\n{choices}\n\n请回复'/select 编号'选择要下载的轻小说喵~\n回复'/info 编号'获取轻小说信息喵~"
-    
-    
+    # 添加搜索结果到卡片
+    for i, (author, title, download_url) in enumerate(matches):
+        book_id_match = re.search(r'id=(\d+)', download_url)
+        book_id = book_id_match.group(1) if book_id_match else "0"
+        append_novel_card(filepath, book_id, title, author, i + 1)
+        # 更新全局 books 字典
+        if title not in books:
+            books[title] = {
+                "download_url": download_url,
+                "page": f"https://www.wenku8.net/book/{book_id}.htm",
+                "author": author
+            }
+
+    # 添加 API 结果到卡片
+    if api_book[msg.user_id]:
+        start_seq = len(matches) + 1
+        for i, (_, title) in enumerate(api_book[msg.user_id].items()):
+            if title not in seen_titles:  # API结果也去重
+                book_id = api_book[msg.user_id][_].get("book_id", "0")
+                author = api_book[msg.user_id][_].get("author", "未知")
+                append_novel_card(filepath, book_id, title, author, start_seq + i)
+                # 更新全局 books 字典
+                if title not in books:
+                    books[title] = api_book[msg.user_id][_]
+
+    close_novel_grid_html(filepath)
+
     # 存储匹配结果临时数据
     temp_selections[msg.user_id] = matches
-    
+
     if is_group:
-        await msg.reply(text=reply)
+        await msg.reply(text=f"找到 {len(matches) + len(api_book[msg.user_id]) if api_book[msg.user_id] else len(matches)} 本轻小说喵~ 点击卡片查看详情或使用 /info 编号 获取信息喵~")
+        await bot.api.post_group_file(msg.group_id, file=filepath)
     else:
-        await bot.api.post_private_msg(msg.user_id, text=reply)
+        await bot.api.post_private_msg(msg.user_id, text=f"找到 {len(matches) + len(api_book[msg.user_id]) if api_book[msg.user_id] else len(matches)} 本轻小说喵~ 点击卡片查看详情或使用 /info 编号 获取信息喵~")
+        await bot.api.upload_private_file(msg.user_id, filepath, filename)
 
 @register_command("/fa",help_text="/fa <作者> -> 搜索作者",category = "6")
 async def handle_find_author(msg, is_group=True):
@@ -3006,6 +3201,38 @@ def search_wenku8_books(search_term: str, search_type: str, max_pages: int = 3) 
             results.append((author, title, download_url))
     
     _log.info(f"总搜索结果数量: {len(results)}")
+    return results
+
+def search_local_novel_cache(search_term: str) -> list:
+    """
+    在本地 novel_details2.json 缓存中搜索小说
+    
+    :param search_term: 搜索关键词
+    :return: 搜索结果列表 [(author, title, download_url), ...]
+    """
+    results = []
+    search_term_lower = search_term.lower()
+    
+    try:
+        cache_file = os.path.join(os.path.dirname(__file__), '..', 'resources', 'config', 'novel_details2.json')
+        if not os.path.exists(cache_file):
+            _log.warning(f"本地缓存文件不存在: {cache_file}")
+            return results
+        
+        with open(cache_file, 'r', encoding='utf-8') as f:
+            cache_data = json.load(f)
+        
+        for title, info in cache_data.items():
+            # 在书名和作者中搜索
+            author = info.get('author', '')
+            if search_term_lower in title.lower() or search_term_lower in author.lower():
+                download_url = info.get('download_url', '')
+                results.append((author, title, download_url))
+        
+        _log.info(f"本地缓存搜索结果: 找到 {len(results)} 本包含 '{search_term}' 的小说")
+    except Exception as e:
+        _log.error(f"搜索本地缓存失败: {e}")
+    
     return results
 
 def get_book_detail_by_url(book_url: str) -> dict:
@@ -3207,29 +3434,32 @@ async def handle_select_book(msg, is_group=True):
         return
     try:
         selection = int(msg.raw_message[len("/select"):].strip()) - 1
-        matches = temp_selections[msg.user_id]
-        api_books = api_book[msg.user_id]
+        matches = temp_selections.get(msg.user_id, [])
+        api_books = api_book.get(msg.user_id, {})
 
         if 0 <= selection < len(matches) or (selection >= len(matches) and selection < len(matches) + len(api_books)):
             if selection < len(matches):
                 author,title, url = matches[selection]
-                reply = f"已开始下载《{title}》-- {author}喵~"
+                reply = f"已选择《{title}》-- {author}喵~\n下载链接: {url}"
                 if is_group:
                     await msg.reply(text=reply)
-                    await bot.api.post_group_file(msg.group_id,file=url)
                 else:
                     await bot.api.post_private_msg(msg.user_id, text=reply)
-                    await bot.api.upload_private_file(msg.user_id,file=url,name=title+".txt")     
+                # 注意：这里只发送链接，不直接发送文件，因为URL不是本地文件
+                # 如果需要下载文件，需要先下载到本地再发送
             else:
                 id, title = list(api_books.items())[selection - len(matches)]
                 download_api_book(id,title)
                 reply = f"已开始下载《{title}》喵~"
                 await msg.reply(text=reply)
                 api_book_file_path = os.path.join(os.path.dirname(__file__), f"cache/novel/{title}.txt")
-                if is_group:
-                    await bot.api.post_group_file(msg.group_id,file=api_book_file_path)
+                if os.path.exists(api_book_file_path):
+                    if is_group:
+                        await bot.api.post_group_file(msg.group_id,file=api_book_file_path)
+                    else:
+                        await bot.api.upload_private_file(msg.user_id,file=api_book_file_path,name=title+".txt")
                 else:
-                    await bot.api.upload_private_file(msg.user_id,file=api_book_file_path,name=title+".txt")
+                    await msg.reply(text="文件下载中，请稍后再试喵~")
             
         else:
             reply = "编号无效喵~请选择列表中的编号喵~"
@@ -3244,8 +3474,9 @@ async def handle_select_book(msg, is_group=True):
         else:
             await bot.api.post_private_msg(msg.user_id, text=reply)
     
-    del temp_selections[str(msg.user_id)] 
-    del api_books[str(msg.user_id)]  
+    # 安全删除，避免KeyError
+    temp_selections.pop(str(msg.user_id), None)
+    api_book.pop(str(msg.user_id), None)  
 
 @register_command("/info",help_text="/info <书名> -> 获取轻小说信息",category = "6")
 async def handle_info(msg, is_group=True):
@@ -3306,13 +3537,25 @@ async def handle_info(msg, is_group=True):
                 except Exception:
                     introduction = "暂无"
                 cover = info['cover_url']
-                reply =  MessageChain(
-                f"《{title}》的信息如下喵~\n作者: {author}\n分类: {info['category']}\n字数: {info['word_count']}\n状态: {info['is_serialize']}\n热度：{info['hot']}\n简介：{introduction}\n更新日期: {info['last_date']}\n下载链接: {url}\n详细页面：{info['page']}",Image(f"{cover}")
-                )
+                
+                # 创建HTML详情页
+                cache_dir = os.path.join(load_address(), "novel_info")
+                os.makedirs(cache_dir, exist_ok=True)
+                file_token = hashlib.md5(f"info_{title}_{time.time()}".encode("utf-8")).hexdigest()[:8]
+                filename = f"{file_token}_{title[:20]}.html"
+                filepath = os.path.join(cache_dir, filename)
+                
+                build_novel_detail_html(title, info, filepath)
+                
+                # 发送文本消息
+                text_reply = f"《{title}》的信息如下喵~\n作者: {author}\n分类: {info['category']}\n字数: {info['word_count']}\n状态: {info['is_serialize']}\n热度：{info['hot']}\n简介：{introduction}\n更新日期: {info['last_date']}\n下载链接: {url}\n详细页面：{info['page']}"
+                
                 if is_group:
-                    await msg.reply(rtf=reply)
+                    await msg.reply(text=text_reply)
+                    await bot.api.post_group_file(msg.group_id, file=filepath)
                 else:
-                    await bot.api.post_private_msg(msg.user_id, rtf=reply)
+                    await bot.api.post_private_msg(msg.user_id, text=text_reply)
+                    await bot.api.upload_private_file(msg.user_id, filepath, filename)
             else:
                 id, title = list(api_books.items())[selection - len(matches)]
                 
@@ -3322,11 +3565,24 @@ async def handle_info(msg, is_group=True):
                     await msg.reply(text=reply)
                     return
 
-                reply =  MessageChain(
-                f"《{title}》的信息如下喵~\n作者: {info['author']}\n分类: {info['category']}\n字数: {info['word_count']}\n状态: {info['is_serialize']}\n热度：{info['hot']}\n简介：{info['introduction']}\n更新日期: {info['last_date']}\n下载链接: {info['download_url']}\n详细页面：{info['page']}",Image(f"{info['cover']}")
-
-                )
-                await msg.reply(rtf=reply)
+                # 创建HTML详情页
+                cache_dir = os.path.join(load_address(), "novel_info")
+                os.makedirs(cache_dir, exist_ok=True)
+                file_token = hashlib.md5(f"info_{title}_{time.time()}".encode("utf-8")).hexdigest()[:8]
+                filename = f"{file_token}_{title[:20]}.html"
+                filepath = os.path.join(cache_dir, filename)
+                
+                build_novel_detail_html(title, info, filepath)
+                
+                # 发送文本消息
+                text_reply = f"《{title}》的信息如下喵~\n作者: {info['author']}\n分类: {info['category']}\n字数: {info['word_count']}\n状态: {info['is_serialize']}\n热度：{info['hot']}\n简介：{info['introduction']}\n更新日期: {info['last_date']}\n下载链接: {info['download_url']}\n详细页面：{info['page']}"
+                
+                if is_group:
+                    await msg.reply(text=text_reply)
+                    await bot.api.post_group_file(msg.group_id, file=filepath)
+                else:
+                    await bot.api.post_private_msg(msg.user_id, text=text_reply)
+                    await bot.api.upload_private_file(msg.user_id, filepath, filename)
 
         else:
             reply = "编号无效喵~请选择列表中的编号喵~"
@@ -3441,27 +3697,25 @@ async def handle_random_novel(msg, is_group=True):
     
     url = info["download_url"]
     hot = info.get('hot', '未知')
-    reply = f"抽选到了《{novel}》喵~\n"
-    reply += f"简介如下喵~\n作者：{info['author']}\n字数：{info['word_count']}\n状态：{info['is_serialize']}\n热度：{hot}\n最新更新：{info['last_date']}\n简介：{info['introduction']}\n下载链接：{url}"
-    cover = info['cover_url']
-    reply =  MessageChain(
-        reply,
-        Image(f"{cover}")
-        )
+    
+    # 创建HTML详情页
+    cache_dir = os.path.join(load_address(), "novel_random")
+    os.makedirs(cache_dir, exist_ok=True)
+    file_token = hashlib.md5(f"random_{novel}_{time.time()}".encode("utf-8")).hexdigest()[:8]
+    filename = f"{file_token}_{novel[:20]}.html"
+    filepath = os.path.join(cache_dir, filename)
+    
+    build_novel_detail_html(novel, info, filepath)
+    
+    text_reply = f"抽选到了《{novel}》喵~\n"
+    text_reply += f"简介如下喵~\n作者：{info['author']}\n字数：{info['word_count']}\n状态：{info['is_serialize']}\n热度：{hot}\n最新更新：{info['last_date']}\n简介：{info['introduction']}\n下载链接：{url}"
+    
     if is_group:
-        await msg.reply(rtf=reply)
-        try:
-            await bot.api.post_group_file(msg.group_id, file=url)
-        except Exception as e:
-            _log.error(f"发送群文件失败: {e}")
-            await msg.reply(text="但是下载小说失败喵~ 可能是因为 wenku8 网站已关闭，请稍后再试喵~")
+        await msg.reply(text=text_reply)
+        await bot.api.post_group_file(msg.group_id, file=filepath)
     else:
-        await bot.api.post_private_msg(msg.user_id, rtf=reply)
-        try:
-            await bot.api.upload_private_file(msg.user_id, file=url, name=novel+".txt")
-        except Exception as e:
-            _log.error(f"发送私聊文件失败: {e}")
-            await bot.api.post_private_msg(msg.user_id, text="但是下载小说失败喵~ 可能是因为 wenku8 网站已关闭，请稍后再试喵~")
+        await bot.api.post_private_msg(msg.user_id, text=text_reply)
+        await bot.api.upload_private_file(msg.user_id, filepath, filename)
 
 @register_command("/hotnovel", help_text="/hotnovel <day|month> [数量] -> 获取今日/本月热门轻小说(支持翻页)", category="6")
 async def handle_hotnovel(msg, is_group=True):
@@ -3628,16 +3882,29 @@ async def handle_hotnovel(msg, is_group=True):
         # 同时清空 api_book 避免干扰
         api_book[msg.user_id] = {}
 
-        reply_text = f"✨ {type_name}前{len(results)}名如下喵：\n"
-        for i, (author, title, _) in enumerate(results):
-            reply_text += f"{i+1}. 《{title}》 - {author}\n"
-        
-        reply_text += "\n请使用 `/info 编号` 查看详情，或 `/select 编号` 下载喵~"
-        
+        # 创建HTML文件
+        cache_dir = os.path.join(load_address(), "novel_hot")
+        os.makedirs(cache_dir, exist_ok=True)
+        file_token = hashlib.md5(f"hotnovel_{rank_type}_{time.time()}".encode("utf-8")).hexdigest()[:8]
+        filename = f"{file_token}_{type_name}.html"
+        filepath = os.path.join(cache_dir, filename)
+
+        build_novel_grid_html(f"{type_name} · 轻小说排行", filepath)
+
+        # 添加到卡片
+        for i, (author, title, download_url) in enumerate(results):
+            book_id_match = re.search(r'id=(\d+)', download_url)
+            book_id = book_id_match.group(1) if book_id_match else "0"
+            append_novel_card(filepath, book_id, title, author, i + 1)
+
+        close_novel_grid_html(filepath)
+
         if is_group:
-            await msg.reply(text=reply_text)
+            await msg.reply(text=f"✨ {type_name}前{len(results)}名喵~ 点击卡片查看详情或使用 /info 编号 获取信息喵~")
+            await bot.api.post_group_file(msg.group_id, file=filepath)
         else:
-            await bot.api.post_private_msg(msg.user_id, text=reply_text)
+            await bot.api.post_private_msg(msg.user_id, text=f"✨ {type_name}前{len(results)}名喵~ 点击卡片查看详情或使用 /info 编号 获取信息喵~")
+            await bot.api.upload_private_file(msg.user_id, filepath, filename)
 
     except Exception as e:
         _log.error(f"Error in handle_hotnovel: {e}")

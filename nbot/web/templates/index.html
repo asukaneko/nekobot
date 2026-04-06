@@ -7345,11 +7345,11 @@
                                                         </div>
                                                         <!-- 图片直接显示 -->
                                                         <img v-if="msg.file.is_image" :src="msg.file.data || msg.file.url || msg.file.preview" class="attachment-preview" style="max-width: 200px; max-height: 150px; object-fit: cover;" @error="handleImageError">
-                                                        <!-- 文本文件显示预览 -->
-                                                        <div v-else-if="msg.file.is_text && msg.file.content" class="text-file-preview" style="max-width: 300px; max-height: 150px; overflow: auto; background: rgba(0,0,0,0.1); padding: 8px; border-radius: 4px; font-family: monospace; font-size: 12px;">
+                                                        <!-- 文本文件显示预览（不包括HTML） -->
+                                                        <div v-else-if="msg.file.is_text && msg.file.content && msg.file.type !== 'text/html'" class="text-file-preview" style="max-width: 300px; max-height: 150px; overflow: auto; background: rgba(0,0,0,0.1); padding: 8px; border-radius: 4px; font-family: monospace; font-size: 12px;">
                                                             <pre style="margin: 0; white-space: pre-wrap;">{{ msg.file.content }}</pre>
                                                         </div>
-                                                        <!-- 其他文件显示图标 -->
+                                                        <!-- HTML文件和其他文件显示图标 -->
                                                         <div v-else class="attachment-icon" :class="getAttachmentIconClass(msg.file.type)">
                                                             <i :class="getAttachmentIcon(msg.file.type)"></i>
                                                         </div>
