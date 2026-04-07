@@ -2447,14 +2447,10 @@ No recent activity
                 self._render_file_links(text, part_content)
     
     def _render_file_links(self, text: Text, content: str):
-        """渲染文件链接和普通格式"""
+        """渲染文件链接和普通格式，支持点击打开文件"""
         import re
         
         # 匹配 Markdown 格式的文件链接: [显示文本](file://路径)
-        # 或直接的文件路径: file://路径
-        # 或工作区文件引用: [文件名]
-        
-        # 先处理 Markdown 链接 [text](file://path)
         link_pattern = r'\[([^\]]+)\]\((file://[^)]+)\)'
         
         last_end = 0
@@ -2473,8 +2469,11 @@ No recent activity
                 actual_path = os.path.join(os.getcwd(), actual_path)
             
             if os.path.exists(actual_path):
-                # 文件存在，显示为可点击的链接样式
-                text.append(display_text, style="bold blue underline")
+                # 文件存在，显示为可点击的链接
+                # 使用 Rich 的 link 属性创建真正的终端链接
+                link_text = Text(display_text, style="bold blue underline")
+                link_text.stylize(f"link file://{actual_path}")
+                text.append(link_text)
                 text.append(" 📄", style="dim")
             else:
                 # 文件不存在，显示为普通文本
