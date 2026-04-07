@@ -66,18 +66,20 @@ try:
     class CommandCompleter(Completer):
         """命令补全器 - 用于prompt_toolkit"""
         
-        def __init__(self, commands):
+        def __init__(self, commands, workspace_root=None):
             self.commands = commands
+            self.workspace_root = workspace_root or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         
         def get_completions(self, document, complete_event):
             text = document.text
             
-            # 只有在命令模式下才提供补全
-            if text.startswith("/"):
+            if text.startswith("@"):
+                for completion in self._get_file_completions(text):
+                    yield completion
+            elif text.startswith("/"):
                 cmd_part = text[1:].lower()
                 
                 for cmd, info in self.commands.items():
-                    # 匹配命令名
                     if cmd.startswith(cmd_part):
                         display = f"/{cmd} - {info['desc']}"
                         yield Completion(
@@ -85,15 +87,51 @@ try:
                             start_position=-len(cmd_part),
                             display=display
                         )
-                    # 匹配别名
                     for alias in info.get("aliases", []):
                         if alias.startswith(cmd_part):
                             display = f"/{alias} - {info['desc']} (alias for /{cmd})"
                             yield Completion(
-                                cmd,  # 补全为完整命令名
+                                cmd,
                                 start_position=-len(cmd_part),
                                 display=display
                             )
+        
+        def _get_file_completions(self, text):
+            """获取文件路径补全"""
+            import glob
+            
+            file_part = text[1:]
+            
+            if '/' in file_part or '\\' in file_part:
+                search_dir = os.path.dirname(file_part) if os.path.dirname(file_part) else "."
+                prefix = os.path.basename(file_part)
+                full_dir = os.path.join(self.workspace_root, search_dir) if not os.path.isabs(search_dir) else search_dir
+            else:
+                search_dir = "."
+                prefix = file_part
+                full_dir = self.workspace_root
+            
+            if not os.path.isdir(full_dir):
+                return
+            
+            try:
+                if prefix:
+                    pattern = os.path.join(full_dir, prefix + "*")
+                else:
+                    pattern = os.path.join(full_dir, "*")
+                
+                for path in glob.glob(pattern):
+                    if os.path.isfile(path):
+                        name = os.path.basename(path)
+                        rel_path = os.path.relpath(path, self.workspace_root)
+                        display = f"📄 {rel_path}"
+                        yield Completion(
+                            name,
+                            start_position=-len(prefix),
+                            display=display
+                        )
+            except Exception:
+                pass
     
     PROMPT_TOOLKIT_AVAILABLE = True
 except ImportError:
@@ -170,9 +208,10 @@ class CCStyleCLI:
         self.prompt_session = None
         if PROMPT_TOOLKIT_AVAILABLE:
             try:
+                workspace_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
                 self.prompt_session = PromptSession(
-                    completer=CommandCompleter(self.COMMANDS),
-                    complete_while_typing=True,  # 输入时实时补全
+                    completer=CommandCompleter(self.COMMANDS, workspace_root),
+                    complete_while_typing=True,
                 )
             except Exception:
                 pass
@@ -345,18 +384,95 @@ No recent activity
             else:
                 return "\033[1;35m›\033[0m"
 
-    def _display_user_message(self, content: str):
+    def _process_file_references(self, message: str) -> tuple[str, list]:
+        """处理消息中的 @filepath 引用，返回 (处理后的消息, 附件列表)"""
+        import re
+        
+        attachments = []
+        processed_message = message
+        
+        workspace_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        
+        pattern = r'@([^\s@]+)'
+        matches = list(re.finditer(pattern, message))
+        
+        for match in matches:
+            filepath = match.group(1)
+            start, end = match.span()
+            
+            resolved_path = self._resolve_file_path(filepath, workspace_root)
+            
+            if resolved_path and os.path.isfile(resolved_path):
+                try:
+                    file_size = os.path.getsize(resolved_path)
+                    max_size = 100 * 1024
+                    
+                    if file_size > max_size:
+                        self.console.print(f"[yellow]文件过大，跳过: {filepath} ({file_size} bytes)[/yellow]")
+                        continue
+                    
+                    with open(resolved_path, 'r', encoding='utf-8') as f:
+                        file_content = f.read()
+                    
+                    rel_path = os.path.relpath(resolved_path, workspace_root)
+                    attachment = {
+                        "type": "file",
+                        "path": resolved_path,
+                        "relative_path": rel_path,
+                        "content": file_content,
+                        "source": filepath
+                    }
+                    attachments.append(attachment)
+                    
+                    file_info = f"[文件: {rel_path}]\n```\n{file_content}\n```"
+                    processed_message = processed_message[:start] + file_info + processed_message[end:]
+                    
+                    attachments[-1]["content"] = file_info
+                    attachments[-1]["source"] = match.group(0)
+                    
+                except Exception as e:
+                    self.console.print(f"[red]读取文件失败: {filepath} - {str(e)}[/red]")
+            else:
+                self.console.print(f"[yellow]文件不存在: {filepath}[/yellow]")
+        
+        return processed_message, attachments
+
+    def _resolve_file_path(self, filepath: str, workspace_root: str) -> str:
+        """解析文件路径，支持绝对路径、相对路径"""
+        filepath = filepath.strip()
+        
+        if os.path.isabs(filepath):
+            return filepath
+        
+        if filepath.startswith('.'):
+            return os.path.abspath(filepath)
+        
+        return os.path.join(workspace_root, filepath)
+
+    def _display_user_message(self, content: str, attachments: list = None):
         """显示用户消息 - 带上下边框"""
+        from rich.text import Text
+        
         line_char = "\u2500"
         width = shutil.get_terminal_size().columns
-        top_line = f"\033[90m{line_char * width}\033[0m\n"
-        bottom_line = f"\033[90m{line_char * width}\033[0m\n"
-
-        sys.stdout.write(top_line)
-        sys.stdout.flush()
-        self.console.print(f"[bold green]>[/bold green] {escape_rich_tags(content)}")
-        sys.stdout.write(bottom_line)
-        sys.stdout.flush()
+        
+        # 使用 Rich 渲染边框
+        self.console.print(f"[dim]{line_char * width}[/dim]")
+        
+        # 渲染用户消息
+        text = Text()
+        text.append("> ", style="bold green")
+        text.append(content)
+        self.console.print(text)
+        
+        # 渲染附件
+        if attachments:
+            for att in attachments:
+                if att.get("type") == "file":
+                    self.console.print(f"[dim]📎 {att.get('relative_path', att.get('source'))}[/dim]")
+        
+        # 渲染底部边框
+        self.console.print(f"[dim]{line_char * width}[/dim]")
 
     def _get_input(self) -> tuple[str, bool]:
         """
@@ -475,50 +591,40 @@ No recent activity
         if not thinking or not self.show_thinking:
             return
         
-        # 使用Text对象显示思考过程，避免Rich标签解析问题
         from rich.text import Text
-        thinking_lines = thinking.strip().split('\n')
-        for line in thinking_lines:
-            if line.strip():
-                # 转义思考内容中的特殊字符
-                line = escape_rich_tags(line)
-                text = Text()
-                text.append("💭 ", style="dim italic")
-                text.append(line, style="dim italic")
-                self.console.print(text)
+        thinking_lines = [line for line in thinking.strip().split('\n') if line.strip()]
+        for i, line in enumerate(thinking_lines):
+            line = escape_rich_tags(line)
+            text = Text()
+            text.append("💭 ", style="dim italic")
+            text.append(line, style="dim italic")
+            self.console.print(text)
 
-    def _render_inline_tool_call(self, tool_name: str, arguments: Dict):
-        """内联渲染工具调用"""
+    def _render_tool_call_and_result(self, tool_name: str, arguments: Dict, result: Dict, success: bool):
+        """在一行内渲染工具调用和结果"""
+        from rich.text import Text
+        
+        # 准备参数字符串
         args_str = json.dumps(arguments, ensure_ascii=False)
-        if len(args_str) > 100:
-            args_str = args_str[:100] + "..."
-        # 转义特殊字符避免Rich标签解析问题
         args_str = escape_rich_tags(args_str)
         tool_name = escape_rich_tags(tool_name)
-        # 使用Text对象避免Rich标签解析问题
-        from rich.text import Text
+        
+        # 构建一行显示
         text = Text()
         text.append("🔧 ", style="dim yellow")
         text.append(f"{tool_name}({args_str})", style="dim yellow")
-        self.console.print(text)
-
-    def _render_inline_tool_result(self, result: Dict, success: bool):
-        """内联渲染工具结果"""
-        from rich.text import Text
-        icon = "✓" if success else "✗"
-        text = Text()
+        
+        # 添加结果
         if success:
-            text.append(f"{icon} ", style="dim green")
-            text.append("Done", style="dim green")
+            text.append(" ✓ Done", style="dim green")
         else:
-            # 转义错误信息中的特殊字符
             error_msg = result.get("error", "")
-            text.append(f"{icon} ", style="dim red")
             if error_msg:
                 error_msg = escape_rich_tags(error_msg)
-                text.append(f"Failed: {error_msg}", style="dim red")
+                text.append(f" ✗ Failed: {error_msg}", style="dim red")
             else:
-                text.append("Failed", style="dim red")
+                text.append(" ✗ Failed", style="dim red")
+        
         self.console.print(text)
 
     def _call_ai(self, messages: List[Dict]) -> Dict[str, Any]:
@@ -571,9 +677,13 @@ No recent activity
                     "model": model_name,
                     "messages": tool_messages,
                     "temperature": model.get("temperature", 0.7),
-                    "max_tokens": model.get("max_tokens", 2000),
                     "stream": True  # 启用流式输出
                 }
+                
+                # 如果配置了 max_tokens，则使用配置值
+                max_tokens = model.get("max_tokens")
+                if max_tokens:
+                    payload["max_tokens"] = max_tokens
 
                 if tools and supports_tools:
                     payload["tools"] = tools
@@ -600,19 +710,18 @@ No recent activity
                     tool_calls = result["tool_calls"]
                     all_tool_calls.extend(tool_calls)
 
+                    # 硅基流动 API 简化工具调用消息格式
+                    tool_call_info = "\n".join([
+                        f"调用工具: {tc.get('function', {}).get('name')}({tc.get('function', {}).get('arguments', '{}')})"
+                        for tc in tool_calls
+                    ])
+                    assistant_msg = result.get("content", "")
+                    if assistant_msg:
+                        assistant_msg += "\n\n"
+                    assistant_msg += f"[工具调用]\n{tool_call_info}"
                     tool_messages.append({
                         "role": "assistant",
-                        "content": result.get("content", ""),
-                        "tool_calls": [
-                            {
-                                "id": tc.get("id"),
-                                "type": "function",
-                                "function": {
-                                    "name": tc.get("function", {}).get("name"),
-                                    "arguments": tc.get("function", {}).get("arguments")
-                                }
-                            } for tc in tool_calls
-                        ]
+                        "content": assistant_msg
                     })
 
                     # 执行工具调用
@@ -633,24 +742,34 @@ No recent activity
                         except:
                             arguments = {}
 
-                        # 内联显示工具调用
-                        self._render_inline_tool_call(tool_name, arguments)
-
                         # 执行工具
                         exec_result = self._execute_tool(tool_name, arguments)
                         success = exec_result.get("success", False)
 
-                        # 内联显示工具结果
-                        self._render_inline_tool_result(exec_result, success)
+                        # 在一行内显示工具调用和结果
+                        self._render_tool_call_and_result(tool_name, arguments, exec_result, success)
 
+                        # 硅基流动 API 使用 user 角色传递工具结果
+                        tool_result_msg = f"工具 {tool_name} 执行结果：\n{json.dumps(exec_result, ensure_ascii=False, indent=2)}"
                         tool_messages.append({
-                            "role": "tool",
-                            "tool_call_id": tool_call.get("id"),
-                            "content": json.dumps(exec_result, ensure_ascii=False)
+                            "role": "user",
+                            "content": tool_result_msg
                         })
+                    
+                    # 工具调用后继续下一轮迭代，让 AI 基于工具结果继续思考
+                    continue
                 else:
                     # 没有工具调用，得到最终回复
                     final_content = result.get("content", "")
+                    
+                    # 如果内容为空，检查是否有工具调用历史
+                    if not final_content:
+                        if all_tool_calls:
+                            final_content = "工具执行完成。"
+                        elif all_thinking:
+                            final_content = "[思考完成]"
+                        else:
+                            final_content = "[无回复内容]"
                     
                     return {
                         "content": final_content,
@@ -674,23 +793,23 @@ No recent activity
             return {"content": f"error: {str(e)}", "thinking": "", "tool_calls": [], "interrupted": False}
 
     def _process_stream_response(self, response, supports_tools: bool) -> Dict:
-        """处理流式响应，流式显示纯文本，结束后渲染 Markdown
+        """处理流式响应，实时渲染 Markdown
         
         返回: {"content": str, "thinking": str, "tool_calls": list, "interrupted": bool}
         """
         import json
         from rich.live import Live
+        from rich.panel import Panel
         from rich.text import Text
         
         content_parts = []
         thinking_parts = []
         tool_calls = []
-        current_tool_call = None
         
-        # 创建 Live 对象用于流式显示
-        live_content = Text("🐱 ", style="cyan")
+        # 创建初始显示内容
+        display_text = Text("🐱 ", style="cyan")
         
-        with Live(live_content, console=self.console, refresh_per_second=20, auto_refresh=True, transient=True) as live:
+        with Live(display_text, console=self.console, refresh_per_second=10, transient=False) as live:
             for line in response.iter_lines():
                 if self.interrupt_requested:
                     return {
@@ -705,11 +824,9 @@ No recent activity
                 
                 line_str = line.decode('utf-8')
                 
-                # SSE 格式: data: {...}
                 if line_str.startswith('data: '):
-                    data_str = line_str[6:]  # 去掉 "data: " 前缀
+                    data_str = line_str[6:]
                     
-                    # 检查是否是结束标记
                     if data_str.strip() == '[DONE]':
                         break
                     
@@ -718,26 +835,21 @@ No recent activity
                         choice = data.get("choices", [{}])[0]
                         delta = choice.get("delta", {})
                         
-                        # 提取思考内容（如果支持）
                         thinking = delta.get("reasoning_content", "") or delta.get("thinking", "")
                         if thinking:
                             thinking_parts.append(thinking)
                         
-                        # 提取内容
                         content = delta.get("content", "")
                         if content:
                             content_parts.append(content)
-                            # 更新 Live 内容，显示纯文本
-                            full_content = "".join(content_parts)
-                            live_content = Text("🐱 " + full_content, style="white")
-                            live.update(live_content)
+                            # 实时更新显示
+                            current_content = "".join(content_parts)
+                            live.update(self._render_markdown_to_text(current_content))
                         
-                        # 提取工具调用（如果支持）
                         if supports_tools and delta.get("tool_calls"):
                             for tc_delta in delta["tool_calls"]:
                                 index = tc_delta.get("index", 0)
                                 
-                                # 确保 tool_calls 列表足够长
                                 while len(tool_calls) <= index:
                                     tool_calls.append({
                                         "id": "",
@@ -745,21 +857,18 @@ No recent activity
                                         "function": {"name": "", "arguments": ""}
                                     })
                                 
-                                # 更新工具调用信息
                                 if tc_delta.get("id"):
                                     tool_calls[index]["id"] = tc_delta["id"]
                                 if tc_delta.get("function", {}).get("name"):
                                     tool_calls[index]["function"]["name"] = tc_delta["function"]["name"]
                                 if tc_delta.get("function", {}).get("arguments"):
                                     tool_calls[index]["function"]["arguments"] += tc_delta["function"]["arguments"]
-                        
+                    
                     except json.JSONDecodeError:
                         continue
         
-        # Live 结束后（transient=True 会自动清除），渲染完整的 Markdown
+        # Live 退出后，最终内容已经显示在屏幕上了
         final_content = "".join(content_parts)
-        if final_content:
-            self._render_markdown(final_content)
         
         return {
             "content": final_content,
@@ -776,51 +885,114 @@ No recent activity
         if not content:
             return Text("🐱 ", style="cyan")
         
-        # 简单的 Markdown 渲染为 Text
         text = Text()
         text.append("🐱 ", style="cyan")
         
         # 转义 Rich 标签
         safe_content = self._escape_rich_tags_in_markdown(content)
         
-        # 处理基本格式
+        # 处理代码块（保护起来）
+        code_blocks = []
+        def protect_code_block(match):
+            code_blocks.append(match.group(0))
+            return f"___CODE_BLOCK_{len(code_blocks)-1}___"
+        
+        safe_content = re.sub(r'```[\s\S]*?```', protect_code_block, safe_content)
+        
+        # 处理行内代码（保护起来）
+        inline_codes = []
+        def protect_inline_code(match):
+            inline_codes.append(match.group(1))
+            return f"___INLINE_CODE_{len(inline_codes)-1}___"
+        
+        safe_content = re.sub(r'`([^`]+)`', protect_inline_code, safe_content)
+        
+        # 处理每一行
         lines = safe_content.split('\n')
+        in_code_block = False
+        
         for i, line in enumerate(lines):
             if i > 0:
                 text.append('\n')
             
-            # 处理标题
-            if line.strip().startswith('#'):
-                level = len(line) - len(line.lstrip('#'))
-                title_text = line.lstrip('#').strip()
-                if level == 1:
-                    text.append(title_text, style="bold cyan")
-                elif level == 2:
-                    text.append(title_text, style="bold green")
-                elif level == 3:
-                    text.append(title_text, style="bold yellow")
-                else:
-                    text.append(title_text, style="bold")
-            # 处理粗体
-            elif '**' in line:
-                parts = re.split(r'\*\*(.+?)\*\*', line)
-                for j, part in enumerate(parts):
-                    if j % 2 == 1:
-                        text.append(part, style="bold")
+            # 恢复代码块
+            if '___CODE_BLOCK_' in line:
+                for j, block in enumerate(code_blocks):
+                    placeholder = f"___CODE_BLOCK_{j}___"
+                    if placeholder in line:
+                        # 提取代码内容
+                        code_content = block.replace('```', '').strip()
+                        lines_in_block = code_content.split('\n')
+                        if lines_in_block and lines_in_block[0] and not lines_in_block[0].strip().isalpha():
+                            # 第一行是语言标识
+                            lang = lines_in_block[0].strip()
+                            code_content = '\n'.join(lines_in_block[1:])
+                        else:
+                            lang = "text"
+                        text.append(code_content, style="bold yellow on black")
+                        line = line.replace(placeholder, '')
+                        continue
+            
+            # 恢复行内代码
+            if '___INLINE_CODE_' in line:
+                parts = re.split(r'(___INLINE_CODE_\d+___)', line)
+                for part in parts:
+                    match = re.match(r'___INLINE_CODE_(\d+)___', part)
+                    if match:
+                        idx = int(match.group(1))
+                        text.append(inline_codes[idx], style="bold yellow on black")
                     else:
-                        text.append(part)
-            # 处理斜体
-            elif '*' in line:
-                parts = re.split(r'\*(.+?)\*', line)
-                for j, part in enumerate(parts):
-                    if j % 2 == 1:
-                        text.append(part, style="italic")
-                    else:
-                        text.append(part)
+                        # 处理普通文本中的格式
+                        self._render_inline_formats(text, part)
             else:
-                text.append(line)
+                # 处理标题
+                if line.strip().startswith('#'):
+                    level = len(line) - len(line.lstrip('#'))
+                    title_text = line.lstrip('#').strip()
+                    if level == 1:
+                        text.append(title_text, style="bold cyan")
+                    elif level == 2:
+                        text.append(title_text, style="bold green")
+                    elif level == 3:
+                        text.append(title_text, style="bold yellow")
+                    else:
+                        text.append(title_text, style="bold")
+                # 处理列表项
+                elif line.strip().startswith('- ') or line.strip().startswith('* '):
+                    item_text = line.strip()[2:]
+                    text.append("  • ", style="dim")
+                    self._render_inline_formats(text, item_text)
+                # 处理数字列表
+                elif re.match(r'^\s*\d+\.\s+', line):
+                    match = re.match(r'^(\s*\d+\.\s+)(.+)$', line)
+                    if match:
+                        text.append(f"  {match.group(1)}", style="dim")
+                        self._render_inline_formats(text, match.group(2))
+                else:
+                    self._render_inline_formats(text, line)
         
         return text
+    
+    def _render_inline_formats(self, text: Text, content: str):
+        """渲染行内格式（粗体、斜体、删除线等）"""
+        import re
+        
+        if not content:
+            return
+        
+        # 处理粗体 **text**
+        bold_parts = re.split(r'\*\*(.+?)\*\*', content)
+        for i, bold_part in enumerate(bold_parts):
+            if i % 2 == 1:  # 粗体内容
+                text.append(bold_part, style="bold")
+            else:
+                # 处理斜体 *text*
+                italic_parts = re.split(r'\*(.+?)\*', bold_part)
+                for j, italic_part in enumerate(italic_parts):
+                    if j % 2 == 1:  # 斜体内容
+                        text.append(italic_part, style="italic")
+                    else:
+                        text.append(italic_part)
 
     def _get_tool_definitions(self) -> List[Dict]:
         """获取工具定义列表（包括内置工具和注册表工具）"""
@@ -871,11 +1043,286 @@ No recent activity
         if not TOOLS_AVAILABLE:
             return {"success": False, "error": "tools not available"}
         try:
+            # 对于工作区工具，使用当前目录作为工作区
+            if tool_name.startswith("workspace_"):
+                return self._execute_workspace_tool(tool_name, arguments)
+            
             tool_context = {"session_id": self.session_id} if self.session_id else {}
             result = execute_tool(tool_name, arguments, tool_context)
             return result
         except Exception as e:
             return {"success": False, "error": str(e)}
+    
+    def _execute_workspace_tool(self, tool_name: str, arguments: Dict) -> Dict:
+        """
+        在CLI中执行工作区工具，使用当前目录作为工作区根目录
+        """
+        import mimetypes
+        
+        # 获取当前工作目录作为工作区根目录
+        workspace_root = os.getcwd()
+        
+        # 获取文件名参数（兼容 filename 和 file_path）
+        filename = arguments.get('filename') or arguments.get('file_path', '')
+        
+        try:
+            if tool_name == "workspace_create_file":
+                if not filename:
+                    return {"success": False, "error": "缺少文件名参数"}
+                if 'content' not in arguments:
+                    return {"success": False, "error": "缺少 content 参数"}
+                
+                # 确保父目录存在
+                file_path = os.path.join(workspace_root, filename)
+                parent_dir = os.path.dirname(file_path)
+                if parent_dir and not os.path.exists(parent_dir):
+                    os.makedirs(parent_dir, exist_ok=True)
+                
+                # 写入文件
+                with open(file_path, 'w', encoding='utf-8') as f:
+                    f.write(arguments['content'])
+                
+                return {
+                    "success": True,
+                    "filename": os.path.basename(filename),
+                    "path": file_path,
+                    "size": len(arguments['content'].encode('utf-8')),
+                    "message": f"文件已创建: {filename}"
+                }
+            
+            elif tool_name == "workspace_read_file":
+                if not filename:
+                    return {"success": False, "error": "缺少文件名参数"}
+                
+                file_path = os.path.join(workspace_root, filename)
+                if not os.path.exists(file_path):
+                    return {"success": False, "error": f"文件不存在: {filename}"}
+                
+                if os.path.isdir(file_path):
+                    return {"success": False, "error": f"这是一个目录，不是文件: {filename}"}
+                
+                # 读取文件内容
+                try:
+                    with open(file_path, 'r', encoding='utf-8', errors='replace') as f:
+                        content = f.read()
+                    
+                    # 应用行范围限制
+                    start_line = arguments.get('start_line')
+                    end_line = arguments.get('end_line')
+                    if start_line is not None or end_line is not None:
+                        lines = content.split('\n')
+                        start = (start_line - 1) if start_line else 0
+                        end = end_line if end_line else len(lines)
+                        content = '\n'.join(lines[start:end])
+                    
+                    # 应用字符范围限制
+                    char_count = arguments.get('char_count')
+                    start_char = arguments.get('start_char')
+                    if char_count is not None or start_char is not None:
+                        start = start_char if start_char else 0
+                        end = start + char_count if char_count else len(content)
+                        content = content[start:end]
+                    
+                    return {
+                        "success": True,
+                        "filename": filename,
+                        "content": content,
+                        "size": os.path.getsize(file_path)
+                    }
+                except Exception as e:
+                    return {"success": False, "error": f"读取文件失败: {str(e)}"}
+            
+            elif tool_name == "workspace_edit_file":
+                if not filename:
+                    return {"success": False, "error": "缺少文件名参数"}
+                
+                file_path = os.path.join(workspace_root, filename)
+                if not os.path.exists(file_path):
+                    return {"success": False, "error": f"文件不存在: {filename}"}
+                
+                old_content = arguments.get('old_content', '')
+                new_content = arguments.get('new_content', '')
+                
+                try:
+                    with open(file_path, 'r', encoding='utf-8') as f:
+                        content = f.read()
+                    
+                    if old_content not in content:
+                        return {"success": False, "error": "未找到要替换的内容"}
+                    
+                    new_file_content = content.replace(old_content, new_content, 1)
+                    
+                    with open(file_path, 'w', encoding='utf-8') as f:
+                        f.write(new_file_content)
+                    
+                    return {
+                        "success": True,
+                        "filename": filename,
+                        "message": f"文件已修改: {filename}"
+                    }
+                except Exception as e:
+                    return {"success": False, "error": f"修改文件失败: {str(e)}"}
+            
+            elif tool_name == "workspace_delete_file":
+                if not filename:
+                    return {"success": False, "error": "缺少文件名参数"}
+                
+                file_path = os.path.join(workspace_root, filename)
+                if not os.path.exists(file_path):
+                    return {"success": False, "error": f"文件不存在: {filename}"}
+                
+                try:
+                    if os.path.isdir(file_path):
+                        import shutil
+                        shutil.rmtree(file_path)
+                    else:
+                        os.remove(file_path)
+                    
+                    return {
+                        "success": True,
+                        "filename": filename,
+                        "message": f"已删除: {filename}"
+                    }
+                except Exception as e:
+                    return {"success": False, "error": f"删除失败: {str(e)}"}
+            
+            elif tool_name == "workspace_list_files":
+                path = arguments.get('path', '')
+                recursive = arguments.get('recursive', False)
+                
+                target_path = os.path.join(workspace_root, path) if path else workspace_root
+                
+                if not os.path.exists(target_path) or not os.path.isdir(target_path):
+                    return {"success": False, "error": f"目录不存在: {path}"}
+                
+                files = []
+                
+                if recursive:
+                    # 递归列出所有文件
+                    for root, dirs, filenames in os.walk(target_path):
+                        for name in filenames:
+                            full_path = os.path.join(root, name)
+                            rel_path = os.path.relpath(full_path, workspace_root)
+                            mime_type, _ = mimetypes.guess_type(full_path)
+                            files.append({
+                                'name': name,
+                                'type': 'file',
+                                'size': os.path.getsize(full_path),
+                                'mime_type': mime_type or 'application/octet-stream',
+                                'path': rel_path.replace('\\', '/')
+                            })
+                        for name in dirs:
+                            full_path = os.path.join(root, name)
+                            rel_path = os.path.relpath(full_path, workspace_root)
+                            files.append({
+                                'name': name,
+                                'type': 'directory',
+                                'size': 0,
+                                'path': rel_path.replace('\\', '/')
+                            })
+                else:
+                    # 只列出当前目录
+                    for name in os.listdir(target_path):
+                        full_path = os.path.join(target_path, name)
+                        rel_path = os.path.relpath(full_path, workspace_root)
+                        if os.path.isdir(full_path):
+                            files.append({
+                                'name': name,
+                                'type': 'directory',
+                                'size': 0,
+                                'path': rel_path.replace('\\', '/')
+                            })
+                        else:
+                            mime_type, _ = mimetypes.guess_type(full_path)
+                            files.append({
+                                'name': name,
+                                'type': 'file',
+                                'size': os.path.getsize(full_path),
+                                'mime_type': mime_type or 'application/octet-stream',
+                                'path': rel_path.replace('\\', '/')
+                            })
+                
+                return {
+                    "success": True,
+                    "path": path or ".",
+                    "recursive": recursive,
+                    "files": files,
+                    "count": len(files),
+                    "message": f"工作区 '{workspace_root}' 包含 {len(files)} 个文件/文件夹"
+                }
+            
+            elif tool_name == "workspace_send_file":
+                if not filename:
+                    return {"success": False, "error": "缺少文件名参数"}
+                
+                file_path = os.path.join(workspace_root, filename)
+                if not os.path.exists(file_path):
+                    return {"success": False, "error": f"文件不存在: {filename}"}
+                
+                # 在CLI中，发送文件意味着显示文件信息并提供打开链接
+                file_size = os.path.getsize(file_path)
+                mime_type, _ = mimetypes.guess_type(file_path)
+                
+                # 尝试打开文件
+                try:
+                    import subprocess
+                    if sys.platform == 'win32':
+                        os.startfile(file_path)
+                    elif sys.platform == 'darwin':
+                        subprocess.run(['open', file_path], check=True)
+                    else:
+                        subprocess.run(['xdg-open', file_path], check=True)
+                    
+                    opened = True
+                except Exception as e:
+                    opened = False
+                
+                return {
+                    "success": True,
+                    "filename": filename,
+                    "path": file_path,
+                    "size": file_size,
+                    "mime_type": mime_type or 'application/octet-stream',
+                    "opened": opened,
+                    "message": f"文件: {filename} ({file_size} bytes)"
+                }
+            
+            elif tool_name == "workspace_parse_file":
+                if not filename:
+                    return {"success": False, "error": "缺少文件名参数"}
+                
+                file_path = os.path.join(workspace_root, filename)
+                if not os.path.exists(file_path):
+                    return {"success": False, "error": f"文件不存在: {filename}"}
+                
+                try:
+                    from nbot.core.file_parser import file_parser
+                    max_chars = arguments.get('max_chars', 50000)
+                    result = file_parser.parse_file(file_path, filename, max_chars)
+                    return result
+                except Exception as e:
+                    return {"success": False, "error": f"解析文件失败: {str(e)}"}
+            
+            elif tool_name == "workspace_file_info":
+                if not filename:
+                    return {"success": False, "error": "缺少文件名参数"}
+                
+                file_path = os.path.join(workspace_root, filename)
+                if not os.path.exists(file_path):
+                    return {"success": False, "error": f"文件不存在: {filename}"}
+                
+                try:
+                    from nbot.core.file_parser import file_parser
+                    result = file_parser.get_file_metadata(file_path, filename)
+                    return result
+                except Exception as e:
+                    return {"success": False, "error": f"获取文件信息失败: {str(e)}"}
+            
+            else:
+                return {"success": False, "error": f"未知的工作区工具: {tool_name}"}
+        
+        except Exception as e:
+            return {"success": False, "error": f"执行工作区工具失败: {str(e)}"}
 
     def save_session(self):
         """保存当前会话"""
@@ -1969,7 +2416,7 @@ No recent activity
             _render_table(table_headers, table_rows)
     
     def _render_inline_formatting(self, text: Text, content: str):
-        """渲染内联格式（粗体、斜体、代码等）"""
+        """渲染内联格式（粗体、斜体、代码、文件链接等）"""
         import re
         
         # 保护行内代码
@@ -1996,20 +2443,81 @@ No recent activity
             if part_type == 'code':
                 text.append(part_content, style="bold yellow on black")
             else:
-                # 处理粗体和斜体
-                # 先处理粗体 **text**
-                bold_parts = re.split(r'\*\*(.+?)\*\*', part_content)
-                for i, bold_part in enumerate(bold_parts):
-                    if i % 2 == 1:  # 粗体内容
-                        text.append(bold_part, style="bold")
+                # 先处理文件链接 [filename](file://path) 或 file://path
+                self._render_file_links(text, part_content)
+    
+    def _render_file_links(self, text: Text, content: str):
+        """渲染文件链接和普通格式"""
+        import re
+        
+        # 匹配 Markdown 格式的文件链接: [显示文本](file://路径)
+        # 或直接的文件路径: file://路径
+        # 或工作区文件引用: [文件名]
+        
+        # 先处理 Markdown 链接 [text](file://path)
+        link_pattern = r'\[([^\]]+)\]\((file://[^)]+)\)'
+        
+        last_end = 0
+        for match in re.finditer(link_pattern, content):
+            # 添加链接前的文本
+            if match.start() > last_end:
+                self._render_bold_italic(text, content[last_end:match.start()])
+            
+            # 添加文件链接
+            display_text = match.group(1)
+            file_path = match.group(2)
+            
+            # 检查文件是否存在
+            actual_path = file_path.replace('file://', '').replace('/', os.sep)
+            if not os.path.isabs(actual_path):
+                actual_path = os.path.join(os.getcwd(), actual_path)
+            
+            if os.path.exists(actual_path):
+                # 文件存在，显示为可点击的链接样式
+                text.append(display_text, style="bold blue underline")
+                text.append(" 📄", style="dim")
+            else:
+                # 文件不存在，显示为普通文本
+                text.append(display_text, style="dim")
+            
+            last_end = match.end()
+        
+        # 处理剩余的文本
+        if last_end < len(content):
+            self._render_bold_italic(text, content[last_end:])
+    
+    def _render_bold_italic(self, text: Text, content: str):
+        """渲染粗体和斜体"""
+        import re
+        
+        # 处理粗体 **text**
+        bold_parts = re.split(r'\*\*(.+?)\*\*', content)
+        for i, bold_part in enumerate(bold_parts):
+            if i % 2 == 1:  # 粗体内容
+                text.append(bold_part, style="bold")
+            else:
+                # 处理斜体 *text*
+                italic_parts = re.split(r'\*(.+?)\*', bold_part)
+                for j, italic_part in enumerate(italic_parts):
+                    if j % 2 == 1:  # 斜体内容
+                        text.append(italic_part, style="italic")
                     else:
-                        # 处理斜体 *text*
-                        italic_parts = re.split(r'\*(.+?)\*', bold_part)
-                        for j, italic_part in enumerate(italic_parts):
-                            if j % 2 == 1:  # 斜体内容
-                                text.append(italic_part, style="italic")
-                            else:
-                                text.append(italic_part)
+                        text.append(italic_part)
+    
+    def _open_file(self, file_path: str) -> bool:
+        """打开文件，返回是否成功"""
+        try:
+            if sys.platform == 'win32':
+                os.startfile(file_path)
+            elif sys.platform == 'darwin':
+                import subprocess
+                subprocess.run(['open', file_path], check=True)
+            else:
+                import subprocess
+                subprocess.run(['xdg-open', file_path], check=True)
+            return True
+        except Exception as e:
+            return False
     
     def _escape_rich_tags_in_markdown(self, content: str) -> str:
         """在 Markdown 内容中转义 Rich 标签，保留 Markdown 语法"""
@@ -2095,20 +2603,24 @@ No recent activity
                 self.console.print(f"[dim]Loaded {total} messages from history[/dim]\n")
             self._display_history(limit=display_limit)
 
-    def _display_history(self, limit: int = 10):
+    def _display_history(self, limit: int = 10, skip_last: bool = False):
         """显示历史消息"""
-        # 只显示最近的消息
         recent_messages = self.messages[-limit:] if len(self.messages) > limit else self.messages
+        
+        if skip_last and len(recent_messages) > 0:
+            recent_messages = recent_messages[:-1]
         
         for msg in recent_messages:
             role = msg.get("role", "")
             content = msg.get("content", "")
+            original_content = msg.get("original_content", content)
+            attachments = msg.get("attachments", [])
             
             if not content:
                 continue
             
             if role == "user":
-                self._display_user_message(content)
+                self._display_user_message(original_content, attachments)
             elif role == "assistant":
                 self._render_markdown(content)
                 self.console.print()
@@ -2178,11 +2690,20 @@ No recent activity
         
         self.interrupt_requested = False
 
-        self._display_user_message(message)
+        original_message = message
+        processed_message, attachments = self._process_file_references(message)
+
+        if attachments:
+            for att in attachments:
+                if att.get("type") == "file":
+                    sys.stdout.write(f"[dim]📎 {att.get('relative_path', att.get('source'))}[/dim]\n")
+                    sys.stdout.flush()
 
         self.messages.append({
             "role": "user",
-            "content": message,
+            "content": processed_message,
+            "original_content": original_message,
+            "attachments": attachments,
             "timestamp": datetime.now().isoformat()
         })
 
@@ -2191,23 +2712,17 @@ No recent activity
         content = result.get("content", "")
         interrupted = result.get("interrupted", False)
 
-        # 添加AI消息
         self.messages.append({
             "role": "assistant",
             "content": content,
             "timestamp": datetime.now().isoformat()
         })
 
-        # 如果被打断，显示提示
         if interrupted:
-            self.console.print(f"\n[dim][interrupted][/dim]")
+            self.console.print(f"[dim][interrupted][/dim]")
 
-        self.console.print()
-
-        # 自动保存
         self.save_session()
         
-        # 重置AI处理状态
         with self.queue_lock:
             self.ai_processing = False
 
