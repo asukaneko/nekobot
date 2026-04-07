@@ -13,6 +13,7 @@ import copy
 import logging
 import threading
 import queue
+import shutil
 import time
 from datetime import datetime
 from typing import Dict, Any, List, Optional
@@ -60,6 +61,7 @@ try:
     from prompt_toolkit import PromptSession
     from prompt_toolkit.completion import Completer, Completion
     from prompt_toolkit.key_binding import KeyBindings
+    from prompt_toolkit.formatted_text import ANSI
     
     class CommandCompleter(Completer):
         """命令补全器 - 用于prompt_toolkit"""
@@ -150,7 +152,6 @@ class CCStyleCLI:
         self.available_models = []
         self.show_thinking = True
         self.max_tool_iterations = 10
-        self.input_mode = "chat"  # chat, command, help
         self.current_path = os.getcwd()
         self.interrupt_requested = False
         
@@ -318,53 +319,116 @@ No recent activity
         self.console.print()
 
     def _render_input_box(self, mode: str = "chat") -> str:
-        """渲染输入框"""
+        """渲染输入框 - 带动态效果"""
+        is_processing = False
+        try:
+            with self.queue_lock:
+                is_processing = self.ai_processing
+        except:
+            pass
+        
+        if is_processing:
+            return "\033[2m⋯\033[0m"
+        
         if mode == "command":
-            return "[bold yellow]/[/bold yellow] [bold]>[/bold]"
+            return "\033[1;33m/\033[0m"
         elif mode == "help":
-            return "[bold magenta]?[/bold magenta] [bold]>[/bold]"
+            return "\033[1;35m?\033[0m"
         else:
-            return "[bold cyan]›[/bold cyan]"
+            msg_count = len(self.messages)
+            if msg_count == 0:
+                return "\033[1;36m›\033[0m"
+            elif msg_count < 10:
+                return "\033[1;32m›\033[0m"
+            elif msg_count < 20:
+                return "\033[1;33m›\033[0m"
+            else:
+                return "\033[1;35m›\033[0m"
 
-    def _get_input(self, mode: str = "chat") -> tuple[str, bool]:
+    def _display_user_message(self, content: str):
+        """显示用户消息 - 带上下边框"""
+        line_char = "\u2500"
+        width = shutil.get_terminal_size().columns
+        top_line = f"\033[90m{line_char * width}\033[0m\n"
+        bottom_line = f"\033[90m{line_char * width}\033[0m\n"
+
+        sys.stdout.write(top_line)
+        sys.stdout.flush()
+        self.console.print(f"[bold green]>[/bold green] {escape_rich_tags(content)}")
+        sys.stdout.write(bottom_line)
+        sys.stdout.flush()
+
+    def _get_input(self) -> tuple[str, bool]:
         """
-        获取用户输入，支持命令候选
+        获取用户输入，支持命令候选和动态效果
         返回: (输入内容, 是否打断)
         """
-        # prompt_toolkit不支持Rich标签，使用纯文本提示符
-        if self.prompt_session and mode == "chat":
-            prompt = ">"  # 纯文本提示符
-        else:
-            prompt = self._render_input_box(mode)
+        self._show_input_hint()
+        
+        prompt = self._render_input_box("chat")
+        line_char = "\u2500"
+        width = shutil.get_terminal_size().columns
+        top_line = f"\033[90m{line_char * width}\033[0m\n"
+        bottom_line = f"\033[90m{line_char * width}\033[0m\n"
+
+        sys.stdout.write(top_line)
+        sys.stdout.flush()
 
         try:
-            # 如果有prompt_toolkit，使用它来获取输入（支持实时候选）
-            if self.prompt_session and mode == "chat":
+            if self.prompt_session:
                 try:
-                    user_input = self.prompt_session.prompt(f"{prompt} ").strip()
+                    user_input = self.prompt_session.prompt(ANSI(f"{prompt} ")).strip()
                 except Exception:
-                    # 如果prompt_toolkit失败，回退到普通输入
                     user_input = self.console.input(f"{prompt} ").strip()
             else:
                 user_input = self.console.input(f"{prompt} ").strip()
-            
-            # 检测模式切换前缀
-            if user_input.startswith("/"):
-                self.input_mode = "command"
-                cmd_input = user_input[1:].strip()
-                # 如果没有输入具体命令，显示所有命令
-                if not cmd_input:
-                    self._show_command_candidates("")
-                    return None, False
-                return cmd_input, False
-            elif user_input.startswith("?"):
-                self.input_mode = "help"
-                return user_input[1:].strip(), False
 
+            sys.stdout.write(bottom_line)
+            sys.stdout.flush()
             return user_input, False
 
         except (KeyboardInterrupt, EOFError):
+            sys.stdout.write(bottom_line)
+            sys.stdout.flush()
             return "", True
+
+    def _show_input_hint(self):
+        """显示输入提示 - 根据当前状态动态变化"""
+        from rich.text import Text
+        
+        # 获取当前模型和人格
+        current_model = self._get_current_model()
+        model_name = current_model.get('name', 'Unknown') if current_model else 'Unknown'
+        
+        current_personality = self._get_current_personality()
+        personality_name = current_personality.get('name', 'Unknown')
+        
+        # 获取消息数量
+        msg_count = len(self.messages)
+        
+        # 构建动态提示
+        text = Text()
+        
+        # 根据消息数量显示不同的提示
+        if msg_count == 0:
+            text.append("💬 ", style="dim")
+            text.append(f"Start chatting with {escape_rich_tags(personality_name)}", style="dim cyan")
+        elif msg_count < 5:
+            text.append("🐱 ", style="dim")
+            text.append("Keep the conversation going", style="dim green")
+        elif msg_count < 15:
+            text.append("✨ ", style="dim")
+            text.append(f"{msg_count} messages so far", style="dim yellow")
+        else:
+            text.append("📝 ", style="dim")
+            text.append(f"Long conversation ({msg_count} msgs)", style="dim magenta")
+        
+        # 显示模型信息
+        text.append(f"  [", style="dim")
+        text.append(escape_rich_tags(model_name[:15]), style="dim cyan")
+        text.append("]", style="dim")
+        
+        self.console.print(text)
 
     def _show_command_candidates(self, partial: str):
         """显示命令候选"""
@@ -869,11 +933,16 @@ No recent activity
             pass
 
     def _handle_command(self, cmd_line: str):
-        """处理命令模式"""
+        """处理命令"""
         # 解析命令和参数
         parts = cmd_line.strip().split(None, 1)
         cmd = parts[0].lower() if parts else ""
         args = parts[1] if len(parts) > 1 else ""
+
+        # 如果没有命令，显示帮助
+        if not cmd:
+            self._show_help()
+            return
 
         if cmd in ["quit", "exit", "q"]:
             self.running = False
@@ -958,11 +1027,6 @@ No recent activity
             help_text = """
 [bold cyan]NekoBot CLI Help[/bold cyan]
 
-[bold]Input Modes:[/bold]
-  [cyan]›[/cyan] normal chat mode
-  [yellow]/[/yellow] command mode
-  [magenta]?[/magenta] help mode
-
 [bold]Commands (/):[/bold]
   /quit, /exit    Exit CLI
   /clear          Clear screen
@@ -988,7 +1052,6 @@ No recent activity
 
 [bold]Tips:[/bold]
   Start with / for commands
-  Start with ? for help
   Just type to chat with AI
   Press Ctrl+C during AI response to interrupt
   Type partial command to see candidates
@@ -1133,35 +1196,141 @@ No recent activity
             return []
 
     def _show_sessions(self):
-        """显示会话列表"""
-        sessions = self.load_sessions()[:10]  # 只显示最近10个
+        """显示会话列表 - 支持交互式选择和上下滚动"""
+        sessions = self.load_sessions()
 
         if not sessions:
             self.console.print("[dim]no sessions[/dim]")
             return
 
-        table = Table(show_header=True, header_style="bold cyan", box=ROUNDED)
-        table.add_column("ID", style="dim", width=10)
-        table.add_column("Name", style="cyan")
-        table.add_column("Messages", style="green", width=10)
-        table.add_column("Updated", style="dim", width=16)
+        # 按更新时间排序
+        sessions.sort(key=lambda x: x.get("updated_at", ""), reverse=True)
 
-        for session in sessions:
-            sid = session.get("id", "")[:8]
-            name = escape_rich_tags(session.get("name", "Untitled"))
-            count = len(session.get("messages", []))
-            updated = session.get("updated_at", "")
+        # 不限制显示数量
+        total = len(sessions)
 
-            if updated:
-                try:
-                    dt = datetime.fromisoformat(updated)
-                    updated = dt.strftime("%m-%d %H:%M")
-                except:
-                    pass
+        if total == 0:
+            self.console.print("[dim]no sessions[/dim]")
+            return
 
-            table.add_row(sid, name, str(count), updated)
+        # 当前选中索引
+        selected_idx = 0
 
-        self.console.print(table)
+        # 使用 Live 实现动态更新
+        from rich.live import Live
+        from rich.table import Table
+        from rich.box import ROUNDED
+
+        def render_table():
+            """渲染会话列表表格"""
+            table = Table(
+                show_header=True,
+                header_style="bold cyan",
+                box=ROUNDED,
+                title=f"Recent Sessions ({total} total)",
+                title_style="bold cyan"
+            )
+            table.add_column("", style="dim", width=3)
+            table.add_column("#", style="dim", width=4)
+            table.add_column("Name", style="cyan", min_width=20)
+            table.add_column("Messages", style="green", width=10)
+            table.add_column("Updated", style="dim", width=16)
+
+            for i, session in enumerate(sessions):
+                sid = session.get("id", "")[:8]
+                name = escape_rich_tags(session.get("name", "Untitled"))
+                count = len(session.get("messages", []))
+                updated = session.get("updated_at", "")
+
+                if updated:
+                    try:
+                        dt = datetime.fromisoformat(updated)
+                        updated = dt.strftime("%m-%d %H:%M")
+                    except:
+                        pass
+
+                # 标记当前会话和选中项
+                is_current = session.get("id") == self.session_id
+                is_selected = i == selected_idx
+
+                if is_selected:
+                    marker = ">>>"
+                    name_style = f"[bold yellow]{name}[/bold yellow]"
+                elif is_current:
+                    marker = " ● "
+                    name_style = f"[green]{name}[/green]"
+                else:
+                    marker = "   "
+                    name_style = name
+
+                table.add_row(
+                    marker,
+                    str(i + 1),
+                    name_style,
+                    str(count),
+                    updated
+                )
+
+            return table
+
+        # 显示提示
+        self.console.print("\n[dim]Enter number to select, q to cancel[/dim]\n")
+
+        # 显示表格（不使用 Live，直接打印）
+        self.console.print(render_table())
+
+        # 简单输入选择
+        try:
+            choice = input("\nSelect session (1-{}): ".format(total)).strip()
+            
+            if choice.lower() == 'q':
+                return
+            elif choice.isdigit():
+                idx = int(choice) - 1
+                if 0 <= idx < total:
+                    self._switch_session(sessions[idx])
+                else:
+                    self.console.print("[red]Invalid selection[/red]")
+            else:
+                self.console.print("[red]Invalid input[/red]")
+                
+        except (KeyboardInterrupt, EOFError):
+            return
+
+    def _switch_session(self, session: Dict):
+        """切换到指定会话"""
+        # 保存当前会话
+        if self.session_id and self.messages:
+            self.save_session()
+
+        # 加载新会话
+        self.session_id = session.get("id")
+        self.messages = session.get("messages", [])
+
+        # 如果会话有 system_prompt 但没有 system 消息，添加 system 消息
+        system_prompt = session.get("system_prompt", "")
+        has_system_msg = any(msg.get("role") == "system" for msg in self.messages)
+        if system_prompt and not has_system_msg:
+            self.messages.insert(0, {
+                "role": "system",
+                "content": system_prompt,
+                "timestamp": datetime.now().isoformat()
+            })
+
+        # 清屏并显示
+        self.console.clear()
+        self.print_welcome()
+        self.console.print(f"[green]✓ Switched to session: {escape_rich_tags(session.get('name', 'Untitled'))}[/green]\n")
+
+        # 显示历史消息
+        if self.messages:
+            display_limit = 10
+            total = len(self.messages)
+            if total > display_limit:
+                self.console.print(f"[dim]Showing latest {display_limit} of {total} messages[/dim]\n")
+            else:
+                self.console.print(f"[dim]Loaded {total} messages[/dim]\n")
+            self._display_history(limit=display_limit)
 
     def _show_memory(self):
         """显示记忆列表"""
@@ -1939,10 +2108,8 @@ No recent activity
                 continue
             
             if role == "user":
-                # 用户消息
-                self.console.print(f"[bold green]>[/bold green] {escape_rich_tags(content)}\n")
+                self._display_user_message(content)
             elif role == "assistant":
-                # AI 消息
                 self._render_markdown(content)
                 self.console.print()
     
@@ -1961,37 +2128,22 @@ No recent activity
                 self._print_footer()
 
                 # 获取输入
-                user_input, interrupted = self._get_input(self.input_mode)
+                user_input, interrupted = self._get_input()
 
                 if interrupted:
                     self.running = False
                     break
-
-                if user_input is None:
-                    # 空命令，已显示候选，继续等待输入
-                    continue
                 
                 if not user_input:
                     continue
 
-                # 根据模式处理输入
-                if self.input_mode == "command":
-                    handled = self._handle_command(user_input)
-                    self.input_mode = "chat"
-                    if not handled:
-                        continue
-
-                elif self.input_mode == "help":
-                    handled = self._handle_help(user_input)
-                    self.input_mode = "chat"
-                    if not handled:
-                        continue
-
+                # 直接处理输入：/ 开头的是命令，否则是聊天
+                if user_input.startswith("/"):
+                    # 处理命令
+                    self._handle_command(user_input[1:])
+                    continue
                 else:
-                    # 聊天模式
-                    if user_input.startswith("/"):
-                        self._handle_command(user_input[1:])
-                        continue
+                    # 聊天消息
 
                     # 检查AI是否正在处理
                     with self.queue_lock:
@@ -2021,21 +2173,19 @@ No recent activity
 
     def _process_chat_message(self, message: str):
         """处理聊天消息（同步版本）"""
-        # 设置AI处理状态
         with self.queue_lock:
             self.ai_processing = True
         
-        # 重置打断标志
         self.interrupt_requested = False
 
-        # 添加用户消息到历史（不显示）
+        self._display_user_message(message)
+
         self.messages.append({
             "role": "user",
             "content": message,
             "timestamp": datetime.now().isoformat()
         })
 
-        # 调用AI（流式输出已包含思考过程和回复）
         result = self._call_ai(self.messages)
 
         content = result.get("content", "")
