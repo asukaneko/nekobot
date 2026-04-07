@@ -348,6 +348,9 @@ class DynamicExecutor:
                 message_type = params.get('message_type', 'info')
                 session_id = context.get('session_id')
                 return ToolExecutor.send_message(content, message_type=message_type, session_id=session_id)
+            elif handler == 'get_date_time':
+                from nbot.services.tools import ToolExecutor
+                return ToolExecutor.get_date_time()
             else:
                 return {
                     'success': False,

@@ -130,6 +130,7 @@ class CCStyleCLI:
         "sessions": {"desc": "列出最近会话", "aliases": []},
         "thinking": {"desc": "切换思考过程显示", "aliases": []},
         "reset": {"desc": "重置当前会话", "aliases": []},
+        "new": {"desc": "创建新会话", "aliases": ["n"]},
         "help": {"desc": "显示帮助信息", "aliases": ["h", "?"]},
         "memory": {"desc": "查看记忆列表", "aliases": ["mem"]},
         "knowledge": {"desc": "查看知识库", "aliases": ["kb", "know"]},
@@ -892,6 +893,15 @@ No recent activity
             self.session_id = str(uuid.uuid4())
             self.console.print("[dim]session reset[/dim]")
             return True
+        elif cmd == "new" or cmd == "n":
+            # 保存当前会话
+            if self.session_id and self.messages:
+                self.save_session()
+            # 创建新会话
+            self.messages = []
+            self.session_id = str(uuid.uuid4())
+            self.console.print("[green]✓ Created new session[/green]")
+            return True
         elif cmd == "memory" or cmd == "mem":
             self._show_memory()
             return True
@@ -944,11 +954,18 @@ No recent activity
   /sessions       List recent sessions
   /thinking       Toggle thinking display
   /reset          Reset current session
+  /new            Create new session
   /help           Show this help
 
 [bold]Shortcuts:[/bold]
   Ctrl+C          Interrupt AI / Exit
   ↑/↓             Navigate history
+
+[bold]Startup Options:[/bold]
+  --cli           Start CLI only
+  --cli-and-web   Start CLI and Web together
+  --only-web      Start Web only
+  --no-web        Start QQ bot only (no Web/CLI)
 
 [bold]Tips:[/bold]
   Start with / for commands
@@ -1628,15 +1645,55 @@ No recent activity
         return content
 
     def run(self):
-        """运行CLI - 直接进入输入模式"""
-        # 初始化会话
+        """运行CLI - 直接进入输入模式，加载最新会话"""
+        # 加载最新会话（如果有）
         if not self.session_id:
-            self.session_id = str(uuid.uuid4())
+            sessions = self.load_sessions()
+            if sessions:
+                # 按更新时间排序，加载最新的
+                sessions.sort(key=lambda x: x.get("updated_at", ""), reverse=True)
+                latest_session = sessions[0]
+                self.session_id = latest_session.get("id")
+                self.messages = latest_session.get("messages", [])
+            else:
+                # 没有会话，创建新的
+                self.session_id = str(uuid.uuid4())
+                self.messages = []
 
         # 清屏并显示欢迎界面
         self.console.clear()
         self.print_welcome()
+        
+        # 显示历史消息（如果有）
+        if self.messages:
+            display_limit = 10  # 只显示最新的10条
+            total = len(self.messages)
+            if total > display_limit:
+                self.console.print(f"[dim]Showing latest {display_limit} of {total} messages[/dim]\n")
+            else:
+                self.console.print(f"[dim]Loaded {total} messages from history[/dim]\n")
+            self._display_history(limit=display_limit)
 
+    def _display_history(self, limit: int = 10):
+        """显示历史消息"""
+        # 只显示最近的消息
+        recent_messages = self.messages[-limit:] if len(self.messages) > limit else self.messages
+        
+        for msg in recent_messages:
+            role = msg.get("role", "")
+            content = msg.get("content", "")
+            
+            if not content:
+                continue
+            
+            if role == "user":
+                # 用户消息
+                self.console.print(f"[bold green]>[/bold green] {escape_rich_tags(content)}\n")
+            elif role == "assistant":
+                # AI 消息
+                self._render_markdown(content)
+                self.console.print()
+    
         # 主循环 - 同步处理
         while self.running:
             try:

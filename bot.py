@@ -146,12 +146,33 @@ def run_cli():
         print(f"\nCLI错误: {e}")
 
 
+def run_cli_and_web(host="0.0.0.0", port=5000):
+    """同时启动 CLI 和 Web"""
+    _log.info("Starting NekoBot CLI and Web Dashboard...")
+    
+    # 准备 Web 服务器
+    prepared = _prepare_web_server(bot=None)
+    
+    # 启动 Web 服务器线程
+    web_thread = threading.Thread(
+        target=start_web_server,
+        args=(host, port, None, prepared),
+        name="web-server",
+        daemon=True,
+    )
+    web_thread.start()
+    
+    # 启动 CLI（在主线程）
+    run_cli()
+
+
 if __name__ == "__main__":
     import sys
 
     web_disabled = "--no-web" in sys.argv
     only_web = "--only-web" in sys.argv
     cli_mode = "--cli" in sys.argv
+    cli_and_web = "--cli-and-web" in sys.argv
     web_port = 5000
     web_host = "0.0.0.0"
 
@@ -161,7 +182,10 @@ if __name__ == "__main__":
         if arg == "--web-host" and i + 1 < len(sys.argv):
             web_host = sys.argv[i + 1]
 
-    if cli_mode:
+    if cli_and_web:
+        # CLI + Web 模式 - 同时启动命令行和 Web 界面
+        run_cli_and_web(host=web_host, port=web_port)
+    elif cli_mode:
         # CLI模式 - 启动命令行界面
         run_cli()
     elif web_disabled:
