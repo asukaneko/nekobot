@@ -616,7 +616,22 @@ No recent activity
         
         # 添加结果
         if success:
-            text.append(" ✓ Done", style="dim green")
+            # 特殊处理 workspace_send_file，显示可点击的文件链接
+            if tool_name == "workspace_send_file" and result.get("file_url"):
+                file_url = result.get("file_url")
+                filename = result.get("filename", "文件")
+                size_str = result.get("size_str", "")
+                
+                text.append(" ✓ ", style="dim green")
+                # 创建可点击的文件链接
+                link_text = Text(filename, style="blue underline")
+                link_text.stylize(f"link {file_url}")
+                text.append(link_text)
+                if size_str:
+                    text.append(f" ({size_str})", style="dim")
+                text.append(" 📄", style="dim")
+            else:
+                text.append(" ✓ Done", style="dim green")
         else:
             error_msg = result.get("error", "")
             if error_msg:
@@ -1259,32 +1274,37 @@ No recent activity
                 if not os.path.exists(file_path):
                     return {"success": False, "error": f"文件不存在: {filename}"}
                 
-                # 在CLI中，发送文件意味着显示文件信息并提供打开链接
+                # 在CLI中，发送文件意味着显示文件信息并提供可点击链接
                 file_size = os.path.getsize(file_path)
                 mime_type, _ = mimetypes.guess_type(file_path)
                 
-                # 尝试打开文件
-                try:
-                    import subprocess
-                    if sys.platform == 'win32':
-                        os.startfile(file_path)
-                    elif sys.platform == 'darwin':
-                        subprocess.run(['open', file_path], check=True)
-                    else:
-                        subprocess.run(['xdg-open', file_path], check=True)
-                    
-                    opened = True
-                except Exception as e:
-                    opened = False
+                # 生成 file:// 协议的链接路径
+                # 将Windows路径转换为file://格式
+                abs_path = os.path.abspath(file_path)
+                if sys.platform == 'win32':
+                    # Windows: C:\path\to\file -> file:///C:/path/to/file
+                    file_url = "file:///" + abs_path.replace('\\', '/')
+                else:
+                    # Unix: /path/to/file -> file:///path/to/file
+                    file_url = "file://" + abs_path
+                
+                # 格式化文件大小
+                if file_size < 1024:
+                    size_str = f"{file_size} B"
+                elif file_size < 1024 * 1024:
+                    size_str = f"{file_size / 1024:.1f} KB"
+                else:
+                    size_str = f"{file_size / (1024 * 1024):.1f} MB"
                 
                 return {
                     "success": True,
                     "filename": filename,
                     "path": file_path,
+                    "file_url": file_url,
                     "size": file_size,
+                    "size_str": size_str,
                     "mime_type": mime_type or 'application/octet-stream',
-                    "opened": opened,
-                    "message": f"文件: {filename} ({file_size} bytes)"
+                    "message": f"📄 [{filename}]({file_url}) ({size_str})"
                 }
             
             elif tool_name == "workspace_parse_file":
