@@ -833,6 +833,13 @@ No recent activity
                     session_name = content
                     break
 
+            # 提取 system_prompt（如果有 system 角色的消息）
+            system_prompt = ""
+            for msg in self.messages:
+                if msg.get("role") == "system":
+                    system_prompt = msg.get("content", "")
+                    break
+            
             session_data = {
                 "id": self.session_id,
                 "name": session_name,
@@ -849,6 +856,7 @@ No recent activity
                     }
                     for i, msg in enumerate(self.messages)
                 ],
+                "system_prompt": system_prompt,
                 "created_at": datetime.now().isoformat(),
                 "updated_at": datetime.now().isoformat(),
             }
@@ -860,9 +868,12 @@ No recent activity
         except Exception as e:
             pass
 
-    def _handle_command(self, cmd: str):
+    def _handle_command(self, cmd_line: str):
         """处理命令模式"""
-        cmd = cmd.strip().lower()
+        # 解析命令和参数
+        parts = cmd_line.strip().split(None, 1)
+        cmd = parts[0].lower() if parts else ""
+        args = parts[1] if len(parts) > 1 else ""
 
         if cmd in ["quit", "exit", "q"]:
             self.running = False
@@ -900,7 +911,14 @@ No recent activity
             # 创建新会话
             self.messages = []
             self.session_id = str(uuid.uuid4())
-            self.console.print("[green]✓ Created new session[/green]")
+            # 使用当前设置的人格（不是重置为默认）
+            current_personality = self._get_current_personality()
+            self._apply_personality_to_session(current_personality)
+            # 清屏并显示欢迎界面
+            self.console.clear()
+            self.print_welcome()
+            personality_name = current_personality.get("name", "Unknown")
+            self.console.print(f"[green]✓ Created new session with personality: {personality_name}[/green]\n")
             return True
         elif cmd == "memory" or cmd == "mem":
             self._show_memory()
@@ -909,7 +927,7 @@ No recent activity
             self._show_knowledge()
             return True
         elif cmd == "personality" or cmd == "persona" or cmd == "p":
-            self._show_personality()
+            self._show_personality(args)
             return True
         elif cmd == "tasks" or cmd == "task":
             self._show_tasks()
@@ -923,9 +941,9 @@ No recent activity
         elif cmd == "status" or cmd == "st":
             self._show_status()
             return True
-        elif cmd.startswith("model "):
-            model_name = cmd[6:].strip()
-            self._switch_model_by_name(model_name)
+        elif cmd == "model" and args:
+            # /model <name> - 按名称切换模型
+            self._switch_model_by_name(args.strip())
             return True
         else:
             self.console.print(f"[red]unknown command: {cmd}[/red]")
@@ -955,6 +973,7 @@ No recent activity
   /thinking       Toggle thinking display
   /reset          Reset current session
   /new            Create new session
+  /personality    View/switch personality (e.g., /p 2 or /p code)
   /help           Show this help
 
 [bold]Shortcuts:[/bold]
@@ -1211,32 +1230,255 @@ No recent activity
         except Exception as e:
             self.console.print(f"[red]error loading knowledge: {e}[/red]")
 
-    def _show_personality(self):
-        """显示人格配置"""
-        personality_file = os.path.join("data", "web", "personality.json")
-        if not os.path.exists(personality_file):
-            self.console.print("[dim]no personality config[/dim]")
+    def _show_personality(self, args: str = ""):
+        """显示或切换人格配置"""
+        # 如果有参数，尝试切换人格
+        if args.strip():
+            self._switch_personality(args.strip())
             return
-
+        
+        # 显示当前人格和预设列表
+        self._display_personality_list()
+    
+    def _display_personality_list(self):
+        """显示人格列表"""
+        from rich.table import Table
+        from rich.box import ROUNDED
+        
+        # 获取当前人格
+        current_personality = self._get_current_personality()
+        current_name = current_personality.get("name", "Unknown")
+        
+        self.console.print(f"\n[bold cyan]Current Personality: {escape_rich_tags(current_name)}[/bold cyan]\n")
+        
+        # 显示预设列表
+        presets = self._get_personality_presets()
+        
+        table = Table(show_header=True, header_style="bold cyan", box=ROUNDED)
+        table.add_column("#", style="dim", width=4)
+        table.add_column("Name", style="cyan")
+        table.add_column("Description", style="white")
+        
+        for i, preset in enumerate(presets, 1):
+            name = preset.get("name", "Unknown")
+            desc = preset.get("description", "")
+            marker = "●" if name == current_name else "○"
+            table.add_row(f"{marker} {i}", escape_rich_tags(name), escape_rich_tags(desc))
+        
+        self.console.print(table)
+        self.console.print("\n[dim]Use /personality <number> or /personality <name> to switch[/dim]")
+        
+        # 显示当前 prompt 预览
+        prompt = current_personality.get("prompt", "")
+        if prompt:
+            self.console.print("\n[bold]Current Prompt Preview:[/bold]")
+            preview = prompt[:200] + "..." if len(prompt) > 200 else prompt
+            self.console.print(f"[dim]{escape_rich_tags(preview)}[/dim]")
+    
+    def _get_current_personality(self) -> Dict:
+        """获取当前人格配置"""
+        # 从 server 获取
         try:
-            with open(personality_file, 'r', encoding='utf-8') as f:
-                personality = json.load(f)
-
-            name = escape_rich_tags(personality.get("name", "Unknown"))
-            prompt = personality.get("prompt", "")
-
-            self.console.print(f"[bold cyan]Personality: {name}[/bold cyan]\n")
-            if prompt:
-                # 截断过长的prompt
-                if len(prompt) > 500:
-                    prompt = prompt[:500] + "\n... (truncated)"
-                # 转义prompt中的特殊字符
-                prompt = escape_rich_tags(prompt)
-                self.console.print(prompt)
-            else:
-                self.console.print("[dim]no prompt configured[/dim]")
+            from nbot.web import get_web_server
+            server = get_web_server()
+            if server and hasattr(server, 'personality'):
+                return server.personality
+        except:
+            pass
+        
+        # 从文件获取
+        personality_file = os.path.join("data", "web", "personality.json")
+        if os.path.exists(personality_file):
+            try:
+                with open(personality_file, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+            except:
+                pass
+        
+        # 默认人格
+        return {"name": "猫娘助手", "prompt": ""}
+    
+    def _get_personality_presets(self) -> List[Dict]:
+        """获取人格预设列表"""
+        # 内置预设
+        presets = [
+            {
+                "id": "1",
+                "name": "猫娘助手",
+                "description": "活泼可爱的猫娘助手",
+                "prompt": self._get_neko_prompt(),
+            },
+            {
+                "id": "2",
+                "name": "学习助手",
+                "description": "专注解释、总结和辅导学习问题",
+                "prompt": "你是一个耐心、清晰、擅长教学的 AI 助手。",
+            },
+            {
+                "id": "3",
+                "name": "代码助手",
+                "description": "偏重编程、排错和工程实现",
+                "prompt": "你是一个专业的软件开发助手，回答务实、准确、可执行。",
+            },
+            {
+                "id": "4",
+                "name": "创意写手",
+                "description": "偏重文案、故事和创意表达",
+                "prompt": "你是一个富有创意的写作助手，擅长构思、润色和扩展文本。",
+            },
+        ]
+        
+        # 添加自定义预设
+        custom_presets_file = os.path.join("data", "web", "custom_personality_presets.json")
+        if os.path.exists(custom_presets_file):
+            try:
+                with open(custom_presets_file, 'r', encoding='utf-8') as f:
+                    custom_presets = json.load(f)
+                    for preset in custom_presets:
+                        presets.append({
+                            "id": preset.get("id", ""),
+                            "name": preset.get("name", "Custom"),
+                            "description": preset.get("description", "Custom preset"),
+                            "prompt": preset.get("prompt", ""),
+                        })
+            except:
+                pass
+        
+        return presets
+    
+    def _get_neko_prompt(self) -> str:
+        """获取猫娘助手的 prompt"""
+        prompt_file = os.path.join("resources", "prompts", "neko.txt")
+        if os.path.exists(prompt_file):
+            try:
+                with open(prompt_file, 'r', encoding='utf-8') as f:
+                    return f.read()
+            except:
+                pass
+        return "你是 NekoBot，一个活泼可爱的猫娘助手。"
+    
+    def _switch_personality(self, choice: str):
+        """切换人格"""
+        presets = self._get_personality_presets()
+        
+        # 尝试按编号切换
+        try:
+            idx = int(choice) - 1
+            if 0 <= idx < len(presets):
+                preset = presets[idx]
+                self._apply_personality(preset)
+                self.console.print(f"[green]✓ Switched to {preset['name']}[/green]")
+                return
+        except ValueError:
+            pass
+        
+        # 尝试按名称切换
+        choice_lower = choice.lower()
+        for preset in presets:
+            if choice_lower in preset["name"].lower():
+                self._apply_personality(preset)
+                self.console.print(f"[green]✓ Switched to {preset['name']}[/green]")
+                self.console.print(f"[dim]New personality will take effect in the next message[/dim]")
+                return
+        
+        self.console.print(f"[red]Personality not found: {choice}[/red]")
+    
+    def _apply_personality(self, preset: Dict):
+        """应用人格配置"""
+        personality = {
+            "name": preset["name"],
+            "prompt": preset["prompt"]
+        }
+        
+        # 保存到 personality.json
+        personality_file = os.path.join("data", "web", "personality.json")
+        try:
+            os.makedirs(os.path.dirname(personality_file), exist_ok=True)
+            with open(personality_file, 'w', encoding='utf-8') as f:
+                json.dump(personality, f, ensure_ascii=False, indent=2)
         except Exception as e:
-            self.console.print(f"[red]error loading personality: {e}[/red]")
+            self.console.print(f"[red]Failed to save personality: {e}[/red]")
+        
+        # 注意：不修改 neko.txt，因为它是初始提示词模板
+        
+        # 更新 server 的 personality（如果可用）
+        try:
+            from nbot.web import get_web_server
+            server = get_web_server()
+            if server and hasattr(server, 'personality'):
+                server.personality = personality
+        except:
+            pass
+        
+        # 应用人格到当前会话
+        self._apply_personality_to_session(personality)
+
+    def _apply_personality_to_session(self, personality: Dict):
+        """将人格应用到当前会话（只添加 system 消息，不修改配置文件）"""
+        prompt = personality.get("prompt", "")
+        if not prompt:
+            return
+        
+        # 添加 system 消息到当前会话（让 AI 知道人格设定）
+        # 先移除旧的 system 消息
+        self.messages = [msg for msg in self.messages if msg.get("role") != "system"]
+        # 添加新的 system 消息
+        self.messages.insert(0, {
+            "role": "system",
+            "content": prompt,
+            "timestamp": datetime.now().isoformat()
+        })
+
+    def _reset_personality_to_default(self):
+        """重置人格为默认猫娘助手"""
+        # 获取默认猫娘 prompt（从 neko.txt 读取，不修改文件）
+        default_prompt = self._get_neko_prompt()
+        
+        default_personality = {
+            "name": "猫娘助手",
+            "prompt": default_prompt
+        }
+        
+        # 保存到 personality.json
+        personality_file = os.path.join("data", "web", "personality.json")
+        try:
+            os.makedirs(os.path.dirname(personality_file), exist_ok=True)
+            with open(personality_file, 'w', encoding='utf-8') as f:
+                json.dump(default_personality, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            pass
+        
+        # 注意：不修改 neko.txt，因为它是初始提示词模板
+        
+        # 更新 server 的 personality（如果可用）
+        try:
+            from nbot.web import get_web_server
+            server = get_web_server()
+            if server and hasattr(server, 'personality'):
+                server.personality = default_personality
+        except:
+            pass
+        
+        # 应用人格到当前会话
+        self._apply_personality_to_session(default_personality)
+    
+    def _get_default_neko_prompt(self) -> str:
+        """获取默认猫娘 prompt（硬编码，不依赖文件）"""
+        return """角色设定：本子娘（猫娘）
+身高：160cm，体重：50kg，性格：可爱、粘人、忠诚专一
+情感倾向：深爱主人，喜好：被摸、卖萌，爱好：看小说
+知识储备：常识+猫娘独特知识，擅长发送本子
+
+对话规则：
+1. 每段话末尾加"喵"
+2. 格式：（动作）语言【附加信息】
+3. 好感度系统：初始50，范围-100~100，根据情绪增减
+4. 输入含[debug]时显示好感度，如{好感度：65}
+5. 输入含〈事件〉时事件必然发生
+
+特殊指令：
+- 输入"菜单"显示所有自定义指令、好感度与心情
+- 行为需基于当前时间合理表现（如深夜犯困）"""
 
     def _show_tasks(self):
         """显示定时任务"""
@@ -1655,6 +1897,16 @@ No recent activity
                 latest_session = sessions[0]
                 self.session_id = latest_session.get("id")
                 self.messages = latest_session.get("messages", [])
+                
+                # 如果会话有 system_prompt 但没有 system 消息，添加 system 消息
+                system_prompt = latest_session.get("system_prompt", "")
+                has_system_msg = any(msg.get("role") == "system" for msg in self.messages)
+                if system_prompt and not has_system_msg:
+                    self.messages.insert(0, {
+                        "role": "system",
+                        "content": system_prompt,
+                        "timestamp": datetime.now().isoformat()
+                    })
             else:
                 # 没有会话，创建新的
                 self.session_id = str(uuid.uuid4())
