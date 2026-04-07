@@ -601,20 +601,37 @@ No recent activity
             self.console.print(text)
 
     def _render_tool_call_and_result(self, tool_name: str, arguments: Dict, result: Dict, success: bool):
-        """在一行内渲染工具调用和结果"""
+        """以卡片样式渲染工具调用和结果"""
         from rich.text import Text
+        from rich.panel import Panel
+        from rich.console import Group
         
-        # 准备参数字符串
+        # 工具名称不截断，完整显示
+        tool_name_display = escape_rich_tags(tool_name)
+        
+        # 准备参数字符串，限制长度
         args_str = json.dumps(arguments, ensure_ascii=False)
         args_str = escape_rich_tags(args_str)
-        tool_name = escape_rich_tags(tool_name)
+        # 限制参数显示长度为30字符
+        if len(args_str) > 30:
+            args_str = args_str[:27] + "..."
         
-        # 构建一行显示
-        text = Text()
-        text.append("🔧 ", style="dim yellow")
-        text.append(f"{tool_name}({args_str})", style="dim yellow")
+        # 构建卡片内容
+        card_lines = []
         
-        # 添加结果
+        # 工具名称行
+        name_line = Text()
+        name_line.append("🔧 ", style="yellow")
+        name_line.append(tool_name_display, style="bold cyan")
+        card_lines.append(name_line)
+        
+        # 参数行（如果有参数）
+        if args_str and args_str != "{}":
+            args_line = Text(f"   {args_str}", style="dim")
+            card_lines.append(args_line)
+        
+        # 结果行
+        result_line = Text()
         if success:
             # 特殊处理 workspace_send_file，显示可点击的文件链接
             if tool_name == "workspace_send_file" and result.get("file_url"):
@@ -622,25 +639,48 @@ No recent activity
                 filename = result.get("filename", "文件")
                 size_str = result.get("size_str", "")
                 
-                text.append(" ✓ ", style="dim green")
+                # 截断文件名显示
+                if len(filename) > 25:
+                    filename = filename[:22] + "..."
+                
+                result_line.append("   ✓ ", style="green")
                 # 创建可点击的文件链接
                 link_text = Text(filename, style="blue underline")
                 link_text.stylize(f"link {file_url}")
-                text.append(link_text)
+                result_line.append(link_text)
                 if size_str:
-                    text.append(f" ({size_str})", style="dim")
-                text.append(" 📄", style="dim")
+                    result_line.append(f" {size_str}", style="dim")
+                result_line.append(" 📄", style="dim")
             else:
-                text.append(" ✓ Done", style="dim green")
+                result_line.append("   ✓ ", style="green")
+                result_line.append("Success", style="green")
         else:
             error_msg = result.get("error", "")
             if error_msg:
                 error_msg = escape_rich_tags(error_msg)
-                text.append(f" ✗ Failed: {error_msg}", style="dim red")
+                # 截断错误信息
+                if len(error_msg) > 30:
+                    error_msg = error_msg[:27] + "..."
+                result_line.append("   ✗ ", style="red")
+                result_line.append(error_msg, style="red")
             else:
-                text.append(" ✗ Failed", style="dim red")
+                result_line.append("   ✗ ", style="red")
+                result_line.append("Failed", style="red")
         
-        self.console.print(text)
+        card_lines.append(result_line)
+        
+        # 创建卡片面板，使用紧凑样式
+        card_content = Group(*card_lines)
+        card = Panel(
+            card_content,
+            border_style="dim" if success else "red",
+            padding=(0, 1),
+            width=50,  # 固定卡片宽度
+            expand=False,
+            box=box.ROUNDED
+        )
+        
+        self.console.print(card)
 
     def _call_ai(self, messages: List[Dict]) -> Dict[str, Any]:
         """调用AI，支持工具调用和多轮思考"""
