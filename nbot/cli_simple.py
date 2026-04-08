@@ -9,6 +9,7 @@ import json
 import uuid
 import requests
 import copy
+import logging
 from datetime import datetime
 from typing import Dict, Any, List, Optional
 
@@ -44,6 +45,7 @@ except ImportError:
 
 try:
     from nbot.core import (
+        build_cli_session_id,
         build_chat_completion_payload,
         normalize_chat_completion_data,
         resolve_chat_completion_url,
@@ -51,6 +53,31 @@ try:
     CORE_AVAILABLE = True
 except ImportError:
     CORE_AVAILABLE = False
+    def build_cli_session_id():
+        return f"cli_{uuid.uuid4().hex}"
+
+
+def _silence_cli_loggers():
+    """在 CLI 模式下屏蔽所有常见日志输出。"""
+    logger_names = [
+        "",
+        "nbot",
+        "werkzeug",
+        "urllib3",
+        "requests",
+        "socketio",
+        "engineio",
+        "apscheduler",
+    ]
+    for name in logger_names:
+        logger = logging.getLogger(name)
+        logger.setLevel(logging.CRITICAL + 1)
+        logger.propagate = False
+        for handler in logger.handlers:
+            handler.setLevel(logging.CRITICAL + 1)
+
+
+_silence_cli_loggers()
 
 
 class SimpleCLI:
@@ -226,21 +253,23 @@ class SimpleCLI:
                 "id": self.session_id,
                 "name": session_name,
                 "type": "cli",
-                "messages": [
-                    {
-                        "id": str(i),
-                        "role": msg.get("role", "user"),
-                        "content": msg.get("content", ""),
-                        "timestamp": msg.get("timestamp", datetime.now().isoformat()),
-                        "sender": "user" if msg.get("role") == "user" else "AI",
-                        "source": "cli",
-                        "session_id": self.session_id,
-                    }
-                    for i, msg in enumerate(self.messages)
-                ],
+                "messages": [],
                 "created_at": datetime.now().isoformat(),
                 "updated_at": datetime.now().isoformat(),
             }
+
+            for i, msg in enumerate(self.messages):
+                stored_message = copy.deepcopy(msg)
+                stored_message.setdefault("id", str(i))
+                stored_message.setdefault(
+                    "timestamp", datetime.now().isoformat()
+                )
+                stored_message.setdefault(
+                    "sender", "user" if stored_message.get("role") == "user" else "AI"
+                )
+                stored_message.setdefault("source", "cli")
+                stored_message.setdefault("session_id", self.session_id)
+                session_data["messages"].append(stored_message)
 
             sessions[self.session_id] = session_data
 
@@ -338,6 +367,31 @@ class SimpleCLI:
         )
         self.console.print(panel)
 
+    def _expand_messages_for_ai(self, messages: List[Dict]) -> List[Dict]:
+        """展开隐藏保存的工具历史，保证后续请求能看到它们。"""
+        expanded_messages = []
+        for msg in copy.deepcopy(messages):
+            hidden_tool_history = msg.pop("tool_call_history", None)
+            expanded_messages.append(msg)
+            if not isinstance(hidden_tool_history, list):
+                continue
+            for hidden_msg in hidden_tool_history:
+                if not isinstance(hidden_msg, dict):
+                    continue
+                if hidden_msg.get("role") not in ("assistant", "tool"):
+                    continue
+                expanded_messages.append(copy.deepcopy(hidden_msg))
+        return expanded_messages
+
+    def _extract_turn_tool_history(
+        self, tool_messages: List[Dict], initial_message_count: int
+    ) -> List[Dict]:
+        return [
+            copy.deepcopy(msg)
+            for msg in tool_messages[initial_message_count:]
+            if msg.get("role") in ("assistant", "tool")
+        ]
+
     def _call_ai_with_tools(self, messages: List[Dict]) -> Dict[str, Any]:
         """调用AI，支持工具调用和多轮思考"""
         model = self._get_current_model()
@@ -374,7 +428,8 @@ class SimpleCLI:
             tools = self._get_tool_definitions() if supports_tools else []
 
             # 准备消息
-            tool_messages = copy.deepcopy(messages)
+            tool_messages = self._expand_messages_for_ai(messages)
+            initial_message_count = len(tool_messages)
             all_thinking = []
             all_tool_calls = []
 
@@ -463,6 +518,7 @@ class SimpleCLI:
                         "content": final_content,
                         "thinking": "\n\n".join(all_thinking),
                         "tool_calls": all_tool_calls,
+                        "tool_call_history": self._extract_turn_tool_history(tool_messages, initial_message_count),
                         "iterations": iteration + 1
                     }
 
@@ -471,6 +527,7 @@ class SimpleCLI:
                 "content": "工具调用次数过多，已停止。请简化您的请求。",
                 "thinking": "\n\n".join(all_thinking),
                 "tool_calls": all_tool_calls,
+                "tool_call_history": self._extract_turn_tool_history(tool_messages, initial_message_count),
                 "iterations": self.max_tool_iterations
             }
 
@@ -485,7 +542,7 @@ class SimpleCLI:
         self.print_header()
 
         if not self.session_id:
-            self.session_id = str(uuid.uuid4())
+            self.session_id = build_cli_session_id()
             self.messages = []
 
         current_model = self._get_current_model()
@@ -556,6 +613,7 @@ class SimpleCLI:
                 content = result.get("content", "")
                 thinking = result.get("thinking", "")
                 tool_calls = result.get("tool_calls", [])
+                tool_call_history = result.get("tool_call_history", [])
                 iterations = result.get("iterations", 1)
 
                 # 显示思考过程
@@ -567,11 +625,14 @@ class SimpleCLI:
                     self.console.print(f"[dim]完成 {iterations} 轮工具调用，共 {len(tool_calls)} 个工具[/dim]")
 
                 # 添加AI消息
-                self.messages.append({
+                assistant_message = {
                     "role": "assistant",
                     "content": content,
                     "timestamp": datetime.now().isoformat()
-                })
+                }
+                if tool_call_history:
+                    assistant_message["tool_call_history"] = tool_call_history
+                self.messages.append(assistant_message)
 
                 # 显示AI回复（使用Markdown渲染）
                 self.console.print(f"[bold cyan]🐱 NekoBot:[/bold cyan]")

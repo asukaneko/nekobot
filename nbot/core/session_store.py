@@ -1,4 +1,5 @@
 import json
+import uuid
 from typing import Any, Callable, Dict, List, Optional
 
 
@@ -28,6 +29,10 @@ def build_qq_history_key(
     if group_id:
         return str(group_id)
     return ""
+
+
+def build_cli_session_id() -> str:
+    return f"cli_{uuid.uuid4().hex}"
 
 
 def build_chat_message(

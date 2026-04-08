@@ -33,10 +33,34 @@ from rich.layout import Layout
 from rich.live import Live
 from rich.status import Status
 
+try:
+    from nbot.core import build_cli_session_id
+except ImportError:
+    def build_cli_session_id():
+        return f"cli_{uuid.uuid4().hex}"
+
 # 屏蔽 nbot 相关的日志输出，避免干扰 CLI 界面
-logging.getLogger("nbot").setLevel(logging.WARNING)
-logging.getLogger("nbot.services.tools").setLevel(logging.WARNING)
-logging.getLogger("nbot.services.dynamic_executor").setLevel(logging.WARNING)
+def _silence_cli_loggers():
+    """在 CLI 模式下屏蔽所有常见日志输出。"""
+    logger_names = [
+        "",
+        "nbot",
+        "werkzeug",
+        "urllib3",
+        "requests",
+        "socketio",
+        "engineio",
+        "apscheduler",
+    ]
+    for name in logger_names:
+        logger = logging.getLogger(name)
+        logger.setLevel(logging.CRITICAL + 1)
+        logger.propagate = False
+        for handler in logger.handlers:
+            handler.setLevel(logging.CRITICAL + 1)
+
+
+_silence_cli_loggers()
 
 
 def escape_rich_tags(text: str) -> str:
@@ -682,11 +706,37 @@ No recent activity
         
         self.console.print(card)
 
+    def _expand_messages_for_ai(self, messages: List[Dict]) -> List[Dict]:
+        """展开会话中隐藏保存的工具历史，供后续请求继续使用。"""
+        expanded_messages = []
+        for msg in copy.deepcopy(messages):
+            hidden_tool_history = msg.pop("tool_call_history", None)
+            expanded_messages.append(msg)
+            if not isinstance(hidden_tool_history, list):
+                continue
+            for hidden_msg in hidden_tool_history:
+                if not isinstance(hidden_msg, dict):
+                    continue
+                if hidden_msg.get("role") not in ("assistant", "tool"):
+                    continue
+                expanded_messages.append(copy.deepcopy(hidden_msg))
+        return expanded_messages
+
+    def _extract_turn_tool_history(
+        self, tool_messages: List[Dict], initial_message_count: int
+    ) -> List[Dict]:
+        """只提取当前轮新增的 assistant/tool 历史。"""
+        return [
+            copy.deepcopy(msg)
+            for msg in tool_messages[initial_message_count:]
+            if msg.get("role") in ("assistant", "tool")
+        ]
+
     def _call_ai(self, messages: List[Dict]) -> Dict[str, Any]:
         """调用AI，支持工具调用和多轮思考"""
         model = self._get_current_model()
         if not model:
-            return {"content": "error: no model available", "thinking": "", "tool_calls": []}
+            return {"content": "error: no model available", "thinking": "", "tool_calls": [], "tool_call_history": []}
 
         try:
             api_key = model.get("api_key", "")
@@ -695,7 +745,7 @@ No recent activity
             supports_tools = model.get("supports_tools", True)
 
             if not api_key or not base_url:
-                return {"content": "error: model not configured", "thinking": "", "tool_calls": []}
+                return {"content": "error: model not configured", "thinking": "", "tool_calls": [], "tool_call_history": []}
 
             url = base_url.rstrip("/")
             if "minimaxi.com" in url:
@@ -713,7 +763,8 @@ No recent activity
             }
 
             tools = self._get_tool_definitions() if supports_tools else []
-            tool_messages = copy.deepcopy(messages)
+            tool_messages = self._expand_messages_for_ai(messages)
+            initial_message_count = len(tool_messages)
             all_thinking = []
             all_tool_calls = []
 
@@ -724,6 +775,7 @@ No recent activity
                         "content": "[interrupted by user]",
                         "thinking": "\n\n".join(all_thinking),
                         "tool_calls": all_tool_calls,
+                        "tool_call_history": self._extract_turn_tool_history(tool_messages, initial_message_count),
                         "iterations": iteration + 1,
                         "interrupted": True
                     }
@@ -752,6 +804,12 @@ No recent activity
                 result = self._process_stream_response(response, supports_tools)
                 
                 if result.get("interrupted"):
+                    result.setdefault(
+                        "tool_call_history",
+                        self._extract_turn_tool_history(
+                            tool_messages, initial_message_count
+                        ),
+                    )
                     return result
                 
                 # 提取思考内容
@@ -787,6 +845,7 @@ No recent activity
                                 "content": "[interrupted by user]",
                                 "thinking": "\n\n".join(all_thinking),
                                 "tool_calls": all_tool_calls,
+                                "tool_call_history": self._extract_turn_tool_history(tool_messages, initial_message_count),
                                 "iterations": iteration + 1,
                                 "interrupted": True
                             }
@@ -830,6 +889,7 @@ No recent activity
                         "content": final_content,
                         "thinking": "\n\n".join(all_thinking),
                         "tool_calls": all_tool_calls,
+                        "tool_call_history": self._extract_turn_tool_history(tool_messages, initial_message_count),
                         "iterations": iteration + 1,
                         "interrupted": False
                     }
@@ -838,14 +898,15 @@ No recent activity
                 "content": "tool iterations exceeded limit",
                 "thinking": "\n\n".join(all_thinking),
                 "tool_calls": all_tool_calls,
+                "tool_call_history": self._extract_turn_tool_history(tool_messages, initial_message_count),
                 "iterations": self.max_tool_iterations,
                 "interrupted": False
             }
 
         except requests.exceptions.RequestException as e:
-            return {"content": f"network error: {str(e)}", "thinking": "", "tool_calls": [], "interrupted": False}
+            return {"content": f"network error: {str(e)}", "thinking": "", "tool_calls": [], "tool_call_history": [], "interrupted": False}
         except Exception as e:
-            return {"content": f"error: {str(e)}", "thinking": "", "tool_calls": [], "interrupted": False}
+            return {"content": f"error: {str(e)}", "thinking": "", "tool_calls": [], "tool_call_history": [], "interrupted": False}
 
     def _process_stream_response(self, response, supports_tools: bool) -> Dict:
         """处理流式响应，实时渲染 Markdown
@@ -1415,22 +1476,24 @@ No recent activity
                 "id": self.session_id,
                 "name": session_name,
                 "type": "cli",
-                "messages": [
-                    {
-                        "id": str(i),
-                        "role": msg.get("role", "user"),
-                        "content": msg.get("content", ""),
-                        "timestamp": msg.get("timestamp", datetime.now().isoformat()),
-                        "sender": "user" if msg.get("role") == "user" else "AI",
-                        "source": "cli",
-                        "session_id": self.session_id,
-                    }
-                    for i, msg in enumerate(self.messages)
-                ],
+                "messages": [],
                 "system_prompt": system_prompt,
                 "created_at": datetime.now().isoformat(),
                 "updated_at": datetime.now().isoformat(),
             }
+
+            for i, msg in enumerate(self.messages):
+                stored_message = copy.deepcopy(msg)
+                stored_message.setdefault("id", str(i))
+                stored_message.setdefault(
+                    "timestamp", datetime.now().isoformat()
+                )
+                stored_message.setdefault(
+                    "sender", "user" if stored_message.get("role") == "user" else "AI"
+                )
+                stored_message.setdefault("source", "cli")
+                stored_message.setdefault("session_id", self.session_id)
+                session_data["messages"].append(stored_message)
 
             sessions[self.session_id] = session_data
             os.makedirs(os.path.dirname(sessions_file), exist_ok=True)
@@ -1477,7 +1540,7 @@ No recent activity
             return True
         elif cmd == "reset":
             self.messages = []
-            self.session_id = str(uuid.uuid4())
+            self.session_id = build_cli_session_id()
             self.console.print("[dim]session reset[/dim]")
             return True
         elif cmd == "new" or cmd == "n":
@@ -1486,7 +1549,7 @@ No recent activity
                 self.save_session()
             # 创建新会话
             self.messages = []
-            self.session_id = str(uuid.uuid4())
+            self.session_id = build_cli_session_id()
             # 使用当前设置的人格（不是重置为默认）
             current_personality = self._get_current_personality()
             self._apply_personality_to_session(current_personality)
@@ -2645,7 +2708,7 @@ No recent activity
                     })
             else:
                 # 没有会话，创建新的
-                self.session_id = str(uuid.uuid4())
+                self.session_id = build_cli_session_id()
                 self.messages = []
 
         # 清屏并显示欢迎界面
@@ -2770,12 +2833,16 @@ No recent activity
 
         content = result.get("content", "")
         interrupted = result.get("interrupted", False)
+        tool_call_history = result.get("tool_call_history", [])
 
-        self.messages.append({
+        assistant_message = {
             "role": "assistant",
             "content": content,
             "timestamp": datetime.now().isoformat()
-        })
+        }
+        if tool_call_history:
+            assistant_message["tool_call_history"] = tool_call_history
+        self.messages.append(assistant_message)
 
         if interrupted:
             self.console.print(f"[dim][interrupted][/dim]")

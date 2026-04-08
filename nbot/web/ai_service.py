@@ -1326,6 +1326,9 @@ def trigger_ai_response_for_request(server, chat_request: ChatRequest, adapter=N
                         stopped_prematurely = loop_result.stopped
                         final_content = loop_result.final_content
                         tool_messages = loop_result.tool_messages
+                        current_round_tool_trace = extract_tool_call_history(
+                            tool_messages[len(execution_result.prepared_messages) :]
+                        )
                         consecutive_errors = loop_result.consecutive_errors
 
                         if not final_content:
@@ -1408,7 +1411,12 @@ def trigger_ai_response_for_request(server, chat_request: ChatRequest, adapter=N
             assistant_content = final_content
 
             assistant_message = _build_channel_assistant_message(
-                ChatResponse(final_content=assistant_content),
+                ChatResponse(
+                    final_content=assistant_content,
+                    tool_trace=current_round_tool_trace
+                    if "current_round_tool_trace" in locals()
+                    else [],
+                ),
                 session_id=session_id,
                 adapter=adapter,
             )

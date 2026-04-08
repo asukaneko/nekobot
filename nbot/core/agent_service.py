@@ -214,9 +214,10 @@ def prepare_chat_context(
     restored_messages, tool_call_history = restore_continue_messages(
         messages, user_content, continue_tokens
     )
+    expanded_messages = expand_hidden_tool_history(restored_messages)
     prepared_messages = inject_knowledge_context(
         trim_messages(
-            restored_messages,
+            expanded_messages,
             max_history=max_history,
             max_total_chars=max_total_chars,
         ),
@@ -236,6 +237,24 @@ def apply_tool_call_history(
     if tool_call_history:
         merged_messages.extend(copy.deepcopy(tool_call_history))
     return merged_messages
+
+
+def expand_hidden_tool_history(
+    messages: List[Dict[str, Any]]
+) -> List[Dict[str, Any]]:
+    expanded_messages: List[Dict[str, Any]] = []
+    for message in copy.deepcopy(messages):
+        hidden_tool_history = message.pop("tool_call_history", None)
+        expanded_messages.append(message)
+        if not isinstance(hidden_tool_history, list):
+            continue
+        for hidden_message in hidden_tool_history:
+            if not isinstance(hidden_message, dict):
+                continue
+            if hidden_message.get("role") not in ("assistant", "tool"):
+                continue
+            expanded_messages.append(copy.deepcopy(hidden_message))
+    return expanded_messages
 
 
 def extract_tool_call_history(

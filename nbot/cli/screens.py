@@ -18,6 +18,14 @@ from rich.layout import Layout
 from rich.align import Align
 from rich import box
 
+try:
+    from nbot.core import build_cli_session_id
+except ImportError:
+    import uuid
+
+    def build_cli_session_id():
+        return f"cli_{uuid.uuid4().hex}"
+
 from .components import (
     Header, Footer, Sidebar, MessagePanel, InputBox,
     ToolPanel, SessionPanel, ConfigPanel, HelpPanel,
@@ -246,8 +254,7 @@ class ChatScreen(BaseScreen):
             
     def _create_new_session(self):
         """创建新会话"""
-        import uuid
-        self.current_session_id = str(uuid.uuid4())
+        self.current_session_id = build_cli_session_id()
         self.message_panel.clear()
         self.message_panel.add_message(Message(
             role="system",

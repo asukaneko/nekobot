@@ -7023,6 +7023,13 @@
                                 </button>
                                 <button 
                                     class="chat-tab" 
+                                    :class="{ active: chatTab === 'cli' }"
+                                    @click="switchChatTab('cli')"
+                                >
+                                    <i class="fas fa-terminal"></i> CLI终端
+                                </button>
+                                <button 
+                                    class="chat-tab" 
                                     :class="{ active: chatTab === 'qq_private' }"
                                     @click="switchChatTab('qq_private')"
                                 >
@@ -7037,18 +7044,18 @@
                                 </button>
                             </div>
                             
-                            <div class="chat-sidebar-header" v-if="chatTab === 'web'">
-                                <button class="btn btn-primary" style="width: 100%;" @click="createNewSession" :disabled="isLoading">
+                            <div class="chat-sidebar-header" v-if="chatTab === 'web' || chatTab === 'cli'">
+                                <button v-if="chatTab === 'web'" class="btn btn-primary" style="width: 100%;" @click="createNewSession" :disabled="isLoading">
                                     <i class="fas fa-plus"></i> 新建会话
                                 </button>
-                                <div class="search-box" style="margin-top: 12px;">
+                                <div class="search-box" :style="{ marginTop: chatTab === 'web' ? '12px' : '0' }">
                                     <i class="fas fa-search" style="color: var(--text-muted);"></i>
                                     <input v-model="sessionSearch" type="text" placeholder="搜索会话...">
                                 </div>
                             </div>
                             
                             <!-- Web 会话列表 -->
-                            <div class="session-list" v-if="chatTab === 'web'">
+                            <div class="session-list" v-if="chatTab === 'web' || chatTab === 'cli'">
                                 <div 
                                     v-for="session in filteredSessions" 
                                     :key="session.id"
@@ -7179,7 +7186,7 @@
 
                         <div class="chat-main">
                             <!-- Web 会话为空 -->
-                            <div v-if="chatTab === 'web' && !currentSession" class="empty-state">
+                            <div v-if="(chatTab === 'web' || chatTab === 'cli') && !currentSession" class="empty-state">
                                 <div class="empty-state-icon">💬</div>
                                 <div class="empty-state-title">选择一个会话开始聊天</div>
                                 <div class="empty-state-desc">或创建一个新的会话</div>
@@ -7261,13 +7268,13 @@
                                         <button class="mobile-menu-btn" @click="toggleMobileMenu" @touchstart.prevent="toggleMobileMenu">
                                             <i class="fas fa-bars"></i>
                                         </button>
-                                        <div class="session-icon" :style="{ background: currentSession.type === 'qq' ? 'var(--info)' : 'var(--accent-primary)' }">
-                                            <i :class="currentSession.type === 'qq' ? 'fab fa-qq' : 'fas fa-comment'" style="color: white;"></i>
+                                        <div class="session-icon" :style="{ background: currentSession.type?.startsWith('qq') ? 'var(--info)' : (currentSession.type === 'cli' ? 'var(--warning)' : 'var(--accent-primary)') }">
+                                            <i :class="currentSession.type?.startsWith('qq') ? 'fab fa-qq' : (currentSession.type === 'cli' ? 'fas fa-terminal' : 'fas fa-comment')" style="color: white;"></i>
                                         </div>
                                         <div>
                                             <div class="chat-header-title">{{ currentSession.name }}</div>
                                             <div class="chat-header-subtitle">
-                                                {{ currentSession.type === 'qq' ? 'QQ 同步会话' : 'Web 会话' }} · {{ currentMessages.length }} 条消息
+                                                {{ currentSession.type?.startsWith('qq') ? 'QQ 同步会话' : (currentSession.type === 'cli' ? 'CLI 终端' : 'Web 会话') }} · {{ currentMessages.length }} 条消息
                                             </div>
                                         </div>
                                     </div>
@@ -10844,8 +10851,8 @@
                             </div>
                             <div class="detail-item">
                                 <label>会话类型</label>
-                                <span class="badge" :class="viewingSession.type?.startsWith('qq') ? 'badge-info' : 'badge-success'">
-                                    {{ viewingSession.type?.startsWith('qq') ? (viewingSession.type === 'qq_private' ? 'QQ私聊' : 'QQ群聊') : 'Web' }}
+                                <span class="badge" :class="viewingSession.type?.startsWith('qq') ? 'badge-info' : (viewingSession.type === 'cli' ? 'badge-warning' : 'badge-success')">
+                                    {{ viewingSession.type?.startsWith('qq') ? (viewingSession.type === 'qq_private' ? 'QQ私聊' : 'QQ群聊') : (viewingSession.type === 'cli' ? 'CLI终端' : 'Web') }}
                                 </span>
                             </div>
                             <div class="detail-item">
@@ -11831,7 +11838,7 @@
                     dragPosition: 'top',  // 放置位置：top 或 bottom
                     
                     // QQ Chat
-                    chatTab: 'web',  // web, qq_private, qq_group
+                    chatTab: 'web',  // web, cli, qq_private, qq_group
                     qqPrivateUsers: [],
                     qqGroups: [],
                     currentQqId: null,
@@ -11903,7 +11910,7 @@
                         { value: 'none', label: '仅记录', icon: 'fas fa-save' },
                         { value: 'qq_group', label: 'QQ群', icon: 'fas fa-users' },
                         { value: 'qq_private', label: 'QQ私聊', icon: 'fas fa-user' },
-                        { value: 'session', label: 'Web会话', icon: 'fas fa-comments' }
+                        { value: 'session', label: 'Web/CLI会话', icon: 'fas fa-comments' }
                     ],
                     showAiGenerateModal: false,
                     aiGeneratePrompt: '',
@@ -12437,9 +12444,14 @@
                 },
                 
                 filteredSessions() {
-                    if (!this.sessionSearch) return this.sessions;
+                    const sessionPool = this.sessions.filter(s => {
+                        if (this.chatTab === 'cli') return s.type === 'cli';
+                        if (this.chatTab === 'web') return s.type === 'web';
+                        return false;
+                    });
+                    if (!this.sessionSearch) return sessionPool;
                     const search = this.sessionSearch.toLowerCase();
-                    return this.sessions.filter(s => s.name.toLowerCase().includes(search));
+                    return sessionPool.filter(s => (s.name || '').toLowerCase().includes(search));
                 },
 
                 commandQuery() {
@@ -13477,7 +13489,7 @@
                             targets: []
                         },
                         web_sessions: {
-                            title: 'Web 会话',
+                            title: 'Web / CLI 会话',
                             icon: 'fas fa-comments',
                             targets: []
                         }
@@ -13505,12 +13517,12 @@
                         });
                     });
 
-                    // 添加 Web 会话
-                    this.sessions.filter(s => s.type === 'web').forEach(s => {
+                    // 添加 Web / CLI 会话
+                    this.sessions.filter(s => ['web', 'cli'].includes(s.type)).forEach(s => {
                         groups.web_sessions.targets.push({
                             id: `web:${s.id}`,
                             name: s.name || `会话 ${s.id.substring(0, 8)}`,
-                            icon: 'fas fa-comments'
+                            icon: s.type === 'cli' ? 'fas fa-terminal' : 'fas fa-comments'
                         });
                     });
 
@@ -17032,12 +17044,14 @@ def main(params):
                         ? 'QQ群'
                         : session.type === 'qq_private'
                             ? 'QQ私聊'
-                            : 'Web';
+                            : session.type === 'cli'
+                                ? 'CLI终端'
+                                : 'Web';
                     return `${prefix} · ${session.name || `会话 ${session.id.substring(0, 8)}`}`;
                 },
 
                 getTaskCenterTargetSessions() {
-                    return this.sessions.filter(s => ['web', 'qq_group', 'qq_private'].includes(s.type));
+                    return this.sessions.filter(s => ['web', 'cli', 'qq_group', 'qq_private'].includes(s.type));
                 },
 
                 async openTaskCenterEditor(item) {
@@ -19835,4 +19849,3 @@ def main(params):
     </script>
 </body>
 </html>
-
