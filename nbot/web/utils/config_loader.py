@@ -337,7 +337,7 @@ def get_stt_model_config() -> dict:
     return {
         "api_key": api_config.get("api_key", ""),
         "base_url": api_config.get("base_url", ""),
-        "model": "whisper-1",
+        "model": "tiny",
         "language": "zh",
         "provider_type": api_config.get("provider_type", "openai_compatible"),
     }

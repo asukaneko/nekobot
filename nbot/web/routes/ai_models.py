@@ -49,7 +49,7 @@ DEFAULT_PURPOSE_CONFIGS = {
     },
     "stt": {
         "language": "zh",
-        "model": "whisper-1"
+        "model": "tiny"
     },
     "embedding": {
         "model": "text-embedding-3-small",

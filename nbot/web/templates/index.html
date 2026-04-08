@@ -7681,12 +7681,12 @@
                                             <!-- 语音录音按钮 -->
                                             <button
                                                 class="btn btn-icon"
-                                                :class="{ 'btn-danger': isRecording, 'btn-secondary': !isRecording }"
+                                                :class="{ 'btn-danger': isRecording, 'btn-secondary': !isRecording, 'btn-warning': isTranscribing }"
                                                 @click="toggleRecording"
-                                                :disabled="isLoading"
+                                                :disabled="isLoading || isTranscribing"
                                                 :title="isRecording ? '停止录音' : '语音输入'"
                                             >
-                                                <i :class="isRecording ? 'fas fa-stop' : 'fas fa-microphone'"></i>
+                                                <i :class="isTranscribing ? 'fas fa-spinner fa-spin' : (isRecording ? 'fas fa-stop' : 'fas fa-microphone')"></i>
                                             </button>
                                             <button
                                                 class="btn"
@@ -12012,6 +12012,7 @@
                     isDeleting: false,
                     // 语音相关
                     isRecording: false,
+                    isTranscribing: false,
                     mediaRecorder: null,
                     audioChunks: [],
                     ttsEnabled: localStorage.getItem('ttsEnabled') === 'true' || false,
@@ -15139,6 +15140,9 @@ def main(params):
 
                 // ========== 语音功能 ==========
                 async toggleRecording() {
+                    if (this.isTranscribing) {
+                        return;
+                    }
                     if (this.isRecording) {
                         await this.stopRecording();
                     } else {
@@ -15183,6 +15187,7 @@ def main(params):
                 },
 
                 async transcribeAudio(audioBlob) {
+                    this.isTranscribing = true;
                     try {
                         const formData = new FormData();
                         formData.append('audio', audioBlob, 'recording.webm');
@@ -15204,6 +15209,8 @@ def main(params):
                     } catch (e) {
                         console.error('语音识别失败:', e);
                         this.showToast('语音识别失败: ' + (e.response?.data?.error || e.message), 'error');
+                    } finally {
+                        this.isTranscribing = false;
                     }
                 },
 

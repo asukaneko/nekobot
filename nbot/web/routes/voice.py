@@ -1,19 +1,145 @@
 """
-语音相关API路由
-TTS (Text-to-Speech) 和 STT (Speech-to-Text)
+Voice APIs for TTS (Text-to-Speech) and STT (Speech-to-Text).
 """
+import logging
 import os
-import tempfile
+import threading
 import time
-from flask import request, jsonify
+
+from flask import jsonify, request
+
+_log = logging.getLogger(__name__)
+_STT_MODEL = None
+_STT_MODEL_NAME = None
+_STT_MODEL_LOAD_ERROR = None
+_STT_MODEL_LOCK = threading.Lock()
+_MODEL_ROOT = os.path.join("data", "models", "faster-whisper")
+
+
+def _get_local_model_dir(model_name: str) -> str:
+    """Return the project-local model directory for a whisper model."""
+    safe_name = str(model_name).replace("/", "--").replace("\\", "--").strip()
+    return os.path.join(_MODEL_ROOT, safe_name)
+
+
+def _get_local_stt_config():
+    """Return local faster-whisper settings with sensible defaults."""
+    try:
+        from nbot.web.utils.config_loader import get_stt_model_config
+
+        stt_config = get_stt_model_config() or {}
+    except Exception:
+        stt_config = {}
+
+    model_name = (
+        stt_config.get("model")
+        or os.environ.get("NBOT_FASTER_WHISPER_MODEL")
+        or "tiny"
+    )
+    model_aliases = {
+        "whisper-1": "tiny",
+        "gpt-4o-mini-transcribe": "base",
+        "gpt-4o-transcribe": "base",
+    }
+    model_name = model_aliases.get(str(model_name).strip(), model_name)
+    language = stt_config.get("language") or os.environ.get("NBOT_STT_LANGUAGE") or "zh"
+    device = stt_config.get("device") or os.environ.get("NBOT_FASTER_WHISPER_DEVICE") or "cpu"
+    compute_type = (
+        stt_config.get("compute_type")
+        or os.environ.get("NBOT_FASTER_WHISPER_COMPUTE_TYPE")
+        or "int8"
+    )
+    beam_size_raw = stt_config.get("beam_size") or os.environ.get("NBOT_FASTER_WHISPER_BEAM_SIZE") or 5
+    try:
+        beam_size = max(1, int(beam_size_raw))
+    except (TypeError, ValueError):
+        beam_size = 5
+
+    return {
+        "model_name": model_name,
+        "model_path": _get_local_model_dir(model_name),
+        "language": language,
+        "device": device,
+        "compute_type": compute_type,
+        "beam_size": beam_size,
+    }
+
+
+def _ensure_stt_model_loaded(force_reload: bool = False):
+    """Load the faster-whisper model once and reuse it for later requests."""
+    global _STT_MODEL, _STT_MODEL_NAME, _STT_MODEL_LOAD_ERROR
+
+    config = _get_local_stt_config()
+    requested_model_name = config["model_name"]
+
+    if (
+        not force_reload
+        and _STT_MODEL is not None
+        and _STT_MODEL_NAME == requested_model_name
+    ):
+        return _STT_MODEL, config
+
+    with _STT_MODEL_LOCK:
+        if (
+            not force_reload
+            and _STT_MODEL is not None
+            and _STT_MODEL_NAME == requested_model_name
+        ):
+            return _STT_MODEL, config
+
+        try:
+            from faster_whisper import WhisperModel
+        except ImportError as exc:
+            _STT_MODEL = None
+            _STT_MODEL_NAME = None
+            _STT_MODEL_LOAD_ERROR = (
+                "faster-whisper is not installed. Run `pip install faster-whisper`."
+            )
+            raise RuntimeError(_STT_MODEL_LOAD_ERROR) from exc
+
+        try:
+            _log.info(
+                "Loading faster-whisper model '%s' from %s on %s (%s)",
+                requested_model_name,
+                config["model_path"] if os.path.isdir(config["model_path"]) else "remote source",
+                config["device"],
+                config["compute_type"],
+            )
+            model_source = (
+                config["model_path"]
+                if os.path.isdir(config["model_path"])
+                else requested_model_name
+            )
+            _STT_MODEL = WhisperModel(
+                model_source,
+                device=config["device"],
+                compute_type=config["compute_type"],
+            )
+            _STT_MODEL_NAME = requested_model_name
+            _STT_MODEL_LOAD_ERROR = None
+            return _STT_MODEL, config
+        except Exception as exc:
+            _STT_MODEL = None
+            _STT_MODEL_NAME = None
+            _STT_MODEL_LOAD_ERROR = str(exc)
+            raise RuntimeError(f"Failed to load faster-whisper model: {exc}") from exc
+
+
+def _preload_stt_model():
+    """Load the local STT model when the web service starts."""
+    try:
+        _ensure_stt_model_loaded()
+    except Exception as exc:
+        _log.warning("Failed to preload faster-whisper model: %s", exc)
 
 
 def register_voice_routes(app, server):
-    """注册语音相关路由"""
+    """Register voice-related API routes."""
+    _preload_stt_model()
 
     @app.route("/api/tts/synthesize", methods=["POST"])
     def tts_synthesize():
-        """将文字转换为语音"""
+        """Convert text to speech."""
         try:
             data = request.json
             text = data.get("text", "")
@@ -23,8 +149,8 @@ def register_voice_routes(app, server):
             if not text:
                 return jsonify({"error": "Text is required"}), 400
 
-            # 获取TTS配置
             from nbot.services.tts import _get_tts_config
+
             tts_config = _get_tts_config()
             api_key = tts_config.get("api_key")
             base_url = tts_config.get("base_url", "https://api.siliconflow.cn/v1")
@@ -34,32 +160,30 @@ def register_voice_routes(app, server):
             if not api_key:
                 return jsonify({"error": "TTS API Key not configured"}), 400
 
-            # 使用配置的voice或请求的voice
             voice_to_use = config_voice if config_voice != "default" else voice
 
-            # 创建临时文件
             temp_dir = os.path.join(server.data_dir, "tts_cache")
             os.makedirs(temp_dir, exist_ok=True)
             output_file = os.path.join(temp_dir, f"tts_{int(time.time())}.mp3")
 
-            # 调用TTS API
             from openai import OpenAI
+
             client = OpenAI(api_key=api_key, base_url=base_url)
 
             with client.audio.speech.with_streaming_response.create(
                 model=model,
                 voice=voice_to_use,
                 input=text,
-                response_format="mp3"
+                response_format="mp3",
             ) as response:
                 response.stream_to_file(output_file)
 
-            # 返回音频URL
             audio_url = f"/api/tts/audio/{os.path.basename(output_file)}"
             return jsonify({
                 "success": True,
                 "audio_url": audio_url,
-                "text": text
+                "text": text,
+                "speed": speed,
             })
 
         except Exception as e:
@@ -67,7 +191,7 @@ def register_voice_routes(app, server):
 
     @app.route("/api/tts/audio/<filename>")
     def tts_audio(filename):
-        """获取TTS生成的音频文件"""
+        """Serve generated TTS audio files."""
         try:
             temp_dir = os.path.join(server.data_dir, "tts_cache")
             file_path = os.path.join(temp_dir, filename)
@@ -76,6 +200,7 @@ def register_voice_routes(app, server):
                 return jsonify({"error": "Audio file not found"}), 404
 
             from flask import send_file
+
             return send_file(file_path, mimetype="audio/mpeg")
 
         except Exception as e:
@@ -83,74 +208,45 @@ def register_voice_routes(app, server):
 
     @app.route("/api/stt/transcribe", methods=["POST"])
     def stt_transcribe():
-        """将语音转换为文字"""
+        """Transcribe recorded audio with a local faster-whisper model."""
         try:
             if "audio" not in request.files:
                 return jsonify({"error": "No audio file provided"}), 400
 
             audio_file = request.files["audio"]
-            language = request.form.get("language", "zh")
+            requested_language = request.form.get("language", "zh")
 
-            # 保存临时文件
             temp_dir = os.path.join(server.data_dir, "stt_cache")
             os.makedirs(temp_dir, exist_ok=True)
-            temp_path = os.path.join(temp_dir, f"stt_{int(time.time())}.webm")
+            temp_path = os.path.join(temp_dir, f"stt_{int(time.time() * 1000)}.webm")
             audio_file.save(temp_path)
 
             try:
-                # 获取STT配置
-                from nbot.services.stt import _get_stt_config
-                stt_config = _get_stt_config()
-                api_key = stt_config.get("api_key")
-                base_url = stt_config.get("base_url", "")
-                model = stt_config.get("model", "whisper-1")
-                config_language = stt_config.get("language", "zh")
+                model, config = _ensure_stt_model_loaded()
+                language = requested_language or config["language"]
+                beam_size = config["beam_size"]
 
-                if not api_key:
-                    return jsonify({"error": "STT API Key not configured"}), 400
-
-                # 使用配置的语言或请求的语言
-                lang = language if language else config_language
-
-                # 构建请求URL
-                if base_url:
-                    url = base_url.rstrip("/") + "/audio/transcriptions"
-                else:
-                    url = "https://api.openai.com/v1/audio/transcriptions"
-
-                import requests
-
-                headers = {
-                    "Authorization": f"Bearer {api_key}"
-                }
-
-                data = {
-                    "model": model,
-                    "language": lang,
-                    "response_format": "text"
-                }
-
-                with open(temp_path, "rb") as f:
-                    files = {
-                        "file": (os.path.basename(temp_path), f, "audio/webm")
-                    }
-                    response = requests.post(url, headers=headers, data=data, files=files, timeout=60)
-
-                response.raise_for_status()
-                result = response.text.strip()
+                segments, info = model.transcribe(
+                    temp_path,
+                    beam_size=beam_size,
+                    language=language,
+                )
+                text = "".join(segment.text for segment in segments).strip()
 
                 return jsonify({
                     "success": True,
-                    "text": result,
-                    "language": lang
+                    "text": text,
+                    "language": getattr(info, "language", language) or language,
+                    "model": config["model_name"],
                 })
-
             finally:
-                # 清理临时文件
                 try:
                     os.unlink(temp_path)
-                except:
+                except OSError:
                     pass
 
         except Exception as e:
-            return jsonify({"error": str(e)}), 500
+            error_message = str(e)
+            if _STT_MODEL_LOAD_ERROR and "Failed to load faster-whisper model" in error_message:
+                error_message = _STT_MODEL_LOAD_ERROR
+            return jsonify({"error": error_message}), 500
