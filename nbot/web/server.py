@@ -14,7 +14,7 @@ import hashlib
 import secrets
 from datetime import datetime, timedelta
 from typing import Dict, Any, Optional, List
-from flask import Flask, request, jsonify, send_from_directory
+from flask import Flask, request, jsonify, send_from_directory, g
 from flask_socketio import SocketIO, emit, join_room, leave_room
 from nbot.web.ai_service import (
     get_ai_response,
@@ -507,6 +507,7 @@ class WebChatServer:
         self._load_ai_config()
         self._load_web_config()
         self._register_routes()
+        self._register_auth_middleware()
         self._register_socket_events()
         self._init_default_data()
         self._start_background_initialization()
@@ -1958,6 +1959,74 @@ class WebChatServer:
         register_workspace_shared_routes(self.app, self)
         register_workspace_misc_routes(self.app, self)
         register_config_legacy_routes(self.app, self)
+
+    def _extract_request_token(self) -> str:
+        """Extract auth token from request."""
+        auth_header = request.headers.get("Authorization", "").strip()
+        if auth_header.lower().startswith("bearer "):
+            return auth_header[7:].strip()
+
+        header_token = (
+            request.headers.get("X-Auth-Token", "").strip()
+            or request.headers.get("X-Token", "").strip()
+        )
+        if header_token:
+            return header_token
+
+        cookie_token = request.cookies.get("nbot_auth_token", "").strip()
+        if cookie_token:
+            return cookie_token
+
+        query_token = request.args.get("token", "").strip()
+        if query_token:
+            return query_token
+
+        if request.method in {"POST", "PUT", "PATCH", "DELETE"}:
+            body_token = ""
+            if request.is_json:
+                data = request.get_json(silent=True) or {}
+                body_token = str(data.get("token", "")).strip()
+            if not body_token:
+                body_token = request.form.get("token", "").strip()
+            if body_token:
+                return body_token
+
+        return ""
+
+    def _register_auth_middleware(self):
+        """Protect all private API routes with login token."""
+        public_api_paths = {
+            "/api/login",
+            "/api/verify-token",
+            "/api/startup-status",
+        }
+
+        @self.app.before_request
+        def _enforce_api_auth():
+            if request.method == "OPTIONS":
+                return None
+
+            path = request.path or ""
+            if not path.startswith("/api/"):
+                return None
+
+            if path in public_api_paths:
+                return None
+
+            token = self._extract_request_token()
+            username = self._validate_login_token(token)
+            if not username:
+                return jsonify(
+                    {
+                        "success": False,
+                        "error": "Unauthorized",
+                        "message": "Login required",
+                    }
+                ), 401
+
+            g.auth_username = username
+            g.auth_token = token
+            return None
 
     def _register_socket_events(self):
         """Register WebSocket handlers."""
