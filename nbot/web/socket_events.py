@@ -1,8 +1,6 @@
 import asyncio
 import hashlib
-import json
 import logging
-import os
 
 from flask import request
 from flask_socketio import emit, join_room, leave_room
@@ -10,6 +8,7 @@ from flask_socketio import emit, join_room, leave_room
 from nbot.channels import WebChannelAdapter
 from nbot.core import WebSessionStore
 from nbot.web.message_adapter import WebMessageAdapter
+from nbot.web.sessions_db import get_session as get_session_from_db
 
 _log = logging.getLogger(__name__)
 
@@ -79,16 +78,10 @@ def register_socket_events(server):
                 f"Received Web message: session={session_id}, sender={sender}, attachments={len(attachments)}"
             )
 
-            sessions_file = os.path.join(server.data_dir, "sessions.json")
-            if os.path.exists(sessions_file):
-                try:
-                    with open(sessions_file, "r", encoding="utf-8") as f:
-                        file_sessions = json.load(f)
-                    for sid, sess in file_sessions.items():
-                        if not session_store.get_session(sid):
-                            session_store.set_session(sid, sess)
-                except Exception:
-                    pass
+            if not session_store.get_session(session_id):
+                disk_session = get_session_from_db(server.data_dir, session_id)
+                if disk_session:
+                    session_store.set_session(session_id, disk_session)
 
             if not session_store.get_session(session_id):
                 server.socketio.emit(

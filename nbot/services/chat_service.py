@@ -825,16 +825,11 @@ def _sync_to_web_session(role, content, user_id=None, group_id=None, group_user_
     # 使用相对路径
     data_dir = os.path.join(os.path.dirname(__file__), '..', '..', 'data', 'web')
     os.makedirs(data_dir, exist_ok=True)
-    sessions_file = os.path.join(data_dir, "sessions.json")
+    from nbot.web.sessions_db import load_sessions as load_sessions_from_db
+    from nbot.web.sessions_db import save_sessions as save_sessions_to_db
     
     # 加载现有会话
-    sessions = {}
-    if os.path.exists(sessions_file):
-        try:
-            with open(sessions_file, 'r', encoding='utf-8') as f:
-                sessions = json.load(f)
-        except:
-            sessions = {}
+    sessions = load_sessions_from_db(data_dir)
     
     # 查找会话：检查 name 是否匹配 session_name
     session_id = None
@@ -892,8 +887,7 @@ def _sync_to_web_session(role, content, user_id=None, group_id=None, group_user_
     
     # 保存会话
     try:
-        with open(sessions_file, 'w', encoding='utf-8') as f:
-            json.dump(sessions, f, ensure_ascii=False, indent=2)
+        save_sessions_to_db(data_dir, sessions)
         print(f"[DEBUG] 已同步消息到 sessions.json, session_id: {session_id}, qq_id: {qq_id}")
     except Exception as e:
         print(f"同步到 Web 会话失败: {e}")

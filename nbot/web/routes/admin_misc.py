@@ -6,6 +6,7 @@ from collections import defaultdict
 from datetime import datetime, timedelta
 
 from flask import jsonify, request
+from nbot.web.sessions_db import load_sessions as load_sessions_from_db
 
 
 _log = logging.getLogger(__name__)
@@ -172,16 +173,13 @@ def register_admin_misc_routes(app, server):
             except Exception:
                 real_stats = {}
 
-        sessions_file = os.path.join(server.data_dir, "sessions.json")
         session_names = {}
-        if os.path.exists(sessions_file):
-            try:
-                with open(sessions_file, "r", encoding="utf-8") as f:
-                    sessions_data = json.load(f)
-                for sid, session in sessions_data.items():
-                    session_names[sid] = session.get("name", f"?? {sid[:8]}")
-            except Exception:
-                pass
+        try:
+            sessions_data = load_sessions_from_db(server.data_dir)
+            for sid, session in sessions_data.items():
+                session_names[sid] = session.get("name", f"?? {sid[:8]}")
+        except Exception:
+            pass
 
         for sid, session in server.sessions.items():
             if sid not in session_names:

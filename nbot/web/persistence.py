@@ -2,6 +2,8 @@ import json
 import logging
 import os
 from datetime import datetime
+from nbot.web.sessions_db import load_sessions as load_sessions_from_db
+from nbot.web.sessions_db import save_sessions as save_sessions_to_db
 
 _log = logging.getLogger(__name__)
 
@@ -340,19 +342,20 @@ def load_all_data(server):
     """加载所有持久化数据"""
     try:
         # 加载会话
-        sessions_file = os.path.join(server.data_dir, "sessions.json")
-        if os.path.exists(sessions_file):
-            with open(sessions_file, "r", encoding="utf-8") as f:
-                loaded_sessions = json.load(f)
+        loaded_sessions = load_sessions_from_db(server.data_dir)
+        if not loaded_sessions:
+            sessions_file = os.path.join(server.data_dir, "sessions.json")
+            if os.path.exists(sessions_file):
+                with open(sessions_file, "r", encoding="utf-8") as f:
+                    loaded_sessions = json.load(f)
+        if loaded_sessions:
             normalized_sessions = {
                 session_id: _normalize_session_record(session_id, session)
                 for session_id, session in loaded_sessions.items()
             }
             server.sessions.clear()
             server.sessions.update(normalized_sessions)
-            if normalized_sessions != loaded_sessions:
-                with open(sessions_file, "w", encoding="utf-8") as f:
-                    json.dump(normalized_sessions, f, ensure_ascii=False, indent=2)
+            save_sessions_to_db(server.data_dir, normalized_sessions)
             # 重新设置 sessions 到 ProgressCardManager
             if server.PROGRESS_CARD_AVAILABLE and server.progress_card_manager:
                 server.progress_card_manager.set_sessions(server.sessions)
@@ -528,10 +531,7 @@ def save_data(server, data_type: str):
     """保存指定类型的数据到磁盘"""
     try:
         if data_type == "sessions":
-            with open(
-                os.path.join(server.data_dir, "sessions.json"), "w", encoding="utf-8"
-            ) as f:
-                json.dump(server.sessions, f, ensure_ascii=False, indent=2)
+            save_sessions_to_db(server.data_dir, server.sessions)
             server._invalidate_sessions_cache()
         elif data_type == "workflows":
             with open(

@@ -5,6 +5,7 @@ import time
 from flask import jsonify, request, send_from_directory
 
 from nbot.core import WebSessionStore
+from nbot.web.sessions_db import get_session as get_session_from_db
 
 
 def register_file_routes(app, server, workspace_available, workspace_manager):
@@ -129,14 +130,9 @@ def register_file_routes(app, server, workspace_available, workspace_manager):
                     session_type = session.get("type", "web")
                 else:
                     try:
-                        sessions_file = os.path.join(server.data_dir, "sessions.json")
-                        if os.path.exists(sessions_file):
-                            with open(sessions_file, "r", encoding="utf-8") as f:
-                                disk_sessions = json.load(f)
-                            if session_id in disk_sessions:
-                                session_type = disk_sessions[session_id].get(
-                                    "type", "web"
-                                )
+                        disk_session = get_session_from_db(server.data_dir, session_id)
+                        if disk_session:
+                            session_type = disk_session.get("type", "web")
                     except Exception as e:
                         server.log_message("warning", f"Load session metadata failed: {e}")
 

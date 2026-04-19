@@ -7,6 +7,7 @@ from datetime import datetime
 from flask import jsonify, request
 
 from nbot.core import WebSessionStore
+from nbot.web.sessions_db import get_session as get_session_from_db
 
 _log = logging.getLogger(__name__)
 
@@ -31,14 +32,6 @@ def register_session_routes(app, server):
             return jsonify(server._sessions_cache)
 
         sessions_data = dict(server.sessions)
-        if not sessions_data:
-            sessions_file = os.path.join(server.data_dir, "sessions.json")
-            if os.path.exists(sessions_file):
-                try:
-                    with open(sessions_file, "r", encoding="utf-8") as f:
-                        sessions_data = json.load(f)
-                except Exception:
-                    sessions_data = {}
 
         sessions = []
         for sid, session in sessions_data.items():
@@ -169,14 +162,7 @@ def register_session_routes(app, server):
     def get_session(session_id):
         session = session_store.get_session(session_id)
         if not session:
-            sessions_file = os.path.join(server.data_dir, "sessions.json")
-            if os.path.exists(sessions_file):
-                try:
-                    with open(sessions_file, "r", encoding="utf-8") as f:
-                        sessions_data = json.load(f)
-                    session = sessions_data.get(session_id)
-                except Exception:
-                    session = None
+            session = get_session_from_db(server.data_dir, session_id)
         if not session:
             return jsonify({"error": "Session not found"}), 404
 
@@ -238,14 +224,7 @@ def register_session_routes(app, server):
         session = session_store.get_session(session_id)
 
         if not session:
-            sessions_file = os.path.join(server.data_dir, "sessions.json")
-            if os.path.exists(sessions_file):
-                try:
-                    with open(sessions_file, "r", encoding="utf-8") as f:
-                        sessions_data = json.load(f)
-                    session = sessions_data.get(session_id)
-                except Exception:
-                    session = None
+            session = get_session_from_db(server.data_dir, session_id)
 
         if not session:
             return jsonify({"error": "Session not found"}), 404

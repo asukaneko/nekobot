@@ -14,6 +14,7 @@ import uuid
 from typing import Optional, List, Dict, Any
 from datetime import datetime
 from dataclasses import dataclass, field, asdict
+from nbot.web.sessions_db import load_sessions, save_sessions
 
 
 @dataclass
@@ -137,15 +138,12 @@ class MessageManager:
                 self._qq_group_cache[group_id] = self._load_messages_from_file(filepath)
         
         # 加载 Web 会话消息
-        sessions_file = os.path.join(self.web_dir, 'sessions.json')
-        if os.path.exists(sessions_file):
-            try:
-                with open(sessions_file, 'r', encoding='utf-8') as f:
-                    sessions_data = json.load(f)
-                    for session_id, session in sessions_data.items():
-                        messages = session.get('messages', [])
-                        self._web_cache[session_id] = [Message.from_dict(m) for m in messages]
-            except Exception as e:
+        sessions_data = load_sessions(self.web_dir)
+        try:
+            for session_id, session in sessions_data.items():
+                messages = session.get('messages', [])
+                self._web_cache[session_id] = [Message.from_dict(m) for m in messages]
+        except Exception as e:
                 print(f"加载 Web 消息失败: {e}")
     
     def _load_messages_from_file(self, filepath: str) -> List[Message]:
@@ -171,7 +169,6 @@ class MessageManager:
     
     def _save_web_sessions(self):
         """保存 Web 会话"""
-        sessions_file = os.path.join(self.web_dir, 'sessions.json')
         try:
             sessions_data = {}
             for session_id, messages in self._web_cache.items():
@@ -179,8 +176,7 @@ class MessageManager:
                     'id': session_id,
                     'messages': [m.to_dict() for m in messages]
                 }
-            with open(sessions_file, 'w', encoding='utf-8') as f:
-                json.dump(sessions_data, f, ensure_ascii=False, indent=2)
+            save_sessions(self.web_dir, sessions_data)
         except Exception as e:
             print(f"保存 Web 会话失败: {e}")
     
