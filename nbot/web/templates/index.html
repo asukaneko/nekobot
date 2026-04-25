@@ -10317,6 +10317,21 @@
                         >
                         <span class="range-value">{{ themeSettings.cardOpacity }}%</span>
                     </div>
+                    <div class="form-group">
+                        <label class="form-label">弹窗交互</label>
+                        <div class="feature-switch-item" @click="themeSettings.closeModalOnOverlayClick = !themeSettings.closeModalOnOverlayClick">
+                            <div class="feature-switch-info">
+                                <i class="fas fa-window-maximize feature-switch-icon"></i>
+                                <span class="feature-switch-label">点击弹窗外关闭窗口</span>
+                            </div>
+                            <label class="toggle-switch" :class="{ active: themeSettings.closeModalOnOverlayClick }" @click.stop>
+                                <div class="toggle-slider"></div>
+                            </label>
+                        </div>
+                        <small style="color: var(--text-secondary); display: block; margin-top: 8px;">
+                            默认关闭。关闭后，所有使用通用遮罩层的弹窗都不会因为点击空白区域而被关闭。
+                        </small>
+                    </div>
                 </div>
                 <div class="modal-footer">
                     <button class="btn btn-secondary" @click="resetTheme">恢复默认</button>
@@ -12279,7 +12294,8 @@
                         primaryColor: '#3b82f6',
                         bgImage: 'https://images.unsplash.com/photo-1506905925346-21bda4d32df4?w=1920&q=80',
                         bgOpacity: 85,
-                        cardOpacity: 90
+                        cardOpacity: 90,
+                        closeModalOnOverlayClick: false
                     },
                     themeColors: [
                         { name: '粉色', value: '#ec4899', gradient: 'linear-gradient(135deg, #ec4899, #f472b6)' },
@@ -12653,6 +12669,8 @@
 
                 // 监听窗口大小变化，调整图表
                 window.addEventListener('resize', this.handleResize);
+                this._modalOverlayClickCaptureHandler = (event) => this.handleGlobalModalOverlayClick(event);
+                document.addEventListener('click', this._modalOverlayClickCaptureHandler, true);
                 
                 // 定时刷新会话列表（每 5 秒，减少频率）
                 this.sessionRefreshTimer = setInterval(() => {
@@ -12664,6 +12682,10 @@
             
             beforeUnmount() {
                 window.removeEventListener('resize', this.handleResize);
+                if (this._modalOverlayClickCaptureHandler) {
+                    document.removeEventListener('click', this._modalOverlayClickCaptureHandler, true);
+                    this._modalOverlayClickCaptureHandler = null;
+                }
                 if (this.sessionRefreshTimer) {
                     clearInterval(this.sessionRefreshTimer);
                 }
@@ -12690,6 +12712,19 @@
             },
             
             methods: {
+                handleGlobalModalOverlayClick(event) {
+                    if (this.themeSettings.closeModalOnOverlayClick) {
+                        return;
+                    }
+                    if (!(event.target instanceof HTMLElement)) {
+                        return;
+                    }
+                    if (!event.target.classList.contains('modal-overlay')) {
+                        return;
+                    }
+                    event.stopPropagation();
+                },
+
                 // 拖动排序方法
                 onDragStart(event, session) {
                     this.draggedSession = session;
@@ -13381,7 +13416,8 @@
                         primaryColor: '#ec4899',
                         bgImage: '',
                         bgOpacity: 85,
-                        cardOpacity: 90
+                        cardOpacity: 90,
+                        closeModalOnOverlayClick: false
                     };
                     this.applyTheme();
                     localStorage.removeItem('themeSettings');
