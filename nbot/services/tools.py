@@ -52,14 +52,9 @@ WEB_DATA_DIR = os.path.join(os.path.dirname(__file__), '..', '..', 'data', 'web'
 EXEC_WHITELIST = {
     'ls', 'cat', 'echo', 'pwd', 'whoami', 'date', 'cal', 'df', 'du',
     'head', 'tail', 'wc', 'grep', 'find', 'ps', 'top', 'htop',
-    'ping', 'curl', 'wget', 'git', 'python', 'python3', 'pip',
-    'node', 'npm', 'yarn', 'docker', 'docker-compose', 'kubectl',
-    'systemctl', 'service', 'journalctl', 'uname', 'hostname',
+    'ping', 'journalctl', 'uname', 'hostname',
     'netstat', 'ss', 'lsof', 'ifconfig', 'ip', 'route',
-    'tar', 'gzip', 'gunzip', 'zip', 'unzip', 'chmod', 'chown',
-    'mkdir', 'touch', 'cp', 'mv', 'rm', 'rmdir', 'ln',
     'which', 'whereis', 'type', 'file', 'stat', 'md5sum', 'sha256sum',
-    'cd', 'dir'
 }
 
 EXEC_BLACKLIST_PATTERNS = [
@@ -766,6 +761,14 @@ class ToolExecutor:
         import shlex
         
         try:
+            if os.getenv("NBOT_ENABLE_EXEC_COMMAND", "").lower() not in {"1", "true", "yes"}:
+                return {
+                    "success": False,
+                    "error": "exec_command is disabled by default. Set NBOT_ENABLE_EXEC_COMMAND=1 to enable it.",
+                    "command": command,
+                    "disabled": True,
+                }
+
             # 安全检查：检测危险模式
             for pattern in EXEC_BLACKLIST_PATTERNS:
                 if re.search(pattern, command, re.IGNORECASE):
@@ -782,6 +785,14 @@ class ToolExecutor:
                 main_cmd = cmd_parts[0] if cmd_parts else ""
             except:
                 main_cmd = command.split()[0] if command else ""
+                cmd_parts = command.split() if command else []
+
+            if not cmd_parts:
+                return {
+                    "success": False,
+                    "error": "命令不能为空",
+                    "command": command,
+                }
             
             # 检查是否在白名单中
             is_whitelisted = main_cmd in EXEC_WHITELIST
@@ -803,8 +814,8 @@ class ToolExecutor:
             
             # 使用 subprocess 执行命令
             result = subprocess.run(
-                command,
-                shell=True,
+                cmd_parts,
+                shell=False,
                 capture_output=True,
                 text=True,
                 timeout=timeout,
@@ -1305,7 +1316,7 @@ TOOL_DEFINITIONS = [
         "type": "function",
         "function": {
             "name": "exec_command",
-            "description": "执行命令行命令。用于执行系统命令、运行脚本、查看系统状态等。白名单内的命令（如ls, cat, echo, git, python等）会直接执行，不在白名单中的命令需要用户确认。危险命令会被自动阻止。",
+            "description": "执行命令行命令。默认禁用；必须显式设置 NBOT_ENABLE_EXEC_COMMAND=1 才允许使用。",
             "parameters": {
                 "type": "object",
                 "properties": {

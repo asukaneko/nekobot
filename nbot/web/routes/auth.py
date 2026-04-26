@@ -1,5 +1,6 @@
 import logging
 import os
+import secrets
 
 from flask import jsonify, request
 
@@ -23,10 +24,6 @@ def register_auth_routes(app, server):
         if cookie_token:
             return cookie_token
 
-        query_token = request.args.get("token", "").strip()
-        if query_token:
-            return query_token
-
         payload = request.get_json(silent=True) or {}
         return str(payload.get("token", "")).strip()
 
@@ -47,11 +44,18 @@ def register_auth_routes(app, server):
         if not username:
             return jsonify({"success": False, "message": "Username is required"}), 400
 
-        if server.web_password:
-            if not password:
-                return jsonify({"success": False, "message": "Password is required"}), 401
-            if password != server.web_password:
-                return jsonify({"success": False, "message": "Invalid password"}), 401
+        if not server.web_password:
+            return jsonify(
+                {
+                    "success": False,
+                    "message": "Web password is not configured",
+                }
+            ), 503
+
+        if not password:
+            return jsonify({"success": False, "message": "Password is required"}), 401
+        if not secrets.compare_digest(password, str(server.web_password)):
+            return jsonify({"success": False, "message": "Invalid password"}), 401
 
         token = server._generate_login_token(username)
         response = jsonify(
@@ -68,6 +72,7 @@ def register_auth_routes(app, server):
             max_age=server.token_expire_days * 24 * 60 * 60,
             httponly=True,
             samesite="Lax",
+            secure=request.is_secure or os.getenv("NBOT_SECURE_COOKIES") == "1",
         )
         return response
 

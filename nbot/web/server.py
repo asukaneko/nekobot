@@ -789,9 +789,16 @@ class WebChatServer:
             config.read("config.ini", encoding="utf-8")
 
             # 读取登录密码
-            self.web_password = config.get("web", "password", fallback=None)
+            self.web_password = (
+                os.getenv("WEB_PASSWORD")
+                or config.get("web", "password", fallback=None)
+            )
             if self.web_password:
                 _log.info("Web login password is set")
+            else:
+                _log.warning(
+                    "Web login password is not set; login API will reject all users"
+                )
         except Exception as e:
             _log.error(f"Failed to load web config: {e}")
 
@@ -1977,10 +1984,6 @@ class WebChatServer:
         if cookie_token:
             return cookie_token
 
-        query_token = request.args.get("token", "").strip()
-        if query_token:
-            return query_token
-
         if request.method in {"POST", "PUT", "PATCH", "DELETE"}:
             body_token = ""
             if request.is_json:
@@ -2639,8 +2642,19 @@ def parse_document_with_mineru(
 def create_web_app(config: Dict[str, Any] = None) -> tuple[Flask, SocketIO]:
     """创建 Flask 应用"""
     app = Flask(__name__, static_folder=None)
-    app.config["SECRET_KEY"] = "nbot-secret-key"
+    app.config["SECRET_KEY"] = (
+        os.getenv("NBOT_SECRET_KEY")
+        or os.getenv("SECRET_KEY")
+        or secrets.token_urlsafe(32)
+    )
     app.config.update(config or {})
+
+    cors_origins_env = os.getenv("NBOT_CORS_ORIGINS", "").strip()
+    cors_allowed_origins = (
+        [origin.strip() for origin in cors_origins_env.split(",") if origin.strip()]
+        if cors_origins_env
+        else None
+    )
 
     # SocketIO 配置优化：增加稳定性
     # ping_timeout: 心跳超时时间
@@ -2648,7 +2662,7 @@ def create_web_app(config: Dict[str, Any] = None) -> tuple[Flask, SocketIO]:
     socketio = SocketIO(
         app,
         async_mode="threading",
-        cors_allowed_origins="*",
+        cors_allowed_origins=cors_allowed_origins,
         max_http_buffer_size=100 * 1024 * 1024,
     )
 

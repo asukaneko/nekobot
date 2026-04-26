@@ -20,14 +20,37 @@ def register_socket_events(server):
     adapter = getattr(server, "web_channel_adapter", None) or WebChannelAdapter()
 
     @server.socketio.on("connect")
-    def handle_connect():
+    def handle_connect(auth=None):
+        token = ""
+        if isinstance(auth, dict):
+            token = str(auth.get("token") or "").strip()
+
+        if not token:
+            auth_header = request.headers.get("Authorization", "").strip()
+            if auth_header.lower().startswith("bearer "):
+                token = auth_header[7:].strip()
+
+        if not token:
+            token = (
+                request.headers.get("X-Auth-Token", "").strip()
+                or request.headers.get("X-Token", "").strip()
+                or request.cookies.get("nbot_auth_token", "").strip()
+            )
+
+        username = server._validate_login_token(token)
+        if not username:
+            _log.warning("Rejected unauthenticated WebSocket connection")
+            return False
+
         user_id = request.args.get("user_id", "web_user")
         server.web_users[request.sid] = user_id
+        server.active_connections[f"auth:{request.sid}"] = username
         _log.info(f"Web client connected: {user_id}")
 
     @server.socketio.on("disconnect")
     def handle_disconnect():
         user_id = server.web_users.pop(request.sid, "unknown")
+        server.active_connections.pop(f"auth:{request.sid}", None)
         session_id = server.active_connections.pop(request.sid, None)
         if session_id:
             leave_room(session_id)

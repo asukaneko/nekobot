@@ -21,6 +21,18 @@ from datetime import datetime
 _log = logging.getLogger(__name__)
 
 
+def _resolve_within(base_path: str, *parts: str) -> Optional[str]:
+    """Resolve a child path and reject traversal outside base_path."""
+    base_abs = os.path.abspath(base_path)
+    target = os.path.abspath(os.path.join(base_abs, *[p for p in parts if p]))
+    try:
+        if os.path.commonpath([base_abs, target]) != base_abs:
+            return None
+    except ValueError:
+        return None
+    return target
+
+
 def _normalize_edit_block(text: str) -> str:
     return "\n".join(
         line.rstrip() for line in (text or "").replace("\r\n", "\n").strip().split("\n")
@@ -117,7 +129,9 @@ class WorkspaceManager:
 
     def list_shared_files(self, path: str = '') -> Dict[str, Any]:
         """列出共享工作区中的文件"""
-        target_path = os.path.join(self.shared_workspace_dir, path) if path else self.shared_workspace_dir
+        target_path = _resolve_within(self.shared_workspace_dir, path)
+        if not target_path:
+            return {'success': False, 'error': '路径不合法'}
 
         if not os.path.exists(target_path) or not os.path.isdir(target_path):
             return {'success': False, 'error': '目录不存在'}
@@ -151,7 +165,9 @@ class WorkspaceManager:
 
     def list_shared_files_recursive(self, path: str = '') -> Dict[str, Any]:
         """递归列出共享工作区中所有子目录的文件"""
-        target_path = os.path.join(self.shared_workspace_dir, path) if path else self.shared_workspace_dir
+        target_path = _resolve_within(self.shared_workspace_dir, path)
+        if not target_path:
+            return {'success': False, 'error': '路径不合法'}
 
         if not os.path.exists(target_path) or not os.path.isdir(target_path):
             return {'success': False, 'error': '目录不存在'}
@@ -248,12 +264,13 @@ class WorkspaceManager:
 
         if path:
             # 检查路径是否在共享工作区内
-            check_path = os.path.normpath(os.path.join(self.shared_workspace_dir, path))
-            if not check_path.startswith(os.path.normpath(self.shared_workspace_dir)):
+            folder_path = _resolve_within(self.shared_workspace_dir, path, folder_name)
+            if not folder_path:
                 return {'success': False, 'error': '路径不合法，不能超出共享工作区'}
-            folder_path = os.path.join(self.shared_workspace_dir, path, folder_name)
         else:
-            folder_path = os.path.join(self.shared_workspace_dir, folder_name)
+            folder_path = _resolve_within(self.shared_workspace_dir, folder_name)
+            if not folder_path:
+                return {'success': False, 'error': '路径不合法，不能超出共享工作区'}
 
         try:
             if os.path.exists(folder_path):
@@ -315,17 +332,17 @@ class WorkspaceManager:
 
     def move_shared_file(self, filename: str, target_path: str = '') -> Dict[str, Any]:
         """移动共享工作区中的文件"""
-        src_path = os.path.normpath(os.path.join(self.shared_workspace_dir, filename))
-        if not src_path.startswith(os.path.normpath(self.shared_workspace_dir)):
+        src_path = _resolve_within(self.shared_workspace_dir, filename)
+        if not src_path:
             return {'success': False, 'error': '路径不合法'}
 
         if not os.path.exists(src_path):
             return {'success': False, 'error': f'文件不存在: {filename}'}
 
         if target_path:
-            dst_dir = os.path.normpath(os.path.join(self.shared_workspace_dir, target_path))
+            dst_dir = _resolve_within(self.shared_workspace_dir, target_path)
             # 检查目标路径是否在共享工作区内
-            if not dst_dir.startswith(os.path.normpath(self.shared_workspace_dir)):
+            if not dst_dir:
                 return {'success': False, 'error': '目标路径不合法，不能超出共享工作区'}
         else:
             dst_dir = self.shared_workspace_dir
@@ -383,8 +400,8 @@ class WorkspaceManager:
 
     def move_from_shared(self, session_id: str, filename: str, target_path: str = '') -> Dict[str, Any]:
         """将共享工作区的文件移动到私有工作区"""
-        src_path = os.path.normpath(os.path.join(self.shared_workspace_dir, filename))
-        if not src_path.startswith(os.path.normpath(self.shared_workspace_dir)):
+        src_path = _resolve_within(self.shared_workspace_dir, filename)
+        if not src_path:
             return {'success': False, 'error': '路径不合法'}
         
         if not os.path.exists(src_path):
@@ -393,8 +410,8 @@ class WorkspaceManager:
         ws_path = self.get_or_create(session_id, 'web')
         
         if target_path:
-            dst_dir = os.path.normpath(os.path.join(ws_path, target_path))
-            if not dst_dir.startswith(os.path.normpath(ws_path)):
+            dst_dir = _resolve_within(ws_path, target_path)
+            if not dst_dir:
                 return {'success': False, 'error': '目标路径不合法'}
         else:
             dst_dir = ws_path
@@ -906,7 +923,9 @@ class WorkspaceManager:
 
         # 如果指定了路径，列出该目录的内容
         if path:
-            target_path = os.path.join(ws_path, path)
+            target_path = _resolve_within(ws_path, path)
+            if not target_path:
+                return {'success': False, 'error': '路径不合法'}
             if not os.path.exists(target_path) or not os.path.isdir(target_path):
                 return {'success': False, 'error': '目录不存在'}
             
@@ -983,7 +1002,9 @@ class WorkspaceManager:
         if not ws_path:
             return {'success': True, 'files': [], 'message': '工作区为空'}
 
-        target_path = os.path.join(ws_path, path) if path else ws_path
+        target_path = _resolve_within(ws_path, path)
+        if not target_path:
+            return {'success': False, 'error': '路径不合法'}
         if not os.path.exists(target_path) or not os.path.isdir(target_path):
             return {'success': False, 'error': '目录不存在'}
 
@@ -1041,8 +1062,8 @@ class WorkspaceManager:
         if not ws_path:
             return {'success': False, 'error': '工作区不存在'}
         
-        src_path = os.path.normpath(os.path.join(ws_path, filename))
-        if not src_path.startswith(os.path.normpath(ws_path)):
+        src_path = _resolve_within(ws_path, filename)
+        if not src_path:
             return {'success': False, 'error': '路径不合法'}
         
         if not os.path.exists(src_path):
@@ -1050,7 +1071,9 @@ class WorkspaceManager:
         
         # 构建目标路径
         if target_path:
-            dst_dir = os.path.join(ws_path, target_path)
+            dst_dir = _resolve_within(ws_path, target_path)
+            if not dst_dir:
+                return {'success': False, 'error': '目标路径不合法'}
         else:
             dst_dir = ws_path
         
@@ -1081,8 +1104,8 @@ class WorkspaceManager:
         if not ws_path:
             return None
 
-        file_path = os.path.normpath(os.path.join(ws_path, filename))
-        if not file_path.startswith(os.path.normpath(ws_path)):
+        file_path = _resolve_within(ws_path, filename)
+        if not file_path:
             return None
 
         if os.path.exists(file_path):

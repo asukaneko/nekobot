@@ -5,6 +5,16 @@ from flask import jsonify, request
 
 
 def register_workspace_shared_routes(app, server):
+    def _resolve_shared_path(*parts):
+        base = os.path.abspath(server.workspace_manager.get_shared_workspace())
+        target = os.path.abspath(os.path.join(base, *[p for p in parts if p]))
+        try:
+            if os.path.commonpath([base, target]) != base:
+                return None
+        except ValueError:
+            return None
+        return target
+
     @app.route("/api/workspace/shared/files", methods=["GET"])
     def get_shared_workspace_files():
         if not server.WORKSPACE_AVAILABLE:
@@ -20,7 +30,9 @@ def register_workspace_shared_routes(app, server):
             return jsonify({"error": "Workspace not available"}), 503
 
         filename = unquote(filename)
-        file_path = os.path.join(server.workspace_manager.get_shared_workspace(), filename)
+        file_path = _resolve_shared_path(filename)
+        if not file_path:
+            return jsonify({"error": "Invalid path"}), 400
         if not os.path.exists(file_path):
             return jsonify({"error": "File not found"}), 404
 

@@ -11727,11 +11727,21 @@
         const { createApp } = Vue;
 
         const api = axios.create({ baseURL: '', timeout: 60000 });
+        api.interceptors.request.use((config) => {
+            const token = localStorage.getItem('auth_token');
+            if (token) {
+                config.headers = config.headers || {};
+                config.headers.Authorization = `Bearer ${token}`;
+            }
+            return config;
+        });
         
         // Socket.IO 连接配置优化
         const socket = io(window.location.origin, {
             path: '/socket.io',
             transports: ['polling', 'websocket'],
+            autoConnect: false,
+            auth: (cb) => cb({ token: localStorage.getItem('auth_token') || '' }),
             upgrade: true,  // 使用 WebSocket
             reconnection: true,         // 启用自动重连
             reconnectionAttempts: 10,   // 最多重连 10 次
@@ -11739,6 +11749,13 @@
             reconnectionDelayMax: 5000, // 最大重连延迟 5 秒
             timeout: 20000             // 连接超时 20 秒
         });
+
+        function connectSocketWithAuth() {
+            socket.auth = { token: localStorage.getItem('auth_token') || '' };
+            if (!socket.connected) {
+                socket.connect();
+            }
+        }
 
         // 自定义指令：点击外部关闭
         const clickOutside = {
@@ -12631,6 +12648,7 @@
                             // Token 有效，自动登录
                             this.username = res.data.username || savedUsername;
                             this.isLoggedIn = true;
+                            connectSocketWithAuth();
                             
                             // 只加载首页（仪表盘）需要的数据
                             await Promise.all([
@@ -12655,6 +12673,7 @@
                 } else if (this.username) {
                     // 兼容旧版本：使用 sessionStorage 的情况
                     this.isLoggedIn = true;
+                    connectSocketWithAuth();
                     await Promise.all([
                         this.loadStats(),
                         this.loadSessions(),
@@ -12935,6 +12954,7 @@
                                 localStorage.setItem('auth_token', res.data.token);
                             }
                             this.isLoggedIn = true;
+                            connectSocketWithAuth();
                             this.password = ''; // 清空密码
                             await this.loadAllData();
                             this.showToast('登录成功', 'success');
@@ -12962,6 +12982,9 @@
                     // 清除本地存储
                     localStorage.removeItem('username');
                     localStorage.removeItem('auth_token');
+                    if (socket.connected) {
+                        socket.disconnect();
+                    }
                     
                     this.isLoggedIn = false;
                     this.username = '';
@@ -19474,6 +19497,39 @@ def main(params):
                     return ext === 'html' || ext === 'htm';
                 },
 
+                sanitizeRenderedHtml(html) {
+                    const template = document.createElement('template');
+                    template.innerHTML = html || '';
+
+                    const blockedTags = new Set(['script', 'style', 'iframe', 'object', 'embed', 'link', 'meta', 'base', 'form']);
+                    const allowedAttrs = new Set(['class', 'id', 'href', 'src', 'alt', 'title', 'target', 'rel', 'colspan', 'rowspan']);
+                    const safeUrl = (value) => {
+                        if (!value) return true;
+                        const trimmed = String(value).trim().toLowerCase();
+                        return !trimmed.startsWith('javascript:') && !trimmed.startsWith('data:text/html');
+                    };
+
+                    template.content.querySelectorAll('*').forEach((node) => {
+                        if (blockedTags.has(node.tagName.toLowerCase())) {
+                            node.remove();
+                            return;
+                        }
+
+                        [...node.attributes].forEach((attr) => {
+                            const name = attr.name.toLowerCase();
+                            if (name.startsWith('on') || !allowedAttrs.has(name) || !safeUrl(attr.value)) {
+                                node.removeAttribute(attr.name);
+                            }
+                        });
+
+                        if (node.tagName.toLowerCase() === 'a') {
+                            node.setAttribute('rel', 'noopener noreferrer');
+                        }
+                    });
+
+                    return template.innerHTML;
+                },
+
                 // 渲染 Markdown 内容
                 renderMarkdown(content) {
                     if (!content) return '';
@@ -19484,7 +19540,6 @@ def main(params):
                         gfm: true,     // 支持 GitHub Flavored Markdown
                         headerIds: false,  // 不生成 header id
                         mangle: false,  // 不转义邮件地址
-                        sanitize: false,  // 允许 HTML（Vue 会自动转义）
                         highlight: function(code, lang) {
                             // 代码高亮
                             if (lang && hljs.getLanguage(lang)) {
@@ -19520,10 +19575,10 @@ def main(params):
                             }
                         );
                         
-                        return html;
+                        return this.sanitizeRenderedHtml(html);
                     } catch (e) {
                         console.error('Markdown parse error:', e);
-                        return content;
+                        return this.escapeHtml(content);
                     }
                 },
                 

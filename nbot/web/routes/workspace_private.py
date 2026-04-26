@@ -12,6 +12,16 @@ def register_workspace_private_routes(app, server):
     )
     preview_text_size_limit = 10 * 1024 * 1024
 
+    def _resolve_workspace_path(base_path, *parts):
+        base = os.path.abspath(base_path)
+        target = os.path.abspath(os.path.join(base, *[p for p in parts if p]))
+        try:
+            if os.path.commonpath([base, target]) != base:
+                return None
+        except ValueError:
+            return None
+        return target
+
     @app.route("/api/sessions/<session_id>/workspace/files", methods=["GET"])
     def get_workspace_files(session_id):
         if not server.WORKSPACE_AVAILABLE:
@@ -107,11 +117,9 @@ def register_workspace_private_routes(app, server):
         if not ws_path:
             return jsonify({"success": False, "error": "Workspace not found"}), 404
 
-        folder_path = (
-            os.path.join(ws_path, path, folder_name)
-            if path
-            else os.path.join(ws_path, folder_name)
-        )
+        folder_path = _resolve_workspace_path(ws_path, path, folder_name)
+        if not folder_path:
+            return jsonify({"success": False, "error": "Invalid path"}), 400
 
         try:
             if os.path.exists(folder_path):

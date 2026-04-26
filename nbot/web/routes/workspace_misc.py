@@ -24,7 +24,14 @@ def register_workspace_misc_routes(app, server):
             os.path.join(base_dir, "static", "files"),
         ]
 
-        if not any(file_path.startswith(os.path.abspath(d)) for d in allowed_dirs):
+        def is_allowed_path(candidate, allowed_dir):
+            allowed = os.path.abspath(allowed_dir)
+            try:
+                return os.path.commonpath([allowed, candidate]) == allowed
+            except ValueError:
+                return False
+
+        if not any(is_allowed_path(file_path, d) for d in allowed_dirs):
             return jsonify({"error": "Access denied"}), 403
 
         if not os.path.exists(file_path) or not os.path.isfile(file_path):

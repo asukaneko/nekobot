@@ -310,8 +310,8 @@ def init_default_tools(server):
         {
             "id": "exec_command",
             "name": "exec_command",
-            "description": "执行命令行命令。白名单内的命令（如ls, cat, echo, git, python等）会直接执行，不在白名单中的命令需要用户确认。危险命令会被自动阻止。",
-            "enabled": True,
+            "description": "执行命令行命令。默认禁用；必须显式设置 NBOT_ENABLE_EXEC_COMMAND=1 才允许使用。",
+            "enabled": False,
             "parameters": {
                 "type": "object",
                 "properties": {
