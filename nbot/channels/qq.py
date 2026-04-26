@@ -1,5 +1,10 @@
 from nbot.channels.base import BaseChannelAdapter, ChannelCapabilities, ChannelEnvelope
-from nbot.core.session_store import build_qq_session_id
+
+
+def _build_qq_session_id(**kwargs):
+    from nbot.core.session_store import build_qq_session_id
+
+    return build_qq_session_id(**kwargs)
 
 
 class QQChannelAdapter(BaseChannelAdapter):
@@ -18,7 +23,7 @@ class QQChannelAdapter(BaseChannelAdapter):
         user_id = kwargs.get("user_id") or ""
         group_id = metadata.get("group_id")
         group_user_id = metadata.get("group_user_id")
-        conversation_id = kwargs.get("conversation_id") or build_qq_session_id(
+        conversation_id = kwargs.get("conversation_id") or _build_qq_session_id(
             user_id=user_id or None,
             group_id=group_id,
             group_user_id=group_user_id,
@@ -48,7 +53,7 @@ class QQChannelAdapter(BaseChannelAdapter):
         group_user_id: str = "",
     ) -> dict:
         is_private = bool(user_id)
-        resolved_conversation_id = conversation_id or build_qq_session_id(
+        resolved_conversation_id = conversation_id or _build_qq_session_id(
             user_id=user_id or None,
             group_id=group_id or None,
             group_user_id=group_user_id or None,

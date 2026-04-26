@@ -57,6 +57,82 @@ def _normalize_session_record(session_id, session):
     return normalized
 
 
+def _default_channel_configs():
+    now = datetime.now().isoformat()
+    return [
+        {
+            "id": "web",
+            "name": "Web",
+            "type": "web",
+            "transport": "socketio",
+            "description": "内置 Web 控制台频道",
+            "enabled": True,
+            "builtin": True,
+            "config": {},
+            "capabilities": {
+                "supports_stream": True,
+                "supports_progress_updates": True,
+                "supports_file_send": True,
+                "supports_stop": True,
+            },
+            "created_at": now,
+            "updated_at": now,
+        },
+        {
+            "id": "qq",
+            "name": "QQ",
+            "type": "qq",
+            "transport": "napcat",
+            "description": "通过 NapCat/ncatbot 接入的内置 QQ 频道",
+            "enabled": True,
+            "builtin": True,
+            "config": {},
+            "capabilities": {
+                "supports_stream": False,
+                "supports_progress_updates": False,
+                "supports_file_send": True,
+                "supports_stop": False,
+            },
+            "created_at": now,
+            "updated_at": now,
+        },
+    ]
+
+
+def _merge_channel_configs(channels):
+    merged = {channel["id"]: channel for channel in _default_channel_configs()}
+    for channel in channels or []:
+        if not isinstance(channel, dict):
+            continue
+        channel_id = str(channel.get("id") or "").strip()
+        if not channel_id:
+            continue
+        base = merged.get(channel_id, {})
+        config = channel.get("config")
+        capabilities = channel.get("capabilities")
+        is_builtin = bool(base.get("builtin")) or bool(channel.get("builtin"))
+        merged[channel_id] = {
+            **base,
+            **channel,
+            "id": channel_id,
+            "builtin": is_builtin,
+            "config": config if isinstance(config, dict) else base.get("config", {}),
+            "capabilities": capabilities
+            if isinstance(capabilities, dict)
+            else base.get("capabilities", {}),
+        }
+    return list(merged.values())
+
+
+def _sync_channel_registry(server):
+    try:
+        from nbot.channels.registry import sync_configured_channels
+
+        sync_configured_channels(getattr(server, "channels_config", []))
+    except Exception as e:
+        _log.warning(f"Failed to sync configured channels: {e}")
+
+
 def init_default_data(server):
     """初始化默认数据"""
     # 默认工作流
@@ -149,6 +225,8 @@ def init_default_data(server):
             "web": True,
         },
     }
+    server.channels_config = _merge_channel_configs([])
+    _sync_channel_registry(server)
 
 
 def init_default_skills(server):
@@ -310,7 +388,7 @@ def init_default_tools(server):
         {
             "id": "exec_command",
             "name": "exec_command",
-            "description": "执行命令行命令。默认禁用；必须显式设置 NBOT_ENABLE_EXEC_COMMAND=1 才允许使用。",
+            "description": "执行命令行命令。白名单命令直接执行，非白名单命令需用户确认。可通过 Web 管理界面启用或禁用。",
             "enabled": False,
             "parameters": {
                 "type": "object",
@@ -496,6 +574,15 @@ def load_all_data(server):
             # 初始化默认 tools 配置
             server._init_default_tools()
 
+        channels_file = os.path.join(server.data_dir, "channels.json")
+        if os.path.exists(channels_file):
+            with open(channels_file, "r", encoding="utf-8") as f:
+                server.channels_config = _merge_channel_configs(json.load(f))
+        else:
+            server.channels_config = _merge_channel_configs([])
+            server._save_data("channels")
+        _sync_channel_registry(server)
+
         # 加载自定义人格预设
         custom_presets_file = os.path.join(
             server.data_dir, "custom_personality_presets.json"
@@ -598,6 +685,12 @@ def save_data(server, data_type: str):
                 os.path.join(server.data_dir, "tools.json"), "w", encoding="utf-8"
             ) as f:
                 json.dump(server.tools_config, f, ensure_ascii=False, indent=2)
+        elif data_type == "channels":
+            with open(
+                os.path.join(server.data_dir, "channels.json"), "w", encoding="utf-8"
+            ) as f:
+                json.dump(server.channels_config, f, ensure_ascii=False, indent=2)
+            _sync_channel_registry(server)
         elif data_type == "logs":
             with open(
                 os.path.join(server.data_dir, "system_logs.json"),

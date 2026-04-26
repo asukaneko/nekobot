@@ -9971,6 +9971,70 @@
                         </div>
                     </div>
 
+                    <!-- Channels -->
+                    <div v-if="currentPage === 'channels'" class="fade-in">
+                        <div class="card">
+                            <div class="card-header">
+                                <span class="card-title"><i class="fas fa-plug"></i> 频道管理</span>
+                                <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                                    <button class="btn btn-secondary" @click="applyChannelPresetById('telegram')" :disabled="isLoading">
+                                        <i class="fab fa-telegram"></i> Telegram 预设
+                                    </button>
+                                    <button class="btn btn-primary" @click="openChannelModal()" :disabled="isLoading">
+                                        <i class="fas fa-plus"></i> 新增频道
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="card-body">
+                                <div v-if="channels.length === 0" class="empty-state">
+                                    <i class="fas fa-plug" style="font-size: 48px; color: var(--text-secondary); margin-bottom: 16px;"></i>
+                                    <p>还没有配置频道</p>
+                                </div>
+                                <div v-else class="grid-2">
+                                    <div v-for="channel in channels" :key="channel.id" class="card" style="margin: 0;">
+                                        <div class="card-body">
+                                            <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 12px;">
+                                                <div>
+                                                    <h4 style="margin: 0 0 6px 0;">{{ channel.name }}</h4>
+                                                    <div style="display: flex; gap: 6px; flex-wrap: wrap;">
+                                                        <span class="badge" :class="channel.enabled ? 'badge-success' : 'badge-secondary'">
+                                                            {{ channel.enabled ? '已启用' : '已禁用' }}
+                                                        </span>
+                                                        <span v-if="channel.builtin" class="badge badge-info">内置</span>
+                                                        <span v-if="channel.registered" class="badge badge-success">已注册适配器</span>
+                                                        <span v-else class="badge badge-warning">仅配置</span>
+                                                    </div>
+                                                </div>
+                                                <div style="display: flex; gap: 8px;">
+                                                    <button class="btn btn-secondary" @click="openChannelModal(channel)" :disabled="isLoading">
+                                                        <i class="fas fa-edit"></i>
+                                                    </button>
+                                                    <button class="btn btn-secondary" @click="toggleChannel(channel)" :disabled="isLoading">
+                                                        <i :class="channel.enabled ? 'fas fa-pause' : 'fas fa-play'"></i>
+                                                    </button>
+                                                    <button v-if="channel.type === 'telegram'" class="btn btn-secondary" @click="setTelegramWebhook(channel)" :disabled="isLoading">
+                                                        <i class="fas fa-link"></i>
+                                                    </button>
+                                                    <button v-if="!channel.builtin" class="btn btn-danger" @click="deleteChannel(channel)" :disabled="isLoading">
+                                                        <i class="fas fa-trash"></i>
+                                                    </button>
+                                                </div>
+                                            </div>
+                                            <p style="margin: 12px 0; color: var(--text-secondary); font-size: 14px;">{{ channel.description || '暂无描述' }}</p>
+                                            <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; font-size: 12px; color: var(--text-secondary);">
+                                                <div><strong>ID:</strong> {{ channel.id }}</div>
+                                                <div><strong>类型:</strong> {{ channel.type }}</div>
+                                                <div><strong>传输方式:</strong> {{ channel.transport || '-' }}</div>
+                                                <div><strong>更新时间:</strong> {{ formatTimeAgo(channel.updated_at) }}</div>
+                                                <div v-if="channel.webhook_path" style="grid-column: 1 / -1;"><strong>Webhook:</strong> <code>{{ channel.webhook_path }}</code></div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
                     <!-- Debug Console -->
                     <div v-if="currentPage === 'debug'" class="fade-in">
                         <div class="grid-2">
@@ -11334,6 +11398,73 @@
             </div>
         </div>
 
+        <!-- Channel Edit Modal -->
+        <div v-if="showChannelModal" class="modal-overlay" @click.self="showChannelModal = false">
+            <div class="modal" style="max-width: 640px; max-height: 90vh; overflow-y: auto;">
+                <div class="modal-header">
+                    <span class="modal-title">{{ editingChannel ? '编辑频道' : '新增频道' }}</span>
+                    <button class="modal-close" @click="showChannelModal = false">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <div v-if="!editingChannel" class="form-group">
+                        <label class="form-label">预设模板</label>
+                        <select v-model="selectedChannelPreset" class="form-select" @change="applyChannelPresetById(selectedChannelPreset)">
+                            <option value="">不使用预设</option>
+                            <option v-for="preset in channelPresets" :key="preset.id" :value="preset.id">{{ preset.name }}</option>
+                        </select>
+                        <div class="form-hint">选择 Telegram 预设会自动填充 webhook 类型、环境变量名和能力配置。</div>
+                    </div>
+                    <div class="grid-2">
+                        <div class="form-group">
+                            <label class="form-label">频道 ID <span class="required">*</span></label>
+                            <input v-model="channelForm.id" type="text" class="form-input" placeholder="telegram" :disabled="!!editingChannel">
+                            <div class="form-hint">2-64 个字符，只允许字母、数字、下划线和中划线。</div>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">名称 <span class="required">*</span></label>
+                            <input v-model="channelForm.name" type="text" class="form-input" placeholder="Telegram">
+                        </div>
+                    </div>
+                    <div class="grid-2">
+                        <div class="form-group">
+                            <label class="form-label">类型</label>
+                            <input v-model="channelForm.type" type="text" class="form-input" placeholder="telegram">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">传输方式</label>
+                            <input v-model="channelForm.transport" type="text" class="form-input" placeholder="webhook / polling / websocket">
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">描述</label>
+                        <textarea v-model="channelForm.description" class="form-textarea" rows="2" placeholder="说明这个频道连接到哪里"></textarea>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">
+                            <input v-model="channelForm.enabled" type="checkbox">
+                            启用此频道
+                        </label>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">配置 JSON</label>
+                        <textarea v-model="channelForm.configText" class="form-textarea" rows="6" placeholder='{"bot_token_env": "TELEGRAM_BOT_TOKEN"}'></textarea>
+                        <div class="form-hint">建议只保存环境变量名等引用。如果 data 目录可能被提交，不要直接粘贴密钥。</div>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">能力 JSON</label>
+                        <textarea v-model="channelForm.capabilitiesText" class="form-textarea" rows="4" placeholder='{"supports_stream": false, "supports_file_send": true}'></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary" @click="showChannelModal = false">取消</button>
+                    <button class="btn btn-primary" @click="saveChannel" :disabled="isLoading || !channelForm.id || !channelForm.name">
+                        <span v-if="isLoading"><div class="spinner" style="display: inline-block; margin-right: 8px;"></div>保存中...</span>
+                        <span v-else>保存</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+
         <!-- Tool Edit Modal -->
         <div v-if="showToolModal" class="modal-overlay" @click.self="showToolModal = false">
             <div class="modal" style="max-width: 600px; max-height: 90vh; overflow-y: auto;">
@@ -11435,6 +11566,39 @@
                     <button class="btn btn-primary" @click="saveTool" :disabled="isLoading || !toolForm.name || !toolForm.description">
                         <span v-if="isLoading"><div class="spinner" style="display: inline-block; margin-right: 8px;"></div>保存中...</span>
                         <span v-else>保存</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- exec_command 确认弹窗 -->
+        <div v-if="showExecConfirmModal" class="modal-overlay" @click.self="showExecConfirmModal = false">
+            <div class="modal" style="max-width: 520px;">
+                <div class="modal-header">
+                    <span class="modal-title">
+                        <i class="fa fa-terminal" style="margin-right: 8px; color: var(--warning);"></i>
+                        命令执行确认
+                    </span>
+                    <button class="modal-close" @click="rejectExecCommand">&times;</button>
+                </div>
+                <div class="modal-body" style="padding: 20px;">
+                    <div style="background: var(--bg-secondary); border-radius: 8px; padding: 16px; margin-bottom: 16px;">
+                        <div style="font-size: 13px; color: var(--text-secondary); margin-bottom: 8px;">AI 请求执行以下命令，该命令不在安全白名单中：</div>
+                        <pre style="background: var(--bg-primary); color: var(--text-primary); padding: 12px; border-radius: 6px; font-family: 'Consolas', 'Monaco', monospace; font-size: 14px; margin: 0; overflow-x: auto; white-space: pre-wrap; word-break: break-all;">{{ execConfirmData.command }}</pre>
+                    </div>
+                    <div v-if="execConfirmData.message" style="font-size: 13px; color: var(--text-secondary); margin-bottom: 8px; padding: 10px; background: rgba(255, 193, 7, 0.08); border-radius: 6px; border-left: 3px solid var(--warning);">
+                        {{ execConfirmData.message }}
+                    </div>
+                    <div style="font-size: 12px; color: var(--text-muted);">
+                        请求ID: {{ execConfirmData.requestId ? execConfirmData.requestId.substring(0, 8) : '' }}
+                    </div>
+                </div>
+                <div class="modal-footer" style="display: flex; gap: 12px; justify-content: flex-end;">
+                    <button class="btn btn-secondary" @click="rejectExecCommand" style="min-width: 80px;">
+                        <i class="fa fa-times" style="margin-right: 4px;"></i> 拒绝
+                    </button>
+                    <button class="btn btn-primary" @click="confirmExecCommand" style="min-width: 80px; background: var(--success); border-color: var(--success);">
+                        <i class="fa fa-check" style="margin-right: 4px;"></i> 确认执行
                     </button>
                 </div>
             </div>
@@ -11802,6 +11966,7 @@
                             { id: 'knowledge', label: '知识库', icon: 'fas fa-book' },
                             { id: 'skills', label: 'Skills 配置', icon: 'fas fa-magic' },
                             { id: 'tools', label: 'Tools 配置', icon: 'fas fa-toolbox' }
+                            , { id: 'channels', label: '频道管理', icon: 'fas fa-plug' }
                         ],
                         system: [
                             { id: 'ai-config', label: 'AI 配置', icon: 'fas fa-robot' },
@@ -12170,6 +12335,13 @@
                     // Tools 配置
                     tools: [],
                     showToolModal: false,
+                    showExecConfirmModal: false,
+                    execConfirmData: {
+                        requestId: '',
+                        command: '',
+                        message: '',
+                        sessionId: ''
+                    },
                     editingTool: null,
                     toolForm: {
                         id: null,
@@ -12177,6 +12349,23 @@
                         description: '',
                         enabled: true,
                         parameters: {}
+                    },
+
+                    // 频道管理
+                    channels: [],
+                    channelPresets: [],
+                    selectedChannelPreset: '',
+                    showChannelModal: false,
+                    editingChannel: null,
+                    channelForm: {
+                        id: '',
+                        name: '',
+                        type: 'custom',
+                        transport: '',
+                        description: '',
+                        enabled: true,
+                        configText: '{}',
+                        capabilitiesText: '{}'
                     },
 
                     // Tokens
@@ -13087,6 +13276,9 @@
                             break;
                         case 'tools':
                             await this.loadTools();
+                            break;
+                        case 'channels':
+                            await this.loadChannels();
                             break;
                     }
                 },
@@ -14271,6 +14463,185 @@ def main(params):
                     } finally {
                         this.isLoading = false;
                     }
+                },
+
+                async loadChannels() {
+                    try {
+                        const res = await api.get('/api/channels');
+                        this.channels = res.data.channels || [];
+                        const presetsRes = await api.get('/api/channels/presets');
+                        this.channelPresets = presetsRes.data.presets || [];
+                    } catch (e) {
+                        console.error('加载频道失败:', e);
+                        this.showToast('加载频道失败', 'error');
+                    }
+                },
+
+                openChannelModal(channel = null) {
+                    this.editingChannel = channel;
+                    this.selectedChannelPreset = '';
+                    if (channel) {
+                        this.channelForm = {
+                            id: channel.id,
+                            name: channel.name || '',
+                            type: channel.type || 'custom',
+                            transport: channel.transport || '',
+                            description: channel.description || '',
+                            enabled: channel.enabled !== false,
+                            configText: JSON.stringify(channel.config || {}, null, 2),
+                            capabilitiesText: JSON.stringify(channel.capabilities || {}, null, 2)
+                        };
+                    } else {
+                        this.channelForm = {
+                            id: '',
+                            name: '',
+                            type: 'custom',
+                            transport: '',
+                            description: '',
+                            enabled: true,
+                            configText: '{}',
+                            capabilitiesText: '{}'
+                        };
+                    }
+                    this.showChannelModal = true;
+                },
+
+                applyChannelPresetById(presetId) {
+                    if (!presetId) return;
+                    const fallbackTelegramPreset = {
+                        id: 'telegram',
+                        name: 'Telegram',
+                        type: 'telegram',
+                        transport: 'webhook',
+                        description: 'Telegram Bot Webhook 频道',
+                        config: {
+                            bot_token_env: 'TELEGRAM_BOT_TOKEN',
+                            secret_token_env: 'TELEGRAM_WEBHOOK_SECRET',
+                            webhook_url: ''
+                        },
+                        capabilities: {
+                            supports_stream: false,
+                            supports_progress_updates: false,
+                            supports_file_send: false,
+                            supports_stop: false
+                        }
+                    };
+                    const preset = this.channelPresets.find(item => item.id === presetId)
+                        || (presetId === 'telegram' ? fallbackTelegramPreset : null);
+                    if (!preset) return;
+
+                    this.editingChannel = null;
+                    this.selectedChannelPreset = preset.id;
+                    this.channelForm = {
+                        id: preset.id,
+                        name: preset.name || preset.id,
+                        type: preset.type || 'custom',
+                        transport: preset.transport || '',
+                        description: preset.description || '',
+                        enabled: preset.enabled !== false,
+                        configText: JSON.stringify(preset.config || {}, null, 2),
+                        capabilitiesText: JSON.stringify(preset.capabilities || {}, null, 2)
+                    };
+                    this.showChannelModal = true;
+                },
+
+                buildChannelPayload() {
+                    let config = {};
+                    let capabilities = {};
+                    try {
+                        config = this.channelForm.configText ? JSON.parse(this.channelForm.configText) : {};
+                    } catch (e) {
+                        throw new Error('配置 JSON 格式不正确');
+                    }
+                    try {
+                        capabilities = this.channelForm.capabilitiesText ? JSON.parse(this.channelForm.capabilitiesText) : {};
+                    } catch (e) {
+                        throw new Error('能力 JSON 格式不正确');
+                    }
+                    return {
+                        id: this.channelForm.id,
+                        name: this.channelForm.name,
+                        type: this.channelForm.type,
+                        transport: this.channelForm.transport,
+                        description: this.channelForm.description,
+                        enabled: this.channelForm.enabled,
+                        config,
+                        capabilities
+                    };
+                },
+
+                async saveChannel() {
+                    this.isLoading = true;
+                    try {
+                        const payload = this.buildChannelPayload();
+                        if (this.editingChannel) {
+                            await api.put(`/api/channels/${this.editingChannel.id}`, payload);
+                        } else {
+                            await api.post('/api/channels', payload);
+                        }
+                        this.showChannelModal = false;
+                        await this.loadChannels();
+                        this.showToast('频道已保存', 'success');
+                    } catch (e) {
+                        this.showToast(e.response?.data?.error || e.message || '保存频道失败', 'error');
+                    } finally {
+                        this.isLoading = false;
+                    }
+                },
+
+                async toggleChannel(channel) {
+                    this.isLoading = true;
+                    try {
+                        await api.post(`/api/channels/${channel.id}/toggle`);
+                        await this.loadChannels();
+                        this.showToast('频道已更新', 'success');
+                    } catch (e) {
+                        this.showToast(e.response?.data?.error || '切换频道状态失败', 'error');
+                    } finally {
+                        this.isLoading = false;
+                    }
+                },
+
+                async setTelegramWebhook(channel) {
+                    const webhookUrl = channel.config?.webhook_url;
+                    if (!webhookUrl) {
+                        this.showToast('请先在频道配置 JSON 中填写 webhook_url', 'error');
+                        return;
+                    }
+                    this.isLoading = true;
+                    try {
+                        await api.post(`/api/channels/telegram/${channel.id}/set-webhook`, {
+                            webhook_url: webhookUrl
+                        });
+                        this.showToast('Telegram Webhook 已设置', 'success');
+                    } catch (e) {
+                        this.showToast(e.response?.data?.error || '设置 Telegram Webhook 失败', 'error');
+                    } finally {
+                        this.isLoading = false;
+                    }
+                },
+
+                async deleteChannel(channel) {
+                    this.showConfirm({
+                        title: '删除频道',
+                        message: `确定删除频道「${channel.name}」吗？`,
+                        confirmText: '删除',
+                        icon: 'fa-trash',
+                        iconColor: 'var(--error)',
+                        danger: true,
+                        action: async () => {
+                            this.isLoading = true;
+                            try {
+                                await api.delete(`/api/channels/${channel.id}`);
+                                await this.loadChannels();
+                                this.showToast('频道已删除', 'success');
+                            } catch (e) {
+                                this.showToast(e.response?.data?.error || '删除频道失败', 'error');
+                            } finally {
+                                this.isLoading = false;
+                            }
+                        }
+                    });
                 },
 
                 async loadMemory() {
@@ -19324,8 +19695,52 @@ def main(params):
                             console.log('[DEBUG] Session mismatch or no current session');
                         }
                     });
+
+                    // 监听 exec_command 确认请求事件
+                    socket.on('exec_confirm_request', (data) => {
+                        console.log('[DEBUG] Exec confirm request received:', data);
+                        if (this.currentSession && data.session_id === this.currentSession.id) {
+                            this.execConfirmData = {
+                                requestId: data.request_id || '',
+                                command: data.command || '',
+                                message: data.message || '',
+                                sessionId: data.session_id || ''
+                            };
+                            this.showExecConfirmModal = true;
+                            this.$forceUpdate();
+                            console.log('[DEBUG] Showing exec confirm modal');
+                        }
+                    });
                 },
                 
+                confirmExecCommand() {
+                    console.log('[DEBUG] User confirmed exec command:', this.execConfirmData.requestId);
+                    if (this.socket && this.socket.connected) {
+                        this.socket.emit('confirm_exec', {
+                            request_id: this.execConfirmData.requestId,
+                            approved: true,
+                            session_id: this.execConfirmData.sessionId
+                        });
+                    }
+                    this.showExecConfirmModal = false;
+                    this.isLoading = true;
+                    this.loadingSessionId = this.execConfirmData.sessionId;
+                    this.showToast('命令已确认，正在执行...', 'info');
+                },
+
+                rejectExecCommand() {
+                    console.log('[DEBUG] User rejected exec command:', this.execConfirmData.requestId);
+                    if (this.socket && this.socket.connected) {
+                        this.socket.emit('confirm_exec', {
+                            request_id: this.execConfirmData.requestId,
+                            approved: false,
+                            session_id: this.execConfirmData.sessionId
+                        });
+                    }
+                    this.showExecConfirmModal = false;
+                    this.showToast('已拒绝执行命令', 'warning');
+                },
+
                 scrollToBottom(force = false, instant = true) {
                     const container = this.$refs.messagesContainer;
                     if (container) {

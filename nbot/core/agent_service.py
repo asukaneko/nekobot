@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Sequence
 
 from nbot.core.chat_models import ChatRequest, ChatResponse
+from nbot.channels.registry import get_channel_handler
 
 if TYPE_CHECKING:
     from nbot.channels.base import BaseChannelAdapter
@@ -83,7 +84,9 @@ class AgentService:
         adapter: Optional["BaseChannelAdapter"] = None,
         **kwargs,
     ) -> ChatResponse:
-        handler = self._handlers.get(chat_request.channel)
+        handler = self._handlers.get(chat_request.channel) or get_channel_handler(
+            chat_request.channel
+        )
         if not handler:
             raise ValueError(f"No agent handler registered for channel: {chat_request.channel}")
 

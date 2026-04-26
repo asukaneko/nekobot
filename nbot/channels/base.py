@@ -1,9 +1,10 @@
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 import uuid
 
-from nbot.core.chat_models import ChatRequest, ChatResponse
+if TYPE_CHECKING:
+    from nbot.core.chat_models import ChatRequest, ChatResponse
 
 
 @dataclass
@@ -43,7 +44,9 @@ class BaseChannelAdapter:
         attachments: Optional[List[Dict[str, Any]]] = None,
         parent_message_id: Optional[str] = None,
         metadata: Optional[Dict[str, Any]] = None,
-    ) -> ChatRequest:
+    ) -> "ChatRequest":
+        from nbot.core.chat_models import ChatRequest
+
         normalized_content = self.normalize_inbound_message(content)
         normalized_attachments = self.normalize_attachments(attachments)
         envelope = self.build_envelope(
@@ -143,7 +146,7 @@ class BaseChannelAdapter:
 
     def build_assistant_message(
         self,
-        chat_response: ChatResponse,
+        chat_response: "ChatResponse",
         *,
         conversation_id: str,
         sender: str = "AI",

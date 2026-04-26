@@ -3,6 +3,7 @@ from nbot.web.routes.ai_config import register_ai_config_routes
 from nbot.web.routes.ai_models import register_ai_model_routes
 from nbot.web.routes.api_keys import register_api_key_routes
 from nbot.web.routes.auth import register_auth_routes
+from nbot.web.routes.channels import register_channel_routes
 from nbot.web.routes.config_legacy import register_config_legacy_routes
 from nbot.web.routes.files import register_file_routes
 from nbot.web.routes.heartbeat import register_heartbeat_routes
@@ -27,6 +28,7 @@ __all__ = [
     "register_ai_model_routes",
     "register_api_key_routes",
     "register_auth_routes",
+    "register_channel_routes",
     "register_config_legacy_routes",
     "register_file_routes",
     "register_heartbeat_routes",

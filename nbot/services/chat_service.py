@@ -24,7 +24,8 @@ from nbot.core import (
     dump_json,
     run_tool_loop_session,
 )
-from nbot.channels import QQChannelAdapter
+from nbot.channels.qq import QQChannelAdapter
+from nbot.channels.registry import get_channel_adapter, register_channel_handler
 from nbot.core.message import create_message
 
 # 工作区管理
@@ -37,11 +38,20 @@ except ImportError:
 
 # 工具调用支持
 try:
-    from nbot.services.tools import TOOL_DEFINITIONS, execute_tool
+    from nbot.services.tools import (
+        TOOL_DEFINITIONS, execute_tool,
+        get_pending_by_session, execute_pending_command, reject_pending_command,
+        _CONFIRM_KEYWORDS, _REJECT_KEYWORDS,
+    )
     TOOLS_AVAILABLE = True
 except ImportError:
     TOOL_DEFINITIONS = []
     execute_tool = None
+    get_pending_by_session = None
+    execute_pending_command = None
+    reject_pending_command = None
+    _CONFIRM_KEYWORDS = set()
+    _REJECT_KEYWORDS = set()
     TOOLS_AVAILABLE = False
 
 # 工具执行线程池（避免阻塞主线程）
@@ -280,7 +290,8 @@ def _get_ai_response_with_tools_qq(messages: list, tools: list, session_id: str 
                         if tool_result.get('require_confirmation'):
                             # 返回确认请求，中断工具调用流程
                             confirmation_msg = tool_result.get('message', f"AI 请求执行命令，需要您的确认。")
-                            return f"{confirmation_msg}\n\n请回复「确认执行」或「同意」来执行该命令。"
+                            request_id = tool_result.get('request_id', '')
+                            return f"{confirmation_msg}\n\n请回复「确认」来执行，或回复「取消」来拒绝。\n[请求ID: {request_id[:8] if request_id else 'N/A'}]"
                         
                         result_content = json.dumps(tool_result, ensure_ascii=False)
                     except TimeoutError:
@@ -376,11 +387,13 @@ def _get_ai_response_with_tools_qq_unified(
             tool_result = future.result(timeout=60)
             if tool_result.get("require_confirmation"):
                 confirmation_msg = tool_result.get(
-                    "message", "AI 璇锋眰鎵ц鍛戒护锛岄渶瑕佹偍鐨勭‘璁ゃ€?"
+                    "message", "AI 请求执行命令，需要您的确认。"
                 )
+                request_id = tool_result.get('request_id', '')
                 raise ToolLoopExit(
-                    f"{confirmation_msg}\n\n璇峰洖澶嶃€岀‘璁ゆ墽琛屻€嶆垨銆屽悓鎰忋€嶆潵鎵ц璇ュ懡浠ゃ€?"
+                    f"{confirmation_msg}\n\n请回复「确认」来执行，或回复「取消」来拒绝。\n[请求ID: {request_id[:8] if request_id else 'N/A'}]"
                 )
+
             print(
                 f"[QQ Tools] 宸ュ叿缁撴灉: {json.dumps(tool_result, ensure_ascii=False)[:200]}..."
             )
@@ -520,7 +533,7 @@ def judge_reply(content: str) -> float:
 
 def chat(content: str = "", user_id=None, group_id=None, group_user_id=None,
          image: bool = False, url=None, video=None):
-    adapter = QQChannelAdapter()
+    adapter = get_channel_adapter("qq") or QQChannelAdapter()
     chat_request = adapter.build_chat_request(
         content=content,
         user_id=str(user_id) if user_id else None,
@@ -540,15 +553,15 @@ def chat_from_request(
     chat_request: ChatRequest, adapter: QQChannelAdapter = None
 ) -> ChatResponse:
     agent_service = AgentService()
-    agent_service.register_handler("qq", _run_qq_chat_request)
-    adapter = adapter or QQChannelAdapter()
+    register_channel_handler("qq", _run_qq_chat_request)
+    adapter = adapter or get_channel_adapter("qq") or QQChannelAdapter()
     return agent_service.process(chat_request, adapter=adapter)
 
 
 def _run_qq_chat_request(
     chat_request: ChatRequest, adapter: QQChannelAdapter = None
 ) -> ChatResponse:
-    adapter = adapter or QQChannelAdapter()
+    adapter = adapter or get_channel_adapter("qq") or QQChannelAdapter()
     runtime_ai = refresh_runtime_ai_config()
     channel_capabilities = adapter.get_capabilities()
     content = chat_request.content
@@ -578,6 +591,43 @@ def _run_qq_chat_request(
 
     messages = copy.deepcopy(history_messages)
 
+    # === 确认/拒绝待执行命令检测（QQ 通道） ===
+    _confirmation_handled = False
+    if content and not image and not video and TOOLS_AVAILABLE and get_pending_by_session:
+        try:
+            session_id_check = get_qq_session_id(user_id, group_id, group_user_id)
+            content_stripped = content.strip().lower()
+            is_confirm = any(kw == content_stripped or (len(content_stripped) <= 4 and kw in content_stripped) for kw in _CONFIRM_KEYWORDS)
+            is_reject = any(kw == content_stripped or (len(content_stripped) <= 4 and kw in content_stripped) for kw in _REJECT_KEYWORDS)
+
+            if is_confirm and not is_reject:
+                request_id = get_pending_by_session(session_id_check)
+                if request_id:
+                    print(f'[QQ Confirm] 用户确认执行待处理命令: session={session_id_check}, request_id={request_id[:8]}')
+                    exec_result = execute_pending_command(request_id)
+                    if exec_result.get('executed'):
+                        cmd = exec_result.get('command', '')
+                        stdout = exec_result.get('stdout', '')
+                        stderr = exec_result.get('stderr', '')
+                        result_msg = f"[系统] 用户已确认执行命令 `{cmd}`。\n\n执行结果:\n{stdout}"
+                        if stderr:
+                            result_msg += f"\n\n错误输出:\n{stderr}"
+                        messages.append({"role": "user", "content": result_msg})
+                        _confirmation_handled = True
+                    else:
+                        error_msg = exec_result.get('error', '命令执行失败')
+                        messages.append({"role": "user", "content": f"[系统] 执行命令失败: {error_msg}"})
+                        _confirmation_handled = True
+            elif is_reject:
+                request_id = get_pending_by_session(session_id_check)
+                if request_id:
+                    print(f'[QQ Reject] 用户拒绝执行待处理命令: session={session_id_check}')
+                    reject_result = reject_pending_command(request_id)
+                    cmd = reject_result.get('command', '')
+                    messages.append({"role": "user", "content": f"[系统] 用户已拒绝执行命令 `{cmd}`。"})
+                    _confirmation_handled = True
+        except Exception as e:
+            print(f"[QQ Confirm] failed to handle pending command confirmation: {e}")
     if group_user_id:
         pre_text = f"用户{group_user_id}说："
     else:
@@ -919,7 +969,7 @@ def _record_message(role, content, user_id=None, group_id=None, group_user_id=No
         record_content = content
 
     qq_store = _get_qq_store()
-    qq_adapter = QQChannelAdapter()
+    qq_adapter = get_channel_adapter("qq") or QQChannelAdapter()
 
     def _sync_manager_message(target_id, **payload_kwargs):
         base_message = {

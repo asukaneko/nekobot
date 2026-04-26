@@ -40,6 +40,7 @@ from nbot.web.routes import (
     register_ai_model_routes,
     register_api_key_routes,
     register_auth_routes,
+    register_channel_routes,
     register_config_legacy_routes,
     register_file_routes,
     register_heartbeat_routes,
@@ -67,6 +68,10 @@ def _resolve_web_adapter(adapter):
     if adapter:
         return adapter
     try:
+        if get_channel_adapter:
+            web_adapter = get_channel_adapter("web")
+            if web_adapter:
+                return web_adapter
         return WebChannelAdapter() if WebChannelAdapter else None
     except NameError:
         return None
@@ -263,7 +268,8 @@ except ImportError:
 # 导入统一消息模块
 try:
     from nbot.core import AgentService, ChatResponse, WebSessionStore, message_manager, create_message
-    from nbot.channels import WebChannelAdapter
+    from nbot.channels.registry import get_channel_adapter, register_channel_handler
+    from nbot.channels.web import WebChannelAdapter
 
     MESSAGE_MODULE_AVAILABLE = True
 except ImportError:
@@ -271,6 +277,8 @@ except ImportError:
     WebSessionStore = None
     AgentService = None
     WebChannelAdapter = None
+    get_channel_adapter = None
+    register_channel_handler = None
     message_manager = None
     create_message = None
     _log.warning("Message module not available")
@@ -388,13 +396,15 @@ class WebChatServer:
             self.sessions, save_callback=lambda: self._save_data("sessions")
         )
         self.agent_service = AgentService()
-        self.agent_service.register_handler(
-            "web",
+        web_handler = (
             lambda chat_request, adapter=None, server=self: trigger_ai_response_for_request(
                 server, chat_request, adapter=adapter
-            ),
+            )
         )
-        self.web_channel_adapter = WebChannelAdapter() if WebChannelAdapter else None
+        self.agent_service.register_handler("web", web_handler)
+        if register_channel_handler:
+            register_channel_handler("web", web_handler)
+        self.web_channel_adapter = _resolve_web_adapter(None)
 
         # 初始化进度卡片管理器
         if PROGRESS_CARD_AVAILABLE and progress_card_manager:
@@ -431,6 +441,7 @@ class WebChatServer:
 
         # Tools 配置
         self.tools_config: List[Dict] = []
+        self.channels_config: List[Dict] = []
 
         # Heartbeat 配置
         self.heartbeat_config: Dict = {
@@ -1952,6 +1963,7 @@ class WebChatServer:
         register_ai_config_routes(self.app, self)
         register_ai_model_routes(self.app, self)
         register_auth_routes(self.app, self)
+        register_channel_routes(self.app, self)
         register_heartbeat_routes(self.app, self)
         register_knowledge_routes(self.app, self)
         register_memory_routes(self.app, self)
@@ -2014,6 +2026,8 @@ class WebChatServer:
                 return None
 
             if path in public_api_paths:
+                return None
+            if path.startswith("/api/channels/telegram/") and path.endswith("/webhook"):
                 return None
 
             token = self._extract_request_token()

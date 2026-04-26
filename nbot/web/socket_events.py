@@ -5,7 +5,8 @@ import logging
 from flask import request
 from flask_socketio import emit, join_room, leave_room
 
-from nbot.channels import WebChannelAdapter
+from nbot.channels.registry import get_channel_adapter
+from nbot.channels.web import WebChannelAdapter
 from nbot.core import WebSessionStore
 from nbot.web.message_adapter import WebMessageAdapter
 from nbot.web.sessions_db import get_session as get_session_from_db
@@ -17,7 +18,7 @@ def register_socket_events(server):
     session_store = WebSessionStore(
         server.sessions, save_callback=lambda: server._save_data("sessions")
     )
-    adapter = getattr(server, "web_channel_adapter", None) or WebChannelAdapter()
+    adapter = getattr(server, "web_channel_adapter", None) or get_channel_adapter("web") or WebChannelAdapter()
 
     @server.socketio.on("connect")
     def handle_connect(auth=None):
@@ -247,3 +248,56 @@ def register_socket_events(server):
             {"sender": server.web_users.get(request.sid)},
             room=session_id,
         )
+
+    @server.socketio.on("confirm_exec")
+    def handle_confirm_exec(data):
+        """处理用户对 exec_command 的确认/拒绝"""
+        try:
+            request_id = data.get("request_id", "")
+            approved = data.get("approved", False)
+            session_id = data.get("session_id", "")
+
+            if not request_id:
+                _log.warning("[confirm_exec] 缺少 request_id")
+                return
+
+            _log.info(f"[confirm_exec] request_id={request_id[:8]}, approved={approved}, session={session_id}")
+
+            from nbot.services.tools import execute_pending_command, reject_pending_command
+
+            if approved:
+                exec_result = execute_pending_command(request_id)
+                if exec_result.get("executed"):
+                    cmd = exec_result.get("command", "")
+                    stdout = exec_result.get("stdout", "")
+                    stderr = exec_result.get("stderr", "")
+                    result_content = f"[系统] 用户已确认执行命令 `{cmd}`。\n\n执行结果:\n{stdout}"
+                    if stderr:
+                        result_content += f"\n\n错误输出:\n{stderr}"
+                else:
+                    error_msg = exec_result.get("error", "命令执行失败")
+                    result_content = f"[系统] 执行命令失败: {error_msg}"
+            else:
+                reject_result = reject_pending_command(request_id)
+                cmd = reject_result.get("command", "")
+                result_content = f"[系统] 用户已拒绝执行命令 `{cmd}`。"
+
+            # 追加到会话消息
+            adapter_sock = getattr(server, "web_channel_adapter", None) or get_channel_adapter("web") or WebChannelAdapter()
+            sys_message = adapter_sock.build_message(
+                role="user",
+                content=result_content,
+                sender="system",
+                conversation_id=session_id,
+            )
+            server.session_store.append_message(session_id, sys_message)
+            server.socketio.emit("new_message", sys_message, room=session_id)
+
+            # 触发 AI 继续处理
+            server._trigger_ai_response(
+                session_id,
+                "请根据上述执行结果继续",
+                "system",
+            )
+        except Exception as e:
+            _log.error(f"[confirm_exec] 处理出错: {e}", exc_info=True)

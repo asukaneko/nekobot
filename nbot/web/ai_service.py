@@ -8,7 +8,8 @@ import time
 import uuid
 from datetime import datetime
 from typing import Dict, List
-from nbot.channels import WebChannelAdapter
+from nbot.channels.registry import get_channel_adapter
+from nbot.channels.web import WebChannelAdapter
 from nbot.core import (
     build_continue_chat_response,
     build_chat_completion_payload,
@@ -18,6 +19,7 @@ from nbot.core import (
     normalize_chat_completion_data,
     prepare_chat_context,
     resolve_chat_completion_url,
+    ToolLoopExit,
     ToolLoopHooks,
     ToolLoopSession,
     WebSessionStore,
@@ -45,7 +47,7 @@ def _build_channel_assistant_message(
     adapter=None,
     sender: str = "AI",
 ):
-    channel_adapter = adapter or WebChannelAdapter()
+    channel_adapter = adapter or get_channel_adapter("web") or WebChannelAdapter()
     return channel_adapter.build_assistant_message(
         chat_response,
         conversation_id=session_id,
@@ -157,7 +159,7 @@ def trigger_ai_response(
     parent_message_id=None,
 ):
     """Trigger an AI response for a web session."""
-    adapter = getattr(server, "web_channel_adapter", None) or WebChannelAdapter()
+    adapter = getattr(server, "web_channel_adapter", None) or get_channel_adapter("web") or WebChannelAdapter()
     chat_request = adapter.build_chat_request(
         conversation_id=session_id,
         content=user_content,
@@ -169,7 +171,7 @@ def trigger_ai_response(
 
 
 def trigger_ai_response_for_request(server, chat_request: ChatRequest, adapter=None):
-    adapter = adapter or getattr(server, "web_channel_adapter", None) or WebChannelAdapter()
+    adapter = adapter or getattr(server, "web_channel_adapter", None) or get_channel_adapter("web") or WebChannelAdapter()
     session_store = WebSessionStore(
         server.sessions, save_callback=lambda: server._save_data("sessions")
     )
@@ -1114,11 +1116,33 @@ def trigger_ai_response_for_request(server, chat_request: ChatRequest, adapter=N
                         def execute_web_tool(
                             tool_call, thinking_content, iteration, current_tool_messages
                         ):
-                            return execute_tool(
+                            result = execute_tool(
                                 tool_call["name"],
                                 tool_call["arguments"],
                                 context=tool_context,
                             )
+                            # 检查是否需要用户确认（exec_command 非白名单）
+                            if result.get('require_confirmation'):
+                                request_id = result.get('request_id', '')
+                                command = result.get('command', '')
+                                _log.info(f"[Web Confirm] 请求确认: request_id={request_id[:8] if request_id else '?'}, cmd={command[:80]}")
+                                # 更新进度卡片为"等待确认"状态
+                                if progress_card:
+                                    try:
+                                        from nbot.core.progress_card import StepType
+                                        progress_card.update(StepType.THINKING, "⏳ 等待用户确认执行命令...", result.get('message', '')[:200])
+                                    except Exception as e:
+                                        _log.warning(f"[ProgressCard] 更新等待确认状态失败: {e}")
+                                server.socketio.emit('exec_confirm_request', {
+                                    'request_id': request_id,
+                                    'command': command,
+                                    'message': result.get('message', ''),
+                                    'session_id': session_id,
+                                }, room=session_id)
+                                raise ToolLoopExit(
+                                    f"命令 `{command}` 需要您的确认，请在弹窗中操作。\n[请求ID: {request_id[:8] if request_id else 'N/A'}]"
+                                )
+                            return result
 
                         def on_tool_start(
                             tool_call, ai_thinking_content, iteration, current_tool_messages

@@ -7,7 +7,8 @@ from datetime import datetime
 from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
-from nbot.channels import WebChannelAdapter
+from nbot.channels.registry import get_channel_adapter
+from nbot.channels.web import WebChannelAdapter
 from nbot.core import ChatResponse, WebSessionStore
 
 _log = logging.getLogger(__name__)
@@ -49,7 +50,7 @@ class WebMessageAdapter:
         self.session_store = WebSessionStore(
             self.server.sessions, save_callback=lambda: self.server._save_data("sessions")
         )
-        self.channel_adapter = getattr(self.server, "web_channel_adapter", None) or WebChannelAdapter()
+        self.channel_adapter = getattr(self.server, "web_channel_adapter", None) or get_channel_adapter("web") or WebChannelAdapter()
 
         try:
             from nbot.commands import admin

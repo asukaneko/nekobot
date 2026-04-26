@@ -1,5 +1,4 @@
 from nbot.channels.base import BaseChannelAdapter, ChannelCapabilities, ChannelEnvelope
-from nbot.core.chat_models import ChatResponse
 
 
 class WebChannelAdapter(BaseChannelAdapter):
@@ -44,6 +43,8 @@ class WebChannelAdapter(BaseChannelAdapter):
     def build_heartbeat_assistant_message(
         self, conversation_id: str, content: str
     ) -> dict:
+        from nbot.core.chat_models import ChatResponse
+
         return self.build_assistant_message(
             ChatResponse(final_content=content),
             conversation_id=conversation_id,
@@ -69,6 +70,8 @@ class WebChannelAdapter(BaseChannelAdapter):
     def build_workflow_assistant_message(
         self, conversation_id: str, content: str, workflow_id: str
     ) -> dict:
+        from nbot.core.chat_models import ChatResponse
+
         return self.build_assistant_message(
             ChatResponse(final_content=content),
             conversation_id=conversation_id,
