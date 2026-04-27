@@ -237,19 +237,19 @@
 
         /* 浅色主题 */
         [data-theme="light"] {
-            --bg-primary: linear-gradient(135deg, #fef0f5 0%, #e8f4fd 50%, #f0f5ff 100%);
+            --bg-primary: #f5f7fb;
             --bg-secondary: #ffffff;
-            --bg-tertiary: #f8faff;
-            --bg-hover: #f0f5fa;
-            --bg-card: rgba(255, 255, 255, 0.85);
-            --text-color: #2d3748;
-            --text-primary: #2d3748;
-            --text-secondary: #4a5568;
-            --text-muted: #718096;
-            --border-color: #e2eaf0;
-            --shadow-color: rgba(100, 150, 200, 0.1);
-            --glass-bg: rgba(255, 255, 255, 0.7);
-            --glass-border: rgba(200, 220, 240, 0.4);
+            --bg-tertiary: #f1f5f9;
+            --bg-hover: #e8eef6;
+            --bg-card: rgba(255, 255, 255, 0.88);
+            --text-color: #1f2937;
+            --text-primary: #1f2937;
+            --text-secondary: #526173;
+            --text-muted: #7b8797;
+            --border-color: #dbe4ef;
+            --shadow-color: rgba(31, 41, 55, 0.08);
+            --glass-bg: rgba(255, 255, 255, 0.76);
+            --glass-border: rgba(219, 228, 239, 0.7);
         }
 
         /* 动态背景 */
@@ -270,7 +270,36 @@
             right: 0;
             bottom: 0;
             background: var(--bg-overlay, rgba(13, 17, 23, 0.85));
-            z-index: -1;
+            z-index: 0;
+            pointer-events: none;
+        }
+
+        body.has-bg-image .app-container {
+            position: relative;
+            z-index: 1;
+            background: transparent;
+        }
+
+        body.has-bg-image .main-content,
+        body.has-bg-image .content-area {
+            background: transparent;
+        }
+
+        body.has-bg-image .card,
+        body.has-bg-image .modal,
+        body.has-bg-image .sidebar,
+        body.has-bg-image .top-bar {
+            background: var(--bg-card);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+        }
+
+        [data-theme="light"] body.has-bg-image .card,
+        [data-theme="light"] body.has-bg-image .modal,
+        [data-theme="light"] body.has-bg-image .sidebar,
+        [data-theme="light"] body.has-bg-image .top-bar {
+            border-color: rgba(203, 213, 225, 0.72);
+            box-shadow: 0 12px 36px rgba(71, 85, 105, 0.08);
         }
 
         * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -457,7 +486,7 @@
         }
 
         .nav-item.active {
-            background: rgba(236, 72, 153, 0.15);
+            background: color-mix(in srgb, var(--accent-primary) 14%, transparent);
             color: var(--accent-primary);
         }
 
@@ -1635,6 +1664,46 @@
             border-bottom: none;
         }
 
+        [data-theme="light"] body.has-bg-image .dashboard-hero,
+        [data-theme="light"] body.has-bg-image .dashboard-section-card {
+            background: rgba(248, 251, 255, 0.78);
+            border-color: rgba(203, 213, 225, 0.74);
+            box-shadow: 0 18px 48px rgba(71, 85, 105, 0.1);
+            backdrop-filter: blur(14px);
+            -webkit-backdrop-filter: blur(14px);
+        }
+
+        [data-theme="light"] body.has-bg-image .dashboard-hero::after {
+            opacity: 0.32;
+        }
+
+        [data-theme="light"] body.has-bg-image .dashboard-side-card,
+        [data-theme="light"] body.has-bg-image .dashboard-pill,
+        [data-theme="light"] body.has-bg-image .dashboard-action,
+        [data-theme="light"] body.has-bg-image .dashboard-status-item,
+        [data-theme="light"] body.has-bg-image .stat-card {
+            background: rgba(255, 255, 255, 0.66);
+            border-color: rgba(203, 213, 225, 0.72);
+            box-shadow: 0 10px 28px rgba(71, 85, 105, 0.08);
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+        }
+
+        [data-theme="light"] body.has-bg-image .dashboard-action:hover,
+        [data-theme="light"] body.has-bg-image .stat-card:hover {
+            background: rgba(255, 255, 255, 0.82);
+            box-shadow: 0 14px 34px rgba(71, 85, 105, 0.12);
+        }
+
+        [data-theme="light"] body.has-bg-image .dashboard-section-body .chart-container {
+            background: rgba(241, 245, 249, 0.46);
+            border-radius: 14px;
+        }
+
+        [data-theme="light"] body.has-bg-image .dashboard-activity-item {
+            border-color: rgba(203, 213, 225, 0.68);
+        }
+
         @media (max-width: 1180px) {
             .dashboard-hero-grid,
             .dashboard-panel-grid,
@@ -2579,7 +2648,7 @@
         }
 
         .session-item:hover { background: var(--bg-tertiary); }
-        .session-item.active { background: rgba(236, 72, 153, 0.15); }
+        .session-item.active { background: color-mix(in srgb, var(--accent-primary) 14%, transparent); }
         
         /* 拖动排序样式 */
         .session-item[draggable="true"] {
@@ -4152,6 +4221,59 @@
             padding: 16px 20px;
             border-top: 1px solid var(--border-color);
             background: var(--bg-secondary);
+        }
+
+        [data-theme="light"] body.has-bg-image .chat-sidebar,
+        [data-theme="light"] body.has-bg-image .chat-main {
+            background: rgba(248, 251, 255, 0.82);
+            border-color: rgba(203, 213, 225, 0.72);
+            box-shadow: 0 18px 48px rgba(71, 85, 105, 0.1);
+            backdrop-filter: blur(14px);
+            -webkit-backdrop-filter: blur(14px);
+        }
+
+        [data-theme="light"] body.has-bg-image .chat-header,
+        [data-theme="light"] body.has-bg-image .chat-input-area,
+        [data-theme="light"] body.has-bg-image .qq-chat-footer {
+            background: rgba(248, 251, 255, 0.72);
+        }
+
+        [data-theme="light"] body.has-bg-image .messages-container {
+            background: rgba(241, 245, 249, 0.64);
+        }
+
+        [data-theme="light"] body.has-bg-image .session-item {
+            background: rgba(255, 255, 255, 0.62);
+            border: 1px solid transparent;
+        }
+
+        [data-theme="light"] body.has-bg-image .session-item:hover {
+            background: rgba(255, 255, 255, 0.82);
+        }
+
+        [data-theme="light"] body.has-bg-image .session-item.active {
+            background: color-mix(in srgb, var(--accent-primary) 16%, rgba(255, 255, 255, 0.72));
+            border-color: color-mix(in srgb, var(--accent-primary) 22%, transparent);
+        }
+
+        [data-theme="light"] body.has-bg-image .message-content {
+            background: rgba(255, 255, 255, 0.82);
+            border: 1px solid rgba(203, 213, 225, 0.66);
+            box-shadow: 0 8px 28px rgba(71, 85, 105, 0.08);
+        }
+
+        [data-theme="light"] body.has-bg-image .message.user .message-content {
+            background: var(--accent-primary);
+            border-color: transparent;
+            box-shadow: 0 8px 24px color-mix(in srgb, var(--accent-primary) 22%, transparent);
+        }
+
+        [data-theme="light"] body.has-bg-image .search-box,
+        [data-theme="light"] body.has-bg-image .chat-input-wrapper,
+        [data-theme="light"] body.has-bg-image .chat-input-container,
+        [data-theme="light"] body.has-bg-image .chat-input {
+            background: rgba(255, 255, 255, 0.74);
+            border-color: rgba(203, 213, 225, 0.78);
         }
 
         .pending-queue-panel {
@@ -5881,6 +6003,54 @@
         .switch-control input:disabled + .switch-slider {
             opacity: 0.45;
             cursor: not-allowed;
+        }
+
+        [data-theme="light"] body.has-bg-image .ai-hero,
+        [data-theme="light"] body.has-bg-image .ai-pane {
+            background: rgba(248, 251, 255, 0.78);
+            border-color: rgba(203, 213, 225, 0.74);
+            box-shadow: 0 18px 48px rgba(71, 85, 105, 0.1);
+            backdrop-filter: blur(14px);
+            -webkit-backdrop-filter: blur(14px);
+        }
+
+        [data-theme="light"] body.has-bg-image .ai-hero::after {
+            opacity: 0.35;
+        }
+
+        [data-theme="light"] body.has-bg-image .ai-status-panel,
+        [data-theme="light"] body.has-bg-image .ai-summary-card,
+        [data-theme="light"] body.has-bg-image .ai-capability-item,
+        [data-theme="light"] body.has-bg-image .ai-help-card,
+        [data-theme="light"] body.has-bg-image .ai-saved-card,
+        [data-theme="light"] body.has-bg-image .model-card,
+        [data-theme="light"] body.has-bg-image .purpose-card {
+            background: rgba(255, 255, 255, 0.66) !important;
+            border-color: rgba(203, 213, 225, 0.72) !important;
+            box-shadow: 0 10px 28px rgba(71, 85, 105, 0.08);
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+        }
+
+        [data-theme="light"] body.has-bg-image .ai-summary-card:hover,
+        [data-theme="light"] body.has-bg-image .ai-saved-card:hover,
+        [data-theme="light"] body.has-bg-image .purpose-card:hover,
+        [data-theme="light"] body.has-bg-image .model-card:hover {
+            background: rgba(255, 255, 255, 0.82) !important;
+            box-shadow: 0 14px 34px rgba(71, 85, 105, 0.12);
+        }
+
+        [data-theme="light"] body.has-bg-image .purpose-card.has-config,
+        [data-theme="light"] body.has-bg-image .ai-saved-card.active,
+        [data-theme="light"] body.has-bg-image .model-card.active {
+            background: color-mix(in srgb, var(--accent-primary) 10%, rgba(255, 255, 255, 0.72)) !important;
+        }
+
+        [data-theme="light"] body.has-bg-image .form-input,
+        [data-theme="light"] body.has-bg-image .form-select,
+        [data-theme="light"] body.has-bg-image .form-textarea {
+            background: rgba(255, 255, 255, 0.76);
+            border-color: rgba(203, 213, 225, 0.78);
         }
 
         .ai-config-fade {
@@ -13525,7 +13695,7 @@
                         body.style.setProperty('--bg-image', `url(${this.themeSettings.bgImage})`);
                         const opacity = this.themeSettings.bgOpacity / 100;
                         const overlayColor = this.themeSettings.mode === 'light'
-                            ? `rgba(240, 242, 245, ${opacity})`
+                            ? `rgba(245, 247, 251, ${Math.min(0.82, opacity)})`
                             : `rgba(13, 17, 23, ${opacity})`;
                         body.style.setProperty('--bg-overlay', overlayColor);
                     } else {
@@ -13537,7 +13707,7 @@
                     // 应用卡片透明度
                     const cardOpacity = this.themeSettings.cardOpacity / 100;
                     const cardBg = this.themeSettings.mode === 'light'
-                        ? `rgba(255, 255, 255, ${cardOpacity})`
+                        ? `rgba(255, 255, 255, ${Math.max(0.82, cardOpacity)})`
                         : `rgba(22, 27, 34, ${cardOpacity})`;
                     root.style.setProperty('--bg-card', cardBg);
 
