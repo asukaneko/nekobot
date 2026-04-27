@@ -118,6 +118,8 @@ def register_ai_config_routes(app, server):
             payload = build_chat_completion_payload(
                 model,
                 [{"role": "user", "content": "Hello"}],
+                base_url=base_url,
+                provider_type=provider_type,
                 extra_body={"max_tokens": 10},
             )
 

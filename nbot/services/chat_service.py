@@ -350,6 +350,8 @@ def _call_qq_ai_with_tools(messages: list, tools: list, stop_event=None) -> dict
     payload = build_chat_completion_payload(
         runtime_ai.get("model") or ai_client.model,
         messages,
+        base_url=runtime_ai.get("base_url") or "",
+        provider_type=runtime_ai.get("provider_type") or "openai_compatible",
         tools=tools,
         tool_choice="auto",
         stream=False,

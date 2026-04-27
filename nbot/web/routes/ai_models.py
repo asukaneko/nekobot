@@ -421,6 +421,8 @@ def register_ai_model_routes(app, server):
                 payload = build_chat_completion_payload(
                     model_name,
                     [{"role": "user", "content": "Hello"}],
+                    base_url=base_url,
+                    provider_type=provider_type,
                     extra_body={"max_tokens": 10},
                 )
                 resp = requests.post(url, json=payload, headers=headers, timeout=30)

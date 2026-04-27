@@ -8,6 +8,7 @@ class ProviderProfile:
     name: str
     endpoint_mode: str = "openai_chat_completions"
     provider_type: str = "openai_compatible"
+    supports_system_messages: bool = True
     supports_tools: bool = True
     supports_reasoning: bool = True
     supports_stream: bool = True
@@ -57,6 +58,7 @@ def infer_provider_profile(
             name="minimax",
             provider_type="minimax",
             endpoint_mode="raw",
+            supports_system_messages=False,
         )
     if explicit in {"anthropic", "claude"}:
         return ProviderProfile(
@@ -77,10 +79,93 @@ def infer_provider_profile(
     if "anthropic" in combined or "/v1/messages" in combined:
         return ProviderProfile(name="anthropic", provider_type="anthropic", endpoint_mode="raw", supports_tools=False)
     if "minimax" in combined:
-        return ProviderProfile(name="minimax", provider_type="minimax", endpoint_mode="raw")
+        return ProviderProfile(
+            name="minimax",
+            provider_type="minimax",
+            endpoint_mode="raw",
+            supports_system_messages=False,
+        )
     if "silicon" in combined:
         return ProviderProfile(name="siliconflow", provider_type="siliconflow")
     return ProviderProfile(name="openai_compatible", provider_type="openai_compatible")
+
+
+def _stringify_message_content(content: Any) -> str:
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        chunks: List[str] = []
+        for item in content:
+            if isinstance(item, str):
+                chunks.append(item)
+            elif isinstance(item, dict):
+                text = item.get("text") or item.get("content")
+                if text:
+                    chunks.append(str(text))
+        return "\n".join(chunk for chunk in chunks if chunk)
+    if content is None:
+        return ""
+    return str(content)
+
+
+def _prepend_text_to_content(content: Any, text: str) -> Any:
+    if isinstance(content, list):
+        return [{"type": "text", "text": text}] + content
+    if content:
+        return f"{text}\n\n{content}"
+    return text
+
+
+def normalize_messages_for_provider(
+    messages: List[Dict[str, Any]],
+    *,
+    base_url: str = "",
+    model: str = "",
+    provider_type: str = "",
+) -> List[Dict[str, Any]]:
+    profile = infer_provider_profile(base_url, model, provider_type)
+    if profile.supports_system_messages:
+        return messages
+
+    normalized: List[Dict[str, Any]] = []
+    pending_system_parts: List[str] = []
+
+    def flush_pending_system() -> None:
+        if pending_system_parts:
+            normalized.append(
+                {
+                    "role": "user",
+                    "content": "System instructions:\n"
+                    + "\n\n".join(part for part in pending_system_parts if part),
+                }
+            )
+            pending_system_parts.clear()
+
+    for message in messages or []:
+        if not isinstance(message, dict):
+            continue
+        if message.get("role") == "system":
+            content = _stringify_message_content(message.get("content"))
+            if content:
+                pending_system_parts.append(content)
+            continue
+
+        message_copy = message.copy()
+        if pending_system_parts and message_copy.get("role") == "user":
+            instruction_text = "System instructions:\n" + "\n\n".join(
+                part for part in pending_system_parts if part
+            )
+            message_copy["content"] = _prepend_text_to_content(
+                message_copy.get("content"),
+                instruction_text,
+            )
+            pending_system_parts.clear()
+        else:
+            flush_pending_system()
+        normalized.append(message_copy)
+
+    flush_pending_system()
+    return normalized
 
 
 def resolve_chat_completion_url(
@@ -108,11 +193,19 @@ def build_chat_completion_payload(
     model: str,
     messages: List[Dict[str, Any]],
     *,
+    base_url: str = "",
+    provider_type: str = "",
     tools: Optional[List[Dict[str, Any]]] = None,
     tool_choice: Optional[str] = "auto",
     stream: bool = False,
     extra_body: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
+    messages = normalize_messages_for_provider(
+        messages,
+        base_url=base_url,
+        model=model,
+        provider_type=provider_type,
+    )
     payload: Dict[str, Any] = {
         "model": model,
         "messages": messages,

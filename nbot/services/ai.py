@@ -257,6 +257,8 @@ class AIClient:
             payload = build_chat_completion_payload(
                 model or self.model,
                 messages,
+                base_url=self.base_url,
+                provider_type=self.provider_type,
                 stream=stream,
             )
             
@@ -424,7 +426,12 @@ class AIClient:
                     "Authorization": f"Bearer {api_key}",
                     "Content-Type": "application/json"
                 }
-                payload = build_chat_completion_payload(model, messages)
+                payload = build_chat_completion_payload(
+                    model,
+                    messages,
+                    base_url=base_url,
+                    provider_type=provider_type,
+                )
                 response = requests.post(url, json=payload, headers=headers, timeout=60)
                 response.raise_for_status()
                 result = self.clean_response(response.json()["choices"][0]["message"]["content"])

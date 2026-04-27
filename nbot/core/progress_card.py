@@ -181,6 +181,10 @@ class ProgressCard:
             # 如果有思考内容，保存到步骤中
             if thinking_content:
                 step_data['thinking_content'] = thinking_content
+            if step_arguments:
+                step_data['arguments'] = step_arguments
+            if step_full_result:
+                step_data['full_result'] = step_full_result
             
             self.steps.append(step_data)
         
@@ -296,6 +300,46 @@ class ProgressCard:
         """标记进度为完成"""
         self.update(StepType.DONE, final_message)
     
+    def complete_exec_command_step(self, command: str, result: Any):
+        """Attach a confirmed exec_command result to the pending tool step."""
+        result_dict = result if isinstance(result, dict) else {"result": result}
+        success = bool(result_dict.get("success")) if isinstance(result_dict, dict) else True
+        stdout = result_dict.get("stdout", "") if isinstance(result_dict, dict) else ""
+        stderr = result_dict.get("stderr", "") if isinstance(result_dict, dict) else ""
+        error = result_dict.get("error", "") if isinstance(result_dict, dict) else ""
+        preview = stdout or stderr or error or result_dict.get("message", "")
+        if not preview:
+            preview = "Command completed" if success else "Command failed"
+
+        target_step = None
+        for step in reversed(self.steps):
+            if step.get("type") != "tool":
+                continue
+            name = str(step.get("name", ""))
+            arguments = step.get("arguments") or {}
+            detail = str(step.get("detail", ""))
+            if (
+                "exec_command" in name
+                or arguments.get("command") == command
+                or command in detail
+            ):
+                target_step = step
+                break
+
+        if target_step is None:
+            target_step = {
+                "type": "tool",
+                "icon": STEP_CONFIG[StepType.TOOL_DONE]["icon"],
+                "name": "exec_command",
+            }
+            self.steps.append(target_step)
+
+        target_step["status"] = "done" if success else "error"
+        target_step["detail"] = str(preview)[:100]
+        target_step["arguments"] = target_step.get("arguments") or {"command": command}
+        target_step["full_result"] = result_dict
+        self._emit_update()
+
     def increment_iteration(self):
         """增加迭代计数"""
         self.current_iteration += 1
@@ -372,6 +416,12 @@ class ProgressCardManager:
         """移除进度卡片"""
         if card_id in self._cards:
             del self._cards[card_id]
+
+    def complete_exec_command_step(self, session_id: str, command: str, result: Any):
+        """Update pending exec_command steps for all active cards in a session."""
+        for card in list(self._cards.values()):
+            if card.session_id == session_id and not card.is_completed:
+                card.complete_exec_command_step(command, result)
     
     def complete_all(self, session_id: str):
         """完成会话中的所有进度卡片"""

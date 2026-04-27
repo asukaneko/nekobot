@@ -263,7 +263,86 @@ def register_socket_events(server):
 
             _log.info(f"[confirm_exec] request_id={request_id[:8]}, approved={approved}, session={session_id}")
 
-            from nbot.services.tools import execute_pending_command, reject_pending_command
+            from nbot.services.tools import (
+                execute_pending_command,
+                get_pending_info,
+                reject_pending_command,
+            )
+
+            pending_info = get_pending_info(request_id) or {}
+            effective_session_id = session_id or pending_info.get("session_id", "")
+            command_for_step = pending_info.get("command", "")
+            exec_step_result = None
+
+            if approved:
+                exec_result = execute_pending_command(request_id)
+                exec_step_result = exec_result
+                if exec_result.get("executed"):
+                    cmd = exec_result.get("command", "")
+                    command_for_step = cmd
+                    stdout = exec_result.get("stdout", "")
+                    stderr = exec_result.get("stderr", "")
+                    result_content = (
+                        f"已确认并执行命令：`{cmd}`\n\n"
+                        f"退出码：{exec_result.get('returncode')}\n\n"
+                        f"标准输出：\n{stdout or '(无输出)'}"
+                    )
+                    if stderr:
+                        result_content += f"\n\n标准错误：\n{stderr}"
+                else:
+                    result_content = f"命令执行失败：{exec_result.get('error', '未知错误')}"
+            else:
+                reject_result = reject_pending_command(request_id)
+                exec_step_result = reject_result
+                command_for_step = reject_result.get("command", command_for_step)
+                result_content = f"已取消执行命令：`{reject_result.get('command', '')}`"
+
+            if effective_session_id:
+                # 仅作为系统上下文保存，不直接在 Web 对话区展示执行结果气泡
+                session_store.append_message(
+                    effective_session_id,
+                    {
+                        "id": f"exec_ctx_{request_id}",
+                        "role": "system",
+                        "content": f"[exec_command_result]\n{result_content}",
+                    },
+                )
+
+            # Fallback: always notify the requesting socket so frontend can clear loading state.
+            server.socketio.emit(
+                "exec_confirm_result",
+                {
+                    "session_id": effective_session_id,
+                    "approved": bool(approved),
+                },
+                room=request.sid,
+            )
+            if (
+                effective_session_id
+                and getattr(server, "PROGRESS_CARD_AVAILABLE", False)
+                and getattr(server, "progress_card_manager", None)
+            ):
+                if command_for_step and exec_step_result is not None:
+                    server.progress_card_manager.complete_exec_command_step(
+                        effective_session_id,
+                        command_for_step,
+                        exec_step_result,
+                    )
+                server.progress_card_manager.complete_all(effective_session_id)
+            if effective_session_id:
+                followup_prompt = (
+                    "The pending exec_command is resolved. Use the execution result already in context "
+                    "to continue answering the user, and do not call exec_command again."
+                )
+                server._trigger_ai_response(
+                    effective_session_id,
+                    followup_prompt,
+                    "system",
+                )
+            _log.info(
+                f"[confirm_exec] result emitted sid={request.sid}, session={effective_session_id}, approved={approved}"
+            )
+            return
 
             if approved:
                 exec_result = execute_pending_command(request_id)

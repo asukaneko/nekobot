@@ -1126,13 +1126,6 @@ def trigger_ai_response_for_request(server, chat_request: ChatRequest, adapter=N
                                 request_id = result.get('request_id', '')
                                 command = result.get('command', '')
                                 _log.info(f"[Web Confirm] 请求确认: request_id={request_id[:8] if request_id else '?'}, cmd={command[:80]}")
-                                # 更新进度卡片为"等待确认"状态
-                                if progress_card:
-                                    try:
-                                        from nbot.core.progress_card import StepType
-                                        progress_card.update(StepType.THINKING, "⏳ 等待用户确认执行命令...", result.get('message', '')[:200])
-                                    except Exception as e:
-                                        _log.warning(f"[ProgressCard] 更新等待确认状态失败: {e}")
                                 server.socketio.emit('exec_confirm_request', {
                                     'request_id': request_id,
                                     'command': command,
@@ -1155,7 +1148,7 @@ def trigger_ai_response_for_request(server, chat_request: ChatRequest, adapter=N
                                 tool_display_name,
                                 json.dumps(arguments, ensure_ascii=False)[:100],
                                 None,
-                                None,
+                                arguments,
                                 None,
                                 ai_thinking_content if ai_thinking_content else None,
                             )
@@ -1363,8 +1356,14 @@ def trigger_ai_response_for_request(server, chat_request: ChatRequest, adapter=N
 
                         _log.info(f"[Tools] 最终回复长度: {len(final_content)}")
 
-                        # 将进度卡片标记为完成（不再删除）
-                        complete_thinking_card()
+                        # 检查是否为等待确认状态（exec_command 非白名单）
+                        if final_content and '[请求ID:' in final_content:
+                            # 命令等待用户确认，不标记完成，不发送 AI 消息
+                            _log.info(f"[Tools] 等待用户确认命令执行，保持进度卡片等待状态")
+                            # 进度卡片已在 execute_web_tool 中更新为等待状态，直接跳过后续处理
+                        else:
+                            # 将进度卡片标记为完成（不再删除）
+                            complete_thinking_card()
                     else:
                         # 无可用工具，使用普通 AI 调用
                         if (
@@ -1430,6 +1429,14 @@ def trigger_ai_response_for_request(server, chat_request: ChatRequest, adapter=N
                     parent_message_id=parent_message_id,
                     file_changes=round_file_changes,
                 )
+                return
+
+            # 如果是等待用户确认状态，不发送 AI 消息，直接返回
+            if final_content and '[请求ID:' in final_content:
+                _log.info(f"[Tools] 命令等待用户确认中，跳过 AI 响应发送")
+                # 清理事件上下文，但不标记完成
+                if progress_card:
+                    progress_card._emit_update()
                 return
 
             assistant_content = final_content
@@ -2081,6 +2088,8 @@ server,
             payload = build_chat_completion_payload(
                 server.ai_model,
                 processed_messages,
+                base_url=server.ai_base_url,
+                provider_type=server.ai_config.get("provider_type", server.ai_config.get("provider", "openai_compatible")),
                 tools=tools,
                 tool_choice="auto",
             )
