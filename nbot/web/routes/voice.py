@@ -6,20 +6,38 @@ import os
 import threading
 import time
 
-from flask import jsonify, request
+from flask import jsonify, request, send_file
+from werkzeug.utils import safe_join
 
 _log = logging.getLogger(__name__)
 _STT_MODEL = None
 _STT_MODEL_NAME = None
 _STT_MODEL_LOAD_ERROR = None
 _STT_MODEL_LOCK = threading.Lock()
-_MODEL_ROOT = os.path.join("data", "models", "faster-whisper")
+_MODEL_ROOT = os.path.abspath(os.path.join("data", "models", "faster-whisper"))
+
+
+def _configure_model_root(base_data_dir: str) -> None:
+    """Bind the faster-whisper cache directory to the web server data dir."""
+    global _MODEL_ROOT
+
+    base_dir = os.path.abspath(base_data_dir or os.path.join("data", "web"))
+    shared_data_dir = os.path.abspath(os.path.join(base_dir, os.pardir))
+    _MODEL_ROOT = os.path.join(shared_data_dir, "models", "faster-whisper")
+    os.makedirs(_MODEL_ROOT, exist_ok=True)
 
 
 def _get_local_model_dir(model_name: str) -> str:
     """Return the project-local model directory for a whisper model."""
     safe_name = str(model_name).replace("/", "--").replace("\\", "--").strip()
     return os.path.join(_MODEL_ROOT, safe_name)
+
+
+def _resolve_cached_audio_path(cache_dir: str, filename: str):
+    """Return a cache file path only when it stays inside the cache directory."""
+    if not filename or filename != os.path.basename(filename):
+        return None
+    return safe_join(cache_dir, filename)
 
 
 def _get_local_stt_config():
@@ -135,6 +153,7 @@ def _preload_stt_model():
 
 def register_voice_routes(app, server):
     """Register voice-related API routes."""
+    _configure_model_root(server.data_dir)
     _preload_stt_model()
 
     @app.route("/api/tts/synthesize", methods=["POST"])
@@ -194,12 +213,10 @@ def register_voice_routes(app, server):
         """Serve generated TTS audio files."""
         try:
             temp_dir = os.path.join(server.data_dir, "tts_cache")
-            file_path = os.path.join(temp_dir, filename)
+            file_path = _resolve_cached_audio_path(temp_dir, filename)
 
-            if not os.path.exists(file_path):
+            if not file_path or not os.path.exists(file_path):
                 return jsonify({"error": "Audio file not found"}), 404
-
-            from flask import send_file
 
             return send_file(file_path, mimetype="audio/mpeg")
 

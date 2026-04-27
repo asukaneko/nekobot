@@ -331,8 +331,7 @@ class DynamicExecutor:
                 from nbot.services.tools import ToolExecutor
                 command = params.get('command', '')
                 timeout = params.get('timeout', 30)
-                confirmed = params.get('confirmed', False)
-                return ToolExecutor.exec_command(command, timeout=timeout, confirmed=confirmed)
+                return ToolExecutor.exec_command(command, timeout=timeout)
             elif handler == 'download_file':
                 from nbot.services.tools import ToolExecutor
                 url = params.get('url', '')

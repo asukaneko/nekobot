@@ -7,6 +7,7 @@ from datetime import datetime
 from flask import jsonify, request
 
 from nbot.core import WebSessionStore
+from nbot.web.persistence import is_web_visible_session
 from nbot.web.sessions_db import get_session as get_session_from_db
 
 _log = logging.getLogger(__name__)
@@ -16,6 +17,14 @@ def register_session_routes(app, server):
     session_store = WebSessionStore(
         server.sessions, save_callback=lambda: server._save_data("sessions")
     )
+
+    def _get_web_session(session_id):
+        session = session_store.get_session(session_id)
+        if not session:
+            session = get_session_from_db(server.data_dir, session_id)
+        if not session or not is_web_visible_session(session_id, session):
+            return None
+        return session
 
     @app.route("/api/sessions")
     def get_sessions():
@@ -28,13 +37,12 @@ def register_session_routes(app, server):
             server._sessions_cache = []
             server._sessions_cache_time = 0
 
-        if (current_time - server._sessions_cache_time) < 5.0 and server._sessions_cache:
-            return jsonify(server._sessions_cache)
-
         sessions_data = dict(server.sessions)
 
         sessions = []
         for sid, session in sessions_data.items():
+            if not is_web_visible_session(sid, session):
+                continue
             sessions.append(
                 {
                     "id": sid,
@@ -148,6 +156,8 @@ def register_session_routes(app, server):
             "messages": [{"role": "system", "content": system_prompt}],
             "system_prompt": system_prompt,
         }
+        if not is_web_visible_session(session_id, session):
+            return jsonify({"error": "Invalid session type"}), 400
     
         session_store.set_session(session_id, session)
     
@@ -160,9 +170,7 @@ def register_session_routes(app, server):
         return jsonify({"id": session_id, "session": session})
     @app.route("/api/sessions/<session_id>")
     def get_session(session_id):
-        session = session_store.get_session(session_id)
-        if not session:
-            session = get_session_from_db(server.data_dir, session_id)
+        session = _get_web_session(session_id)
         if not session:
             return jsonify({"error": "Session not found"}), 404
 
@@ -171,7 +179,7 @@ def register_session_routes(app, server):
 
     @app.route("/api/sessions/<session_id>", methods=["PUT"])
     def update_session(session_id):
-        session = session_store.get_session(session_id)
+        session = _get_web_session(session_id)
         if not session:
             return jsonify({"error": "Session not found"}), 404
 
@@ -191,6 +199,8 @@ def register_session_routes(app, server):
 
     @app.route("/api/sessions/<session_id>", methods=["DELETE"])
     def delete_session(session_id):
+        if not _get_web_session(session_id):
+            return jsonify({"error": "Session not found"}), 404
         if session_store.delete_session(session_id):
             if server.WORKSPACE_AVAILABLE and server.workspace_manager:
                 server.workspace_manager.delete_workspace(session_id)
@@ -221,11 +231,7 @@ def register_session_routes(app, server):
 
     @app.route("/api/sessions/<session_id>/messages", methods=["GET"])
     def get_messages(session_id):
-        session = session_store.get_session(session_id)
-
-        if not session:
-            session = get_session_from_db(server.data_dir, session_id)
-
+        session = _get_web_session(session_id)
         if not session:
             return jsonify({"error": "Session not found"}), 404
 
@@ -236,7 +242,7 @@ def register_session_routes(app, server):
 
     @app.route("/api/sessions/<session_id>/messages", methods=["POST"])
     def add_message(session_id):
-        session = session_store.get_session(session_id)
+        session = _get_web_session(session_id)
         if not session:
             return jsonify({"error": "Session not found"}), 404
 
@@ -254,7 +260,7 @@ def register_session_routes(app, server):
 
     @app.route("/api/sessions/<session_id>/messages", methods=["DELETE"])
     def clear_messages(session_id):
-        session = session_store.get_session(session_id)
+        session = _get_web_session(session_id)
         if not session:
             return jsonify({"error": "Session not found"}), 404
 
@@ -267,7 +273,7 @@ def register_session_routes(app, server):
 
     @app.route("/api/sessions/<session_id>/compress", methods=["POST"])
     def compress_context(session_id):
-        session = session_store.get_session(session_id)
+        session = _get_web_session(session_id)
         if not session:
             return jsonify({"error": "Session not found"}), 404
 
@@ -353,7 +359,7 @@ def register_session_routes(app, server):
 
     @app.route("/api/sessions/<session_id>/chat", methods=["POST"])
     def chat_with_ai(session_id):
-        session = session_store.get_session(session_id)
+        session = _get_web_session(session_id)
         if not session:
             return jsonify({"error": "Session not found"}), 404
 

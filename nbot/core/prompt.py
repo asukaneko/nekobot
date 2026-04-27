@@ -203,13 +203,13 @@ class PromptManager:
             tools_text += "- **workspace_send_file**: 将工作区中的文件发送给用户下载\n"
             
             tools_text += "\n### 命令执行工具 (Exec)\n"
-            tools_text += "- **exec_command**: 执行命令行命令。白名单命令（如ls, cat, echo, git, python等）会直接执行，非白名单命令需要用户确认。\n"
+            tools_text += "- **exec_command**: 执行命令行命令。白名单命令（如ls, cat, echo等）会直接执行，非白名单命令系统会自动向用户请求确认，用户确认后命令自动执行，你无需再次调用。\n"
             
             tools_text += "\n**使用规则：**\n"
             tools_text += "1. 当用户请求需要使用工具时，你可以调用对应的工具\n"
             tools_text += "2. 工具调用会被系统自动处理\n"
             tools_text += "3. 用户上传的文件会自动保存到工作区，你可以使用 workspace_read_file 查看\n"
-            tools_text += "4. 使用 exec_command 时，如果命令不在白名单中，系统会要求用户确认。当用户回复「确认执行」或「同意」时，你需要再次调用 exec_command 并将 confirmed 参数设为 true\n"
+            tools_text += "4. 使用 exec_command 时，如果命令不在白名单中，系统会自动请求用户确认。用户确认后系统会直接执行命令，你无需再次调用 exec_command\n"
             
             return tools_text
         except ImportError:

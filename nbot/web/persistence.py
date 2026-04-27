@@ -23,6 +23,74 @@ def _derive_session_name(session_id, session):
     return f"会话 {session_id[:8]}"
 
 
+def is_cli_session(session_id, session):
+    """Return True when a persisted record belongs to the CLI channel."""
+    session = session or {}
+    if str(session_id or "").startswith("cli_"):
+        return True
+
+    session_type = str(session.get("type") or "").strip().lower()
+    if session_type == "cli":
+        return True
+
+    messages = session.get("messages") or []
+    if not isinstance(messages, list):
+        return False
+
+    return any(
+        isinstance(message, dict)
+        and str(message.get("source") or "").strip().lower() == "cli"
+        for message in messages
+    )
+
+
+def is_web_visible_session(session_id, session):
+    """Only sessions owned by Web/QQ channels should be exposed through Web APIs."""
+    return not is_cli_session(session_id, session)
+
+
+def _load_json_sessions(data_dir):
+    sessions_file = os.path.join(data_dir, "sessions.json")
+    if not os.path.exists(sessions_file):
+        return {}
+
+    try:
+        with open(sessions_file, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except Exception as e:
+        _log.warning(f"Failed to load legacy sessions.json: {e}")
+        return {}
+
+
+def _merge_session_sources(db_sessions, json_sessions):
+    db_sessions = db_sessions or {}
+    json_sessions = json_sessions or {}
+
+    # If DB already has data, treat it as source of truth and only backfill metadata
+    # for the same session IDs to avoid reviving stale legacy sessions from JSON.
+    if db_sessions:
+        merged = dict(db_sessions)
+        for session_id, db_session in list(merged.items()):
+            json_session = json_sessions.get(session_id)
+            if not isinstance(json_session, dict) or not isinstance(db_session, dict):
+                continue
+
+            merged[session_id] = {**json_session, **db_session}
+            for key in ("name", "type", "created_at", "system_prompt", "user_id", "qq_id"):
+                if not merged[session_id].get(key) and json_session.get(key):
+                    merged[session_id][key] = json_session[key]
+        return merged
+
+    # First-run migration path: DB empty, bootstrap from legacy JSON.
+    merged = {}
+    for session_id, json_session in json_sessions.items():
+        if not isinstance(json_session, dict):
+            continue
+        merged[session_id] = json_session
+    return merged
+
+
 def _normalize_session_record(session_id, session):
     session = dict(session or {})
     messages = session.get("messages")
@@ -420,16 +488,15 @@ def load_all_data(server):
     """加载所有持久化数据"""
     try:
         # 加载会话
-        loaded_sessions = load_sessions_from_db(server.data_dir)
-        if not loaded_sessions:
-            sessions_file = os.path.join(server.data_dir, "sessions.json")
-            if os.path.exists(sessions_file):
-                with open(sessions_file, "r", encoding="utf-8") as f:
-                    loaded_sessions = json.load(f)
+        loaded_sessions = _merge_session_sources(
+            load_sessions_from_db(server.data_dir),
+            _load_json_sessions(server.data_dir),
+        )
         if loaded_sessions:
             normalized_sessions = {
                 session_id: _normalize_session_record(session_id, session)
                 for session_id, session in loaded_sessions.items()
+                if is_web_visible_session(session_id, session)
             }
             server.sessions.clear()
             server.sessions.update(normalized_sessions)
@@ -618,7 +685,12 @@ def save_data(server, data_type: str):
     """保存指定类型的数据到磁盘"""
     try:
         if data_type == "sessions":
-            save_sessions_to_db(server.data_dir, server.sessions)
+            visible_sessions = {
+                session_id: session
+                for session_id, session in server.sessions.items()
+                if is_web_visible_session(session_id, session)
+            }
+            save_sessions_to_db(server.data_dir, visible_sessions)
             server._invalidate_sessions_cache()
         elif data_type == "workflows":
             with open(

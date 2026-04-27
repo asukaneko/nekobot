@@ -14,6 +14,7 @@ import uuid
 from typing import Optional, List, Dict, Any
 from datetime import datetime
 from dataclasses import dataclass, field, asdict
+from nbot.web.persistence import is_web_visible_session
 from nbot.web.sessions_db import load_sessions, save_sessions
 
 
@@ -141,6 +142,8 @@ class MessageManager:
         sessions_data = load_sessions(self.web_dir)
         try:
             for session_id, session in sessions_data.items():
+                if not is_web_visible_session(session_id, session):
+                    continue
                 messages = session.get('messages', [])
                 self._web_cache[session_id] = [Message.from_dict(m) for m in messages]
         except Exception as e:
@@ -170,12 +173,22 @@ class MessageManager:
     def _save_web_sessions(self):
         """保存 Web 会话"""
         try:
-            sessions_data = {}
+            existing_sessions = load_sessions(self.web_dir)
+            sessions_data = {
+                session_id: dict(session)
+                for session_id, session in existing_sessions.items()
+                if is_web_visible_session(session_id, session)
+            }
             for session_id, messages in self._web_cache.items():
-                sessions_data[session_id] = {
+                existing = sessions_data.get(session_id, {})
+                session = {
+                    **existing,
                     'id': session_id,
+                    'type': existing.get('type') or 'web',
                     'messages': [m.to_dict() for m in messages]
                 }
+                if is_web_visible_session(session_id, session):
+                    sessions_data[session_id] = session
             save_sessions(self.web_dir, sessions_data)
         except Exception as e:
             print(f"保存 Web 会话失败: {e}")

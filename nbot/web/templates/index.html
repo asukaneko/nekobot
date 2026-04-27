@@ -19699,6 +19699,9 @@ def main(params):
                     // 监听 exec_command 确认请求事件
                     socket.on('exec_confirm_request', (data) => {
                         console.log('[DEBUG] Exec confirm request received:', data);
+                        this.isLoading = false;
+                        this.loadingSessionId = null;
+                        this.isTyping = false;
                         if (this.currentSession && data.session_id === this.currentSession.id) {
                             this.execConfirmData = {
                                 requestId: data.request_id || '',
@@ -19711,17 +19714,45 @@ def main(params):
                             console.log('[DEBUG] Showing exec confirm modal');
                         }
                     });
+
+                    socket.on('exec_confirm_result', (data) => {
+                        console.log('[DEBUG] Exec confirm result received:', data);
+                        this.isTyping = false;
+                        const finishedSessionId = data?.session_id || this.loadingSessionId || this.currentSession?.id;
+                        this.isLoading = false;
+                        this.loadingSessionId = null;
+
+                        if (
+                            this.currentSession &&
+                            data?.message &&
+                            data.session_id === this.currentSession.id
+                        ) {
+                            const existingIdx = this.currentMessages.findIndex(m => m.id === data.message.id);
+                            if (existingIdx !== -1) {
+                                this.currentMessages.splice(existingIdx, 1, {
+                                    ...this.currentMessages[existingIdx],
+                                    ...data.message
+                                });
+                            } else {
+                                this.currentMessages.push(data.message);
+                            }
+                            this.$nextTick(() => this.scrollToBottom());
+                        }
+                        this.processPendingQueue(finishedSessionId);
+                    });
                 },
                 
                 confirmExecCommand() {
                     console.log('[DEBUG] User confirmed exec command:', this.execConfirmData.requestId);
-                    if (this.socket && this.socket.connected) {
-                        this.socket.emit('confirm_exec', {
-                            request_id: this.execConfirmData.requestId,
-                            approved: true,
-                            session_id: this.execConfirmData.sessionId
-                        });
+                    if (!(socket && socket.connected)) {
+                        this.showToast('Socket未连接，无法确认命令执行', 'error');
+                        return;
                     }
+                    socket.emit('confirm_exec', {
+                        request_id: this.execConfirmData.requestId,
+                        approved: true,
+                        session_id: this.execConfirmData.sessionId
+                    });
                     this.showExecConfirmModal = false;
                     this.isLoading = true;
                     this.loadingSessionId = this.execConfirmData.sessionId;
@@ -19730,13 +19761,15 @@ def main(params):
 
                 rejectExecCommand() {
                     console.log('[DEBUG] User rejected exec command:', this.execConfirmData.requestId);
-                    if (this.socket && this.socket.connected) {
-                        this.socket.emit('confirm_exec', {
-                            request_id: this.execConfirmData.requestId,
-                            approved: false,
-                            session_id: this.execConfirmData.sessionId
-                        });
+                    if (!(socket && socket.connected)) {
+                        this.showToast('Socket未连接，无法提交拒绝操作', 'error');
+                        return;
                     }
+                    socket.emit('confirm_exec', {
+                        request_id: this.execConfirmData.requestId,
+                        approved: false,
+                        session_id: this.execConfirmData.sessionId
+                    });
                     this.showExecConfirmModal = false;
                     this.showToast('已拒绝执行命令', 'warning');
                 },

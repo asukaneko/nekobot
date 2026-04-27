@@ -8,6 +8,8 @@ import urllib.parse
 import os
 import difflib
 import mimetypes
+import uuid
+import time
 from typing import Dict, Any, Optional, List
 from datetime import datetime
 import configparser
@@ -66,6 +68,112 @@ EXEC_BLACKLIST_PATTERNS = [
     r'fork\s*\(',
     r'while\s*\(true\)',
 ]
+
+# 待执行命令存储（用于确认机制）
+# request_id -> {command, timeout, session_id, timestamp}
+_pending_executions: Dict[str, Dict] = {}
+# session_id -> request_id（用于 QQ 通道通过 session 查找）
+_session_pending: Dict[str, str] = {}
+
+# 确认关键词（QQ 通道用于检测用户是否同意执行）
+_CONFIRM_KEYWORDS = {'确认', '同意', '确认执行', '是', 'yes', 'y', 'ok', '执行'}
+_REJECT_KEYWORDS = {'取消', '拒绝', '否', '不执行', 'no', 'n', 'cancel'}
+
+def store_pending_execution(session_id: str, command: str, timeout: int = 30) -> str:
+    """存储待确认的命令，返回 request_id"""
+    request_id = uuid.uuid4().hex
+    _pending_executions[request_id] = {
+        'command': command,
+        'timeout': timeout,
+        'session_id': session_id,
+        'timestamp': time.time(),
+    }
+    _session_pending[session_id] = request_id
+    _log.info(f"[PendingExec] 存储待确认命令: request_id={request_id[:8]}, session={session_id}, cmd={command[:80]}")
+    return request_id
+
+def get_pending_by_session(session_id: str) -> Optional[str]:
+    """通过 session_id 查找待确认命令的 request_id"""
+    return _session_pending.get(session_id)
+
+def get_pending_info(request_id: str) -> Optional[Dict]:
+    """查看待执行命令信息"""
+    return _pending_executions.get(request_id)
+
+def execute_pending_command(request_id: str) -> Dict[str, Any]:
+    """执行待确认的命令，返回执行结果"""
+    import subprocess
+    import shlex
+
+    pending = _pending_executions.pop(request_id, None)
+    if not pending:
+        return {"success": False, "error": "未找到待执行的命令，可能已过期或已处理", "request_id": request_id}
+
+    # 清理 session 映射
+    session_id = pending.get('session_id', '')
+    if _session_pending.get(session_id) == request_id:
+        del _session_pending[session_id]
+
+    command = pending['command']
+    timeout = pending.get('timeout', 30)
+
+    _log.info(f"[PendingExec] 用户确认，执行命令: {command}")
+
+    try:
+        try:
+            cmd_parts = shlex.split(command)
+        except Exception:
+            cmd_parts = command.split()
+
+        result = subprocess.run(
+            cmd_parts,
+            shell=False,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            cwd=os.getcwd()
+        )
+
+        output = result.stdout
+        max_output_length = 10000
+        if len(output) > max_output_length:
+            output = output[:max_output_length] + f"\n\n... (输出已截断，共 {len(result.stdout)} 字符)"
+
+        return {
+            "success": result.returncode == 0,
+            "command": command,
+            "returncode": result.returncode,
+            "stdout": output,
+            "stderr": result.stderr[:5000] if result.stderr else "",
+            "executed": True,
+        }
+    except subprocess.TimeoutExpired:
+        _log.error(f"[PendingExec] 命令超时: {command}")
+        return {
+            "success": False,
+            "error": f"命令执行超时（{timeout}秒）",
+            "command": command,
+        }
+    except Exception as e:
+        _log.error(f"[PendingExec] 执行出错: {e}")
+        return {
+            "success": False,
+            "error": str(e),
+            "command": command,
+        }
+
+def reject_pending_command(request_id: str) -> Dict[str, Any]:
+    """拒绝待确认的命令，清理存储"""
+    pending = _pending_executions.pop(request_id, None)
+    session_id = pending.get('session_id', '') if pending else ''
+    if session_id and _session_pending.get(session_id) == request_id:
+        del _session_pending[session_id]
+
+    if pending:
+        _log.info(f"[PendingExec] 用户拒绝命令: request_id={request_id[:8]}, cmd={pending.get('command', '')[:80]}")
+        return {"success": False, "rejected": True, "command": pending.get('command', ''), "message": "用户已拒绝执行该命令"}
+    else:
+        return {"success": False, "rejected": True, "error": "未找到待执行的命令", "request_id": request_id}
 
 
 def _truncate_text_preview(text: str, limit: int = 1200) -> str:
@@ -744,31 +852,22 @@ class ToolExecutor:
             }
 
     @staticmethod
-    def exec_command(command: str, timeout: int = 30, confirmed: bool = False) -> Dict[str, Any]:
+    def exec_command(command: str, timeout: int = 30) -> Dict[str, Any]:
         """
         执行命令行命令
-        
+
         Args:
             command: 要执行的命令
             timeout: 超时时间（秒），默认30秒
-            confirmed: 是否已经用户确认，False表示需要检查确认
-        
+
         Returns:
-            命令执行结果，如果需要确认则返回确认请求
+            命令执行结果，如果在白名单外则返回确认请求
         """
         import subprocess
         import re
         import shlex
-        
-        try:
-            if os.getenv("NBOT_ENABLE_EXEC_COMMAND", "").lower() not in {"1", "true", "yes"}:
-                return {
-                    "success": False,
-                    "error": "exec_command is disabled by default. Set NBOT_ENABLE_EXEC_COMMAND=1 to enable it.",
-                    "command": command,
-                    "disabled": True,
-                }
 
+        try:
             # 安全检查：检测危险模式
             for pattern in EXEC_BLACKLIST_PATTERNS:
                 if re.search(pattern, command, re.IGNORECASE):
@@ -778,7 +877,7 @@ class ToolExecutor:
                         "command": command,
                         "blocked_reason": "dangerous_pattern"
                     }
-            
+
             # 解析命令获取主命令名
             try:
                 cmd_parts = shlex.split(command)
@@ -793,26 +892,25 @@ class ToolExecutor:
                     "error": "命令不能为空",
                     "command": command,
                 }
-            
+
             # 检查是否在白名单中
             is_whitelisted = main_cmd in EXEC_WHITELIST
-            
-            # 如果未确认且不在白名单，返回确认请求
-            if not confirmed and not is_whitelisted:
+
+            # 不在白名单：返回确认请求（由 execute_tool 负责存储待执行状态）
+            if not is_whitelisted:
                 return {
                     "success": False,
                     "error": "需要用户确认",
                     "command": command,
                     "require_confirmation": True,
                     "main_command": main_cmd,
-                    "is_whitelisted": is_whitelisted,
-                    "message": f"AI 请求执行命令: `{command}`\n\n该命令不在白名单中，请谨慎确认。"
+                    "is_whitelisted": False,
+                    "message": f"AI 请求执行命令: `{command}`\n\n该命令不在白名单中，需用户确认后执行。"
                 }
-            
-            # 执行命令
-            _log.info(f"Executing command: {command}")
-            
-            # 使用 subprocess 执行命令
+
+            # 白名单命令：直接执行
+            _log.info(f"Executing command (whitelisted): {command}")
+
             result = subprocess.run(
                 cmd_parts,
                 shell=False,
@@ -821,25 +919,25 @@ class ToolExecutor:
                 timeout=timeout,
                 cwd=os.getcwd()
             )
-            
+
             # 构建返回结果
             output = result.stdout
             error_output = result.stderr
-            
+
             # 限制输出长度
             max_output_length = 10000
             if len(output) > max_output_length:
                 output = output[:max_output_length] + f"\n\n... (输出已截断，共 {len(result.stdout)} 字符)"
-            
+
             return {
                 "success": result.returncode == 0,
                 "command": command,
                 "returncode": result.returncode,
                 "stdout": output,
                 "stderr": error_output[:5000] if error_output else "",
-                "is_whitelisted": is_whitelisted
+                "is_whitelisted": True
             }
-            
+
         except subprocess.TimeoutExpired:
             _log.error(f"Command timeout: {command}")
             return {
@@ -1316,7 +1414,7 @@ TOOL_DEFINITIONS = [
         "type": "function",
         "function": {
             "name": "exec_command",
-            "description": "执行命令行命令。默认禁用；必须显式设置 NBOT_ENABLE_EXEC_COMMAND=1 才允许使用。",
+            "description": "执行命令行命令。白名单命令（如 ls, cat, echo 等）直接执行，非白名单命令系统会自动请求用户确认后执行。可通过 Web 管理界面启用或禁用此工具。",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -1328,11 +1426,6 @@ TOOL_DEFINITIONS = [
                         "type": "integer",
                         "description": "命令超时时间（秒），默认30秒",
                         "default": 30
-                    },
-                    "confirmed": {
-                        "type": "boolean",
-                        "description": "是否已经用户确认。首次调用时设为false，如果返回需要确认，则用户确认后再次调用设为true",
-                        "default": False
                     }
                 },
                 "required": ["command"]
@@ -1724,48 +1817,58 @@ def execute_tool(tool_name: str, arguments: Dict[str, Any], context: Dict = None
             break
 
     # 4. 如果找到 Web 配置且有 implementation，使用动态执行
+    result = None
     if tool_config and tool_config.get('implementation'):
         _log.info(f"Executing dynamic tool: {tool_name}")
         executor = get_dynamic_executor()
         if executor:
-            return executor.execute_tool(tool_config, arguments, context)
+            result = executor.execute_tool(tool_config, arguments, context)
         else:
-            return {
+            result = {
                 "success": False,
                 "error": "Dynamic executor not available"
             }
+    else:
+        # 5. 否则使用内置 Tool
+        _log.info(f"Executing built-in tool: {tool_name}")
+        executor = ToolExecutor()
 
-    # 5. 否则使用内置 Tool
-    _log.info(f"Executing built-in tool: {tool_name}")
-    executor = ToolExecutor()
-
-    tool_map = {
-        "search_news": executor.search_news,
-        "get_weather": executor.get_weather,
-        "search_web": executor.search_web,
-        "get_date_time": executor.get_date_time,
-        "http_get": executor.http_get,
-        "understand_image": executor.understand_image,
-        "exec_command": executor.exec_command,
-        "get_session_thinking_history": executor.get_session_thinking_history,
-    }
-
-    if tool_name not in tool_map:
-        return {
-            "success": False,
-            "error": f"Unknown tool: {tool_name}"
+        tool_map = {
+            "search_news": executor.search_news,
+            "get_weather": executor.get_weather,
+            "search_web": executor.search_web,
+            "get_date_time": executor.get_date_time,
+            "http_get": executor.http_get,
+            "understand_image": executor.understand_image,
+            "exec_command": executor.exec_command,
+            "get_session_thinking_history": executor.get_session_thinking_history,
         }
 
-    try:
-        tool_func = tool_map[tool_name]
-        result = tool_func(**arguments)
-        return result
-    except Exception as e:
-        _log.error(f"Tool execution error: {e}")
-        return {
-            "success": False,
-            "error": str(e)
-        }
+        if tool_name not in tool_map:
+            return {
+                "success": False,
+                "error": f"Unknown tool: {tool_name}"
+            }
+
+        try:
+            tool_func = tool_map[tool_name]
+            result = tool_func(**arguments)
+        except Exception as e:
+            _log.error(f"Tool execution error: {e}")
+            return {
+                "success": False,
+                "error": str(e)
+            }
+
+    # 如果 exec_command 返回需要确认，存储待执行命令并注入 request_id
+    if result and result.get('require_confirmation') and context and context.get('session_id'):
+        request_id = store_pending_execution(
+            context['session_id'],
+            result.get('command', ''),
+            arguments.get('timeout', 30)
+        )
+        result['request_id'] = request_id
+    return result
 
 
 def _execute_workspace_tool(tool_name: str, arguments: Dict[str, Any],
