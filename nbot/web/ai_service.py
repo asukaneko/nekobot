@@ -40,6 +40,14 @@ except ImportError:
 _log = logging.getLogger(__name__)
 
 
+def _feature_enabled(server, name: str, default: bool = True) -> bool:
+    settings = getattr(server, "settings", {}) or {}
+    features = settings.get("features")
+    if isinstance(features, dict) and name in features:
+        return bool(features.get(name))
+    return bool(settings.get(name, default))
+
+
 def _build_channel_assistant_message(
     chat_response: ChatResponse,
     *,
@@ -216,8 +224,9 @@ def trigger_ai_response_for_request(server, chat_request: ChatRequest, adapter=N
     # 知识库检索
     knowledge_retrieved = False
     knowledge_text = ""
-    _log.info(f"[Knowledge] 知识库开关状态: {server.settings.get('knowledge', True)}")
-    if server.settings.get("knowledge", True):
+    knowledge_enabled = _feature_enabled(server, "knowledge", True)
+    _log.info(f"[Knowledge] 知识库开关状态: {knowledge_enabled}")
+    if knowledge_enabled:
         try:
             _log.info(f"[Knowledge] 开始检索，查询: {user_content[:50]}...")
             knowledge_text = server._retrieve_knowledge(user_content)

@@ -5005,6 +5005,8 @@
             left: 0;
             right: 0;
             bottom: 0;
+            width: 100%;
+            height: 100%;
             background: var(--bg-tertiary);
             border-radius: 14px;
             transition: all 0.3s ease;
@@ -5025,6 +5027,47 @@
         }
         .toggle-switch input:checked + .toggle-slider::before {
             transform: translateX(28px);
+        }
+
+        /* Active-class feature switches share the base toggle class with input switches. */
+        .toggle-switch.active .toggle-slider {
+            transform: none;
+        }
+
+        .toggle-switch.active .toggle-slider::before {
+            transform: translateX(28px);
+        }
+
+        .feature-switch-item .toggle-switch {
+            width: 48px;
+            height: 26px;
+            background: var(--border-color);
+            border-radius: 13px;
+            flex-shrink: 0;
+        }
+
+        .feature-switch-item .toggle-switch.active {
+            background: var(--success);
+        }
+
+        .feature-switch-item .toggle-slider {
+            top: 3px;
+            left: 3px;
+            right: auto;
+            bottom: auto;
+            width: 20px;
+            height: 20px;
+            background: #fff;
+            border-radius: 50%;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+        }
+
+        .feature-switch-item .toggle-slider::before {
+            content: none;
+        }
+
+        .feature-switch-item .toggle-switch.active .toggle-slider {
+            transform: translateX(22px);
         }
 
         /* 工具卡片样式 */
@@ -9720,73 +9763,23 @@
                                 <div class="form-group" style="margin-top: 20px;">
                                     <label class="form-label">功能开关</label>
                                     <div class="feature-switches-grid">
-                                        <!-- AI 对话 -->
-                                        <div class="feature-switch-item" @click="settings.features.ai = !settings.features.ai">
-                                            <div class="feature-switch-info">
-                                                <i class="fas fa-robot feature-switch-icon"></i>
-                                                <span class="feature-switch-label">AI 对话</span>
-                                            </div>
-                                            <label class="toggle-switch" :class="{ active: settings.features.ai }" @click.stop>
-                                                <div class="toggle-slider"></div>
-                                            </label>
-                                        </div>
-                                        <!-- 记忆功能 -->
-                                        <div class="feature-switch-item" @click="settings.features.memory = !settings.features.memory">
-                                            <div class="feature-switch-info">
-                                                <i class="fas fa-brain feature-switch-icon"></i>
-                                                <span class="feature-switch-label">记忆功能</span>
-                                            </div>
-                                            <label class="toggle-switch" :class="{ active: settings.features.memory }" @click.stop>
-                                                <div class="toggle-slider"></div>
-                                            </label>
-                                        </div>
                                         <!-- 知识库 -->
                                         <div class="feature-switch-item" @click="settings.features.knowledge = !settings.features.knowledge">
                                             <div class="feature-switch-info">
                                                 <i class="fas fa-book feature-switch-icon"></i>
                                                 <span class="feature-switch-label">知识库</span>
                                             </div>
-                                            <label class="toggle-switch" :class="{ active: settings.features.knowledge }" @click.stop>
-                                                <div class="toggle-slider"></div>
-                                            </label>
-                                        </div>
-                                        <!-- 语音合成 -->
-                                        <div class="feature-switch-item" @click="settings.features.tts = !settings.features.tts">
-                                            <div class="feature-switch-info">
-                                                <i class="fas fa-volume-up feature-switch-icon"></i>
-                                                <span class="feature-switch-label">语音合成</span>
-                                            </div>
-                                            <label class="toggle-switch" :class="{ active: settings.features.tts }" @click.stop>
-                                                <div class="toggle-slider"></div>
-                                            </label>
-                                        </div>
-                                        <!-- 工作流 -->
-                                        <div class="feature-switch-item" @click="settings.features.workflow = !settings.features.workflow">
-                                            <div class="feature-switch-info">
-                                                <i class="fas fa-project-diagram feature-switch-icon"></i>
-                                                <span class="feature-switch-label">工作流</span>
-                                            </div>
-                                            <label class="toggle-switch" :class="{ active: settings.features.workflow }" @click.stop>
-                                                <div class="toggle-slider"></div>
-                                            </label>
-                                        </div>
-                                        <!-- Web 界面 -->
-                                        <div class="feature-switch-item" @click="settings.features.web = !settings.features.web">
-                                            <div class="feature-switch-info">
-                                                <i class="fas fa-globe feature-switch-icon"></i>
-                                                <span class="feature-switch-label">Web 界面</span>
-                                            </div>
-                                            <label class="toggle-switch" :class="{ active: settings.features.web }" @click.stop>
+                                            <label class="toggle-switch" :class="{ active: settings.features.knowledge }">
                                                 <div class="toggle-slider"></div>
                                             </label>
                                         </div>
                                         <!-- 显示进度卡片 -->
-                                        <div class="feature-switch-item" @click="showThinkingCard = !showThinkingCard">
+                                        <div class="feature-switch-item" @click="toggleThinkingCards()">
                                             <div class="feature-switch-info">
                                                 <i class="fas fa-tasks feature-switch-icon"></i>
                                                 <span class="feature-switch-label">显示进度卡片</span>
                                             </div>
-                                            <label class="toggle-switch" :class="{ active: showThinkingCard }" @click.stop>
+                                            <label class="toggle-switch" :class="{ active: showThinkingCard }">
                                                 <div class="toggle-slider"></div>
                                             </label>
                                         </div>
@@ -9796,7 +9789,7 @@
                                                 <i class="fas fa-microphone-alt feature-switch-icon"></i>
                                                 <span class="feature-switch-label">Web端语音播报</span>
                                             </div>
-                                            <label class="toggle-switch" :class="{ active: ttsEnabled }" @click.stop>
+                                            <label class="toggle-switch" :class="{ active: ttsEnabled }">
                                                 <div class="toggle-slider"></div>
                                             </label>
                                         </div>
@@ -10388,7 +10381,7 @@
                                 <i class="fas fa-window-maximize feature-switch-icon"></i>
                                 <span class="feature-switch-label">点击弹窗外关闭窗口</span>
                             </div>
-                            <label class="toggle-switch" :class="{ active: themeSettings.closeModalOnOverlayClick }" @click.stop>
+                            <label class="toggle-switch" :class="{ active: themeSettings.closeModalOnOverlayClick }">
                                 <div class="toggle-slider"></div>
                             </label>
                         </div>
@@ -12021,7 +12014,7 @@
                     uploadedFiles: [],
                     isTyping: false,
                     thinkingCards: [],  // 进度卡片列表
-                    showThinkingCard: true,  // 是否显示进度卡片
+                    showThinkingCard: localStorage.getItem('showThinkingCard') !== 'false',  // 是否显示进度卡片
                     orphanCards: {},  // 找不到父消息的孤儿卡片（按 parentMsgId 分组）
                     isUserScrolling: false,
                     showScrollToBottom: false,
@@ -14868,7 +14861,16 @@ def main(params):
                 async loadSettings() {
                     try {
                         const res = await api.get('/api/settings');
-                        this.settings = res.data;
+                        const currentFeatures = this.settings.features || {};
+                        const loadedSettings = res.data || {};
+                        this.settings = {
+                            ...this.settings,
+                            ...loadedSettings,
+                            features: {
+                                ...currentFeatures,
+                                ...(loadedSettings.features || {})
+                            }
+                        };
                         // 同步上下文长度设置
                         if (this.settings.max_context_length) {
                             this.maxContextLength = this.settings.max_context_length;
@@ -15667,6 +15669,12 @@ def main(params):
                     this.ttsEnabled = !this.ttsEnabled;
                     localStorage.setItem('ttsEnabled', this.ttsEnabled);
                     this.showToast(this.ttsEnabled ? '语音播报已开启' : '语音播报已关闭', 'info');
+                },
+
+                toggleThinkingCards() {
+                    this.showThinkingCard = !this.showThinkingCard;
+                    localStorage.setItem('showThinkingCard', this.showThinkingCard);
+                    this.showToast(this.showThinkingCard ? '进度卡片已显示' : '进度卡片已隐藏', 'info');
                 },
 
                 // ========== API Key 管理 ==========
