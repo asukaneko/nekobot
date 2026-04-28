@@ -6506,16 +6506,33 @@
             align-items: center;
             justify-content: center;
             height: 100vh;
-            background: linear-gradient(135deg, var(--bg-primary) 0%, var(--bg-secondary) 100%);
+            padding: 24px;
+            position: relative;
+            z-index: 2;
+            background:
+                radial-gradient(circle at 50% 22%, rgba(88, 166, 255, 0.18), transparent 32%),
+                linear-gradient(135deg, #121923 0%, #182232 52%, #101722 100%);
+        }
+
+        .login-container::before {
+            content: '';
+            position: absolute;
+            inset: 0;
+            z-index: -1;
+            background: rgba(8, 13, 20, 0.22);
+            pointer-events: none;
         }
 
         .login-box {
-            background: var(--bg-secondary);
-            border: 1px solid var(--border-color);
+            background: rgba(22, 31, 45, 0.92);
+            border: 1px solid rgba(125, 151, 183, 0.28);
             border-radius: 16px;
             padding: 40px;
             width: 400px;
             text-align: center;
+            box-shadow: 0 24px 80px rgba(0, 0, 0, 0.36), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
         }
 
         .login-logo {
@@ -6534,12 +6551,42 @@
             font-size: 24px;
             font-weight: 700;
             margin-bottom: 8px;
+            color: #f8fafc;
         }
 
         .login-subtitle {
             font-size: 14px;
-            color: var(--text-secondary);
+            color: #b6c4d6;
             margin-bottom: 32px;
+        }
+
+        .login-box .form-input {
+            background: rgba(255, 255, 255, 0.08);
+            border-color: rgba(125, 151, 183, 0.24);
+            color: #f8fafc;
+        }
+
+        .login-box .form-input::placeholder {
+            color: #8ea0b7;
+        }
+
+        .login-box .form-input:focus {
+            background: rgba(255, 255, 255, 0.12);
+            border-color: rgba(88, 166, 255, 0.65);
+            box-shadow: 0 0 0 3px rgba(88, 166, 255, 0.16);
+        }
+
+        .login-box .btn-primary {
+            background: #2563eb;
+            box-shadow: 0 12px 30px rgba(37, 99, 235, 0.28);
+        }
+
+        .login-box .btn-primary:hover {
+            background: #3b82f6;
+        }
+
+        body.has-bg-image .login-container {
+            z-index: 2;
         }
 
         /* Code Block */
@@ -10302,6 +10349,16 @@
                                                 <div class="toggle-slider"></div>
                                             </label>
                                         </div>
+                                        <!-- Live2D 看板娘 -->
+                                        <div class="feature-switch-item" @click="toggleLive2d()">
+                                            <div class="feature-switch-info">
+                                                <i class="fas fa-user-astronaut feature-switch-icon"></i>
+                                                <span class="feature-switch-label">Live2D 看板娘</span>
+                                            </div>
+                                            <label class="toggle-switch" :class="{ active: settings.features.live2d }">
+                                                <div class="toggle-slider"></div>
+                                            </label>
+                                        </div>
                                     </div>
                                 </div>
                             </div>
@@ -12438,7 +12495,7 @@
             }
         };
 
-        createApp({
+        const nbotVueApp = createApp({
             data() {
                 return {
                     isLoggedIn: false,
@@ -12925,7 +12982,8 @@
                             knowledge: true,
                             tts: false,
                             workflow: true,
-                            web: true
+                            web: true,
+                            live2d: true
                         }
                     },
                     
@@ -15482,6 +15540,10 @@ def main(params):
                         if (this.settings.max_context_length) {
                             this.maxContextLength = this.settings.max_context_length;
                         }
+                        // 同步 Live2D 显隐状态
+                        if (this.settings.features && window.__nbotLive2dSetEnabled) {
+                            window.__nbotLive2dSetEnabled(this.settings.features.live2d);
+                        }
                         this.updateContextStats();
                     } catch (e) {
                         console.error('Failed to load settings:', e);
@@ -15494,6 +15556,9 @@ def main(params):
                     
                     // 切换到新会话，清除所有状态
                     this.currentSession = session;
+                    if (window.__nbotLive2dSay) {
+                        window.__nbotLive2dSay(`\u5df2\u5207\u6362\u5230\u300c${session.name || '\u5f53\u524d\u4f1a\u8bdd'}\u300d\u3002`, 3200, 3);
+                    }
                     this.currentQqId = null;
                     this.currentQqMessages = [];
                     this.currentMessages = [];
@@ -15928,10 +15993,17 @@ def main(params):
 
                     if (this.isLoading && this.loadingSessionId === this.currentSession.id) {
                         const queueLength = this.enqueuePendingMessage(this.currentSession.id, payload);
+                        if (window.__nbotLive2dSay) {
+                            window.__nbotLive2dSay('\u5df2\u52a0\u5165\u5f53\u524d\u4f1a\u8bdd\u7684\u53d1\u9001\u961f\u5217\u3002', 3200, 4);
+                        }
                         this.showToast(`已加入待发送队列（第 ${queueLength} 条）`, 'info');
                         return;
                     }
 
+                    if (window.__nbotLive2dSay) {
+                        const hasFiles = files.length > 0;
+                        window.__nbotLive2dSay(hasFiles ? '\u6587\u4ef6\u548c\u6d88\u606f\u5df2\u9001\u51fa\uff0c\u6211\u7b49 AI \u56de\u590d\u3002' : '\u6d88\u606f\u5df2\u9001\u51fa\uff0c\u6211\u7b49 AI \u56de\u590d\u3002', 3600, 4);
+                    }
                     await this.sendPreparedMessage(payload);
                 },
                 
@@ -16283,6 +16355,14 @@ def main(params):
                     this.showThinkingCard = !this.showThinkingCard;
                     localStorage.setItem('showThinkingCard', this.showThinkingCard);
                     this.showToast(this.showThinkingCard ? '进度卡片已显示' : '进度卡片已隐藏', 'info');
+                },
+
+                toggleLive2d() {
+                    this.settings.features.live2d = !this.settings.features.live2d;
+                    if (window.__nbotLive2dSetEnabled) {
+                        window.__nbotLive2dSetEnabled(this.settings.features.live2d);
+                    }
+                    this.showToast(this.settings.features.live2d ? 'Live2D 看板娘已开启' : 'Live2D 看板娘已关闭', 'info');
                 },
 
                 // ========== API Key 管理 ==========
@@ -20237,6 +20317,14 @@ def main(params):
                     socket.on('ai_stream_end', (data) => {
                         console.log('[Stream] AI stream end:', data);
                         const finishedSessionId = data?.session_id || this.loadingSessionId || this.currentSession?.id;
+                        if (this.currentSession && finishedSessionId === this.currentSession.id && window.__nbotLive2dComment) {
+                            // Collect last 5 rounds (up to 10 messages) for Live2D commentary
+                            const allMsgs = this.currentMessages.filter(m => m.role === 'user' || m.role === 'assistant');
+                            const recent = allMsgs.slice(-10).map(m => ({ role: m.role, content: m.content || '' }));
+                            if (recent.length) {
+                                window.__nbotLive2dComment(recent);
+                            }
+                        }
                         this.isLoading = false;
                         this.loadingSessionId = null;
                         this.processPendingQueue(finishedSessionId);
@@ -20249,6 +20337,13 @@ def main(params):
                         this.isLoading = false;
                         this.loadingSessionId = null;
                         if (this.currentSession && data.session_id === this.currentSession.id) {
+                            if (data.message?.content && window.__nbotLive2dComment) {
+                                const allMsgs = this.currentMessages.filter(m => m.role === 'user' || m.role === 'assistant');
+                                const recent = allMsgs.slice(-10).map(m => ({ role: m.role, content: m.content || '' }));
+                                if (recent.length) {
+                                    window.__nbotLive2dComment(recent);
+                                }
+                            }
                             const existingIdx = this.currentMessages.findIndex(m => m.id === data.message.id);
                             if (existingIdx !== -1) {
                                 const existingMessage = this.currentMessages[existingIdx];
@@ -20275,6 +20370,9 @@ def main(params):
                         const failedSessionId = err?.session_id || this.loadingSessionId || this.currentSession?.id;
                         this.isLoading = false;
                         this.loadingSessionId = null;
+                        if (this.currentSession && failedSessionId === this.currentSession.id && window.__nbotLive2dSay) {
+                            window.__nbotLive2dSay('\u8fd9\u6b21\u8bf7\u6c42\u51fa\u9519\u4e86\uff0c\u53ef\u4ee5\u770b\u4e00\u4e0b\u9519\u8bef\u63d0\u793a\u3002', 4200, 6);
+                        }
                         this.showToast(err.message || '发生错误', 'error');
                         this.processPendingQueue(failedSessionId);
                     });
@@ -20922,6 +21020,7 @@ def main(params):
                 'click-outside': clickOutside
             }
         }).mount('#app');
+        window.__nbotVueApp = nbotVueApp;
         window.__nbotAppReady = true;
         window.dispatchEvent(new Event('nbot-app-ready'));
         if (window.__hideNbotBootOverlay) window.__hideNbotBootOverlay();
@@ -20937,6 +21036,7 @@ def main(params):
         });
     </script>
 
+    <script src="/static/js/live2d-widget.js"></script>
     <script>
         (function () {
             const overlay = document.getElementById('boot-overlay');

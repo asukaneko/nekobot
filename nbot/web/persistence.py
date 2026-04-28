@@ -291,6 +291,7 @@ def init_default_data(server):
             "tts": False,
             "workflow": True,
             "web": True,
+            "live2d": True,
         },
     }
     server.channels_config = _merge_channel_configs([])

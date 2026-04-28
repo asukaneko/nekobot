@@ -8,6 +8,7 @@ from nbot.web.routes.config_legacy import register_config_legacy_routes
 from nbot.web.routes.files import register_file_routes
 from nbot.web.routes.heartbeat import register_heartbeat_routes
 from nbot.web.routes.knowledge import register_knowledge_routes
+from nbot.web.routes.live2d import register_live2d_routes
 from nbot.web.routes.memory import register_memory_routes
 from nbot.web.routes.personality import register_personality_routes
 from nbot.web.routes.qq_overview import register_qq_overview_routes
@@ -33,6 +34,7 @@ __all__ = [
     "register_file_routes",
     "register_heartbeat_routes",
     "register_knowledge_routes",
+    "register_live2d_routes",
     "register_memory_routes",
     "register_personality_routes",
     "register_qq_overview_routes",

@@ -3985,16 +3985,33 @@
             align-items: center;
             justify-content: center;
             height: 100vh;
-            background: linear-gradient(135deg, var(--bg-primary) 0%, var(--bg-secondary) 100%);
+            padding: 24px;
+            position: relative;
+            z-index: 2;
+            background:
+                radial-gradient(circle at 50% 22%, rgba(88, 166, 255, 0.18), transparent 32%),
+                linear-gradient(135deg, #121923 0%, #182232 52%, #101722 100%);
+        }
+
+        .login-container::before {
+            content: '';
+            position: absolute;
+            inset: 0;
+            z-index: -1;
+            background: rgba(8, 13, 20, 0.22);
+            pointer-events: none;
         }
 
         .login-box {
-            background: var(--bg-secondary);
-            border: 1px solid var(--border-color);
+            background: rgba(22, 31, 45, 0.92);
+            border: 1px solid rgba(125, 151, 183, 0.28);
             border-radius: 16px;
             padding: 40px;
             width: 400px;
             text-align: center;
+            box-shadow: 0 24px 80px rgba(0, 0, 0, 0.36), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
         }
 
         .login-logo {
@@ -4013,12 +4030,42 @@
             font-size: 24px;
             font-weight: 700;
             margin-bottom: 8px;
+            color: #f8fafc;
         }
 
         .login-subtitle {
             font-size: 14px;
-            color: var(--text-secondary);
+            color: #b6c4d6;
             margin-bottom: 32px;
+        }
+
+        .login-box .form-input {
+            background: rgba(255, 255, 255, 0.08);
+            border-color: rgba(125, 151, 183, 0.24);
+            color: #f8fafc;
+        }
+
+        .login-box .form-input::placeholder {
+            color: #8ea0b7;
+        }
+
+        .login-box .form-input:focus {
+            background: rgba(255, 255, 255, 0.12);
+            border-color: rgba(88, 166, 255, 0.65);
+            box-shadow: 0 0 0 3px rgba(88, 166, 255, 0.16);
+        }
+
+        .login-box .btn-primary {
+            background: #2563eb;
+            box-shadow: 0 12px 30px rgba(37, 99, 235, 0.28);
+        }
+
+        .login-box .btn-primary:hover {
+            background: #3b82f6;
+        }
+
+        body.has-bg-image .login-container {
+            z-index: 2;
         }
 
         /* Code Block */
