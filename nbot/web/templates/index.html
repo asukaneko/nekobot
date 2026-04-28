@@ -6982,6 +6982,291 @@
             0% { background-position: 200% 0; }
             100% { background-position: -200% 0; }
         }
+
+        /* Chat polish: lighter message cards and calmer markdown tables */
+        .messages-container {
+            background:
+                radial-gradient(circle at 12% 6%, rgba(88, 166, 255, 0.08), transparent 28%),
+                radial-gradient(circle at 86% 16%, rgba(35, 134, 54, 0.08), transparent 24%),
+                linear-gradient(180deg, rgba(13, 17, 23, 0.28), rgba(13, 17, 23, 0));
+        }
+
+        .message {
+            align-items: flex-start;
+        }
+
+        .message-avatar {
+            box-shadow: 0 10px 24px rgba(0, 0, 0, 0.22);
+        }
+
+        .message.assistant .message-avatar {
+            background: linear-gradient(135deg, #2f81f7 0%, #1f6feb 100%);
+        }
+
+        .message.user .message-avatar {
+            background: linear-gradient(135deg, #60a5fa 0%, #2563eb 100%);
+        }
+
+        .message-content {
+            border: 1px solid rgba(139, 148, 158, 0.14);
+            box-shadow: 0 16px 38px rgba(0, 0, 0, 0.18);
+        }
+
+        .message.assistant .message-content {
+            width: min(45%, 760px);
+            max-width: calc(100% - 64px);
+            background: linear-gradient(145deg, rgba(33, 38, 45, 0.92), rgba(22, 27, 34, 0.88));
+            border-color: rgba(139, 148, 158, 0.16);
+        }
+
+        .message.user .message-content {
+            background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+            border-color: rgba(255, 255, 255, 0.16);
+            box-shadow: 0 16px 36px rgba(37, 99, 235, 0.24);
+        }
+
+        .message.is-progress {
+            margin: 4px 0 16px 52px;
+            gap: 0;
+            justify-content: flex-start;
+        }
+
+        .message.is-progress .message-avatar,
+        .message.is-progress .message-time,
+        .message.is-progress .msg-actions {
+            display: none;
+        }
+
+        .message.is-progress .message-content {
+            max-width: max-content;
+            width: auto;
+            padding: 7px 12px;
+            border-radius: 999px;
+            background: linear-gradient(135deg, rgba(45, 96, 72, 0.22), rgba(22, 45, 38, 0.12));
+            border: 1px solid rgba(92, 145, 113, 0.26);
+            color: rgba(154, 196, 171, 0.92);
+            box-shadow: 0 8px 22px rgba(18, 60, 42, 0.08);
+            font-size: 13px;
+        }
+
+        .message.is-progress .markdown-body {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-weight: 600;
+            line-height: 1.35;
+        }
+
+        .message.is-progress .markdown-body p {
+            margin: 0;
+        }
+
+        .global-thinking-cards {
+            padding: 10px 20px 14px;
+            margin-left: 60px;
+        }
+
+        .global-thinking-cards .thinking-card,
+        .message-thinking-cards .thinking-card {
+            display: inline-block !important;
+            width: min(45%, 760px);
+            max-width: calc(100% - 64px);
+            margin: 4px 0 10px;
+            padding: 9px 13px;
+            border-radius: 13px;
+            background: linear-gradient(145deg, rgba(18, 22, 28, 0.96), rgba(10, 13, 17, 0.92));
+            border: 1px solid rgba(139, 148, 158, 0.14);
+            box-shadow: 0 18px 42px rgba(0, 0, 0, 0.24), inset 0 1px 0 rgba(255, 255, 255, 0.035);
+        }
+
+        .global-thinking-cards .thinking-card:not(.is-complete),
+        .message-thinking-cards .thinking-card:not(.is-complete) {
+            border-color: rgba(88, 166, 255, 0.26);
+        }
+
+        .global-thinking-cards .thinking-card:not(.is-complete) .thinking-card-header,
+        .message-thinking-cards .thinking-card:not(.is-complete) .thinking-card-header {
+            margin-bottom: 8px;
+            color: rgba(125, 176, 255, 0.96);
+            font-size: 13px;
+            font-weight: 600;
+        }
+
+        .global-thinking-cards .thinking-card:not(.is-complete) .thinking-card-steps,
+        .message-thinking-cards .thinking-card:not(.is-complete) .thinking-card-steps {
+            gap: 7px;
+        }
+
+        .global-thinking-cards .thinking-card:not(.is-complete) .thinking-step,
+        .message-thinking-cards .thinking-card:not(.is-complete) .thinking-step {
+            width: 100%;
+            min-width: 220px;
+            padding: 6px 8px;
+            border-radius: 9px;
+            background: rgba(255, 255, 255, 0.025);
+            border: 1px solid rgba(139, 148, 158, 0.08);
+        }
+
+        .global-thinking-cards .thinking-card.is-complete,
+        .message-thinking-cards .thinking-card.is-complete {
+            display: inline-block !important;
+            width: min(45%, 760px);
+            max-width: calc(100% - 64px);
+            margin: 4px 0 10px;
+            padding: 9px 13px;
+            border-radius: 13px;
+            background: linear-gradient(145deg, rgba(18, 22, 28, 0.96), rgba(10, 13, 17, 0.92));
+            border: 1px solid rgba(139, 148, 158, 0.16);
+            box-shadow: 0 18px 42px rgba(0, 0, 0, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.035);
+            cursor: default;
+        }
+
+        .global-thinking-cards .thinking-card.is-complete .thinking-card-header,
+        .message-thinking-cards .thinking-card.is-complete .thinking-card-header {
+            margin-bottom: 0;
+            color: rgba(204, 213, 224, 0.92);
+            font-size: 13px;
+            font-weight: 600;
+        }
+
+        .global-thinking-cards .thinking-card.is-complete .thinking-card-header i,
+        .message-thinking-cards .thinking-card.is-complete .thinking-card-header i {
+            color: rgba(154, 196, 171, 0.86);
+        }
+
+        .global-thinking-cards .thinking-card.is-complete .thinking-card-steps,
+        .message-thinking-cards .thinking-card.is-complete .thinking-card-steps {
+            display: flex !important;
+            flex-direction: column;
+            gap: 7px;
+            max-height: 0;
+            overflow: hidden;
+            margin-top: 0;
+            opacity: 0;
+            transition: max-height 0.22s ease, margin-top 0.22s ease, opacity 0.18s ease;
+        }
+
+        .global-thinking-cards .thinking-card.is-complete:hover .thinking-card-steps,
+        .message-thinking-cards .thinking-card.is-complete:hover .thinking-card-steps {
+            max-height: 360px !important;
+            margin-top: 9px;
+            opacity: 1;
+        }
+
+        .global-thinking-cards .thinking-card.is-complete .thinking-step,
+        .message-thinking-cards .thinking-card.is-complete .thinking-step {
+            width: 100%;
+            min-width: 220px;
+            justify-content: flex-start;
+            padding: 6px 8px;
+            border-radius: 9px;
+            background: rgba(255, 255, 255, 0.025);
+            border: 1px solid rgba(139, 148, 158, 0.08);
+        }
+
+        .global-thinking-cards .thinking-card.is-complete .step-name,
+        .message-thinking-cards .thinking-card.is-complete .step-name {
+            background: transparent;
+            border: 0;
+            padding: 0;
+            color: rgba(204, 213, 224, 0.82);
+        }
+
+        .global-thinking-cards .thinking-card.is-complete .step-detail,
+        .message-thinking-cards .thinking-card.is-complete .step-detail {
+            margin-left: auto;
+            color: rgba(139, 148, 158, 0.74);
+            white-space: nowrap;
+        }
+
+        .message.assistant .markdown-body table {
+            display: table;
+            width: max-content;
+            min-width: 100%;
+            overflow-x: auto;
+            border-collapse: separate;
+            border-spacing: 0;
+            border: 1px solid rgba(139, 148, 158, 0.16);
+            border-radius: 12px;
+            background: rgba(13, 17, 23, 0.2);
+            table-layout: auto;
+        }
+
+        .message.assistant .markdown-body th,
+        .message.assistant .markdown-body td {
+            border: 0;
+            border-bottom: 1px solid rgba(139, 148, 158, 0.12);
+            padding: 10px 12px;
+        }
+
+        .message.assistant .markdown-body tr:last-child td {
+            border-bottom: 0;
+        }
+
+        .message.assistant .markdown-body th {
+            background: rgba(88, 166, 255, 0.08);
+            color: #dbeafe;
+            font-weight: 700;
+        }
+
+        .message.assistant .markdown-body tr:nth-child(2n) {
+            background: rgba(255, 255, 255, 0.025);
+        }
+
+        .message.assistant .markdown-body ul,
+        .message.assistant .markdown-body ol {
+            padding-left: 18px;
+        }
+
+        .message-time {
+            color: rgba(139, 148, 158, 0.82);
+        }
+
+        @media (max-width: 768px) {
+            .global-thinking-cards {
+                padding: 8px 12px 12px;
+                margin-left: 40px;
+            }
+
+            .global-thinking-cards .thinking-card,
+            .message-thinking-cards .thinking-card,
+            .global-thinking-cards .thinking-card.is-complete,
+            .message-thinking-cards .thinking-card.is-complete {
+                width: calc(100% - 12px);
+                max-width: calc(100% - 12px);
+                min-width: 0;
+            }
+
+            .message.assistant .message-content {
+                width: calc(100% - 48px);
+                max-width: calc(100% - 48px);
+            }
+
+            .global-thinking-cards .thinking-card .thinking-step,
+            .message-thinking-cards .thinking-card .thinking-step,
+            .global-thinking-cards .thinking-card.is-complete .thinking-step,
+            .message-thinking-cards .thinking-card.is-complete .thinking-step {
+                min-width: 0;
+            }
+
+            .global-thinking-cards .thinking-card .step-detail,
+            .message-thinking-cards .thinking-card .step-detail {
+                white-space: normal;
+                overflow-wrap: anywhere;
+            }
+
+            .message.is-progress {
+                margin-left: 40px;
+            }
+
+            .message.is-progress .message-content {
+                padding: 6px 10px;
+            }
+
+            .message-content {
+                box-shadow: 0 10px 24px rgba(0, 0, 0, 0.16);
+            }
+        }
     </style>
 </head>
 <body>
@@ -7446,7 +7731,7 @@
                                 </div>
 
                                 <div class="messages-container" ref="qqMessagesContainer" @scroll="handleQqMessagesScroll">
-                                    <div v-for="msg in currentQqMessages" :key="msg.id" class="message" :class="[msg.role, chatTab === 'qq_private' ? 'message-qq' : 'message-qq-group']">
+                                    <div v-for="msg in currentQqMessages" :key="msg.id" class="message" :class="[msg.role, chatTab === 'qq_private' ? 'message-qq' : 'message-qq-group', { 'is-progress': isProgressMessage(msg) }]">
                                         <div class="message-avatar">
                                             <i :class="msg.role === 'user' ? 'fas fa-user' : 'fas fa-robot'"></i>
                                         </div>
@@ -7523,7 +7808,7 @@
                                     </div>
                                     <template v-for="msg in currentMessages.filter(m => !m.hide_in_web)" :key="msg.id">
                                         <!-- 消息主体 -->
-                                        <div class="message" :class="msg.role">
+                                        <div class="message" :class="[msg.role, { 'is-progress': isProgressMessage(msg) }]">
                                             <div class="message-avatar">
                                                 <i :class="msg.role === 'user' ? 'fas fa-user' : 'fas fa-robot'"></i>
                                             </div>
@@ -7833,7 +8118,7 @@
                                                     <div class="context-stats">
                                                         <div class="stat-item">
                                                             <div class="stat-label">消息数</div>
-                                                            <div class="stat-value">{{ currentMessages.length }}</div>
+                                                            <div class="stat-value">{{ contextMessageCount }}</div>
                                                         </div>
                                                         <div class="stat-item">
                                                             <div class="stat-label">总字符数</div>
@@ -12210,6 +12495,7 @@
                     contextCharCount: 0,  // 当前上下文总字符数
                     contextTokenEstimate: 0,  // 预估token数
                     contextUsage: 0,  // 使用百分比
+                    contextMessageCount: 0,
                     isCompressing: false,  // 是否正在压缩上下文
                     
                     // Workflows
@@ -13235,16 +13521,107 @@
                 },
 
                 // Context Indicator Methods
+                isProgressMessage(msg) {
+                    if (!msg) return false;
+                    if (msg.is_progress || msg.is_progress_message) return true;
+
+                    const messageType = msg.message_type || msg.type || msg.metadata?.message_type;
+                    if (messageType === 'progress') return true;
+
+                    const content = String(msg.content || '');
+                    const compactContent = content.replace(/\s+/g, '');
+                    const isShortAssistantNotice = msg.role === 'assistant'
+                        && !msg.file
+                        && compactContent.length <= 40;
+                    if (
+                        msg.role === 'assistant'
+                        && !msg.file
+                        && (
+                            content.includes('\u5904\u7406\u5b8c\u6210')
+                            || content.includes('AI \u6b63\u5728\u5904\u7406')
+                            || (isShortAssistantNotice && /[\u2705\u2611]/u.test(content))
+                        )
+                    ) {
+                        return true;
+                    }
+                    return msg.role === 'assistant'
+                        && !msg.file
+                        && (content.includes('处理完成') || content.includes('AI 正在处理'));
+                },
+
+                getContextHistoryLimit() {
+                    const configuredLimit = Number(this.settings?.max_context_length || this.maxContextLength || 20);
+                    if (!Number.isFinite(configuredLimit)) return 20;
+                    return Math.max(1, Math.floor(configuredLimit));
+                },
+
+                getContextStatMessages() {
+                    if (!this.currentSession) return [];
+
+                    const contextMessages = [];
+                    const systemPrompt = this.currentSession.system_prompt || this.aiConfig.system_prompt || '';
+                    if (systemPrompt) {
+                        contextMessages.push({
+                            role: 'system',
+                            content: systemPrompt
+                        });
+                    }
+
+                    const historyLimit = this.getContextHistoryLimit();
+                    const visibleRoles = new Set(['user', 'assistant', 'tool', 'system']);
+                    const historyMessages = (this.currentMessages || [])
+                        .filter(msg => msg && !msg.hide_in_web && visibleRoles.has(msg.role || ''))
+                        .slice(-historyLimit);
+
+                    return contextMessages.concat(historyMessages);
+                },
+
+                estimateTextTokens(text) {
+                    const value = String(text || '');
+                    if (!value) return 0;
+
+                    const cjkMatches = value.match(/[\u3400-\u9fff\uf900-\ufaff]/g) || [];
+                    const cjkCount = cjkMatches.length;
+                    const nonCjkText = value.replace(/[\u3400-\u9fff\uf900-\ufaff]/g, ' ');
+                    const wordLikeCount = (nonCjkText.match(/[A-Za-z0-9_]+|[^\sA-Za-z0-9_]/g) || []).length;
+
+                    return Math.ceil(cjkCount * 1.05 + wordLikeCount * 0.75);
+                },
+
+                estimateMessageTokens(msg) {
+                    if (!msg) return 0;
+
+                    let tokenCount = 4 + this.estimateTextTokens(msg.role || '');
+                    tokenCount += this.estimateTextTokens(msg.content || '');
+
+                    if (Array.isArray(msg.attachments) && msg.attachments.length) {
+                        const attachmentText = msg.attachments
+                            .map(file => [
+                                file.name || file.filename || '',
+                                file.type || file.mime_type || '',
+                                file.extracted_text || file.content || ''
+                            ].join(' '))
+                            .join('\n');
+                        tokenCount += this.estimateTextTokens(attachmentText);
+                    }
+
+                    return tokenCount;
+                },
+
                 updateContextStats() {
-                    if (!this.currentSession || !this.currentMessages.length) {
+                    const contextMessages = this.getContextStatMessages();
+                    if (!this.currentSession || !contextMessages.length) {
                         this.contextCharCount = 0;
                         this.contextTokenEstimate = 0;
                         this.contextUsage = 0;
+                        this.contextMessageCount = 0;
                         return;
                     }
                     
                     // 计算总字符数
-                    this.contextCharCount = this.currentMessages.reduce((total, msg) => {
+                    this.contextMessageCount = contextMessages.length;
+
+                    this.contextCharCount = contextMessages.reduce((total, msg) => {
                         const content = typeof msg.content === 'string' ? msg.content : '';
                         const role = msg.role || '';
                         return total + role.length + content.length;
@@ -13260,6 +13637,11 @@
                     );
                     
                     // 计算使用百分比（基于 Token 数量，使用 max_context_length 作为限制）
+                    this.contextTokenEstimate = contextMessages.reduce(
+                        (total, msg) => total + this.estimateMessageTokens(msg),
+                        0
+                    );
+
                     const maxTokens = this.aiConfig.max_context_length || 30000;
                     const estimatedTokens = this.contextTokenEstimate || 0;
                     this.contextUsage = Math.min(100, (estimatedTokens / maxTokens) * 100);
@@ -14843,6 +15225,7 @@ def main(params):
                         } else {
                             this.syncProviderMetadata(this.aiConfig);
                         }
+                        this.updateContextStats();
                     } catch (e) {
                         console.error('Failed to load AI config:', e);
                     }
@@ -15045,6 +15428,7 @@ def main(params):
                         if (this.settings.max_context_length) {
                             this.maxContextLength = this.settings.max_context_length;
                         }
+                        this.updateContextStats();
                     } catch (e) {
                         console.error('Failed to load settings:', e);
                     }
