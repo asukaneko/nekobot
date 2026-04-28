@@ -1,6 +1,7 @@
 import asyncio
 import logging
 from typing import Optional, List, Dict, Any
+from nbot.core.prompt_format import format_skills_prompt
 from nbot.plugins.skills.base import SkillContext, SkillResult, SkillRegistry
 
 _log = logging.getLogger(__name__)
@@ -19,33 +20,17 @@ class SkillDispatcher:
         if not skills:
             return ""
 
-        skills_desc = "## 可用技能 (Skills)\n"
-        skills_desc += "你可以使用以下技能来帮助用户：\n\n"
-
-        for skill in skills:
-            if not skill.get("enabled", True):
-                continue
-
-            skills_desc += f"### {skill['name']}\n"
-            skills_desc += f"- 描述: {skill['description']}\n"
-            if skill.get("aliases"):
-                skills_desc += f"- 别名: {', '.join(skill['aliases'])}\n"
-            skills_desc += "\n"
-
+        skills_desc = format_skills_prompt(skills)
         skills_desc += """
-**使用规则：**
-1. 当用户请求需要使用技能时，明确调用对应的技能
-2. 技能调用格式：`[SKILL:skill_name]参数[/SKILL]`
-3. 例如：`[SKILL:search]天气[/SKILL]`
 
-**查看技能详情：**
-你可以使用以下工具来查看技能的详细信息和文件：
-- `skill_list`: 列出所有 Skills 的存储空间
-- `skill_view`: 查看指定 Skill 的文件结构，列出所有文件
-- `skill_read`: 读取 Skill 存储空间中的指定文件内容
-- `skill_get_info`: 获取所有可用的 Skills 信息
+### 技能调用格式
+1. 当用户请求需要使用技能时，明确调用对应的技能。
+2. 技能调用格式：`[SKILL:skill_name]参数[/SKILL]`。
+3. 示例：`[SKILL:search]天气[/SKILL]`。
 
-当用户询问某个技能的功能或需要查看技能的实现时，可以使用这些工具。
+### 技能存储工具
+- `skill_view`：查看指定 Skill 的文件结构，列出所有文件。
+- `skill_read`：读取 Skill 存储空间中的指定文件内容。
 """
 
         return skills_desc

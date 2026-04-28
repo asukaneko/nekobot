@@ -7,6 +7,7 @@ from datetime import datetime
 from flask import jsonify, request
 
 from nbot.core import WebSessionStore
+from nbot.core.prompt_format import format_memory_items, format_skills_prompt
 from nbot.web.persistence import is_web_visible_session
 from nbot.web.sessions_db import get_session as get_session_from_db
 
@@ -93,7 +94,7 @@ def register_session_routes(app, server):
                                 else content
                             )
                         )
-                        memory_items.append(f"【{title}】{display}")
+                        memory_items.append({"title": title, "summary": display})
             elif server.memories:
                 # 从 server.memories 获取
                 for mem in server.memories:
@@ -110,41 +111,18 @@ def register_session_routes(app, server):
                                 else content
                             )
                         )
-                        memory_items.append(f"【{title}】{display}")
+                        memory_items.append({"title": title, "summary": display})
         except Exception as e:
             _log.warning(f"获取记忆失败: {e}")
     
         # 如果有记忆，添加到系统提示词
         if memory_items:
-            memory_context = "\n\n【可用记忆主题】\n" + "\n".join(
-                [f"- {item}" for item in memory_items]
-            )
-            system_prompt += memory_context
+            system_prompt += format_memory_items(memory_items)
             _log.info(f"已添加 {len(memory_items)} 个记忆到会话 {session_id[:8]}")
     
         # 添加 Skills 到系统提示词
-        skills = server.skills_config
-        enabled_skills = [s for s in skills if s.get("enabled", True)]
-    
-        skills_desc = "\n\n## 可用技能 (Skills)\n"
-        skills_desc += "你可以使用以下技能来帮助用户：\n\n"
-    
-        if enabled_skills:
-            for skill in enabled_skills:
-                skills_desc += f"### {skill['name']}\n"
-                skills_desc += f"- 描述: {skill['description']}\n"
-                if skill.get("aliases"):
-                    skills_desc += f"- 别名: {', '.join(skill['aliases'])}\n"
-                skills_desc += "\n"
-        else:
-            skills_desc += "（暂无可用技能）\n\n"
-    
-        skills_desc += """
-    **使用规则：**
-    1. 当用户需要使用或了解某个技能时，使用 `skill_get_info` 工具获取该技能的详细信息
-    2. 使用 `skill_list` 工具可以列出所有可用的 Skills
-    """
-        system_prompt += skills_desc
+        enabled_skills = [s for s in server.skills_config if s.get("enabled", True)]
+        system_prompt += format_skills_prompt(server.skills_config)
         _log.info(f"已添加 {len(enabled_skills)} 个技能到会话 {session_id[:8]}")
     
         session = {
