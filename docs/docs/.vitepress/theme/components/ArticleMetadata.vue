@@ -4,9 +4,10 @@ import { computed, ref, onMounted } from 'vue'
 import { countWord } from './untils/functions'
 
 const { page } = useData()
-const date = computed(
-  () => new Date(page.value.lastUpdated!)
-)
+const date = computed(() => {
+  const lastUpdated = page.value?.lastUpdated
+  return lastUpdated ? new Date(lastUpdated) : new Date()
+})
 
 const wordCount = ref(0)
 const imageCount = ref(0)
@@ -31,8 +32,9 @@ const readTime = computed(() => {
 
 
 function analyze() {
+    if (typeof document === 'undefined') return
     document.querySelectorAll('.meta-des').forEach(v => v.remove())
-    const docDomContainer = window.document.querySelector('#VPContent')
+    const docDomContainer = document.querySelector('#VPContent')
     const imgs = docDomContainer?.querySelectorAll<HTMLImageElement>(
         '.content-container .main img'
     )
