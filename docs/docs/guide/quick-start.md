@@ -19,8 +19,8 @@
 ### 1. 克隆项目
 
 ```bash
-git clone https://github.com/asukaneko/comic-downloader.git
-cd comic-downloader
+git clone https://github.com/asukaneko/nekobot.git
+cd nekobot
 ```
 
 ### 2. 安装依赖

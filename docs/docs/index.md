@@ -42,7 +42,7 @@ features:
 
 <div align="center">
 
-**[功能演示](https://github.com/asukaneko/Ncatbot-comic-QQbot)** · **[更新日志](./guide/changelog.md)** · **[贡献指南](https://github.com/asukaneko/Ncatbot-comic-QQbot/blob/main/docs/CONTRIBUTING.md)**
+**[功能演示](https://github.com/asukaneko/nekobot)** · **[更新日志](./guide/changelog.md)** · **[贡献指南](https://github.com/asukaneko/nekobot/blob/main/docs/CONTRIBUTING.md)**
 
 </div>
 
@@ -82,8 +82,8 @@ Ncatbot-comic-QQbot/
 
 ```bash
 # 克隆项目
-git clone https://github.com/asukaneko/Ncatbot-comic-QQbot.git
-cd Ncatbot-comic-QQbot
+git clone https://github.com/asukaneko/nekobot.git
+cd nekobot
 
 # 安装依赖
 pip install -r requirements.txt

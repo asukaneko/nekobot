@@ -165,8 +165,8 @@ Ncatbot-comic-QQbot/
 ### 1. 克隆仓库
 
 ```bash
-git clone https://github.com/asukaneko/comic-downloader.git
-cd comic-downloader
+git clone https://github.com/asukaneko/nekobot.git
+cd nekobot
 ```
 
 ### 2. 安装依赖
