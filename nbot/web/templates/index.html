@@ -1644,6 +1644,36 @@
             background: color-mix(in srgb, var(--bg-secondary) 80%, white 20%);
         }
 
+        body.has-bg-image .dashboard-section-card {
+            background: rgba(12, 18, 28, 0.54);
+            border-color: rgba(148, 163, 184, 0.2);
+            box-shadow: 0 20px 54px rgba(0, 0, 0, 0.2);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+        }
+
+        body.has-bg-image .dashboard-status-item {
+            background: rgba(15, 23, 42, 0.42);
+            border-color: rgba(148, 163, 184, 0.16);
+            box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+        }
+
+        body.has-bg-image .dashboard-status-item .status-label {
+            color: rgba(226, 232, 240, 0.62);
+        }
+
+        body.has-bg-image .dashboard-status-item .status-value {
+            color: rgba(241, 245, 249, 0.94);
+        }
+
+        body.has-bg-image .dashboard-status-item .status-value.text-success {
+            color: #7dd3a7;
+        }
+
+        body.has-bg-image .dashboard-status-item .status-value.text-warning {
+            color: #f6c56f;
+        }
+
         .dashboard-activity-list {
             display: flex;
             flex-direction: column;
@@ -8005,14 +8035,6 @@
                                                     </button>
                                                     <button class="msg-action-btn" @click="forkSessionFromMessage(msg)" title="从此 Fork">
                                                         <i class="fas fa-code-branch"></i>
-                                                    </button>
-                                                    <button class="msg-action-btn" :class="{ active: msg._liked }" 
-                                                            @click="msg._liked = !msg._liked; msg._disliked = false" title="有帮助">
-                                                        <i class="fas fa-thumbs-up"></i>
-                                                    </button>
-                                                    <button class="msg-action-btn" :class="{ active: msg._disliked }"
-                                                            @click="msg._disliked = !msg._disliked; msg._liked = false" title="没帮助">
-                                                        <i class="fas fa-thumbs-down"></i>
                                                     </button>
                                                     <button v-if="msg.can_continue && currentMessages.indexOf(msg) === currentMessages.length - 1" class="msg-action-btn continue-btn" 
                                                             @click="continueGeneration(msg)" title="继续生成">
