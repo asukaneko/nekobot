@@ -38,6 +38,11 @@ def register_task_center_routes(app, server):
             "next_run": None,
             **payload,
         }
+        try:
+            server._validate_custom_task(task)
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+
         server.scheduled_tasks.append(task)
 
         if task.get("enabled"):
@@ -53,6 +58,12 @@ def register_task_center_routes(app, server):
             return jsonify({"error": "Task not found"}), 404
 
         payload = _normalize_task_payload(request.json or {})
+        candidate = {**task, **payload}
+        try:
+            server._validate_custom_task(candidate)
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+
         task.update(payload)
         server._unschedule_custom_task(task_id)
         if task.get("enabled"):
@@ -100,6 +111,11 @@ def register_task_center_routes(app, server):
 
         task["enabled"] = not task.get("enabled", True)
         if task["enabled"]:
+            try:
+                server._validate_custom_task(task)
+            except ValueError as exc:
+                task["enabled"] = False
+                return jsonify({"error": str(exc)}), 400
             server._schedule_custom_task(task)
         else:
             server._unschedule_custom_task(task_id)
@@ -111,8 +127,10 @@ def register_task_center_routes(app, server):
         if task_id == "heartbeat":
             import asyncio
 
-            asyncio.run(server._execute_heartbeat(force=True))
-            return jsonify({"success": True})
+            server.socketio.start_background_task(
+                lambda: asyncio.run(server._execute_heartbeat(force=True))
+            )
+            return jsonify({"success": True, "message": "Heartbeat execution started"})
 
         workflow = next((item for item in server.workflows if item.get("id") == task_id), None)
         if workflow:
@@ -128,5 +146,5 @@ def register_task_center_routes(app, server):
         if not task:
             return jsonify({"error": "Task not found"}), 404
 
-        server._execute_custom_task(task_id)
-        return jsonify({"success": True})
+        server.socketio.start_background_task(server._execute_custom_task, task_id)
+        return jsonify({"success": True, "message": "Task execution started"})

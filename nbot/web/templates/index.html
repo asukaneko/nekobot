@@ -5095,6 +5095,19 @@
 
         .data-table tr:hover { background: var(--bg-tertiary); }
 
+        .sessions-table .sessions-table-check,
+        .sessions-table td:first-child {
+            width: 56px;
+            text-align: center;
+        }
+
+        .sessions-table input[type="checkbox"] {
+            width: 18px;
+            height: 18px;
+            cursor: pointer;
+            vertical-align: middle;
+        }
+
         .badge {
             display: inline-flex;
             align-items: center;
@@ -7987,6 +8000,12 @@
                                                     <button class="msg-action-btn" @click="copyMessage(msg)" title="复制">
                                                         <i class="fas fa-copy"></i>
                                                     </button>
+                                                    <button class="msg-action-btn" @click="regenerateMessage(msg)" title="重新生成">
+                                                        <i class="fas fa-redo"></i>
+                                                    </button>
+                                                    <button class="msg-action-btn" @click="forkSessionFromMessage(msg)" title="从此 Fork">
+                                                        <i class="fas fa-code-branch"></i>
+                                                    </button>
                                                     <button class="msg-action-btn" :class="{ active: msg._liked }" 
                                                             @click="msg._liked = !msg._liked; msg._disliked = false" title="有帮助">
                                                         <i class="fas fa-thumbs-up"></i>
@@ -8326,6 +8345,13 @@
                                         <i class="fas fa-search"></i>
                                         <input v-model="sessionSearch" type="text" placeholder="搜索会话...">
                                     </div>
+                                    <input ref="sessionImportInput" type="file" accept=".json,application/json" style="display: none;" @change="handleSessionImportFile">
+                                    <button class="btn btn-secondary" @click="triggerSessionImport" :disabled="isLoading">
+                                        <i class="fas fa-file-import"></i> 导入
+                                    </button>
+                                    <button class="btn btn-secondary" @click="exportSelectedOrVisibleSessions" :disabled="isLoading || filteredSessions.length === 0">
+                                        <i class="fas fa-file-export"></i> 导出
+                                    </button>
                                     <button class="btn btn-primary" @click="createNewSession" :disabled="isLoading">
                                         <i class="fas fa-plus"></i> 新建
                                     </button>
@@ -8335,10 +8361,10 @@
                                 </div>
                             </div>
                             <div class="card-body" style="padding: 0;">
-                                <table class="data-table">
+                                <table class="data-table sessions-table">
                                     <thead>
                                         <tr>
-                                            <th style="width: 40px;">
+                                            <th class="sessions-table-check">
                                                 <input type="checkbox" @change="toggleSelectAllSessions" :checked="isAllSessionsSelected && filteredSessions.length > 0" :indeterminate="selectedSessions.length > 0 && !isAllSessionsSelected">
                                             </th>
                                             <th>会话名称</th>
@@ -8374,6 +8400,9 @@
                                                 </button>
                                                 <button class="btn btn-secondary" style="padding: 6px 12px; font-size: 12px; margin-left: 8px;" @click="viewSessionDetails(session)" :disabled="isLoading">
                                                     详情
+                                                </button>
+                                                <button class="btn btn-secondary" style="padding: 6px 12px; font-size: 12px; margin-left: 8px;" @click="exportSession(session)" :disabled="isLoading">
+                                                    导出
                                                 </button>
                                                 <button class="btn btn-secondary" style="padding: 6px 12px; font-size: 12px; margin-left: 8px;" @click="editSession(session)" :disabled="isLoading">
                                                     编辑
@@ -8536,7 +8565,7 @@
                                                             <i :class="item.enabled ? 'fas fa-pause' : 'fas fa-play'"></i>
                                                             {{ item.enabled ? '停用' : '启用' }}
                                                         </button>
-                                                        <button class="btn btn-primary" style="flex: 1; padding: 6px; font-size: 12px;" @click="runTaskCenterItem(item)" :disabled="isLoading">
+                                                        <button class="btn btn-primary" style="flex: 1; padding: 6px; font-size: 12px;" @click="runTaskCenterItem(item)" :disabled="isLoading || item.status === 'running'">
                                                             <i class="fas fa-bolt"></i> 执行
                                                         </button>
                                                         <button v-if="item.editable" class="btn btn-secondary" style="flex: 1; padding: 6px; font-size: 12px;" @click="openTaskCenterEditor(item)" :disabled="isLoading">
@@ -8607,7 +8636,7 @@
                                                 <button class="btn btn-secondary" style="flex: 1; padding: 6px; font-size: 12px;" @click="toggleWorkflow(workflow)" :disabled="isLoading">
                                                     <i :class="workflow.enabled ? 'fas fa-pause' : 'fas fa-play'"></i>
                                                 </button>
-                                                <button class="btn btn-primary" style="flex: 1; padding: 6px; font-size: 12px;" @click="executeWorkflow(workflow)" :disabled="isLoading || !workflow.enabled">
+                                                <button class="btn btn-primary" style="flex: 1; padding: 6px; font-size: 12px;" @click="executeWorkflow(workflow)" :disabled="isLoading || !workflow.enabled || workflow.status === 'running'">
                                                     <i class="fas fa-play"></i> 执行
                                                 </button>
                                             </div>
@@ -12673,7 +12702,6 @@
                     workflowTriggerTypes: [
                         { value: 'manual', label: '手动触发', icon: 'fas fa-hand-pointer' },
                         { value: 'cron', label: '定时触发', icon: 'fas fa-clock' },
-                        { value: 'message', label: '消息触发', icon: 'fas fa-comment' }
                     ],
                     workflowTargetTypes: [
                         { value: 'none', label: '仅记录', icon: 'fas fa-save' },
@@ -14463,7 +14491,7 @@
                         this.heartbeatConfig.target_session_id = payload.target_session_id;
                         this.showToast('配置已保存', 'success');
                     } catch (e) {
-                        this.showToast('保存失败', 'error');
+                        this.showToast('保存失败: ' + (e.response?.data?.error || e.message), 'error');
                     }
                 },
 
@@ -14493,7 +14521,7 @@
                         });
                         this.showToast('内容已保存', 'success');
                     } catch (e) {
-                        this.showToast('保存失败', 'error');
+                        this.showToast('保存失败: ' + (e.response?.data?.error || e.message), 'error');
                     }
                 },
 
@@ -15807,6 +15835,39 @@ def main(params):
                     }
                 },
 
+                async exportSession(session) {
+                    if (!session?.id) {
+                        this.showToast('请选择要导出的会话', 'warning');
+                        return;
+                    }
+                    try {
+                        const res = await api.get(`/api/sessions/${session.id}/export`);
+                        const safeName = (session.name || session.id).replace(/[\\/:*?"<>|]/g, '_');
+                        this.downloadJson(res.data, `session_${safeName}_${new Date().toISOString().slice(0, 10)}.json`);
+                        this.showToast('会话已导出', 'success');
+                    } catch (e) {
+                        this.showToast('导出会话失败: ' + (e.response?.data?.error || e.message), 'error');
+                    }
+                },
+
+                async exportSelectedOrVisibleSessions() {
+                    const source = this.selectedSessions.length > 0
+                        ? this.sessions.filter(s => this.selectedSessions.includes(s.id))
+                        : this.filteredSessions;
+                    const ids = source.map(s => s.id).filter(Boolean);
+                    if (!ids.length) {
+                        this.showToast('没有可导出的会话', 'warning');
+                        return;
+                    }
+                    try {
+                        const res = await api.get(`/api/sessions/export?ids=${encodeURIComponent(ids.join(','))}`);
+                        this.downloadJson(res.data, `sessions_export_${new Date().toISOString().slice(0, 10)}.json`);
+                        this.showToast(`已导出 ${res.data.total || ids.length} 个会话`, 'success');
+                    } catch (e) {
+                        this.showToast('导出会话失败: ' + (e.response?.data?.error || e.message), 'error');
+                    }
+                },
+
                 async exportVisibleSessions() {
                     const ids = this.filteredSessions.map(s => s.id).filter(Boolean);
                     if (!ids.length) {
@@ -15823,7 +15884,8 @@ def main(params):
                 },
 
                 triggerSessionImport() {
-                    const input = this.$refs.sessionImportInput;
+                    const ref = this.$refs.sessionImportInput;
+                    const input = Array.isArray(ref) ? ref[0] : ref;
                     if (input) {
                         input.value = '';
                         input.click();
@@ -18353,7 +18415,7 @@ def main(params):
                         await this.loadTaskCenter();
                     } catch (e) {
                         console.error('Failed to save task center task:', e);
-                        this.showToast('保存失败', 'error');
+                        this.showToast('保存失败: ' + (e.response?.data?.error || e.message), 'error');
                     } finally {
                         this.isLoading = false;
                     }
@@ -18487,7 +18549,7 @@ def main(params):
                         this.showWorkflowModal = false;
                         await this.loadWorkflows();
                     } catch (e) {
-                        this.showToast('保存失败', 'error');
+                        this.showToast('保存失败: ' + (e.response?.data?.error || e.message), 'error');
                     } finally {
                         this.isLoading = false;
                     }
@@ -21022,6 +21084,69 @@ def main(params):
                 copyMessage(msg) {
                     const text = msg.content || '';
                     this.copyToClipboard(text);
+                },
+
+                async regenerateMessage(msg) {
+                    if (!this.currentSession || !msg?.id) {
+                        this.showToast('无法定位要重新生成的回复', 'error');
+                        return;
+                    }
+                    if (this.isLoading && this.loadingSessionId === this.currentSession.id) {
+                        this.showToast('当前会话正在生成中', 'warning');
+                        return;
+                    }
+
+                    const sessionId = this.currentSession.id;
+                    const msgIndex = this.currentMessages.findIndex(m => m.id === msg.id);
+                    this.isTyping = true;
+                    this.isLoading = true;
+                    this.loadingSessionId = sessionId;
+
+                    try {
+                        await api.post(`/api/sessions/${sessionId}/regenerate`, {
+                            message_id: msg.id
+                        });
+                        if (msgIndex !== -1) {
+                            this.currentMessages = this.currentMessages.slice(0, msgIndex);
+                        } else {
+                            await this.loadMessages();
+                        }
+                        this.showToast('已开始重新生成', 'success');
+                        this.$nextTick(() => this.scrollToBottom());
+                    } catch (e) {
+                        this.isTyping = false;
+                        this.isLoading = false;
+                        this.loadingSessionId = null;
+                        this.showToast(e.response?.data?.error || '重新生成失败', 'error');
+                    }
+                },
+
+                async forkSessionFromMessage(msg) {
+                    if (!this.currentSession || !msg?.id) {
+                        this.showToast('无法定位要分支的回复', 'error');
+                        return;
+                    }
+
+                    try {
+                        const res = await api.post(`/api/sessions/${this.currentSession.id}/fork`, {
+                            message_id: msg.id
+                        });
+                        const forkedSession = res.data.session;
+                        if (!forkedSession) {
+                            throw new Error('Fork session missing');
+                        }
+                        this.sessions = [
+                            forkedSession,
+                            ...this.sessions.filter(s => s.id !== forkedSession.id)
+                        ];
+                        this.currentPage = 'chat';
+                        this.chatTab = forkedSession.type === 'cli' ? 'cli' : 'web';
+                        await this.selectSession(forkedSession);
+                        this.showToast('已创建会话分支', 'success');
+                    } catch (e) {
+                        console.error('Fork session failed:', e);
+                        this.showToast(e.response?.data?.error || '创建会话分支失败', 'error');
+                    }
                 },
 
                 // 继续生成（从中断点恢复）

@@ -20,6 +20,11 @@ def register_workflow_routes(app, server):
             "trigger": data.get("trigger", "manual"),
             "config": data.get("config", {}),
         }
+        try:
+            server._validate_workflow(workflow)
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+
         server.workflows.append(workflow)
         server._save_data("workflows")
 
@@ -34,6 +39,12 @@ def register_workflow_routes(app, server):
             if workflow["id"] == workflow_id:
                 data = request.json or {}
                 old_trigger = workflow.get("trigger")
+
+                candidate = {**workflow, **data}
+                try:
+                    server._validate_workflow(candidate)
+                except ValueError as exc:
+                    return jsonify({"error": str(exc)}), 400
 
                 workflow.update(data)
                 server._save_data("workflows")
@@ -61,6 +72,12 @@ def register_workflow_routes(app, server):
         for workflow in server.workflows:
             if workflow["id"] == workflow_id:
                 workflow["enabled"] = not workflow.get("enabled", True)
+                if workflow["enabled"]:
+                    try:
+                        server._validate_workflow(workflow)
+                    except ValueError as exc:
+                        workflow["enabled"] = False
+                        return jsonify({"error": str(exc)}), 400
                 server._save_data("workflows")
 
                 if workflow.get("trigger") == "cron":

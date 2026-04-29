@@ -461,6 +461,8 @@ class WebChatServer:
         self.heartbeat_job = None
         self.scheduled_tasks: List[Dict[str, Any]] = []
         self.scheduled_task_jobs: Dict[str, Any] = {}
+        self.running_task_ids: set = set()
+        self.running_workflow_ids: set = set()
 
         # 系统启动时间
         self.start_time = time.time()
@@ -1198,6 +1200,8 @@ class WebChatServer:
     def _schedule_workflow(self, workflow: Dict):
         """调度一个工作流任务"""
         if not self.scheduler:
+            workflow["next_run"] = None
+            workflow["last_error"] = "Scheduler is not available"
             return
 
         workflow_id = workflow["id"]
@@ -1240,6 +1244,7 @@ class WebChatServer:
                 )
         except Exception as e:
             workflow["next_run"] = None
+            workflow["last_error"] = str(e)
             _log.error(f"Failed to schedule workflow {workflow_id}: {e}")
 
     def _unschedule_workflow(self, workflow_id: str):
@@ -1295,8 +1300,44 @@ class WebChatServer:
             )
         }
 
+    def _validate_custom_task(self, task: Dict[str, Any]):
+        if not (task.get("name") or "").strip():
+            raise ValueError("Task name is required")
+        if not (task.get("prompt") or "").strip():
+            raise ValueError("Task prompt is required")
+        session_id = task.get("target_session_id")
+        if not session_id or not self.session_store.get_session(session_id):
+            raise ValueError("Target session is required or does not exist")
+        self._build_custom_task_trigger(task)
+
+    def _mark_task_status(
+        self,
+        task: Dict[str, Any],
+        status: str,
+        *,
+        error: str = None,
+        save: bool = True,
+    ):
+        now = datetime.now().isoformat()
+        task["status"] = status
+        if status == "running":
+            task["started_at"] = now
+            task["last_error"] = None
+        elif status == "success":
+            task["last_run"] = now
+            task["finished_at"] = now
+            task["last_error"] = None
+        elif status == "failed":
+            task["failed_at"] = now
+            task["finished_at"] = now
+            task["last_error"] = error or "Unknown task error"
+        if save:
+            self._save_data("scheduled_tasks")
+
     def _schedule_custom_task(self, task: Dict[str, Any]):
         if not self.scheduler:
+            task["next_run"] = None
+            task["last_error"] = "Scheduler is not available"
             return
 
         task_id = task.get("id")
@@ -1320,6 +1361,7 @@ class WebChatServer:
             )
         except Exception as e:
             task["next_run"] = None
+            task["last_error"] = str(e)
             _log.error(f"Failed to schedule custom task {task_id}: {e}")
 
     def _unschedule_custom_task(self, task_id: str):
@@ -1346,11 +1388,15 @@ class WebChatServer:
         task = self._get_custom_task(task_id)
         if not task or not task.get("enabled"):
             return
+        if task_id in self.running_task_ids:
+            _log.warning(f"Skip custom task {task_id}: already running")
+            return
 
         prompt = (task.get("prompt") or "").strip()
         session_id = task.get("target_session_id")
         if not prompt or not session_id:
             _log.warning(f"Skip custom task {task_id}: missing prompt or target session")
+            self._mark_task_status(task, "failed", error="Missing prompt or target session")
             return
 
         session = self.session_store.get_session(session_id)
@@ -1358,8 +1404,11 @@ class WebChatServer:
             _log.warning(
                 f"Skip custom task {task_id}: target session {session_id} not found"
             )
+            self._mark_task_status(task, "failed", error=f"Target session {session_id} not found")
             return
 
+        self.running_task_ids.add(task_id)
+        self._mark_task_status(task, "running")
         session_type = session.get("type", "web")
         if session_type in ["qq_private", "qq_group"]:
             try:
@@ -1406,11 +1455,15 @@ class WebChatServer:
                     task["enabled"] = False
                     self._unschedule_custom_task(task_id)
 
+                self._mark_task_status(task, "success", save=False)
                 self._save_data("scheduled_tasks")
                 return
             except Exception as e:
                 _log.error(f"Failed to execute QQ custom task {task_id}: {e}", exc_info=True)
+                self._mark_task_status(task, "failed", error=str(e), save=False)
                 return
+            finally:
+                self.running_task_ids.discard(task_id)
 
         adapter = _resolve_web_adapter(self.web_channel_adapter)
         user_message = adapter.build_message(
@@ -1435,8 +1488,12 @@ class WebChatServer:
             )
         except Exception as e:
             _log.error(f"Failed to execute custom task {task_id}: {e}", exc_info=True)
+            self._mark_task_status(task, "failed", error=str(e), save=False)
+        else:
+            self._mark_task_status(task, "success", save=False)
+        finally:
+            self.running_task_ids.discard(task_id)
 
-        task["last_run"] = datetime.now().isoformat()
         job = self.scheduled_task_jobs.get(task_id)
         task["next_run"] = (
             job.next_run_time.isoformat() if job and job.next_run_time else None
@@ -1498,6 +1555,8 @@ class WebChatServer:
                     "target_session_id": workflow.get("session_id", ""),
                     "last_run": workflow.get("last_run"),
                     "next_run": next_run,
+                    "status": workflow.get("status", "idle"),
+                    "last_error": workflow.get("last_error"),
                     "editable": True,
                     "deletable": False,
                 }
@@ -1525,6 +1584,8 @@ class WebChatServer:
                     "target_session_id": task.get("target_session_id", ""),
                     "last_run": task.get("last_run"),
                     "next_run": task.get("next_run"),
+                    "status": task.get("status", "idle"),
+                    "last_error": task.get("last_error"),
                     "editable": True,
                     "deletable": True,
                     "prompt": task.get("prompt", ""),
@@ -1533,6 +1594,43 @@ class WebChatServer:
             )
 
         return items
+
+    def _validate_workflow(self, workflow: Dict[str, Any]):
+        if not (workflow.get("name") or "").strip():
+            raise ValueError("Workflow name is required")
+        if not (workflow.get("description") or "").strip():
+            raise ValueError("Workflow description is required")
+        trigger = workflow.get("trigger", "manual")
+        if trigger not in {"manual", "cron"}:
+            raise ValueError(f"Unsupported workflow trigger: {trigger}")
+        if trigger == "cron":
+            cron_expr = ((workflow.get("config") or {}).get("cron") or "").strip()
+            if len(cron_expr.split()) != 5:
+                raise ValueError("Workflow cron expression must contain 5 parts")
+
+    def _mark_workflow_status(
+        self,
+        workflow: Dict[str, Any],
+        status: str,
+        *,
+        error: str = None,
+        save: bool = True,
+    ):
+        now = datetime.now().isoformat()
+        workflow["status"] = status
+        if status == "running":
+            workflow["started_at"] = now
+            workflow["last_error"] = None
+        elif status == "success":
+            workflow["last_run"] = now
+            workflow["finished_at"] = now
+            workflow["last_error"] = None
+        elif status == "failed":
+            workflow["failed_at"] = now
+            workflow["finished_at"] = now
+            workflow["last_error"] = error or "Unknown workflow error"
+        if save:
+            self._save_data("workflows")
 
     def _execute_workflow(self, workflow_id: str, trigger_data: Dict = None):
         """执行工作流 - 支持多轮工具调用"""
@@ -1545,8 +1643,13 @@ class WebChatServer:
 
         if not workflow or not workflow.get("enabled"):
             return
+        if workflow_id in self.running_workflow_ids:
+            _log.warning(f"Skip workflow {workflow_id}: already running")
+            return
 
         _log.info(f"Executing workflow: {workflow['name']}")
+        self.running_workflow_ids.add(workflow_id)
+        self._mark_workflow_status(workflow, "running")
 
         # 获取或创建工作流的专属会话
         session_id = workflow.get("session_id")
@@ -1568,7 +1671,11 @@ class WebChatServer:
 
         # 添加历史上下文（最近10条）
         session = self.session_store.get_session(session_id) or {}
-        history = session.get("messages", [])[-10:]
+        try:
+            max_history = max(1, int(config.get("max_history", 10) or 10))
+        except (TypeError, ValueError):
+            max_history = 10
+        history = session.get("messages", [])[-max_history:]
         for msg in history:
             if msg.get("role") in ["user", "assistant"]:
                 messages.append({"role": msg["role"], "content": msg["content"]})
@@ -1738,10 +1845,14 @@ class WebChatServer:
                         )
                     except Exception:
                         workflow["next_run"] = None
+                self._mark_workflow_status(workflow, "success", save=False)
                 self._save_data("workflows")
 
             except Exception as e:
                 _log.error(f"Workflow execution error: {e}", exc_info=True)
+                self._mark_workflow_status(workflow, "failed", error=str(e), save=True)
+            finally:
+                self.running_workflow_ids.discard(workflow_id)
 
         self.socketio.start_background_task(run_workflow_with_tools)
 

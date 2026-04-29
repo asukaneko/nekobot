@@ -2,6 +2,7 @@ import json
 import logging
 import os
 import uuid
+from copy import deepcopy
 from datetime import datetime
 
 from flask import jsonify, request
@@ -25,6 +26,19 @@ def register_session_routes(app, server):
             session = get_session_from_db(server.data_dir, session_id)
         if not session or not is_web_visible_session(session_id, session):
             return None
+        return session
+
+    def _find_message_index(messages, message_id):
+        if not message_id:
+            return -1
+        return next(
+            (idx for idx, msg in enumerate(messages) if str(msg.get("id")) == str(message_id)),
+            -1,
+        )
+
+    def _ensure_mutable_session(session_id, session):
+        if not session_store.get_session(session_id):
+            session_store.set_session(session_id, session)
         return session
 
     @app.route("/api/sessions")
@@ -278,6 +292,104 @@ def register_session_routes(app, server):
             "failed": len(errors),
             "sessions": imported,
             "errors": errors,
+        })
+
+    @app.route("/api/sessions/<session_id>/fork", methods=["POST"])
+    def fork_session(session_id):
+        session = _get_web_session(session_id)
+        if not session:
+            return jsonify({"error": "Session not found"}), 404
+
+        data = request.get_json(silent=True) or {}
+        message_id = data.get("message_id")
+        messages = session.get("messages", [])
+        message_index = _find_message_index(messages, message_id)
+        if message_index < 0:
+            return jsonify({"success": False, "error": "Message not found"}), 404
+
+        now = datetime.now().isoformat()
+        new_id = str(uuid.uuid4())
+        base_name = session.get("name") or f"Session {session_id[:8]}"
+        forked_messages = deepcopy(messages[: message_index + 1])
+        system_prompt = session.get("system_prompt", "")
+        if not system_prompt:
+            system_msg = next((m for m in forked_messages if m.get("role") == "system"), None)
+            system_prompt = (system_msg or {}).get("content", "")
+        if system_prompt and not any(m.get("role") == "system" for m in forked_messages):
+            forked_messages.insert(0, {"role": "system", "content": system_prompt})
+
+        new_session = {
+            "id": new_id,
+            "name": f"{base_name} - Fork",
+            "type": session.get("type") if session.get("type") in {"web", "cli"} else "web",
+            "user_id": session.get("user_id"),
+            "qq_id": session.get("qq_id"),
+            "created_at": now,
+            "messages": forked_messages,
+            "system_prompt": system_prompt,
+            "forked_from": {
+                "session_id": session_id,
+                "message_id": message_id,
+                "message_index": message_index,
+                "created_at": now,
+            },
+        }
+        session_store.set_session(new_id, new_session)
+        if server.WORKSPACE_AVAILABLE and server.workspace_manager:
+            server.workspace_manager.get_or_create(
+                new_id, new_session.get("type", "web"), new_session.get("name", "")
+            )
+        return jsonify({"success": True, "id": new_id, "session": new_session})
+
+    @app.route("/api/sessions/<session_id>/regenerate", methods=["POST"])
+    def regenerate_message(session_id):
+        session = _get_web_session(session_id)
+        if not session:
+            return jsonify({"error": "Session not found"}), 404
+
+        data = request.get_json(silent=True) or {}
+        message_id = data.get("message_id")
+        messages = session.get("messages", [])
+        message_index = _find_message_index(messages, message_id)
+        if message_index < 0:
+            return jsonify({"success": False, "error": "Message not found"}), 404
+
+        target = messages[message_index]
+        if target.get("role") != "assistant":
+            return jsonify({"success": False, "error": "Only assistant messages can be regenerated"}), 400
+
+        previous_user = next(
+            (msg for msg in reversed(messages[:message_index]) if msg.get("role") == "user"),
+            None,
+        )
+        if not previous_user or not previous_user.get("content"):
+            return jsonify({"success": False, "error": "Previous user message not found"}), 400
+
+        _ensure_mutable_session(session_id, session)
+        original_messages = deepcopy(messages)
+        session_store.replace_messages(session_id, deepcopy(messages[:message_index]))
+        trigger = getattr(server, "_trigger_ai_response", None)
+        if not trigger:
+            session_store.replace_messages(session_id, original_messages)
+            return jsonify({"success": False, "error": "AI trigger is unavailable"}), 500
+
+        try:
+            trigger(
+                session_id,
+                previous_user.get("content", ""),
+                previous_user.get("sender", "web_user"),
+                previous_user.get("attachments") or [],
+                previous_user.get("id"),
+            )
+        except Exception as exc:
+            session_store.replace_messages(session_id, original_messages)
+            _log.error("Failed to trigger regenerated response: %s", exc, exc_info=True)
+            return jsonify({"success": False, "error": "Failed to trigger AI response"}), 500
+        return jsonify({
+            "success": True,
+            "session_id": session_id,
+            "removed_count": len(messages) - message_index,
+            "prompt_message_id": previous_user.get("id"),
         })
 
     @app.route("/api/stop", methods=["POST"])

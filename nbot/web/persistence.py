@@ -517,6 +517,9 @@ def load_all_data(server):
         if os.path.exists(workflows_file):
             with open(workflows_file, "r", encoding="utf-8") as f:
                 server.workflows = json.load(f)
+            for workflow in server.workflows:
+                if workflow.get("status") == "running":
+                    workflow["status"] = "idle"
 
         # 加载记忆
         memories_file = os.path.join(server.data_dir, "memories.json")
@@ -620,6 +623,9 @@ def load_all_data(server):
         if os.path.exists(tasks_file):
             with open(tasks_file, "r", encoding="utf-8") as f:
                 server.scheduled_tasks = json.load(f)
+            for task in server.scheduled_tasks:
+                if task.get("status") == "running":
+                    task["status"] = "idle"
 
         # 加载多模型配置
         server._load_ai_models()
