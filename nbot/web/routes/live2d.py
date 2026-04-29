@@ -4,6 +4,8 @@ from datetime import datetime
 
 from flask import jsonify, request
 
+from nbot.web.agent_tools import execute_web_agent_tool, get_web_agent_tools, run_web_agent_turn
+
 _log = logging.getLogger(__name__)
 
 
@@ -112,6 +114,16 @@ def _build_status(server, payload):
         "workspace": {
             "available": bool(getattr(server, "WORKSPACE_AVAILABLE", False)),
         },
+        "web_agent": {
+            "tools": [
+                {
+                    "name": tool["name"],
+                    "permission": tool["permission"],
+                    "description": tool["description"],
+                }
+                for tool in get_web_agent_tools()
+            ],
+        },
         "live2d": live2d,
     }
 
@@ -177,6 +189,8 @@ def register_live2d_routes(app, server):
     # Initialize invisible Live2D conversation history
     if not hasattr(server, "live2d_messages"):
         server.live2d_messages = []
+    if not hasattr(server, "live2d_pending_tool"):
+        server.live2d_pending_tool = None
 
     @app.route("/api/live2d/random-talk", methods=["POST"])
     def random_talk():
@@ -186,6 +200,54 @@ def register_live2d_routes(app, server):
         payload = request.get_json(silent=True) or {}
         topic = (payload.get("topic") or "").strip()
         status = _build_status(server, payload)
+
+        if topic and topic.lower() in {"确认", "确认执行", "执行", "同意", "yes", "ok"}:
+            pending_tool = getattr(server, "live2d_pending_tool", None)
+            if pending_tool:
+                result = execute_web_agent_tool(
+                    server,
+                    pending_tool.get("tool", ""),
+                    pending_tool.get("arguments") or {},
+                    confirm=True,
+                )
+                server.live2d_pending_tool = None
+                message = _clean_line(result.get("message") or result.get("error") or "")
+                if not message:
+                    message = "已经执行完成。"
+                server.live2d_messages.append({"role": "user", "content": topic})
+                server.live2d_messages.append({"role": "assistant", "content": message})
+                if len(server.live2d_messages) > 60:
+                    server.live2d_messages = server.live2d_messages[-40:]
+                return jsonify({
+                    "success": bool(result.get("success")),
+                    "message": message,
+                    "agent": {"used_tool": True, "tool": pending_tool.get("tool"), "tool_result": result},
+                    "status": status,
+                    "history_length": len(server.live2d_messages),
+                })
+
+        if topic:
+            agent_result = run_web_agent_turn(server, topic, allow_write=False)
+            if agent_result.get("used_tool") or agent_result.get("requires_confirmation"):
+                message = _clean_line(agent_result.get("message") or "")
+                if not message:
+                    message = "这个操作需要确认后再执行。"
+                if agent_result.get("requires_confirmation"):
+                    server.live2d_pending_tool = {
+                        "tool": agent_result.get("tool"),
+                        "arguments": agent_result.get("arguments") or {},
+                    }
+                server.live2d_messages.append({"role": "user", "content": topic})
+                server.live2d_messages.append({"role": "assistant", "content": message})
+                if len(server.live2d_messages) > 60:
+                    server.live2d_messages = server.live2d_messages[-40:]
+                return jsonify({
+                    "success": True,
+                    "message": message,
+                    "agent": agent_result,
+                    "status": status,
+                    "history_length": len(server.live2d_messages),
+                })
 
         system_prompt = _build_system_prompt(
             server,
@@ -318,6 +380,20 @@ def register_live2d_routes(app, server):
     def reset_live2d():
         server.live2d_messages = []
         return jsonify({"success": True, "message": "会话历史已清除"})
+
+    @app.route("/api/live2d/history")
+    def live2d_history():
+        try:
+            limit = int(request.args.get("limit", 20))
+        except (TypeError, ValueError):
+            limit = 20
+        limit = max(1, min(limit, 60))
+        all_messages = list(getattr(server, "live2d_messages", []) or [])
+        return jsonify({
+            "success": True,
+            "messages": all_messages[-limit:],
+            "total": len(all_messages),
+        })
 
     @app.route("/api/live2d/comment", methods=["POST"])
     def live2d_comment():

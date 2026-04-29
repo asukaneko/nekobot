@@ -113,9 +113,11 @@ const live2dModels = [
         const style = document.createElement('style');
         style.id = 'nbot-live2d-overrides';
         style.textContent = [
-            '#oml2d-stage { background: transparent !important; overflow: visible !important; cursor: grab; user-select: none; touch-action: none; }',
+            '#oml2d-stage { background: transparent !important; overflow: visible !important; user-select: none; pointer-events: none; }',
             '#oml2d-stage.is-dragging { cursor: grabbing; }',
-            '#oml2d-canvas { background: transparent !important; }',
+            '#oml2d-canvas { background: transparent !important; pointer-events: none !important; }',
+            '.nbot-live2d-hitbox { position: fixed; width: 190px; height: 250px; z-index: 9999; cursor: grab; touch-action: none; pointer-events: auto; background: transparent; }',
+            '.nbot-live2d-hitbox.is-dragging { cursor: grabbing; }',
             '#oml2d-menus, #oml2d-statusBar { display: none !important; }',
             '#oml2d-tips { top: -68px !important; left: 0 !important; right: 0 !important; margin-left: auto !important; margin-right: auto !important; }',
             '#nbot-live2d-menu { position: fixed; z-index: 10000; display: none; width: 184px; padding: 8px; border: 1px solid rgba(148,163,184,0.18); border-radius: 10px; background: rgba(15,23,42,0.94); box-shadow: 0 18px 48px rgba(0,0,0,0.36), inset 0 1px 0 rgba(255,255,255,0.06); backdrop-filter: blur(14px); color: #e6edf3; }',
@@ -136,6 +138,16 @@ const live2dModels = [
             '#nbot-live2d-menu .nbot-live2d-chat-send { flex: 0 0 26px; width: 26px; min-width: 26px; max-width: 26px; height: 26px; display: inline-flex; align-items: center; justify-content: center; grid-template-columns: none; gap: 0; border: 0; border-radius: 6px; background: rgba(56,189,248,0.15); color: #38bdf8; cursor: pointer; padding: 0; margin: 0; box-sizing: border-box; line-height: 1; text-align: center; }',
             '.nbot-live2d-chat-send:hover { background: rgba(56,189,248,0.28); }',
             '#nbot-live2d-menu .nbot-live2d-chat-send svg { width: 14px; height: 14px; flex: 0 0 14px; display: block; margin: 0; transform: none; }',
+            '#nbot-live2d-history-panel { position: fixed; z-index: 10001; display: none; width: min(360px, calc(100vw - 24px)); max-height: min(420px, calc(100vh - 24px)); padding: 10px; border: 1px solid rgba(148,163,184,0.2); border-radius: 10px; background: rgba(15,23,42,0.96); box-shadow: 0 18px 52px rgba(0,0,0,0.42), inset 0 1px 0 rgba(255,255,255,0.06); backdrop-filter: blur(16px); color: #e6edf3; overflow: hidden; }',
+            '#nbot-live2d-history-panel.is-visible { display: flex; flex-direction: column; animation: nbot-live2d-menu-in 120ms ease-out; }',
+            '.nbot-live2d-history-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 2px 2px 8px; border-bottom: 1px solid rgba(148,163,184,0.14); }',
+            '.nbot-live2d-history-head strong { font-size: 13px; color: #f8fafc; }',
+            '.nbot-live2d-history-head span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #94a3b8; font-size: 11px; }',
+            '.nbot-live2d-history-close { flex: 0 0 26px; width: 26px; height: 26px; display: inline-flex; align-items: center; justify-content: center; border: 0; border-radius: 7px; background: rgba(148,163,184,0.1); color: #cbd5e1; cursor: pointer; }',
+            '.nbot-live2d-history-body { overflow: auto; padding-top: 8px; display: flex; flex-direction: column; gap: 7px; }',
+            '.nbot-live2d-history-item { display: grid; grid-template-columns: 42px 1fr; gap: 8px; padding: 8px; border-radius: 8px; background: rgba(255,255,255,0.045); }',
+            '.nbot-live2d-history-role { color: #38bdf8; font-size: 11px; font-weight: 700; text-transform: uppercase; }',
+            '.nbot-live2d-history-text { color: #dbeafe; font-size: 12px; line-height: 1.45; word-break: break-word; }',
             '@keyframes nbot-live2d-menu-in { from { opacity: 0; transform: translateY(4px) scale(0.98); } to { opacity: 1; transform: translateY(0) scale(1); } }'
         ].join('\n');
         document.head.appendChild(style);
@@ -166,9 +178,28 @@ const live2dModels = [
     }
 
     function applyDefaultStagePosition(stage) {
-        const left = (window.innerWidth - stage.offsetWidth) / 2;
-        const top = (window.innerHeight - stage.offsetHeight) / 2;
+        const fallback = stageForModel(live2dModels[currentLive2dModelIndex] || live2dModels[0]);
+        const width = stage.offsetWidth || fallback.width || 440;
+        const height = stage.offsetHeight || fallback.height || 440;
+        const left = (window.innerWidth - width) / 2;
+        const top = (window.innerHeight - height) / 2;
         return applyStagePosition(stage, left, top);
+    }
+
+    function scheduleDefaultStagePosition(stage) {
+        let attempts = 0;
+        const place = () => {
+            if (!stage || !document.body.contains(stage)) return;
+            attempts += 1;
+            applyDefaultStagePosition(stage);
+            const rect = stage.getBoundingClientRect();
+            const hasStableSize = rect.width > 120 && rect.height > 120;
+            const isInsideViewport = rect.right > 0 && rect.bottom > 0 && rect.left < window.innerWidth && rect.top < window.innerHeight;
+            if ((!hasStableSize || !isInsideViewport) && attempts < 24) {
+                window.setTimeout(place, attempts < 8 ? 120 : 250);
+            }
+        };
+        window.requestAnimationFrame(place);
     }
 
     function getStageRightSlack(stage) {
@@ -193,7 +224,131 @@ const live2dModels = [
         stage.style.right = 'auto';
         stage.style.bottom = 'auto';
         stage.style.transform = 'none';
+        syncStageHitbox(stage);
         return { left: nextLeft, top: nextTop };
+    }
+
+    function syncStageHitbox(stage) {
+        const hitbox = document.getElementById('nbot-live2d-hitbox');
+        if (!stage || !hitbox) return;
+        const rect = stage.getBoundingClientRect();
+        const hitboxWidth = hitbox.offsetWidth || 190;
+        const hitboxHeight = hitbox.offsetHeight || 250;
+        const left = rect.left + (rect.width / 2) - (hitboxWidth / 2);
+        const top = rect.bottom - hitboxHeight - 4;
+        hitbox.style.left = `${Math.round(left)}px`;
+        hitbox.style.top = `${Math.round(top)}px`;
+    }
+
+    function getLive2dVisualBounds(stage) {
+        const canvas = stage?.querySelector('canvas') || document.getElementById('oml2d-canvas');
+        const rect = canvas?.getBoundingClientRect?.() || stage?.getBoundingClientRect?.();
+        if (!rect) return null;
+
+        if (canvas && canvas.width > 0 && canvas.height > 0) {
+            try {
+                const ctx = canvas.getContext('2d', { willReadFrequently: true });
+                if (!ctx) throw new Error('2d context unavailable');
+                const width = canvas.width;
+                const height = canvas.height;
+                const step = Math.max(2, Math.floor(Math.max(width, height) / 180));
+                const pixels = ctx.getImageData(0, 0, width, height).data;
+                let minX = width;
+                let minY = height;
+                let maxX = 0;
+                let maxY = 0;
+                let found = false;
+                for (let y = 0; y < height; y += step) {
+                    for (let x = 0; x < width; x += step) {
+                        if (pixels[((y * width + x) * 4) + 3] > 8) {
+                            found = true;
+                            if (x < minX) minX = x;
+                            if (y < minY) minY = y;
+                            if (x > maxX) maxX = x;
+                            if (y > maxY) maxY = y;
+                        }
+                    }
+                }
+                if (found) {
+                    const scaleX = rect.width / width;
+                    const scaleY = rect.height / height;
+                    const pad = 10;
+                    return {
+                        left: rect.left + minX * scaleX - pad,
+                        top: rect.top + minY * scaleY - pad,
+                        right: rect.left + maxX * scaleX + pad,
+                        bottom: rect.top + maxY * scaleY + pad,
+                    };
+                }
+            } catch (error) {
+                try {
+                    const gl = canvas.getContext('webgl2')
+                        || canvas.getContext('webgl')
+                        || canvas.getContext('experimental-webgl');
+                    if (!gl) throw new Error('webgl context unavailable');
+                    const width = canvas.width;
+                    const height = canvas.height;
+                    const step = Math.max(2, Math.floor(Math.max(width, height) / 180));
+                    const pixels = new Uint8Array(width * height * 4);
+                    gl.readPixels(0, 0, width, height, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+                    let minX = width;
+                    let minY = height;
+                    let maxX = 0;
+                    let maxY = 0;
+                    let found = false;
+                    for (let y = 0; y < height; y += step) {
+                        for (let x = 0; x < width; x += step) {
+                            if (pixels[((y * width + x) * 4) + 3] > 8) {
+                                found = true;
+                                if (x < minX) minX = x;
+                                if (y < minY) minY = y;
+                                if (x > maxX) maxX = x;
+                                if (y > maxY) maxY = y;
+                            }
+                        }
+                    }
+                    if (found) {
+                        const scaleX = rect.width / width;
+                        const scaleY = rect.height / height;
+                        const pad = 12;
+                        return {
+                            left: rect.left + minX * scaleX - pad,
+                            top: rect.top + (height - maxY) * scaleY - pad,
+                            right: rect.left + maxX * scaleX + pad,
+                            bottom: rect.top + (height - minY) * scaleY + pad,
+                        };
+                    }
+                } catch (webglError) {
+                    // Fall back below when canvas pixels cannot be read.
+                }
+            }
+        }
+
+        return {
+            left: rect.left + rect.width * 0.18,
+            top: rect.top + rect.height * 0.12,
+            right: rect.left + rect.width * 0.82,
+            bottom: rect.top + rect.height * 0.98,
+        };
+    }
+
+    function isInsideLive2dVisual(stage, clientX, clientY) {
+        const bounds = getLive2dVisualBounds(stage);
+        if (!bounds) return false;
+
+        const width = bounds.right - bounds.left;
+        const height = bounds.bottom - bounds.top;
+        const interactiveBounds = {
+            left: bounds.left,
+            top: bounds.top,
+            right: bounds.left + width * 0.68,
+            bottom: bounds.top + height * 0.78,
+        };
+
+        return clientX >= interactiveBounds.left
+            && clientX <= interactiveBounds.right
+            && clientY >= interactiveBounds.top
+            && clientY <= interactiveBounds.bottom;
     }
 
     async function fetchLive2dMenuOptions() {
@@ -253,6 +408,88 @@ const live2dModels = [
         });
     }
 
+    function cleanHistoryText(text) {
+        var value = String(text || '').replace(/\s+/g, ' ').trim();
+        if (value.length > 180) {
+            value = value.slice(0, 177).trim() + '...';
+        }
+        return value;
+    }
+
+    async function fetchLive2dHistory() {
+        const response = await fetch('/api/live2d/history?limit=20', {
+            method: 'GET',
+            headers: getAuthHeaders()
+        });
+        const data = await response.json();
+        if (!data.success) {
+            throw new Error(data.error || 'Failed to load Live2D history');
+        }
+        return Array.isArray(data.messages) ? data.messages : [];
+    }
+
+    function hideLive2dHistoryPanel() {
+        var panel = document.getElementById('nbot-live2d-history-panel');
+        if (panel) {
+            panel.classList.remove('is-visible');
+        }
+    }
+
+    function ensureLive2dHistoryPanel() {
+        var panel = document.getElementById('nbot-live2d-history-panel');
+        if (panel) return panel;
+
+        panel = document.createElement('div');
+        panel.id = 'nbot-live2d-history-panel';
+        panel.innerHTML = [
+            '<div class="nbot-live2d-history-head">',
+            '<div><strong>\u4f1a\u8bdd\u8bb0\u5f55</strong><span></span></div>',
+            '<button type="button" class="nbot-live2d-history-close" title="\u5173\u95ed"><i class="fas fa-times"></i></button>',
+            '</div>',
+            '<div class="nbot-live2d-history-body"></div>'
+        ].join('');
+        panel.querySelector('.nbot-live2d-history-close').addEventListener('click', hideLive2dHistoryPanel);
+        document.body.appendChild(panel);
+        return panel;
+    }
+
+    async function showLive2dHistoryPanel(anchorRect) {
+        let messages = [];
+        try {
+            messages = (await fetchLive2dHistory()).filter(function (msg) {
+                return msg && msg.content;
+            }).slice(-12);
+        } catch (error) {
+            console.warn('Live2D history fetch failed:', error);
+            window.__nbotLive2dSay('\u770b\u677f\u5a18\u4f1a\u8bdd\u8bb0\u5f55\u8bfb\u53d6\u5931\u8d25\u3002', 3200, 4);
+            return;
+        }
+        if (!messages.length) {
+            window.__nbotLive2dSay('\u6682\u65f6\u8fd8\u6ca1\u6709\u548c\u770b\u677f\u5a18\u7684\u4f1a\u8bdd\u8bb0\u5f55\u3002', 3400, 4);
+            return;
+        }
+
+        var panel = ensureLive2dHistoryPanel();
+        var title = panel.querySelector('.nbot-live2d-history-head span');
+        var body = panel.querySelector('.nbot-live2d-history-body');
+        title.textContent = '\u770b\u677f\u5a18\u6700\u8fd1\u5bf9\u8bdd';
+        body.innerHTML = messages.map(function (msg) {
+            var role = msg.role === 'user' ? '\u6211' : (msg.role === 'assistant' ? 'AI' : (msg.role || 'sys'));
+            var text = cleanHistoryText(msg.content);
+            return '<div class="nbot-live2d-history-item"><div class="nbot-live2d-history-role">' + role + '</div><div class="nbot-live2d-history-text">' + text.replace(/[&<>"']/g, function (ch) {
+                return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch];
+            }) + '</div></div>';
+        }).join('');
+
+        panel.classList.add('is-visible');
+        var width = panel.offsetWidth || 360;
+        var height = panel.offsetHeight || 420;
+        var left = Math.min(Math.max(12, anchorRect.left - width - 12), window.innerWidth - width - 12);
+        var top = Math.min(Math.max(12, anchorRect.top), window.innerHeight - height - 12);
+        panel.style.left = left + 'px';
+        panel.style.top = top + 'px';
+    }
+
     function ensureLive2dMenu() {
         let menu = document.getElementById('nbot-live2d-menu');
         if (menu) return menu;
@@ -268,6 +505,7 @@ const live2dModels = [
         buttons.push(
             '<button type="button" data-action="talk"><span class="nbot-live2d-menu-icon"><i class="fas fa-comment-dots"></i></span><span>\u968f\u673a\u8bf4\u8bdd</span></button>',
             '<button type="button" data-action="status"><span class="nbot-live2d-menu-icon"><i class="fas fa-robot"></i></span><span>AI \u72b6\u6001</span></button>',
+            '<button type="button" data-action="history"><span class="nbot-live2d-menu-icon"><i class="fas fa-history"></i></span><span>\u67e5\u770b\u4f1a\u8bdd\u8bb0\u5f55</span></button>',
             '<button type="button" data-action="reset"><span class="nbot-live2d-menu-icon"><i class="fas fa-compress-arrows-alt"></i></span><span>\u56de\u5230\u53f3\u4e0b\u89d2</span></button>',
             '<div class="nbot-live2d-chat-row"><input class="nbot-live2d-chat-input" type="text" placeholder="\u5bf9\u7740\u6211\u8bf4\u70b9\u4ec0\u4e48..."><button type="button" class="nbot-live2d-chat-send" title="\u53d1\u9001"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg></button></div>'
         );
@@ -316,6 +554,8 @@ const live2dModels = [
                 } else {
                     window.__nbotLive2dSay('\u8fd8\u6ca1\u6709\u9009\u4e2d\u4f1a\u8bdd\u3002', 3200, 4);
                 }
+            } else if (action === 'history') {
+                showLive2dHistoryPanel(btn.getBoundingClientRect());
             } else if (action === 'reset' && stage) {
                 clearSavedStagePosition();
                 const pos = applyDefaultStagePosition(stage);
@@ -328,8 +568,18 @@ const live2dModels = [
         document.body.appendChild(menu);
         document.addEventListener('pointerdown', (event) => {
             if (!menu.classList.contains('is-visible')) return;
-            if (menu.contains(event.target) || document.getElementById('oml2d-stage')?.contains(event.target)) return;
+            if (
+                menu.contains(event.target)
+                || document.getElementById('oml2d-stage')?.contains(event.target)
+                || document.getElementById('nbot-live2d-hitbox')?.contains(event.target)
+            ) return;
             hideLive2dMenu();
+        });
+        document.addEventListener('pointerdown', (event) => {
+            var panel = document.getElementById('nbot-live2d-history-panel');
+            if (!panel || !panel.classList.contains('is-visible')) return;
+            if (panel.contains(event.target) || menu.contains(event.target)) return;
+            hideLive2dHistoryPanel();
         });
         return menu;
     }
@@ -397,13 +647,25 @@ const live2dModels = [
         }
     }
 
+    function ensureStageHitbox(stage) {
+        let hitbox = document.getElementById('nbot-live2d-hitbox');
+        if (hitbox) return hitbox;
+        hitbox = document.createElement('div');
+        hitbox.id = 'nbot-live2d-hitbox';
+        hitbox.className = 'nbot-live2d-hitbox';
+        hitbox.setAttribute('aria-label', 'Live2D interaction area');
+        document.body.appendChild(hitbox);
+        syncStageHitbox(stage);
+        return hitbox;
+    }
+
     function enableStageDrag() {
         const stage = document.getElementById('oml2d-stage');
         if (!stage || stage.dataset.nbotDragReady === 'true') return;
         stage.dataset.nbotDragReady = 'true';
 
         clearSavedStagePosition();
-        applyDefaultStagePosition(stage);
+        scheduleDefaultStagePosition(stage);
 
         let dragging = false;
         let startX = 0;
@@ -411,42 +673,51 @@ const live2dModels = [
         let startLeft = 0;
         let startTop = 0;
         let didMove = false;
+        let swallowNextClick = false;
 
-        stage.addEventListener('pointerdown', (event) => {
+        document.addEventListener('pointerdown', (event) => {
             if (event.button !== undefined && event.button !== 0) return;
+            if (!isInsideLive2dVisual(stage, event.clientX, event.clientY)) return;
+            event.preventDefault();
+            event.stopPropagation();
             const rect = stage.getBoundingClientRect();
             dragging = true;
             didMove = false;
+            swallowNextClick = true;
             startX = event.clientX;
             startY = event.clientY;
             startLeft = rect.left;
             startTop = rect.top;
             stage.classList.add('is-dragging');
-            stage.setPointerCapture?.(event.pointerId);
-        });
+        }, true);
 
-        stage.addEventListener('pointermove', (event) => {
+        document.addEventListener('pointermove', (event) => {
             if (!dragging) return;
+            event.preventDefault();
+            event.stopPropagation();
             const dx = event.clientX - startX;
             const dy = event.clientY - startY;
             if (Math.abs(dx) > 2 || Math.abs(dy) > 2) {
                 didMove = true;
             }
             applyStagePosition(stage, startLeft + dx, startTop + dy);
-        });
+        }, true);
 
         function endDrag(event) {
             if (!dragging) return;
+            event.preventDefault();
+            event.stopPropagation();
             dragging = false;
             stage.classList.remove('is-dragging');
-            stage.releasePointerCapture?.(event.pointerId);
             const rect = stage.getBoundingClientRect();
             saveStagePosition(rect.left, rect.top);
         }
 
-        stage.addEventListener('pointerup', endDrag);
-        stage.addEventListener('pointercancel', endDrag);
-        stage.addEventListener('click', (event) => {
+        document.addEventListener('pointerup', endDrag, true);
+        document.addEventListener('pointercancel', endDrag, true);
+        document.addEventListener('click', (event) => {
+            if (!swallowNextClick && !isInsideLive2dVisual(stage, event.clientX, event.clientY)) return;
+            swallowNextClick = false;
             if (didMove) {
                 event.preventDefault();
                 event.stopPropagation();
@@ -463,6 +734,7 @@ const live2dModels = [
             const rect = stage.getBoundingClientRect();
             const pos = applyStagePosition(stage, rect.left, rect.top);
             saveStagePosition(pos.left, pos.top);
+            syncStageHitbox(stage);
         });
     }
 
@@ -479,13 +751,30 @@ const live2dModels = [
 
     window.__nbotLive2dReady = false;
     window.__nbotLive2dQueue = window.__nbotLive2dQueue || [];
+    window.__nbotLive2dQueuePlaying = false;
+    window.__nbotLive2dAutoTalkTimer = null;
+    window.__nbotLive2dAiTalking = false;
+
+    function playNextLive2dMessage() {
+        if (window.__nbotLive2dQueuePlaying) return;
+        if (!window.__nbotLive2dReady || !window.__nbotLive2d || typeof window.__nbotLive2d.tipsMessage !== 'function') return;
+
+        const item = window.__nbotLive2dQueue.shift();
+        if (!item) return;
+
+        window.__nbotLive2dQueuePlaying = true;
+        const duration = item.duration || 3600;
+        window.__nbotLive2d.tipsMessage(item.message, duration, item.priority || 4);
+        window.setTimeout(() => {
+            window.__nbotLive2dQueuePlaying = false;
+            playNextLive2dMessage();
+        }, duration + 220);
+    }
+
     window.__nbotLive2dSay = function (message, duration, priority) {
         if (!message) return;
-        if (window.__nbotLive2dReady && window.__nbotLive2d && typeof window.__nbotLive2d.tipsMessage === 'function') {
-            window.__nbotLive2d.tipsMessage(message, duration || 3600, priority || 4);
-            return;
-        }
         window.__nbotLive2dQueue.push({ message, duration: duration || 3600, priority: priority || 4 });
+        playNextLive2dMessage();
     };
 
     window.__nbotLive2dRandomSay = function (group, duration, priority) {
@@ -538,12 +827,17 @@ const live2dModels = [
         };
     }
 
-    window.__nbotLive2dAiTalk = async function (topic) {
+    window.__nbotLive2dAiTalk = async function (topic, options) {
+        if (window.__nbotLive2dAiTalking) return;
+        window.__nbotLive2dAiTalking = true;
+        options = options || {};
         const hasTopic = topic && typeof topic === 'string' && topic.trim();
-        if (hasTopic) {
-            window.__nbotLive2dSay('...', 2000, 5);
-        } else {
-            window.__nbotLive2dSay('\u6211\u770b\u4e00\u4e0b\u73b0\u5728\u7684\u72b6\u6001...', 2800, 6);
+        if (!options.silentStart) {
+            if (hasTopic) {
+                window.__nbotLive2dSay('...', 2000, 5);
+            } else {
+                window.__nbotLive2dSay('\u6211\u770b\u4e00\u4e0b\u73b0\u5728\u7684\u72b6\u6001...', 2800, 6);
+            }
         }
         try {
             const body = {
@@ -567,6 +861,8 @@ const live2dModels = [
         } catch (error) {
             console.warn('Live2D AI talk failed:', error);
             window.__nbotLive2dRandomSay('idle', 4200, 4);
+        } finally {
+            window.__nbotLive2dAiTalking = false;
         }
     };
 
@@ -618,10 +914,18 @@ const live2dModels = [
         if (!window.__nbotLive2d || typeof window.__nbotLive2d.tipsMessage !== 'function') {
             return;
         }
-        const queued = window.__nbotLive2dQueue.splice(0, window.__nbotLive2dQueue.length);
-        queued.slice(-4).forEach((item) => {
-            window.__nbotLive2d.tipsMessage(item.message, item.duration, item.priority);
-        });
+        playNextLive2dMessage();
+    }
+
+    function startLive2dAutoTalk() {
+        if (window.__nbotLive2dAutoTalkTimer) return;
+        window.__nbotLive2dAutoTalkTimer = window.setInterval(() => {
+            if (!window.__nbotLive2dReady || window.__nbotLive2dAiTalking) return;
+            if (document.hidden) return;
+            if (document.getElementById('nbot-live2d-menu')?.classList.contains('is-visible')) return;
+            if (document.getElementById('nbot-live2d-history-panel')?.classList.contains('is-visible')) return;
+            window.__nbotLive2dRandomSay('idle', 4200, 2);
+        }, 30000);
     }
 
     function oml2dConfigForModels(models) {
@@ -673,6 +977,7 @@ const live2dModels = [
         flushLive2dQueue();
         localStorage.removeItem('NBOT_LIVE2D_DISABLED');
         window.__nbotLive2dRandomSay('ready', 3800, 3);
+        startLive2dAutoTalk();
         fetchLive2dMenuOptions().catch(function () {});
     }
 
