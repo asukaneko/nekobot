@@ -49,6 +49,15 @@ const live2dModels = [
         idle:    ['Breath1', 'Breath2', 'Breath3', 'Breath5', 'Breath7', 'Breath8']
     };
 
+    var live2dMotionOrder = [
+        'Breath1', 'Breath2', 'Breath3', 'Breath4', 'Breath5', 'Breath6', 'Breath7', 'Breath8',
+        'Fail', 'Sleeping', 'Success',
+        'Sukebei1', 'Sukebei2', 'Sukebei3',
+        'Touch Dere1', 'Touch Dere2', 'Touch Dere3', 'Touch Dere4', 'Touch Dere5', 'Touch Dere6',
+        'Touch1', 'Touch2', 'Touch3', 'Touch4', 'Touch5', 'Touch6',
+        'WakeUp'
+    ];
+
     function pickMotion(group) {
         var list = live2dMotions[group];
         if (!list || !list.length) list = live2dMotions.tap;
@@ -60,22 +69,34 @@ const live2dModels = [
         try {
             var oml2d = window.__nbotLive2d;
             if (!oml2d) return;
-            // oh-my-live2d exposes stage 鈫?internalModel for Cubism2
+            var motionIndex = live2dMotionOrder.indexOf(motionName);
             var stage = oml2d.stage || oml2d;
+            if (motionIndex >= 0 && stage && typeof stage.playMotion === 'function') {
+                stage.playMotion('', motionIndex);
+                return;
+            }
+            if (motionIndex >= 0 && stage?.model && typeof stage.model.motion === 'function') {
+                stage.model.motion('', motionIndex);
+                return;
+            }
+            if (motionIndex >= 0 && stage?.model && typeof stage.model.startMotion === 'function') {
+                stage.model.startMotion('', motionIndex);
+                return;
+            }
             var internalModel = stage?.internalModel || stage?.currentModel || stage?._model;
             if (internalModel && typeof internalModel.motion === 'function') {
-                internalModel.motion('', motionName);
+                internalModel.motion('', motionIndex >= 0 ? motionIndex : motionName);
                 return;
             }
             if (internalModel && internalModel.internalModel && typeof internalModel.internalModel.motion === 'function') {
-                internalModel.internalModel.motion('', motionName);
+                internalModel.internalModel.motion('', motionIndex >= 0 ? motionIndex : motionName);
                 return;
             }
+            console.warn('Live2D motion API not found:', motionName, motionIndex, oml2d);
         } catch (e) {
-            // Ignore 鈥?motion is cosmetic
+            console.warn('Live2D motion failed:', motionName, e);
         }
     }
-
     // Detect emotion from AI reply text and play matching motion
     function playMotionForText(text) {
         if (!text) return;
@@ -138,6 +159,15 @@ const live2dModels = [
             '#nbot-live2d-menu .nbot-live2d-chat-send { flex: 0 0 26px; width: 26px; min-width: 26px; max-width: 26px; height: 26px; display: inline-flex; align-items: center; justify-content: center; grid-template-columns: none; gap: 0; border: 0; border-radius: 6px; background: rgba(56,189,248,0.15); color: #38bdf8; cursor: pointer; padding: 0; margin: 0; box-sizing: border-box; line-height: 1; text-align: center; }',
             '.nbot-live2d-chat-send:hover { background: rgba(56,189,248,0.28); }',
             '#nbot-live2d-menu .nbot-live2d-chat-send svg { width: 14px; height: 14px; flex: 0 0 14px; display: block; margin: 0; transform: none; }',
+            '.nbot-live2d-motion-panel { position: fixed; z-index: 10000; display: none; width: 260px; max-height: min(420px, calc(100vh - 24px)); padding: 9px; border: 1px solid rgba(148,163,184,0.18); border-radius: 10px; background: rgba(15,23,42,0.96); box-shadow: 0 18px 48px rgba(0,0,0,0.36), inset 0 1px 0 rgba(255,255,255,0.06); backdrop-filter: blur(14px); overflow: auto; }',
+            '.nbot-live2d-motion-panel.is-visible { display: block; animation: nbot-live2d-menu-in 120ms ease-out; }',
+            '.nbot-live2d-motion-group { margin-bottom: 9px; }',
+            '.nbot-live2d-motion-group:last-child { margin-bottom: 0; }',
+            '.nbot-live2d-motion-label { display: flex; align-items: center; gap: 6px; padding: 2px 1px 6px; color: #93c5fd; font-size: 11px; font-weight: 700; }',
+            '.nbot-live2d-motion-label::before { content: ""; width: 6px; height: 6px; border-radius: 999px; background: #38bdf8; box-shadow: 0 0 10px rgba(56,189,248,0.5); }',
+            '.nbot-live2d-motion-grid { display: flex; flex-wrap: wrap; gap: 6px; }',
+            '.nbot-live2d-motion-panel .nbot-live2d-motion-item { flex: 1 1 calc(50% - 6px); min-width: 86px; max-width: 100%; padding: 6px 8px; border: 1px solid rgba(56,189,248,0.16); border-radius: 7px; color: #dbeafe; background: rgba(15,23,42,0.72); box-shadow: inset 0 1px 0 rgba(255,255,255,0.045); font-size: 11px; line-height: 1.2; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; }',
+            '.nbot-live2d-motion-panel .nbot-live2d-motion-item:hover { color: #f8fafc; background: rgba(56,189,248,0.18); border-color: rgba(56,189,248,0.34); }',
             '#nbot-live2d-history-panel { position: fixed; z-index: 10001; display: none; width: min(360px, calc(100vw - 24px)); max-height: min(420px, calc(100vh - 24px)); padding: 10px; border: 1px solid rgba(148,163,184,0.2); border-radius: 10px; background: rgba(15,23,42,0.96); box-shadow: 0 18px 52px rgba(0,0,0,0.42), inset 0 1px 0 rgba(255,255,255,0.06); backdrop-filter: blur(16px); color: #e6edf3; overflow: hidden; }',
             '#nbot-live2d-history-panel.is-visible { display: flex; flex-direction: column; animation: nbot-live2d-menu-in 120ms ease-out; }',
             '.nbot-live2d-history-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 2px 2px 8px; border-bottom: 1px solid rgba(148,163,184,0.14); }',
@@ -408,6 +438,70 @@ const live2dModels = [
         });
     }
 
+    function escapeHtml(value) {
+        return String(value || '').replace(/[&<>"']/g, function (ch) {
+            return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch];
+        });
+    }
+
+    function ensureMotionPanel(menu) {
+        var panel = menu.querySelector('.nbot-live2d-motion-panel');
+        if (panel) return panel;
+
+        panel = document.createElement('div');
+        panel.className = 'nbot-live2d-motion-panel';
+        const labels = {
+            happy: '\u5f00\u5fc3',
+            sad: '\u4f4e\u843d',
+            surprised: '\u60ca\u8bb6',
+            shy: '\u5bb3\u7f9e',
+            naughty: '\u8c03\u76ae',
+            tap: '\u70b9\u51fb',
+            idle: '\u5f85\u673a'
+        };
+        panel.innerHTML = Object.keys(live2dMotions).map(function (group) {
+            const motions = live2dMotions[group] || [];
+            return '<div class="nbot-live2d-motion-group">'
+                + '<div class="nbot-live2d-motion-label">' + (labels[group] || group) + '</div>'
+                + '<div class="nbot-live2d-motion-grid">'
+                + motions.map(function (motion) {
+                    return '<button type="button" class="nbot-live2d-motion-item" data-action="play-motion" data-motion="' + escapeHtml(motion) + '" title="' + escapeHtml(motion) + '">' + escapeHtml(motion) + '</button>';
+                }).join('')
+                + '</div></div>';
+        }).join('');
+        document.body.appendChild(panel);
+        return panel;
+    }
+
+    function positionMotionPanel(menu, anchorButton, panel) {
+        const menuRect = menu.getBoundingClientRect();
+        const anchorRect = anchorButton.getBoundingClientRect();
+        const panelWidth = panel.offsetWidth || 260;
+        const panelHeight = panel.offsetHeight || 360;
+        const gap = 10;
+        const rightSpace = window.innerWidth - menuRect.right;
+        const leftSpace = menuRect.left;
+        const openRight = rightSpace >= panelWidth + gap || rightSpace >= leftSpace;
+        const left = openRight
+            ? Math.min(window.innerWidth - panelWidth - 8, menuRect.right + gap)
+            : Math.max(8, menuRect.left - panelWidth - gap);
+        const top = Math.min(
+            Math.max(8, anchorRect.top - 8),
+            window.innerHeight - panelHeight - 8
+        );
+        panel.style.left = left + 'px';
+        panel.style.top = top + 'px';
+    }
+
+    function toggleMotionPanel(menu, anchorButton) {
+        const panel = ensureMotionPanel(menu);
+        const shouldShow = !panel.classList.contains('is-visible');
+        panel.classList.toggle('is-visible', shouldShow);
+        if (shouldShow) {
+            positionMotionPanel(menu, anchorButton, panel);
+        }
+    }
+
     function cleanHistoryText(text) {
         var value = String(text || '').replace(/\s+/g, ' ').trim();
         if (value.length > 180) {
@@ -506,6 +600,7 @@ const live2dModels = [
             '<button type="button" data-action="talk"><span class="nbot-live2d-menu-icon"><i class="fas fa-comment-dots"></i></span><span>\u968f\u673a\u8bf4\u8bdd</span></button>',
             '<button type="button" data-action="status"><span class="nbot-live2d-menu-icon"><i class="fas fa-robot"></i></span><span>AI \u72b6\u6001</span></button>',
             '<button type="button" data-action="history"><span class="nbot-live2d-menu-icon"><i class="fas fa-history"></i></span><span>\u67e5\u770b\u4f1a\u8bdd\u8bb0\u5f55</span></button>',
+            '<button type="button" data-action="motions"><span class="nbot-live2d-menu-icon"><i class="fas fa-running"></i></span><span>\u9009\u62e9\u52a8\u4f5c</span></button>',
             '<button type="button" data-action="reset"><span class="nbot-live2d-menu-icon"><i class="fas fa-compress-arrows-alt"></i></span><span>\u56de\u5230\u53f3\u4e0b\u89d2</span></button>',
             '<div class="nbot-live2d-chat-row"><input class="nbot-live2d-chat-input" type="text" placeholder="\u5bf9\u7740\u6211\u8bf4\u70b9\u4ec0\u4e48..."><button type="button" class="nbot-live2d-chat-send" title="\u53d1\u9001"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg></button></div>'
         );
@@ -542,6 +637,15 @@ const live2dModels = [
                 window.__nbotLive2dSwitchModel();
             } else if (action === 'talk') {
                 window.__nbotLive2dAiTalk();
+            } else if (action === 'motions') {
+                toggleMotionPanel(menu, btn);
+                return;
+            } else if (action === 'play-motion') {
+                const motion = btn.dataset.motion;
+                if (motion) {
+                    playLive2dMotion(motion);
+                    window.__nbotLive2dSay(`\u64ad\u653e\u52a8\u4f5c\uff1a${motion}`, 1800, 4);
+                }
             } else if (action === 'dynamic-talk') {
                 const topic = btn.dataset.topic;
                 if (topic) {
@@ -570,6 +674,7 @@ const live2dModels = [
             if (!menu.classList.contains('is-visible')) return;
             if (
                 menu.contains(event.target)
+                || document.querySelector('.nbot-live2d-motion-panel')?.contains(event.target)
                 || document.getElementById('oml2d-stage')?.contains(event.target)
                 || document.getElementById('nbot-live2d-hitbox')?.contains(event.target)
             ) return;
@@ -588,6 +693,7 @@ const live2dModels = [
         var menu = document.getElementById('nbot-live2d-menu');
         if (menu) {
             menu.classList.remove('is-visible');
+            document.querySelector('.nbot-live2d-motion-panel')?.classList.remove('is-visible');
             // Clean up dynamic items when closing
             var divider = menu.querySelector('.nbot-live2d-dynamic-divider');
             if (divider) { divider.style.display = 'none'; }
@@ -940,13 +1046,13 @@ const live2dModels = [
             }; }),
             tips: {
                 style: {
-                    width: 270, maxWidth: 320, minHeight: 48,
+                    width: 330, maxWidth: 'min(330px, calc(100vw - 32px))', minHeight: 54, maxHeight: 190,
                     fontSize: '14px', lineHeight: '1.5', color: '#e6edf3',
                     backgroundColor: 'rgba(13, 17, 23, 0.88)',
                     border: '1px solid rgba(255, 255, 255, 0.12)',
                     boxShadow: '0 14px 36px rgba(0, 0, 0, 0.28)',
                     wordBreak: 'break-word', overflowWrap: 'break-word',
-                    whiteSpace: 'normal', overflow: 'hidden', textOverflow: 'ellipsis'
+                    whiteSpace: 'normal', overflow: 'auto', textOverflow: 'clip'
                 },
                 welcomeTips: {
                     duration: 4200, priority: 3,
@@ -1029,6 +1135,7 @@ const live2dModels = [
         }
     };
 })();
+
 
 
 

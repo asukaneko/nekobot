@@ -185,6 +185,101 @@ def register_session_routes(app, server):
             return jsonify({"success": True})
         return jsonify({"error": "Session not found"}), 404
 
+    def _export_session_payload(sessions):
+        return {
+            "version": 1,
+            "type": "nbot_session_export",
+            "exported_at": datetime.now().isoformat(),
+            "total": len(sessions),
+            "sessions": sessions,
+        }
+
+    def _normalize_imported_session(raw_session):
+        if not isinstance(raw_session, dict):
+            raise ValueError("session must be an object")
+        old_id = str(raw_session.get("id") or "").strip()
+        new_id = str(uuid.uuid4())
+        now = datetime.now().isoformat()
+        session = dict(raw_session)
+        session["id"] = new_id
+        session["name"] = session.get("name") or f"Imported {new_id[:8]}"
+        if old_id:
+            session["imported_from"] = old_id
+        session["imported_at"] = now
+        session["type"] = session.get("type") or "web"
+        if session["type"] not in {"web", "cli"}:
+            session["type"] = "web"
+        messages = session.get("messages")
+        if not isinstance(messages, list):
+            messages = []
+        session["messages"] = [m for m in messages if isinstance(m, dict)]
+        system_prompt = session.get("system_prompt")
+        if not system_prompt:
+            system_msg = next((m for m in session["messages"] if m.get("role") == "system"), None)
+            system_prompt = (system_msg or {}).get("content", "")
+        session["system_prompt"] = system_prompt or ""
+        if session["system_prompt"] and not any(m.get("role") == "system" for m in session["messages"]):
+            session["messages"].insert(0, {"role": "system", "content": session["system_prompt"]})
+        session["created_at"] = session.get("created_at") or now
+        if not is_web_visible_session(new_id, session):
+            raise ValueError("invalid session type")
+        return new_id, session
+
+    @app.route("/api/sessions/<session_id>/export")
+    def export_session(session_id):
+        session = _get_web_session(session_id)
+        if not session:
+            return jsonify({"error": "Session not found"}), 404
+        return jsonify(_export_session_payload([session]))
+
+    @app.route("/api/sessions/export")
+    def export_sessions():
+        ids = [sid.strip() for sid in request.args.get("ids", "").split(",") if sid.strip()]
+        sessions = []
+        if ids:
+            for sid in ids:
+                session = _get_web_session(sid)
+                if session:
+                    sessions.append(session)
+        else:
+            for sid, session in (server.sessions or {}).items():
+                if is_web_visible_session(sid, session):
+                    sessions.append(session)
+        return jsonify(_export_session_payload(sessions))
+
+    @app.route("/api/sessions/import", methods=["POST"])
+    def import_sessions():
+        data = request.get_json(silent=True) or {}
+        sessions_payload = data.get("sessions")
+        if sessions_payload is None and isinstance(data.get("session"), dict):
+            sessions_payload = [data["session"]]
+        if sessions_payload is None and isinstance(data, dict) and data.get("type") != "nbot_session_export":
+            sessions_payload = [data]
+        if not isinstance(sessions_payload, list):
+            return jsonify({"success": False, "error": "sessions must be a list"}), 400
+
+        imported = []
+        errors = []
+        for idx, raw_session in enumerate(sessions_payload):
+            try:
+                session_id, session = _normalize_imported_session(raw_session)
+                session_store.set_session(session_id, session)
+                if server.WORKSPACE_AVAILABLE and server.workspace_manager:
+                    server.workspace_manager.get_or_create(
+                        session_id, session.get("type", "web"), session.get("name", "")
+                    )
+                imported.append({"id": session_id, "name": session.get("name")})
+            except Exception as exc:
+                errors.append({"index": idx, "error": str(exc)})
+
+        return jsonify({
+            "success": True,
+            "imported": len(imported),
+            "failed": len(errors),
+            "sessions": imported,
+            "errors": errors,
+        })
+
     @app.route("/api/stop", methods=["POST"])
     def stop_generation():
         data = request.json or {}

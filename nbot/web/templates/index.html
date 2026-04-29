@@ -7647,6 +7647,15 @@
                                 <button v-if="chatTab === 'web'" class="btn btn-primary" style="width: 100%;" @click="createNewSession" :disabled="isLoading">
                                     <i class="fas fa-plus"></i> 新建会话
                                 </button>
+                                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px;">
+                                    <button class="btn btn-secondary" @click="triggerSessionImport" :disabled="isLoading" title="导入会话">
+                                        <i class="fas fa-file-import"></i> 导入
+                                    </button>
+                                    <button class="btn btn-secondary" @click="exportVisibleSessions" :disabled="isLoading || filteredSessions.length === 0" title="导出当前列表会话">
+                                        <i class="fas fa-file-export"></i> 导出
+                                    </button>
+                                </div>
+                                <input type="file" ref="sessionImportInput" accept=".json,application/json" @change="handleSessionImportFile" style="display: none;">
                                 <div class="search-box" :style="{ marginTop: chatTab === 'web' ? '12px' : '0' }">
                                     <i class="fas fa-search" style="color: var(--text-muted);"></i>
                                     <input v-model="sessionSearch" type="text" placeholder="搜索会话...">
@@ -7878,6 +7887,9 @@
                                         </div>
                                     </div>
                                     <div class="chat-actions">
+                                        <button class="btn-icon" @click="exportCurrentSession" title="导出会话" :disabled="isLoading">
+                                            <i class="fas fa-file-export"></i>
+                                        </button>
                                         <button class="btn-icon" @click="clearSession" title="清空" :disabled="isLoading">
                                             <i class="fas fa-trash-alt"></i>
                                         </button>
@@ -15765,6 +15777,78 @@ def main(params):
                         this.showToast('创建会话失败: ' + (e.response?.data?.error || e.message), 'error');
                     } finally {
                         this.isLoading = false;
+                    }
+                },
+
+                downloadJson(data, filename) {
+                    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json;charset=utf-8' });
+                    const url = URL.createObjectURL(blob);
+                    const link = document.createElement('a');
+                    link.href = url;
+                    link.download = filename;
+                    document.body.appendChild(link);
+                    link.click();
+                    document.body.removeChild(link);
+                    URL.revokeObjectURL(url);
+                },
+
+                async exportCurrentSession() {
+                    if (!this.currentSession?.id) {
+                        this.showToast('请先选择一个会话', 'warning');
+                        return;
+                    }
+                    try {
+                        const res = await api.get(`/api/sessions/${this.currentSession.id}/export`);
+                        const safeName = (this.currentSession.name || this.currentSession.id).replace(/[\\/:*?"<>|]/g, '_');
+                        this.downloadJson(res.data, `session_${safeName}_${new Date().toISOString().slice(0, 10)}.json`);
+                        this.showToast('会话已导出', 'success');
+                    } catch (e) {
+                        this.showToast('导出会话失败: ' + (e.response?.data?.error || e.message), 'error');
+                    }
+                },
+
+                async exportVisibleSessions() {
+                    const ids = this.filteredSessions.map(s => s.id).filter(Boolean);
+                    if (!ids.length) {
+                        this.showToast('没有可导出的会话', 'warning');
+                        return;
+                    }
+                    try {
+                        const res = await api.get(`/api/sessions/export?ids=${encodeURIComponent(ids.join(','))}`);
+                        this.downloadJson(res.data, `sessions_export_${new Date().toISOString().slice(0, 10)}.json`);
+                        this.showToast(`已导出 ${res.data.total || ids.length} 个会话`, 'success');
+                    } catch (e) {
+                        this.showToast('导出会话失败: ' + (e.response?.data?.error || e.message), 'error');
+                    }
+                },
+
+                triggerSessionImport() {
+                    const input = this.$refs.sessionImportInput;
+                    if (input) {
+                        input.value = '';
+                        input.click();
+                    }
+                },
+
+                async handleSessionImportFile(event) {
+                    const file = event.target.files?.[0];
+                    if (!file) return;
+                    try {
+                        const text = await file.text();
+                        const parsed = JSON.parse(text);
+                        const res = await api.post('/api/sessions/import', parsed);
+                        await this.loadSessions();
+                        const imported = res.data.imported || 0;
+                        const failed = res.data.failed || 0;
+                        if (imported > 0) {
+                            this.showToast(`成功导入 ${imported} 个会话${failed ? `，失败 ${failed} 个` : ''}`, failed ? 'warning' : 'success');
+                        } else {
+                            this.showToast('没有导入任何会话', 'warning');
+                        }
+                    } catch (e) {
+                        this.showToast('导入会话失败: ' + (e.response?.data?.error || e.message), 'error');
+                    } finally {
+                        if (event.target) event.target.value = '';
                     }
                 },
 

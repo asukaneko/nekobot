@@ -1,4 +1,4 @@
-import json
+﻿import json
 import logging
 from datetime import datetime
 
@@ -145,8 +145,8 @@ def _clean_line(text):
     if text.endswith("```"):
         text = text[:-3].strip()
     text = text.replace("\r", " ").replace("\n", " ").strip(" \t\"'")
-    if len(text) > 120:
-        text = text[:117].rstrip(" ,，.。") + "..."
+    if len(text) > 100:
+        text = text[:97].rstrip(" ,，。！？!?") + "..."
     return text
 
 
@@ -471,3 +471,4 @@ def register_live2d_routes(app, server):
             "message": message,
             "history_length": len(server.live2d_messages),
         })
+

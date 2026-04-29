@@ -74,6 +74,7 @@ def _get_local_stt_config():
         beam_size = 5
 
     return {
+        "enabled": bool(stt_config.get("local_enabled", False)),
         "model_name": model_name,
         "model_path": _get_local_model_dir(model_name),
         "language": language,
@@ -88,6 +89,12 @@ def _ensure_stt_model_loaded(force_reload: bool = False):
     global _STT_MODEL, _STT_MODEL_NAME, _STT_MODEL_LOAD_ERROR
 
     config = _get_local_stt_config()
+    if not config["enabled"]:
+        _STT_MODEL = None
+        _STT_MODEL_NAME = None
+        _STT_MODEL_LOAD_ERROR = None
+        raise RuntimeError("Local STT is disabled. Set [stt] local_enabled = true in config.ini to enable faster-whisper.")
+
     requested_model_name = config["model_name"]
 
     if (
@@ -145,6 +152,10 @@ def _ensure_stt_model_loaded(force_reload: bool = False):
 
 def _preload_stt_model():
     """Load the local STT model when the web service starts."""
+    if not _get_local_stt_config()["enabled"]:
+        _log.info("Local STT preload skipped because [stt] local_enabled is false")
+        return
+
     try:
         _ensure_stt_model_loaded()
     except Exception as exc:
@@ -227,6 +238,11 @@ def register_voice_routes(app, server):
     def stt_transcribe():
         """Transcribe recorded audio with a local faster-whisper model."""
         try:
+            if not _get_local_stt_config()["enabled"]:
+                return jsonify({
+                    "error": "Local STT is disabled. Set [stt] local_enabled = true in config.ini to enable voice transcription."
+                }), 400
+
             if "audio" not in request.files:
                 return jsonify({"error": "No audio file provided"}), 400
 

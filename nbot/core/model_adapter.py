@@ -168,6 +168,49 @@ def normalize_messages_for_provider(
     return normalized
 
 
+def sanitize_messages_for_chat_api(
+    messages: List[Dict[str, Any]],
+    *,
+    allow_tools: bool = False,
+) -> List[Dict[str, Any]]:
+    sanitized: List[Dict[str, Any]] = []
+    for message in messages or []:
+        if not isinstance(message, dict):
+            continue
+        role = message.get("role")
+        if role not in {"system", "user", "assistant", "tool"}:
+            continue
+        if role == "tool" and not allow_tools:
+            continue
+
+        clean: Dict[str, Any] = {"role": role}
+        content = message.get("content", "")
+
+        if role == "assistant" and allow_tools and message.get("tool_calls"):
+            clean["content"] = content if content is not None else ""
+            clean["tool_calls"] = message.get("tool_calls")
+        else:
+            if content is None:
+                content = ""
+            clean["content"] = content
+
+        if role == "tool":
+            tool_call_id = message.get("tool_call_id")
+            if not tool_call_id:
+                continue
+            clean["tool_call_id"] = tool_call_id
+            if message.get("name"):
+                clean["name"] = message.get("name")
+
+        if role == "assistant" and not clean.get("content") and not clean.get("tool_calls"):
+            continue
+        if role in {"user", "system", "tool"} and clean.get("content") in (None, ""):
+            continue
+        sanitized.append(clean)
+
+    return sanitized
+
+
 def resolve_chat_completion_url(
     base_url: str,
     provider: Optional[ProviderProfile] = None,
@@ -200,18 +243,21 @@ def build_chat_completion_payload(
     stream: bool = False,
     extra_body: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
+    profile = infer_provider_profile(base_url, model, provider_type)
+    allow_tools = bool(tools and profile.supports_tools)
     messages = normalize_messages_for_provider(
         messages,
         base_url=base_url,
         model=model,
         provider_type=provider_type,
     )
+    messages = sanitize_messages_for_chat_api(messages, allow_tools=allow_tools)
     payload: Dict[str, Any] = {
         "model": model,
         "messages": messages,
         "stream": stream,
     }
-    if tools:
+    if allow_tools:
         payload["tools"] = tools
         if tool_choice:
             payload["tool_choice"] = tool_choice

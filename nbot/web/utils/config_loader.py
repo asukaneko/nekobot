@@ -23,6 +23,13 @@ def _read_config():
     return config_parser
 
 
+def _env_bool(name: str):
+    value = os.getenv(name)
+    if value is None:
+        return None
+    return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+
 def resolve_runtime_api_key(configured_api_key: str = "", provider_type: str = "") -> str:
     provider = (provider_type or "").strip().lower()
     if provider == "minimax":
@@ -145,6 +152,30 @@ def get_voice_config():
     )
 
     return {"voice": voice}
+
+
+def get_stt_local_config() -> dict:
+    config_parser = _read_config()
+    env_enabled = _env_bool("NBOT_LOCAL_STT_ENABLED")
+    local_enabled = (
+        env_enabled
+        if env_enabled is not None
+        else config_parser.getboolean("stt", "local_enabled", fallback=False)
+    )
+
+    return {
+        "local_enabled": local_enabled,
+        "model": os.getenv("NBOT_FASTER_WHISPER_MODEL")
+        or config_parser.get("stt", "model", fallback="tiny"),
+        "language": os.getenv("NBOT_STT_LANGUAGE")
+        or config_parser.get("stt", "language", fallback="zh"),
+        "device": os.getenv("NBOT_FASTER_WHISPER_DEVICE")
+        or config_parser.get("stt", "device", fallback="cpu"),
+        "compute_type": os.getenv("NBOT_FASTER_WHISPER_COMPUTE_TYPE")
+        or config_parser.get("stt", "compute_type", fallback="int8"),
+        "beam_size": os.getenv("NBOT_FASTER_WHISPER_BEAM_SIZE")
+        or config_parser.get("stt", "beam_size", fallback="5"),
+    }
 
 
 def get_search_config():
@@ -328,18 +359,25 @@ def get_tts_model_config() -> dict:
 
 
 def get_stt_model_config() -> dict:
+    local_config = get_stt_local_config()
     """获取STT语音识别模型配置"""
     config = get_model_config_by_purpose("stt")
     if config:
+        for key, value in local_config.items():
+            config.setdefault(key, value)
         return config
     # 默认配置
     api_config = get_api_config()
     return {
         "api_key": api_config.get("api_key", ""),
         "base_url": api_config.get("base_url", ""),
-        "model": "tiny",
-        "language": "zh",
+        "model": local_config["model"],
+        "language": local_config["language"],
         "provider_type": api_config.get("provider_type", "openai_compatible"),
+        "local_enabled": local_config["local_enabled"],
+        "device": local_config["device"],
+        "compute_type": local_config["compute_type"],
+        "beam_size": local_config["beam_size"],
     }
 
 
