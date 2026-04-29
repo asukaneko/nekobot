@@ -7037,6 +7037,35 @@
             border-radius: 4px;
             margin-left: 4px;
         }
+        .user-copy-action {
+            position: absolute;
+            right: 0;
+            top: 50%;
+            transform: translateY(-50%);
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 5px;
+            width: 24px;
+            height: 24px;
+            padding: 0;
+            border: none;
+            border-radius: 5px;
+            background: transparent;
+            color: rgba(255, 255, 255, 0.72);
+            font-size: 12px;
+            line-height: 1;
+            cursor: pointer;
+            transition: background .15s, color .15s;
+        }
+        .message.user .message-time {
+            padding-right: 28px;
+            position: relative;
+        }
+        .user-copy-action:hover {
+            background: rgba(255, 255, 255, 0.14);
+            color: #fff;
+        }
 
         /* 进度卡片改进样式 */
         .thinking-step.done .step-name {
@@ -8766,6 +8795,9 @@
                                                 <div class="message-time">
                                                     {{ formatFullTime(msg.timestamp) }}
                                                     <span v-if="msg.source === 'qq'"> · <i class="fab fa-qq"></i> QQ</span>
+                                                    <button v-if="msg.role === 'user'" class="user-copy-action" @click.stop="copyMessage(msg)" title="复制">
+                                                        <i class="fas fa-copy"></i>
+                                                    </button>
                                                 </div>
                                                 <!-- 消息操作栏（只对 assistant 消息显示） -->
                                                 <div v-if="msg.role === 'assistant'" class="msg-actions">
@@ -21911,16 +21943,40 @@ def main(params):
 
                     const sessionId = this.currentSession.id;
                     const msgIndex = this.currentMessages.findIndex(m => m.id === msg.id);
+                    let promptMessageId = null;
+                    if (msgIndex !== -1) {
+                        for (let i = msgIndex - 1; i >= 0; i--) {
+                            if (this.currentMessages[i].role === 'user') {
+                                promptMessageId = this.currentMessages[i].id;
+                                break;
+                            }
+                        }
+                        this.currentMessages = this.currentMessages.slice(0, msgIndex).map(currentMsg => {
+                            if (promptMessageId && currentMsg.id !== promptMessageId) {
+                                return currentMsg;
+                            }
+                            const cleanedMsg = { ...currentMsg };
+                            delete cleanedMsg.thinking_cards;
+                            delete cleanedMsg.todo_cards;
+                            delete cleanedMsg.change_cards;
+                            return cleanedMsg;
+                        });
+                        if (promptMessageId) {
+                            delete this.orphanCards[promptMessageId];
+                        }
+                    }
                     this.isTyping = true;
                     this.isLoading = true;
                     this.loadingSessionId = sessionId;
 
                     try {
-                        await api.post(`/api/sessions/${sessionId}/regenerate`, {
+                        const res = await api.post(`/api/sessions/${sessionId}/regenerate`, {
                             message_id: msg.id
                         });
                         if (msgIndex !== -1) {
-                            this.currentMessages = this.currentMessages.slice(0, msgIndex);
+                            if (res.data?.prompt_message_id) {
+                                delete this.orphanCards[res.data.prompt_message_id];
+                            }
                         } else {
                             await this.loadMessages();
                         }
@@ -21930,6 +21986,7 @@ def main(params):
                         this.isTyping = false;
                         this.isLoading = false;
                         this.loadingSessionId = null;
+                        await this.loadMessages();
                         this.showToast(e.response?.data?.error || '重新生成失败', 'error');
                     }
                 },

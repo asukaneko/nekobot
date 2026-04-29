@@ -367,7 +367,15 @@ def register_session_routes(app, server):
 
         _ensure_mutable_session(session_id, session)
         original_messages = deepcopy(messages)
-        session_store.replace_messages(session_id, deepcopy(messages[:message_index]))
+        trimmed_messages = deepcopy(messages[:message_index])
+        previous_user_id = previous_user.get("id")
+        for retained_msg in reversed(trimmed_messages):
+            if str(retained_msg.get("id")) == str(previous_user_id):
+                retained_msg.pop("thinking_cards", None)
+                retained_msg.pop("todo_cards", None)
+                retained_msg.pop("change_cards", None)
+                break
+        session_store.replace_messages(session_id, trimmed_messages)
         trigger = getattr(server, "_trigger_ai_response", None)
         if not trigger:
             session_store.replace_messages(session_id, original_messages)
