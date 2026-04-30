@@ -606,7 +606,25 @@ def load_all_data(server):
         if os.path.exists(login_tokens_file):
             try:
                 with open(login_tokens_file, "r", encoding="utf-8") as f:
-                    server.login_tokens = json.load(f)
+                    loaded_tokens = json.load(f)
+
+                # 迁移旧格式：旧版 key 为明文 token，新版 key 为 SHA-256 hash
+                # 旧格式 key 长度为 43（token_urlsafe(32)），新格式为 64（hex sha256）
+                migrated = {}
+                needs_save = False
+                for key, value in loaded_tokens.items():
+                    if len(key) != 64:
+                        # 旧格式明文 token，无法转换为 hash（用户需重新登录）
+                        needs_save = True
+                        _log.info(f"[Auth] 丢弃旧格式 Token: username={value.get('username', '?')}")
+                    else:
+                        migrated[key] = value
+
+                server.login_tokens = migrated
+                if needs_save:
+                    server._save_login_tokens()
+                    _log.info("[Auth] 已迁移 Token 存储格式（明文 → SHA-256 hash）")
+
                 # 清理已过期的 token
                 server._cleanup_expired_tokens()
                 _log.info(f"[Auth] 已加载 {len(server.login_tokens)} 个登录 Token")

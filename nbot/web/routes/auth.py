@@ -1,6 +1,5 @@
 import logging
 import os
-import secrets
 
 from flask import jsonify, request
 
@@ -54,8 +53,26 @@ def register_auth_routes(app, server):
 
         if not password:
             return jsonify({"success": False, "message": "Password is required"}), 401
-        if not secrets.compare_digest(password, str(server.web_password)):
+
+        # 登录失败限流检查
+        client_ip = request.remote_addr or "unknown"
+        wait_seconds = server._check_login_rate_limit(client_ip)
+        if wait_seconds is not None:
+            _log.warning(f"[Auth] 登录限流: IP={client_ip}, 需等待 {wait_seconds}s")
+            return jsonify(
+                {
+                    "success": False,
+                    "message": f"Too many failed attempts, please try again in {wait_seconds} seconds",
+                }
+            ), 429
+
+        # 密码验证（支持明文和 bcrypt 哈希）
+        if not server._verify_password(password):
+            server._record_login_failure(client_ip)
             return jsonify({"success": False, "message": "Invalid password"}), 401
+
+        # 登录成功，清除失败记录
+        server._reset_login_failures(client_ip)
 
         token = server._generate_login_token(username)
         response = jsonify(
@@ -92,10 +109,12 @@ def register_auth_routes(app, server):
     @app.route("/api/logout", methods=["POST"])
     def logout():
         token = _get_request_token()
-        if token and token in server.login_tokens:
-            del server.login_tokens[token]
-            _log.info(f"[Auth] Token removed: {token[:8]}...")
-            server._save_login_tokens()
+        if token:
+            token_hash = server._hash_token(token)
+            if token_hash in server.login_tokens:
+                del server.login_tokens[token_hash]
+                _log.info(f"[Auth] Token removed: {token_hash[:16]}...")
+                server._save_login_tokens()
 
         response = jsonify({"success": True, "message": "Logged out"})
         response.delete_cookie("nbot_auth_token")

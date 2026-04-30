@@ -505,11 +505,17 @@ class WebChatServer:
         # QQ Bot 引用（用于发送消息到QQ）
         self.qq_bot = None
 
-        # 登录密码
+        # 登录密码（可能是明文或 bcrypt 哈希）
         self.web_password = None
+        self._web_password_is_hash = False
+
+        # 登录失败限流：{ip: {'count': int, 'first_fail': float}}
+        self._login_fail_records: Dict[str, Dict[str, Any]] = {}
+        self._login_rate_limit = 5          # 最大失败次数
+        self._login_rate_window = 300       # 限流窗口（秒）
 
         # 登录 Token 管理（用于长时间免登录）
-        # token_store: {token: {'username': str, 'expires_at': datetime, 'created_at': datetime}}
+        # key 为 token 的 SHA-256 hash，value 为 {'username': str, 'expires_at': datetime, 'created_at': datetime}
         self.login_tokens: Dict[str, Dict[str, Any]] = {}
         self.token_expire_days = 30  # Token 有效期 30 天
 
@@ -568,6 +574,11 @@ class WebChatServer:
         else:
             return f"{minutes}分钟"
 
+    @staticmethod
+    def _hash_token(token: str) -> str:
+        """将明文 token 进行 SHA-256 哈希，用于安全存储"""
+        return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
     def _generate_login_token(self, username: str) -> str:
         """
         生成登录 Token
@@ -576,16 +587,16 @@ class WebChatServer:
             username: 用户名
 
         Returns:
-            token 字符串
+            token 字符串（明文，仅此一次返回）
         """
-        # 生成随机 token
         token = secrets.token_urlsafe(32)
+        token_hash = self._hash_token(token)
 
-        # 存储 token 信息
         now = datetime.now()
         expires_at = now + timedelta(days=self.token_expire_days)
 
-        self.login_tokens[token] = {
+        # 存储 token hash 而非明文
+        self.login_tokens[token_hash] = {
             "username": username,
             "created_at": now.isoformat(),
             "expires_at": expires_at.isoformat(),
@@ -593,9 +604,7 @@ class WebChatServer:
 
         _log.info(f"[Auth] 生成登录 Token: username={username}, expires={expires_at}")
 
-        # 持久化保存 Token
         self._save_login_tokens()
-
         return token
 
     def _validate_login_token(self, token: str) -> Optional[str]:
@@ -603,21 +612,21 @@ class WebChatServer:
         验证登录 Token
 
         Args:
-            token: token 字符串
+            token: token 明文字符串
 
         Returns:
             验证成功返回用户名，失败返回 None
         """
-        if not token or token not in self.login_tokens:
+        token_hash = self._hash_token(token)
+        if not token_hash or token_hash not in self.login_tokens:
             return None
 
-        token_info = self.login_tokens[token]
+        token_info = self.login_tokens[token_hash]
 
         # 检查是否过期
         expires_at = datetime.fromisoformat(token_info["expires_at"])
         if datetime.now() > expires_at:
-            # Token 已过期，删除
-            del self.login_tokens[token]
+            del self.login_tokens[token_hash]
             _log.info(f"[Auth] Token 已过期: username={token_info['username']}")
             return None
 
@@ -626,21 +635,21 @@ class WebChatServer:
     def _cleanup_expired_tokens(self):
         """清理过期的 Token"""
         now = datetime.now()
-        expired_tokens = [
-            token
-            for token, info in self.login_tokens.items()
+        expired_hashes = [
+            token_hash
+            for token_hash, info in self.login_tokens.items()
             if datetime.fromisoformat(info["expires_at"]) < now
         ]
 
-        for token in expired_tokens:
-            del self.login_tokens[token]
+        for token_hash in expired_hashes:
+            del self.login_tokens[token_hash]
 
-        if expired_tokens:
-            _log.info(f"[Auth] 清理了 {len(expired_tokens)} 个过期的 Token")
+        if expired_hashes:
+            _log.info(f"[Auth] 清理了 {len(expired_hashes)} 个过期的 Token")
             self._save_login_tokens()
 
     def _save_login_tokens(self):
-        """保存登录 Token 到文件"""
+        """保存登录 Token 到文件（仅存储 hash，不含明文 token）"""
         try:
             login_tokens_file = os.path.join(self.data_dir, "login_tokens.json")
             os.makedirs(os.path.dirname(login_tokens_file), exist_ok=True)
@@ -648,6 +657,71 @@ class WebChatServer:
                 json.dump(self.login_tokens, f, ensure_ascii=False, indent=2)
         except Exception as e:
             _log.error(f"[Auth] 保存登录 Token 失败: {e}")
+
+    def _check_login_rate_limit(self, ip: str) -> Optional[int]:
+        """
+        检查 IP 是否超过登录失败限流
+
+        Returns:
+            None 表示允许登录，整数表示需等待的秒数
+        """
+        now = time.time()
+        record = self._login_fail_records.get(ip)
+
+        if record is None:
+            return None
+
+        # 窗口已过，重置计数
+        if now - record["first_fail"] > self._login_rate_window:
+            del self._login_fail_records[ip]
+            return None
+
+        if record["count"] >= self._login_rate_limit:
+            remaining = int(self._login_rate_window - (now - record["first_fail"]))
+            return max(remaining, 1)
+
+        return None
+
+    def _record_login_failure(self, ip: str):
+        """记录一次登录失败"""
+        now = time.time()
+        record = self._login_fail_records.get(ip)
+
+        if record is None or now - record["first_fail"] > self._login_rate_window:
+            self._login_fail_records[ip] = {"count": 1, "first_fail": now}
+        else:
+            record["count"] += 1
+
+    def _reset_login_failures(self, ip: str):
+        """登录成功后清除该 IP 的失败记录"""
+        self._login_fail_records.pop(ip, None)
+
+    def _verify_password(self, password: str) -> bool:
+        """
+        验证密码，支持明文和 bcrypt 哈希两种模式
+
+        bcrypt 哈希格式: $2b$12$... 或 $2a$12$...
+        明文密码直接使用 secrets.compare_digest 安全比较
+        """
+        stored = self.web_password
+        if not stored or not password:
+            return False
+
+        # 判断存储的密码是否为 bcrypt 哈希
+        if self._web_password_is_hash:
+            try:
+                import bcrypt
+                return bcrypt.checkpw(
+                    password.encode("utf-8"), stored.encode("utf-8")
+                )
+            except ImportError:
+                _log.warning("[Auth] bcrypt 未安装，回退到明文比较")
+                return secrets.compare_digest(password, stored)
+            except Exception as e:
+                _log.error(f"[Auth] bcrypt 验证异常: {e}")
+                return False
+        else:
+            return secrets.compare_digest(password, stored)
 
     def _initialize_ai_client(
         self,
@@ -804,13 +878,19 @@ class WebChatServer:
             config = configparser.ConfigParser()
             config.read("config.ini", encoding="utf-8")
 
-            # 读取登录密码
+            # 读取登录密码（支持明文或 bcrypt 哈希）
             self.web_password = (
                 os.getenv("WEB_PASSWORD")
                 or config.get("web", "password", fallback=None)
             )
             if self.web_password:
-                _log.info("Web login password is set")
+                # 自动检测 bcrypt 哈希格式（$2b$ 或 $2a$ 开头）
+                if self.web_password.startswith(("$2b$", "$2a$")):
+                    self._web_password_is_hash = True
+                    _log.info("Web login password is set (bcrypt hash)")
+                else:
+                    self._web_password_is_hash = False
+                    _log.info("Web login password is set (plaintext)")
             else:
                 _log.warning(
                     "Web login password is not set; login API will reject all users"
