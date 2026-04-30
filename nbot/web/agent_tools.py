@@ -353,6 +353,9 @@ def execute_web_agent_tool(server, name, arguments=None, confirm=False):
         updates = {key: value for key, value in arguments.items() if key in allowed and value is not None}
         if not updates:
             return _err("No supported AI config fields provided")
+        # max_context_length 最低 100k
+        if "max_context_length" in updates:
+            updates["max_context_length"] = max(100000, int(updates["max_context_length"]))
         server.ai_config.update(updates)
         if "base_url" in updates:
             server.ai_base_url = updates["base_url"]

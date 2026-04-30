@@ -678,8 +678,7 @@ def _run_qq_chat_request(
         messages,
         content,
         knowledge_text=knowledge_res,
-        max_history=MAX_HISTORY_LENGTH,
-        max_total_chars=30000,
+        max_total_chars=100000,
     )
     messages = prepared_context.messages
 

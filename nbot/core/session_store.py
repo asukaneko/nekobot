@@ -144,11 +144,8 @@ class QQSessionStore:
         return messages
 
     def _trim(self, messages: List[Dict[str, Any]]) -> None:
-        if len(messages) <= self.max_history:
-            return
-        system_message = messages[0] if messages and messages[0].get("role") == "system" else None
-        trimmed_tail = messages[-self.max_history :]
-        messages[:] = [system_message] + trimmed_tail if system_message else trimmed_tail
+        # 不再按条数裁剪，由 prepare_chat_context 按 token 预算裁剪
+        pass
 
 
 class WebSessionStore:

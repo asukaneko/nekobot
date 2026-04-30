@@ -173,22 +173,27 @@ def trim_messages(
 ) -> List[Dict[str, Any]]:
     trimmed_messages = copy.deepcopy(messages)
 
-    if len(trimmed_messages) > max_history:
-        trimmed_messages = [trimmed_messages[0]] + trimmed_messages[-max_history:]
-
+    # 仅按 token/字符数裁剪，不再限制消息条数
     total_chars = sum(len(str(msg.get("content", ""))) for msg in trimmed_messages)
     if total_chars <= max_total_chars:
         return trimmed_messages
 
+    # 从最早的消息开始移除（保留 system 消息和最近的消息）
     system_message = (
         trimmed_messages[0]
         if trimmed_messages and trimmed_messages[0].get("role") == "system"
         else None
     )
-    recent_messages = trimmed_messages[-max_history:] if trimmed_messages else []
+    non_system = trimmed_messages[1:] if system_message else trimmed_messages
+
+    # 逐步移除最早的非 system 消息，直到总字符数在预算内
+    while non_system and total_chars > max_total_chars:
+        removed = non_system.pop(0)
+        total_chars -= len(str(removed.get("content", "")))
+
     if system_message:
-        return [system_message] + recent_messages
-    return recent_messages
+        return [system_message] + non_system
+    return non_system
 
 
 def inject_knowledge_context(
@@ -221,7 +226,6 @@ def prepare_chat_context(
     prepared_messages = inject_knowledge_context(
         trim_messages(
             expanded_messages,
-            max_history=max_history,
             max_total_chars=max_total_chars,
         ),
         knowledge_text,

@@ -253,6 +253,7 @@ def init_default_data(server):
         "model": server.ai_model or "gpt-4",
         "temperature": 0.7,
         "max_tokens": 2000,
+        "max_context_length": 100000,
         "top_p": 0.9,
         "supports_tools": True,
         "supports_reasoning": True,
@@ -285,7 +286,6 @@ def init_default_data(server):
         "ws_uri": "ws://127.0.0.1:3001",
         "master_id": "",
         "bot_id": "",
-        "max_context_length": 50,
         "features": {
             "ai": True,
             "memory": True,

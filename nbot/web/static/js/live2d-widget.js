@@ -1,4 +1,4 @@
-﻿(function () {
+(function () {
 const live2dModels = [
         { name: 'Pio', path: '/static/live2d/models/Pio/model1.json', layoutWidth: 2.0, position: [0, 8], scale: 0.3 }
     ];
@@ -211,8 +211,11 @@ const live2dModels = [
         const fallback = stageForModel(live2dModels[currentLive2dModelIndex] || live2dModels[0]);
         const width = stage.offsetWidth || fallback.width || 440;
         const height = stage.offsetHeight || fallback.height || 440;
-        const left = (window.innerWidth - width) / 2;
-        const top = (window.innerHeight - height) / 2;
+        // 定位到右下角，向左上偏移一些避免紧贴屏幕边缘
+        const offsetX = 95;
+        const offsetY = 60;
+        const left = window.innerWidth - width + getStageRightSlack(stage) - offsetX;
+        const top = window.innerHeight - height + getDefaultStageBottomSlack(stage) - offsetY;
         return applyStagePosition(stage, left, top);
     }
 
@@ -470,6 +473,25 @@ const live2dModels = [
                 + '</div></div>';
         }).join('');
         document.body.appendChild(panel);
+        // 子面板按钮点击事件
+        panel.addEventListener('click', function (event) {
+            var btn = event.target.closest('button');
+            if (!btn) {
+                // 点击空白区域关闭子面板
+                panel.classList.remove('is-visible');
+                return;
+            }
+            var action = btn.dataset.action;
+            if (action === 'play-motion') {
+                var motion = btn.dataset.motion;
+                if (motion) {
+                    playLive2dMotion(motion);
+                    window.__nbotLive2dSay('\u64ad\u653e\u52a8\u4f5c\uff1a' + motion, 1800, 4);
+                }
+                panel.classList.remove('is-visible');
+                hideLive2dMenu();
+            }
+        });
         return panel;
     }
 

@@ -245,26 +245,18 @@ def trigger_ai_response_for_request(server, chat_request: ChatRequest, adapter=N
             messages_for_ai = copy.deepcopy(session["messages"])
             tool_call_history = None
             try:
-                context_history_limit = int(
-                    getattr(server, "settings", {}).get("max_context_length", 20)
-                )
-            except (TypeError, ValueError):
-                context_history_limit = 20
-            context_history_limit = max(1, context_history_limit)
-
-            try:
                 context_char_budget = int(
-                    getattr(server, "ai_config", {}).get("max_context_length", 30000)
+                    getattr(server, "ai_config", {}).get("max_context_length", 100000)
                 )
             except (TypeError, ValueError):
-                context_char_budget = 30000
-            context_char_budget = max(1000, context_char_budget)
+                context_char_budget = 100000
+            # 最低 100k token
+            context_char_budget = max(100000, context_char_budget)
 
             prepared_context = prepare_chat_context(
                 messages_for_ai,
                 chat_request.content,
                 knowledge_text=knowledge_text,
-                max_history=context_history_limit,
                 max_total_chars=context_char_budget,
             )
             messages_for_ai = prepared_context.messages

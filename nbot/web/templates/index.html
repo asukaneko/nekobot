@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
@@ -9300,7 +9300,7 @@
                                                         </div>
                                                         <div class="stat-item">
                                                             <div class="stat-label">限制Token</div>
-                                                            <div class="stat-value">{{ formatNumber(aiConfig.max_context_length || 30000) }}</div>
+                                                            <div class="stat-value">{{ formatNumber(aiConfig.max_context_length || 100000) }}</div>
                                                         </div>
                                                     </div>
                                                     <button class="compress-btn"
@@ -10419,15 +10419,15 @@
                                                 <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
                                                     <span style="font-size: 12px; color: var(--text-secondary);">当前上下文使用</span>
                                                     <span style="font-size: 12px; font-weight: 600;">
-                                                        {{ Math.round((contextTokenEstimate || 0) / (aiConfig.max_context_length || 30000) * 100) }}%
+                                                        {{ Math.round((contextTokenEstimate || 0) / (aiConfig.max_context_length || 100000) * 100) }}%
                                                     </span>
                                                 </div>
                                                 <div class="progress-bar" style="height: 8px;">
-                                                    <div class="progress-fill" :style="{ width: Math.min(100, (contextTokenEstimate || 0) / (aiConfig.max_context_length || 30000) * 100) + '%' }"></div>
+                                                    <div class="progress-fill" :style="{ width: Math.min(100, (contextTokenEstimate || 0) / (aiConfig.max_context_length || 100000) * 100) + '%' }"></div>
                                                 </div>
                                                 <div style="display: flex; justify-content: space-between; margin-top: 8px; font-size: 11px; color: var(--text-secondary);">
                                                     <span>预计 {{ formatNumber(contextTokenEstimate || 0) }} Token</span>
-                                                    <span>上限 {{ formatNumber(aiConfig.max_context_length || 30000) }} Token</span>
+                                                    <span>上限 {{ formatNumber(aiConfig.max_context_length || 100000) }} Token</span>
                                                 </div>
                                             </div>
                                         </div>
@@ -10533,9 +10533,9 @@
                                             </select>
                                         </div>
                                         <div class="form-group">
-                                            <label class="form-label">最大上下文长度</label>
-                                            <input v-model.number="aiConfig.max_context_length" type="number" min="1000" max="128000" step="1000" class="form-input">
-                                            <div class="form-hint">超过这个阈值时，后端会自动裁剪历史消息，避免上下文爆掉。</div>
+                                            <label class="form-label">最大上下文长度 (Token)</label>
+                                            <input v-model.number="aiConfig.max_context_length" type="number" min="100000" max="1280000" step="10000" class="form-input">
+                                            <div class="form-hint">上下文 Token 上限，最低 100k。超过此阈值时后端会自动裁剪历史消息。</div>
                                         </div>
                                         <div class="ai-capability-list">
                                             <div class="ai-capability-item">
@@ -11402,11 +11402,6 @@
                                         <label class="form-label">机器人 QQ 号</label>
                                         <input v-model="settings.bot_id" type="text" class="form-input">
                                     </div>
-                                </div>
-                                <div class="form-group" style="margin-top: 20px;">
-                                    <label class="form-label">上下文长度 (条)</label>
-                                    <input v-model.number="settings.max_context_length" type="number" min="5" max="500" class="form-input" placeholder="50">
-                                    <small style="color: var(--text-secondary);">AI 对话时保留的历史消息数量 (5-500)</small>
                                 </div>
                                 <div class="form-group" style="margin-top: 20px;">
                                     <label class="form-label">功能开关</label>
@@ -13693,8 +13688,7 @@
                     qqGroups: [],
                     currentQqId: null,
                     currentQqMessages: [],
-                    maxContextLength: 30000,
-                    
+
                     // Context Indicator
                     circumference: 2 * Math.PI * 16,  // 圆圈周长 (2πr, r=16)
                     contextCharCount: 0,  // 当前上下文总字符数
@@ -13854,7 +13848,7 @@
                         image_model: '',
                         search_api_key: '',
                         embedding_model: '',
-                        max_context_length: 30000
+                        max_context_length: 100000
                     },
                     showApiKey: false,
                     showAIConfigDetails: false,
@@ -13917,7 +13911,7 @@
                         image_model: '',
                         search_api_key: '',
                         embedding_model: '',
-                        max_context_length: 30000,
+                        max_context_length: 100000,
                         // TTS/STT/Embedding特有配置
                         voice: 'default',
                         speed: 1.0,
@@ -14153,8 +14147,8 @@
                         mode: 'dark',
                         primaryColor: '#3b82f6',
                         bgImage: 'https://images.unsplash.com/photo-1506905925346-21bda4d32df4?w=1920&q=80',
-                        bgOpacity: 85,
-                        cardOpacity: 90,
+                        bgOpacity: 20,
+                        cardOpacity: 75,
                         closeModalOnOverlayClick: false
                     },
                     themeColors: [
@@ -14770,12 +14764,6 @@
                         && (content.includes('处理完成') || content.includes('AI 正在处理'));
                 },
 
-                getContextHistoryLimit() {
-                    const configuredLimit = Number(this.settings?.max_context_length || this.maxContextLength || 20);
-                    if (!Number.isFinite(configuredLimit)) return 20;
-                    return Math.max(1, Math.floor(configuredLimit));
-                },
-
                 getContextStatMessages() {
                     if (!this.currentSession) return [];
 
@@ -14788,11 +14776,10 @@
                         });
                     }
 
-                    const historyLimit = this.getContextHistoryLimit();
+                    // 不再按条数限制，返回所有可见消息，由后端按 token 预算裁剪
                     const visibleRoles = new Set(['user', 'assistant', 'tool', 'system']);
                     const historyMessages = (this.currentMessages || [])
-                        .filter(msg => msg && !msg.hide_in_web && visibleRoles.has(msg.role || ''))
-                        .slice(-historyLimit);
+                        .filter(msg => msg && !msg.hide_in_web && visibleRoles.has(msg.role || ''));
 
                     return contextMessages.concat(historyMessages);
                 },
@@ -14863,7 +14850,7 @@
                         0
                     );
 
-                    const maxTokens = this.aiConfig.max_context_length || 30000;
+                    const maxTokens = this.aiConfig.max_context_length || 100000;
                     const estimatedTokens = this.contextTokenEstimate || 0;
                     this.contextUsage = Math.min(100, (estimatedTokens / maxTokens) * 100);
                 },
@@ -15442,8 +15429,8 @@
                         mode: 'dark',
                         primaryColor: '#ec4899',
                         bgImage: '',
-                        bgOpacity: 85,
-                        cardOpacity: 90,
+                        bgOpacity: 20,
+                        cardOpacity: 75,
                         closeModalOnOverlayClick: false
                     };
                     this.applyTheme();
@@ -16691,10 +16678,6 @@ def main(params):
                                 ...(loadedSettings.features || {})
                             }
                         };
-                        // 同步上下文长度设置
-                        if (this.settings.max_context_length) {
-                            this.maxContextLength = this.settings.max_context_length;
-                        }
                         // 同步 Live2D 显隐状态
                         if (this.settings.features && window.__nbotLive2dSetEnabled) {
                             window.__nbotLive2dSetEnabled(this.settings.features.live2d);
@@ -20928,7 +20911,7 @@ def main(params):
                             image_model: '',
                             search_api_key: '',
                             embedding_model: '',
-                            max_context_length: 30000,
+                            max_context_length: 100000,
                             // TTS/STT/Embedding特有配置
                             voice: 'default',
                             speed: 1.0,
@@ -21148,8 +21131,6 @@ def main(params):
                     this.isLoading = true;
                     try {
                         await api.put('/api/settings', this.settings);
-                        // 同步上下文长度设置
-                        this.maxContextLength = this.settings.max_context_length || 50;
                         this.showToast('设置已保存', 'success');
                     } catch (e) {
                         this.showToast('保存失败', 'error');

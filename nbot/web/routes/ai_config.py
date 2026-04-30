@@ -69,7 +69,8 @@ def register_ai_config_routes(app, server):
         if data.get("embedding_model") is not None:
             server.ai_config["embedding_model"] = data["embedding_model"]
         if data.get("max_context_length") is not None:
-            server.ai_config["max_context_length"] = data["max_context_length"]
+            # 最低 100k token
+            server.ai_config["max_context_length"] = max(100000, int(data["max_context_length"]))
         if data.get("supports_tools") is not None:
             server.ai_config["supports_tools"] = data["supports_tools"]
         if data.get("supports_reasoning") is not None:

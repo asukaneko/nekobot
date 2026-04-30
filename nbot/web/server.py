@@ -1749,13 +1749,9 @@ class WebChatServer:
             {"role": "system", "content": f"{system_prompt}\n\n{CORE_INSTRUCTIONS}"}
         ]
 
-        # 添加历史上下文（最近10条）
+        # 添加历史上下文（不再按条数限制，由 token 预算控制）
         session = self.session_store.get_session(session_id) or {}
-        try:
-            max_history = max(1, int(config.get("max_history", 10) or 10))
-        except (TypeError, ValueError):
-            max_history = 10
-        history = session.get("messages", [])[-max_history:]
+        history = session.get("messages", [])
         for msg in history:
             if msg.get("role") in ["user", "assistant"]:
                 messages.append({"role": msg["role"], "content": msg["content"]})
