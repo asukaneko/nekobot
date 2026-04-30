@@ -15025,6 +15025,7 @@
                     switch(page) {
                         case 'dashboard':
                             await this.loadStats();
+                            await this.loadRecentActivities();
                             // 延迟初始化图表，确保 DOM 已渲染
                             setTimeout(() => this.initCharts(), 100);
                             break;
@@ -16662,6 +16663,16 @@ def main(params):
                         this.logs = res.data;
                     } catch (e) {
                         console.error('Failed to load logs:', e);
+                    }
+                },
+
+                async loadRecentActivities() {
+                    try {
+                        const res = await api.get('/api/logs');
+                        const importantLogs = (res.data || []).filter(log => log.important === true);
+                        this.recentActivities = importantLogs.slice(-10).reverse();
+                    } catch (e) {
+                        console.error('Failed to load recent activities:', e);
                     }
                 },
                 

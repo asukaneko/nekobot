@@ -143,10 +143,10 @@ def register_file_routes(app, server, workspace_available, workspace_manager):
                     if ws_result.get("success"):
                         save_to_workspace = True
                         server.log_message(
-                            "info", f"Uploaded file saved to workspace: {file.filename}"
+                            "info", f"上传文件已保存到工作区: {file.filename}", important=True
                         )
                 except Exception as e:
-                    server.log_message("error", f"Save file to workspace failed: {e}")
+                    server.log_message("error", f"保存文件到工作区失败: {e}", important=True)
 
             if save_to_workspace:
                 content = None
@@ -230,5 +230,5 @@ def register_file_routes(app, server, workspace_available, workspace_manager):
                 }
             )
         except Exception as e:
-            server.log_message("error", f"Upload failed: {e}")
+            server.log_message("error", f"文件上传失败: {e}", important=True)
             return jsonify({"error": str(e)}), 500

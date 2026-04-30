@@ -223,6 +223,7 @@ def register_session_routes(app, server):
         if session_store.delete_session(session_id):
             if server.WORKSPACE_AVAILABLE and server.workspace_manager:
                 server.workspace_manager.delete_workspace(session_id)
+            server.log_message("info", f"删除了会话 {session_id[:8]}...", important=True)
             return jsonify({"success": True})
         return jsonify({"error": "Session not found"}), 404
 
@@ -493,6 +494,7 @@ def register_session_routes(app, server):
             system_msg = session["messages"][0]
 
         session_store.replace_messages(session_id, [system_msg] if system_msg else [])
+        server.log_message("info", f"清空了会话 {session_id[:8]} 的消息", important=True)
         return jsonify({"success": True})
 
     @app.route("/api/sessions/<session_id>/compress", methods=["POST"])

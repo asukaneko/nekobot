@@ -271,6 +271,7 @@ def execute_web_agent_tool(server, name, arguments=None, confirm=False):
             return _err("Failed to add memory", 500)
         server.memories = prompt_manager.get_memories()
         server._save_data("memories")
+        server.log_message("info", f"创建了记忆: {title}", important=True)
         return _ok({"title": title}, "已创建记忆。")
 
     if name == "knowledge.list":
@@ -297,6 +298,7 @@ def execute_web_agent_tool(server, name, arguments=None, confirm=False):
         if not km.store.load_base("default"):
             km.create_knowledge_base("默认知识库", "默认知识库")
         doc = km.add_document("default", title, content, arguments.get("source", ""), arguments.get("tags", []))
+        server.log_message("info", f"创建了知识库文档: {title}", important=True)
         return _ok({"document": {"id": doc.id, "title": doc.title, "size": len(doc.content)}}, "已创建知识库文档。")
 
     if name == "skills.list":
@@ -316,6 +318,7 @@ def execute_web_agent_tool(server, name, arguments=None, confirm=False):
         }
         server.skills_config.append(skill)
         server._save_data("skills")
+        server.log_message("info", f"创建了 Skill: {skill_name}", important=True)
         return _ok({"skill": skill}, "已创建 Skill 配置。")
 
     if name == "ai.config.summary":
@@ -365,6 +368,7 @@ def execute_web_agent_tool(server, name, arguments=None, confirm=False):
         if getattr(server, "ai_api_key", None) and getattr(server, "ai_base_url", None):
             reinitialized = bool(server._initialize_ai_client())
         server._save_data("ai_config")
+        server.log_message("info", f"修改了 AI 配置: {', '.join(sorted(updates.keys()))}", important=True)
         return _ok(
             {"updated": sorted(updates.keys()), "reinitialized": reinitialized},
             "已更新 AI 配置。",
@@ -376,6 +380,7 @@ def execute_web_agent_tool(server, name, arguments=None, confirm=False):
             return _err("settings must be an object")
         server.settings.update(settings)
         server._save_data("settings")
+        server.log_message("info", "修改了界面主题/设置", important=True)
         return _ok({"settings": server.settings}, "已更新 Web 界面设置。")
 
     return _err(f"Tool not implemented: {name}", 501)

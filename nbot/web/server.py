@@ -1061,12 +1061,13 @@ class WebChatServer:
         """设置 QQ Bot 引用"""
         self.qq_bot = bot
 
-    def log_message(self, level: str, message: str):
-        """记录系统日志"""
+    def log_message(self, level: str, message: str, important: bool = False):
+        """记录系统日志，important=True 时会在最近活动中显示"""
         log = {
             "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "level": level,
             "message": message,
+            "important": important,
         }
         self.system_logs.append(log)
         if len(self.system_logs) > 1000:

@@ -62,9 +62,14 @@ def register_workflow_routes(app, server):
 
     @app.route("/api/workflows/<workflow_id>", methods=["DELETE"])
     def delete_workflow(workflow_id):
+        for w in server.workflows:
+            if w["id"] == workflow_id:
+                workflow_name = w.get("name", "未命名工作流")
+                break
         server._unschedule_workflow(workflow_id)
         server.workflows = [w for w in server.workflows if w["id"] != workflow_id]
         server._save_data("workflows")
+        server.log_message("info", f"删除了工作流: {workflow_name}", important=True)
         return jsonify({"success": True})
 
     @app.route("/api/workflows/<workflow_id>/toggle", methods=["POST"])
@@ -99,6 +104,8 @@ def register_workflow_routes(app, server):
                     "content": data.get("content", ""),
                     "time": datetime.now().isoformat(),
                 }
+                workflow_name = workflow.get("name", "未命名工作流")
+                server.log_message("info", f"手动执行了工作流: {workflow_name}", important=True)
                 server._execute_workflow(workflow_id, trigger_data)
                 return jsonify({"success": True, "message": "Workflow execution started"})
         return jsonify({"error": "Workflow not found"}), 404
