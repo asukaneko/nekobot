@@ -58,6 +58,7 @@ def register_session_routes(app, server):
         for sid, session in sessions_data.items():
             if not is_web_visible_session(sid, session):
                 continue
+            archived = bool(session.get("archived"))
             sessions.append(
                 {
                     "id": sid,
@@ -66,6 +67,8 @@ def register_session_routes(app, server):
                     "user_id": session.get("user_id"),
                     "qq_id": session.get("qq_id"),
                     "created_at": session.get("created_at"),
+                    "archived": archived,
+                    "archived_at": session.get("archived_at") if archived else None,
                     "message_count": len(session.get("messages", [])),
                     "system_prompt": session.get("system_prompt", ""),
                 }
@@ -145,6 +148,8 @@ def register_session_routes(app, server):
             "type": data.get("type", "web"),
             "user_id": data.get("user_id"),
             "created_at": datetime.now().isoformat(),
+            "archived": False,
+            "archived_at": None,
             "messages": [{"role": "system", "content": system_prompt}],
             "system_prompt": system_prompt,
         }
@@ -186,6 +191,28 @@ def register_session_routes(app, server):
             else:
                 session["messages"].insert(0, {"role": "system", "content": new_prompt})
 
+        session_store.set_session(session_id, session)
+        return jsonify({"success": True, "session": session})
+
+    @app.route("/api/sessions/<session_id>/archive", methods=["POST"])
+    def archive_session(session_id):
+        session = _get_web_session(session_id)
+        if not session:
+            return jsonify({"error": "Session not found"}), 404
+
+        session["archived"] = True
+        session["archived_at"] = datetime.now().isoformat()
+        session_store.set_session(session_id, session)
+        return jsonify({"success": True, "session": session})
+
+    @app.route("/api/sessions/<session_id>/restore", methods=["POST"])
+    def restore_session(session_id):
+        session = _get_web_session(session_id)
+        if not session:
+            return jsonify({"error": "Session not found"}), 404
+
+        session["archived"] = False
+        session["archived_at"] = None
         session_store.set_session(session_id, session)
         return jsonify({"success": True, "session": session})
 
@@ -235,6 +262,8 @@ def register_session_routes(app, server):
         if session["system_prompt"] and not any(m.get("role") == "system" for m in session["messages"]):
             session["messages"].insert(0, {"role": "system", "content": session["system_prompt"]})
         session["created_at"] = session.get("created_at") or now
+        session["archived"] = bool(session.get("archived"))
+        session["archived_at"] = session.get("archived_at") if session["archived"] else None
         if not is_web_visible_session(new_id, session):
             raise ValueError("invalid session type")
         return new_id, session
@@ -325,6 +354,8 @@ def register_session_routes(app, server):
             "user_id": session.get("user_id"),
             "qq_id": session.get("qq_id"),
             "created_at": now,
+            "archived": False,
+            "archived_at": None,
             "messages": forked_messages,
             "system_prompt": system_prompt,
             "forked_from": {

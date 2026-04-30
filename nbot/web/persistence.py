@@ -119,6 +119,8 @@ def _normalize_session_record(session_id, session):
         "name": _derive_session_name(session_id, session),
         "type": session.get("type") or "web",
         "created_at": created_at,
+        "archived": bool(session.get("archived")),
+        "archived_at": session.get("archived_at") if session.get("archived") else None,
         "messages": messages,
         "system_prompt": system_prompt or "",
     }
