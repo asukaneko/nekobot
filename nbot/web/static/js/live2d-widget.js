@@ -1125,6 +1125,7 @@ const live2dModels = [
     }
 
     function loadLive2d() {
+        if (localStorage.getItem('NBOT_LIVE2D_DISABLED') === '1') return;
         if (window.OML2D) {
             initLive2d();
             return;
@@ -1148,12 +1149,16 @@ const live2dModels = [
 
     // Keep Live2D visible while the widget is being reset to a single local Pio model.
     window.__nbotLive2dSetEnabled = function (enabled) {
-        localStorage.removeItem('NBOT_LIVE2D_DISABLED');
         var stage = document.getElementById('oml2d-stage');
-        if (stage) {
-            stage.style.display = '';
-            var tips = document.getElementById('oml2d-tips');
+        var tips = document.getElementById('oml2d-tips');
+        if (enabled) {
+            localStorage.removeItem('NBOT_LIVE2D_DISABLED');
+            if (stage) stage.style.display = '';
             if (tips) tips.style.display = '';
+        } else {
+            localStorage.setItem('NBOT_LIVE2D_DISABLED', '1');
+            if (stage) stage.style.display = 'none';
+            if (tips) tips.style.display = 'none';
         }
     };
 })();
