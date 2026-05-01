@@ -14,6 +14,7 @@
     <link rel="stylesheet" href="/static/vendor/styles/highlight-github-dark.min.css">
     <script src="/static/vendor/highlight.min.js"></script>
     <link rel="stylesheet" href="/static/vendor/styles/font-awesome.min.css">
+    <script src="/static/js/i18n.js"></script>
     <script>
         window.__nbotCoreDepsReady = Promise.resolve();
         window.__nbotOptionalDepsReady = Promise.resolve();
@@ -8787,13 +8788,13 @@
                     <img src="/static/neko.png" alt="NekoBot" style="width: 80px; height: 80px; object-fit: cover; border-radius: 16px;">
                 </div>
                 <h1 class="login-title">NekoBot Dashboard</h1>
-                <p class="login-subtitle">智能 QQ 机器人管理后台</p>
+                <p class="login-subtitle">{{ $t('login.subtitle') }}</p>
                 <div class="form-group">
                     <input 
                         v-model="username" 
                         type="text" 
                         class="form-input" 
-                        placeholder="输入用户名"
+                        :placeholder="$t('login.username')"
                         @keyup.enter="login"
                     >
                 </div>
@@ -8802,13 +8803,13 @@
                         v-model="password" 
                         type="password" 
                         class="form-input" 
-                        placeholder="输入密码"
+                        :placeholder="$t('login.password')"
                         @keyup.enter="login"
                     >
                 </div>
                 <button class="btn btn-primary" style="width: 100%;" @click="login" :disabled="!username || !password || isLoading">
-                    <span v-if="isLoading"><div class="spinner" style="display: inline-block; margin-right: 8px;"></div>登录中...</span>
-                    <span v-else><i class="fas fa-sign-in-alt"></i> 进入系统</span>
+                    <span v-if="isLoading"><div class="spinner" style="display: inline-block; margin-right: 8px;"></div>{{ $t('login.loading') }}</span>
+                    <span v-else><i class="fas fa-sign-in-alt"></i> {{ $t('login.button') }}</span>
                 </button>
             </div>
         </div>
@@ -8821,7 +8822,7 @@
             <!-- Sidebar -->
             <aside class="sidebar" :class="{ collapsed: isSidebarCollapsed, 'mobile-open': isMobileMenuOpen }">
                 <!-- Sidebar Toggle Button (Desktop) -->
-                <button class="sidebar-toggle" @click="toggleSidebar" title="收起/展开">
+                <button class="sidebar-toggle" @click="toggleSidebar" :title="$t('nav.collapse')">
                     <i class="fas fa-chevron-left"></i>
                 </button>
 
@@ -8837,7 +8838,7 @@
 
                 <nav class="sidebar-nav">
                     <div class="nav-section">
-                        <div class="nav-section-title">概览</div>
+                        <div class="nav-section-title">{{ $t('nav.overview') }}</div>
                         <div 
                             v-for="item in navItems.overview" 
                             :key="item.id"
@@ -8846,12 +8847,12 @@
                             @click="navigateTo(item.id)"
                         >
                             <i :class="item.icon" class="nav-icon"></i>
-                            <span class="nav-text">{{ item.label }}</span>
+                            <span class="nav-text">{{ $t(item.labelKey) }}</span>
                         </div>
                     </div>
 
                     <div class="nav-section">
-                        <div class="nav-section-title">对话</div>
+                        <div class="nav-section-title">{{ $t('nav.chat') }}</div>
                         <div 
                             v-for="item in navItems.chat" 
                             :key="item.id"
@@ -8860,12 +8861,12 @@
                             @click="navigateTo(item.id)"
                         >
                             <i :class="item.icon" class="nav-icon"></i>
-                            <span class="nav-text">{{ item.label }}</span>
+                            <span class="nav-text">{{ $t(item.labelKey) }}</span>
                         </div>
                     </div>
 
                     <div class="nav-section">
-                        <div class="nav-section-title">配置</div>
+                        <div class="nav-section-title">{{ $t('nav.config') }}</div>
                         <div 
                             v-for="item in navItems.config" 
                             :key="item.id"
@@ -8874,12 +8875,12 @@
                             @click="navigateTo(item.id)"
                         >
                             <i :class="item.icon" class="nav-icon"></i>
-                            <span class="nav-text">{{ item.label }}</span>
+                            <span class="nav-text">{{ $t(item.labelKey) }}</span>
                         </div>
                     </div>
 
                     <div class="nav-section">
-                        <div class="nav-section-title">系统</div>
+                        <div class="nav-section-title">{{ $t('nav.system') }}</div>
                         <div 
                             v-for="item in navItems.system" 
                             :key="item.id"
@@ -8888,17 +8889,17 @@
                             @click="navigateTo(item.id)"
                         >
                             <i :class="item.icon" class="nav-icon"></i>
-                            <span class="nav-text">{{ item.label }}</span>
+                            <span class="nav-text">{{ $t(item.labelKey) }}</span>
                         </div>
                     </div>
                 </nav>
 
                 <div class="sidebar-footer">
                     <div class="sidebar-actions">
-                        <button class="sidebar-action-btn" @click="showThemePanel = true" title="主题设置">
+                        <button class="sidebar-action-btn" @click="showThemePanel = true" :title="$t('nav.theme')">
                             <i class="fas fa-palette"></i>
                         </button>
-                        <button class="sidebar-action-btn" @click="navigateTo('settings')" title="系统设置">
+                        <button class="sidebar-action-btn" @click="navigateTo('settings')" :title="$t('nav.settings')">
                             <i class="fas fa-cog"></i>
                         </button>
                     </div>
@@ -8906,7 +8907,7 @@
                         <div class="user-avatar">{{ username[0]?.toUpperCase() }}</div>
                         <div>
                             <div class="user-name">{{ username }}</div>
-                            <div class="user-status"><i class="fas fa-circle" style="font-size: 8px;"></i> 在线</div>
+                            <div class="user-status"><i class="fas fa-circle" style="font-size: 8px;"></i> {{ $t('status.online') }}</div>
                         </div>
                     </div>
                 </div>
@@ -8918,7 +8919,7 @@
                 <header class="top-bar">
                     <h1 class="page-title mobile-clickable" @click="toggleMobileMenu">{{ pageTitle }}</h1>
                     <div class="top-actions">
-                        <button class="btn-icon" @click="refreshData" title="刷新" :disabled="isLoading">
+                        <button class="btn-icon" @click="refreshData" :title="$t('app.refresh')" :disabled="isLoading">
                             <i class="fas fa-sync-alt" :class="{ 'fa-spin': isLoading }"></i>
                         </button>
                     </div>
@@ -8936,32 +8937,32 @@
                                             <i class="fas fa-compass"></i>
                                         </div>
                                         <div class="dashboard-hero-copy">
-                                            <h2>&#x63a7;&#x5236;&#x53f0;&#x9996;&#x9875;</h2>
+                                            <h2>{{ $t('dashboard.title') }}</h2>
                                         </div>
                                     </div>
                                     <div class="dashboard-pills">
                                         <div class="dashboard-pill">
                                             <i class="fas fa-robot"></i>
-                                            AI {{ stats.ai_service_status === 'normal' ? '&#x6b63;&#x5e38;' : '&#x5f85;&#x914d;&#x7f6e;' }}
+                                            AI {{ stats.ai_service_status === 'normal' ? $t('status.normal') : $t('status.pending_config') }}
                                         </div>
                                         <div class="dashboard-pill">
                                             <i class="fab fa-qq"></i>
-                                            QQ {{ stats.qq_connected ? '&#x5df2;&#x8fde;&#x63a5;' : '&#x672a;&#x8fde;&#x63a5;' }}
+                                            QQ {{ stats.qq_connected ? $t('status.connected') : $t('status.disconnected') }}
                                         </div>
                                         <div class="dashboard-pill">
                                             <i class="fas fa-plug"></i>
-                                            WebSocket {{ socketConnected ? '&#x5728;&#x7ebf;' : '&#x65ad;&#x5f00;' }}
+                                            WebSocket {{ socketConnected ? $t('status.online') : $t('status.disconnected') }}
                                         </div>
                                     </div>
                                     <div class="dashboard-quick-actions">
-                                        <button class="dashboard-action" @click="navigateTo('chat')"><i class="fas fa-comments"></i> &#x6253;&#x5f00;&#x4f1a;&#x8bdd;</button>
-                                        <button class="dashboard-action" @click="navigateTo('ai-config')"><i class="fas fa-sliders-h"></i> AI &#x914d;&#x7f6e;</button>
-                                        <button class="dashboard-action" @click="refreshData()"><i class="fas fa-rotate-right"></i> &#x5237;&#x65b0;&#x72b6;&#x6001;</button>
+                                        <button class="dashboard-action" @click="navigateTo('chat')"><i class="fas fa-comments"></i> {{ $t('dashboard.open_chat') }}</button>
+                                        <button class="dashboard-action" @click="navigateTo('ai-config')"><i class="fas fa-sliders-h"></i> {{ $t('dashboard.ai_config') }}</button>
+                                        <button class="dashboard-action" @click="refreshData()"><i class="fas fa-rotate-right"></i> {{ $t('dashboard.refresh_status') }}</button>
                                     </div>
                                 </div>
                                 <div class="dashboard-hero-side">
-                                    <div class="dashboard-side-card"><div class="dashboard-side-title">&#x7d2f;&#x8ba1;&#x6d88;&#x606f;</div><div class="dashboard-side-main">{{ formatNumber(stats.total_messages || stats.today_messages || 0) }}</div><div class="dashboard-side-sub">&#x8986;&#x76d6; Web &#x4e0e; QQ &#x4e24;&#x4e2a;&#x9891;&#x9053;&#x7684;&#x7d2f;&#x8ba1;&#x6d88;&#x606f;&#x89c4;&#x6a21;&#x3002;</div></div>
-                                    <div class="dashboard-side-card"><div class="dashboard-side-title">&#x6d3b;&#x8dc3;&#x4f1a;&#x8bdd;</div><div class="dashboard-side-main">{{ sessionCount }}</div><div class="dashboard-side-sub">&#x5f53;&#x524d;&#x5df2;&#x8bb0;&#x5f55;&#x7684;&#x4f1a;&#x8bdd;&#x6570;&#x91cf;&#xff0c;&#x53ef;&#x76f4;&#x63a5;&#x8f6c;&#x5165;&#x4f1a;&#x8bdd;&#x9875;&#x5904;&#x7406;&#x3002;</div></div>
+                                    <div class="dashboard-side-card"><div class="dashboard-side-title">{{ $t('dashboard.cumulative_messages') }}</div><div class="dashboard-side-main">{{ formatNumber(stats.total_messages || stats.today_messages || 0) }}</div><div class="dashboard-side-sub">{{ $t('dashboard.cumulative_desc') }}</div></div>
+                                    <div class="dashboard-side-card"><div class="dashboard-side-title">{{ $t('dashboard.active_sessions') }}</div><div class="dashboard-side-main">{{ sessionCount }}</div><div class="dashboard-side-sub">{{ $t('dashboard.active_desc') }}</div></div>
                                 </div>
                             </div>
                         </div>
@@ -8969,34 +8970,34 @@
                             <div class="dashboard-stack">
                                 <div class="dashboard-section-card">
                                     <div class="dashboard-section-header">
-                                        <div class="dashboard-section-copy"><div class="chart-title">&#x6d88;&#x606f;&#x8d8b;&#x52bf;</div><div class="chart-subtitle">&#x6309;&#x65f6;&#x95f4;&#x67e5;&#x770b;&#x6d88;&#x606f;&#x53d8;&#x5316;&#xff0c;&#x5feb;&#x901f;&#x5224;&#x65ad;&#x5f53;&#x524d;&#x6d3b;&#x8dc3;&#x5ea6;&#x3002;</div></div>
+                                        <div class="dashboard-section-copy"><div class="chart-title">{{ $t('dashboard.message_trend') }}</div><div class="chart-subtitle">{{ $t('dashboard.trend_desc') }}</div></div>
                                         <div class="time-filter">
-                                            <button v-for="period in timePeriods" :key="period.value" class="time-filter-btn" :class="{ active: selectedPeriod === period.value }" @click="changeTimePeriod(period.value)">{{ period.label }}</button>
+                                            <button v-for="period in timePeriods" :key="period.value" class="time-filter-btn" :class="{ active: selectedPeriod === period.value }" @click="changeTimePeriod(period.value)">{{ $t(period.labelKey) }}</button>
                                         </div>
                                     </div>
                                     <div class="dashboard-section-body"><div ref="trendChart" class="chart-container"></div></div>
                                 </div>
                                 <div class="stats-grid">
-                                    <div class="stat-card"><div class="stat-icon green"><i class="fas fa-clock"></i></div><div class="stat-content"><div class="stat-label">&#x8fd0;&#x884c;&#x65f6;&#x95f4;</div><div class="stat-value">{{ stats.uptime || '0&#x5c0f;&#x65f6;' }}</div><div class="stat-subtitle">&#x5f53;&#x524d;&#x670d;&#x52a1;&#x6301;&#x7eed;&#x8fd0;&#x884c;&#x65f6;&#x957f;</div></div></div>
-                                    <div class="stat-card"><div class="stat-icon orange"><i class="fas fa-memory"></i></div><div class="stat-content"><div class="stat-label">&#x5185;&#x5b58;&#x5360;&#x7528;</div><div class="stat-value">{{ stats.memory_usage || 42 }} MB</div><div class="stat-subtitle">&#x5f53;&#x524d;&#x8fdb;&#x7a0b;&#x5185;&#x5b58;&#x6d88;&#x8017;</div></div></div>
-                                    <div class="stat-card"><div class="stat-icon yellow"><i class="fas fa-file-arrow-up"></i></div><div class="stat-content"><div class="stat-label">&#x6587;&#x4ef6;&#x4f20;&#x8f93;</div><div class="stat-value">{{ formatNumber(stats.file_transfers || 0) }}</div><div class="stat-subtitle">&#x4eca;&#x65e5;&#x4e0a;&#x4f20;&#x4e0e;&#x4e0b;&#x8f7d;&#x6b21;&#x6570;</div></div></div>
-                                    <div class="stat-card"><div class="stat-icon red"><i class="fas fa-bolt"></i></div><div class="stat-content"><div class="stat-label">&#x5e73;&#x5747;&#x54cd;&#x5e94;</div><div class="stat-value">{{ stats.avg_response_time || '1.2' }}s</div><div class="stat-subtitle">AI &#x5e73;&#x5747;&#x54cd;&#x5e94;&#x8017;&#x65f6;</div></div></div>
+                                    <div class="stat-card"><div class="stat-icon green"><i class="fas fa-clock"></i></div><div class="stat-content"><div class="stat-label">{{ $t('dashboard.total_messages') }}</div><div class="stat-value">{{ stats.total_messages || 0 }}</div><div class="stat-subtitle">{{ $t('dashboard.messages_desc') }}</div></div></div>
+                                    <div class="stat-card"><div class="stat-icon orange"><i class="fas fa-memory"></i></div><div class="stat-content"><div class="stat-label">{{ $t('dashboard.memory_usage') }}</div><div class="stat-value">{{ stats.memory_usage || 42 }} MB</div><div class="stat-subtitle">{{ $t('dashboard.memory_desc') }}</div></div></div>
+                                    <div class="stat-card"><div class="stat-icon yellow"><i class="fas fa-file-arrow-up"></i></div><div class="stat-content"><div class="stat-label">{{ $t('dashboard.file_transfers') }}</div><div class="stat-value">{{ formatNumber(stats.file_transfers || 0) }}</div><div class="stat-subtitle">{{ $t('dashboard.transfers_desc') }}</div></div></div>
+                                    <div class="stat-card"><div class="stat-icon red"><i class="fas fa-bolt"></i></div><div class="stat-content"><div class="stat-label">{{ $t('dashboard.avg_response') }}</div><div class="stat-value">{{ stats.avg_response_time || '1.2' }}s</div><div class="stat-subtitle">{{ $t('dashboard.response_desc') }}</div></div></div>
                                 </div>
                             </div>
                             <div class="dashboard-stack">
                                 <div class="dashboard-section-card">
                                     <div class="dashboard-section-header">
-                                        <div class="dashboard-section-copy"><div class="chart-title">&#x7cfb;&#x7edf;&#x72b6;&#x6001;</div><div class="chart-subtitle">&#x5173;&#x952e;&#x8fde;&#x63a5;&#x4e0e;&#x670d;&#x52a1;&#x72b6;&#x6001;&#x4e00;&#x773c;&#x770b;&#x6e05;&#x3002;</div></div>
-                                        <span class="status-badge" :class="stats.ai_service_status === 'normal' ? 'badge-success' : 'badge-warning'">{{ stats.ai_service_status === 'normal' ? '&#x8fd0;&#x884c;&#x4e2d;' : '&#x5f85;&#x914d;&#x7f6e;' }}</span>
+                                        <div class="dashboard-section-copy"><div class="chart-title">{{ $t('dashboard.system_status') }}</div><div class="chart-subtitle">{{ $t('dashboard.status_desc') }}</div></div>
+                                        <span class="status-badge" :class="stats.ai_service_status === 'normal' ? 'badge-success' : 'badge-warning'">{{ stats.ai_service_status === 'normal' ? $t('dashboard.running') : $t('status.pending_config') }}</span>
                                     </div>
                                     <div class="dashboard-section-body"><div class="dashboard-status-list">
-                                        <div class="dashboard-status-item"><span class="status-label">QQ &#x8fde;&#x63a5;</span><span class="status-value" :class="stats.qq_connected ? 'text-success' : 'text-warning'">{{ stats.qq_connected ? '&#x5df2;&#x8fde;&#x63a5;' : '&#x672a;&#x8fde;&#x63a5;' }}</span></div>
-                                        <div class="dashboard-status-item"><span class="status-label">AI &#x670d;&#x52a1;</span><span class="status-value" :class="stats.ai_service_status === 'normal' ? 'text-success' : 'text-warning'">{{ stats.ai_service_status === 'normal' ? '&#x6b63;&#x5e38;' : '&#x672a;&#x914d;&#x7f6e;' }}</span></div>
-                                        <div class="dashboard-status-item"><span class="status-label">WebSocket</span><span class="status-value" :class="socketConnected ? 'text-success' : 'text-warning'">{{ socketConnected ? '&#x5728;&#x7ebf;' : '&#x65ad;&#x5f00;' }}</span></div>
-                                        <div class="dashboard-status-item"><span class="status-label">&#x4f1a;&#x8bdd;&#x6c60;&#x89c4;&#x6a21;</span><span class="status-value">{{ sessionCount }}</span></div>
+                                        <div class="dashboard-status-item"><span class="status-label">{{ $t('dashboard.qq_connection') }}</span><span class="status-value" :class="stats.qq_connected ? 'text-success' : 'text-warning'">{{ stats.qq_connected ? $t('status.connected') : $t('status.disconnected') }}</span></div>
+                                        <div class="dashboard-status-item"><span class="status-label">{{ $t('dashboard.ai_service') }}</span><span class="status-value" :class="stats.ai_service_status === 'normal' ? 'text-success' : 'text-warning'">{{ stats.ai_service_status === 'normal' ? $t('status.normal') : $t('status.not_configured') }}</span></div>
+                                        <div class="dashboard-status-item"><span class="status-label">{{ $t('dashboard.websocket') }}</span><span class="status-value" :class="socketConnected ? 'text-success' : 'text-warning'">{{ socketConnected ? $t('status.online') : $t('status.disconnected') }}</span></div>
+                                        <div class="dashboard-status-item"><span class="status-label">{{ $t('dashboard.session_manager') }}</span><span class="status-value">{{ sessionCount }}</span></div>
                                     </div></div>
                                 </div>
-                                <div class="dashboard-section-card"><div class="dashboard-section-header"><div class="dashboard-section-copy"><div class="chart-title">&#x6700;&#x8fd1;&#x6d3b;&#x52a8;</div><div class="chart-subtitle">&#x6700;&#x8fd1;&#x53d1;&#x751f;&#x7684;&#x7cfb;&#x7edf;&#x4e8b;&#x4ef6;&#x4e0e;&#x64cd;&#x4f5c;&#x8bb0;&#x5f55;&#x3002;</div></div></div><div class="dashboard-section-body" style="max-height: 260px; overflow-y: auto;"><div v-if="recentActivities && recentActivities.length > 0" class="dashboard-activity-list"><div v-for="(activity, index) in recentActivities" :key="index" class="dashboard-activity-item"><span style="color: var(--text-primary);">{{ activity.message }}</span><span style="color: var(--text-secondary); font-size: 11px; white-space: nowrap;">{{ formatTime(activity.time) }}</span></div></div><div v-else style="text-align: center; color: var(--text-secondary); padding: 20px;">&#x6682;&#x65e0;&#x6d3b;&#x52a8;&#x8bb0;&#x5f55;</div></div></div>
+                                <div class="dashboard-section-card"><div class="dashboard-section-header"><div class="dashboard-section-copy"><div class="chart-title">{{ $t('dashboard.recent_activity') }}</div><div class="chart-subtitle">{{ $t('dashboard.activity_desc') }}</div></div></div><div class="dashboard-section-body" style="max-height: 260px; overflow-y: auto;"><div v-if="recentActivities && recentActivities.length > 0" class="dashboard-activity-list"><div v-for="(activity, index) in recentActivities" :key="index" class="dashboard-activity-item"><span style="color: var(--text-primary);">{{ activity.message }}</span><span style="color: var(--text-secondary); font-size: 11px; white-space: nowrap;">{{ formatTime(activity.time) }}</span></div></div><div v-else style="text-align: center; color: var(--text-secondary); padding: 20px;">{{ $t('activity.no_records') }}</div></div></div>
                             </div>
                         </div>
                     </div>
@@ -9028,40 +9029,40 @@
                                     :class="{ active: chatTab === 'cli' }"
                                     @click="switchChatTab('cli')"
                                 >
-                                    <i class="fas fa-terminal"></i> CLI终端
+                                    <i class="fas fa-terminal"></i> {{ $t('chat.tab_cli') }}
                                 </button>
                                 <button 
                                     class="chat-tab" 
                                     :class="{ active: chatTab === 'qq_private' }"
                                     @click="switchChatTab('qq_private')"
                                 >
-                                    <i class="fab fa-qq"></i> QQ私聊
+                                    <i class="fab fa-qq"></i> {{ $t('chat.tab_qq_private') }}
                                 </button>
                                 <button 
                                     class="chat-tab" 
                                     :class="{ active: chatTab === 'qq_group' }"
                                     @click="switchChatTab('qq_group')"
                                 >
-                                    <i class="fas fa-users"></i> QQ群聊
+                                    <i class="fas fa-users"></i> {{ $t('chat.tab_qq_group') }}
                                 </button>
                             </div>
                             
                             <div class="chat-sidebar-header" v-if="chatTab === 'web' || chatTab === 'cli'">
                                 <button v-if="chatTab === 'web'" class="btn btn-primary" style="width: 100%;" @click="createNewSession" :disabled="isLoading">
-                                    <i class="fas fa-plus"></i> 新建会话
+                                    <i class="fas fa-plus"></i> {{ $t('chat.new_session') }}
                                 </button>
                                 <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px;">
-                                    <button class="btn btn-secondary" @click="triggerSessionImport" :disabled="isLoading" title="导入会话">
-                                        <i class="fas fa-file-import"></i> 导入
+                                    <button class="btn btn-secondary" @click="triggerSessionImport" :disabled="isLoading" :title="$t('session.import')">
+                                        <i class="fas fa-file-import"></i> {{ $t('app.import') }}
                                     </button>
-                                    <button class="btn btn-secondary" @click="exportVisibleSessions" :disabled="isLoading || filteredSessions.length === 0" title="导出当前列表会话">
-                                        <i class="fas fa-file-export"></i> 导出
+                                    <button class="btn btn-secondary" @click="exportVisibleSessions" :disabled="isLoading || filteredSessions.length === 0" :title="$t('session.export_current')">
+                                        <i class="fas fa-file-export"></i> {{ $t('app.export') }}
                                     </button>
                                 </div>
                                 <input type="file" ref="sessionImportInput" accept=".json,application/json" @change="handleSessionImportFile" style="display: none;">
                                 <div class="search-box" :style="{ marginTop: chatTab === 'web' ? '12px' : '0' }">
                                     <i class="fas fa-search" style="color: var(--text-muted);"></i>
-                                    <input v-model="sessionSearch" type="text" placeholder="搜索会话...">
+                                    <input v-model="sessionSearch" type="text" :placeholder="$t('session.search')">
                                 </div>
                             </div>
                             
@@ -9757,7 +9758,7 @@
                     <div v-if="currentPage === 'sessions'" class="fade-in">
                         <div class="card">
                             <div class="card-header">
-                                <span class="card-title">会话管理</span>
+                                <span class="card-title">{{ $t('page.sessions') }}</span>
                                 <div style="display: flex; gap: 8px; align-items: center;">
                                     <div class="search-box" style="width: 240px;">
                                         <i class="fas fa-search"></i>
@@ -9853,7 +9854,7 @@
                             <!-- Heartbeat 配置 -->
                             <div class="card">
                                 <div class="card-header">
-                                    <span class="card-title"><i class="fas fa-heartbeat"></i> 定时任务配置</span>
+                                    <span class="card-title"><i class="fas fa-heartbeat"></i> {{ $t('page.heartbeat') }}</span>
                                     <label class="toggle-switch">
                                         <input type="checkbox" v-model="heartbeatConfig.enabled" @change="saveHeartbeatConfig">
                                         <span class="toggle-slider"></span>
@@ -9945,7 +9946,7 @@
                     <div v-if="currentPage === 'task-center'" class="fade-in">
                         <div class="card">
                             <div class="card-header">
-                                <span class="card-title">任务中心</span>
+                                <span class="card-title">{{ $t('page.task_center') }}</span>
                                 <button class="btn btn-primary" @click="openTaskCenterModal()" :disabled="isLoading">
                                     <i class="fas fa-plus"></i> 新建任务
                                 </button>
@@ -10020,7 +10021,7 @@
                     <div v-if="currentPage === 'message-style'" class="fade-in">
                         <div class="card">
                             <div class="card-header">
-                                <span class="card-title"><i class="fas fa-paint-brush"></i> 消息样式编辑</span>
+                                <span class="card-title"><i class="fas fa-paint-brush"></i> {{ $t('page.message_style') }}</span>
                                 <div style="display: flex; gap: 12px;">
                                     <button class="btn" @click="resetMessageStyle">
                                         <i class="fas fa-undo"></i> 恢复默认
@@ -10121,7 +10122,7 @@
                     <div v-if="currentPage === 'workflows'" class="fade-in">
                         <div class="card">
                             <div class="card-header">
-                                <span class="card-title">工作流管理</span>
+                                <span class="card-title">{{ $t('page.workflows') }}</span>
                                 <div style="display: flex; gap: 12px;">
                                     <button class="btn btn-secondary" @click="showAiGenerateModal = true" :disabled="isLoading">
                                         <i class="fas fa-magic"></i> AI生成
@@ -10186,7 +10187,7 @@
                             <!-- 左侧：当前人格提示词 -->
                             <div class="card" style="height: fit-content;">
                                 <div class="card-header">
-                                    <span class="card-title">当前人格提示词</span>
+                                    <span class="card-title">{{ $t('page.personality') }}</span>
                                     <button class="btn btn-primary" @click="savePersonality" :disabled="isLoading">
                                         <i class="fas fa-save"></i> 保存
                                     </button>
@@ -10480,7 +10481,7 @@
                         <div class="card">
                             <div class="card-header">
                                 <div style="display: flex; align-items: center; gap: 16px;">
-                                    <span class="card-title">知识库文档</span>
+                                    <span class="card-title">{{ $t('page.knowledge') }}</span>
                                     <!-- 搜索框 -->
                                     <div class="search-box" style="position: relative;">
                                         <i class="fas fa-search" style="position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: var(--text-secondary);"></i>
@@ -10582,24 +10583,24 @@
                                             <span class="ai-hero-glyph">✦</span>
                                         </div>
                                         <div class="ai-hero-copy">
-                                            <h2>AI 配置中心</h2>
-                                            <p>为不同AI能力配置专用模型，实现图片理解、视频分析、语音合成等高级功能。</p>
+                                            <h2>{{ $t('ai_config.title') }}</h2>
+                                            <p>{{ $t('ai_config.subtitle') }}</p>
                                         </div>
                                     </div>
                                     <div class="ai-toolbar">
                                         <div class="ai-action-group">
                                             <button class="btn btn-secondary" @click="openModelEditModal()">
-                                                <i class="fas fa-plus"></i> 新增模型配置
+                                                <i class="fas fa-plus"></i> {{ $t('ai_config.add_model') }}
                                             </button>
                                             <button class="btn btn-secondary" @click="openApiKeyManager()">
-                                                <i class="fas fa-key"></i> API Key管理
+                                                <i class="fas fa-key"></i> {{ $t('ai_config.api_key_manage') }}
                                             </button>
                                             <button class="btn btn-secondary" @click="showAIConfigDetails = !showAIConfigDetails">
                                                 <i class="fas" :class="showAIConfigDetails ? 'fa-eye-slash' : 'fa-sliders-h'"></i>
-                                                {{ showAIConfigDetails ? '收起详细配置' : '展开详细配置' }}
+                                                {{ showAIConfigDetails ? $t('ai_config.collapse_details') : $t('ai_config.expand_details') }}
                                             </button>
                                             <button class="btn btn-primary" @click="saveAIConfig" :disabled="isLoading">
-                                                <i class="fas fa-save"></i> 保存配置
+                                                <i class="fas fa-save"></i> {{ $t('ai_config.save') }}
                                             </button>
                                         </div>
                                     </div>
@@ -10609,33 +10610,33 @@
                                     <div class="ai-status-panel">
                                         <div class="ai-status-top">
                                             <div>
-                                                <div class="ai-status-title">系统状态</div>
+                                                <div class="ai-status-title">{{ $t('ai_config.system_status') }}</div>
                                                 <div class="ai-status-name">
-                                                    {{ Object.values(activeModelsByPurpose).filter(m => m && m.has_config).length }}/6 种能力已配置
+                                                    {{ $t('ai_config.status_count', {configured: Object.values(activeModelsByPurpose).filter(m => m && m.has_config).length}) }}
                                                 </div>
                                             </div>
                                             <span class="badge" :class="aiStatus.class">{{ aiStatus.text }}</span>
                                         </div>
                                         <div class="ai-summary-grid">
                                             <div class="ai-summary-card">
-                                                <div class="ai-summary-label">对话模型</div>
-                                                <div class="ai-summary-value">{{ activeModelsByPurpose.chat?.model?.name || '未配置' }}</div>
-                                                <div class="ai-summary-note">{{ activeModelsByPurpose.chat?.has_config ? '已启用' : '点击卡片配置' }}</div>
+                                                <div class="ai-summary-label">{{ $t('ai_config.chat_model') }}</div>
+                                                <div class="ai-summary-value">{{ activeModelsByPurpose.chat?.model?.name || $t('ai_config.not_configured') }}</div>
+                                                <div class="ai-summary-note">{{ activeModelsByPurpose.chat?.has_config ? $t('ai_config.enabled') : $t('ai_config.click_to_config') }}</div>
                                             </div>
                                             <div class="ai-summary-card">
-                                                <div class="ai-summary-label">图片理解</div>
-                                                <div class="ai-summary-value">{{ activeModelsByPurpose.vision?.model?.name || '未配置' }}</div>
-                                                <div class="ai-summary-note">{{ activeModelsByPurpose.vision?.has_config ? '已启用' : '点击卡片配置' }}</div>
+                                                <div class="ai-summary-label">{{ $t('ai_config.vision') }}</div>
+                                                <div class="ai-summary-value">{{ activeModelsByPurpose.vision?.model?.name || $t('ai_config.not_configured') }}</div>
+                                                <div class="ai-summary-note">{{ activeModelsByPurpose.vision?.has_config ? $t('ai_config.enabled') : $t('ai_config.click_to_config') }}</div>
                                             </div>
                                             <div class="ai-summary-card">
-                                                <div class="ai-summary-label">视频理解</div>
-                                                <div class="ai-summary-value">{{ activeModelsByPurpose.video?.model?.name || '未配置' }}</div>
-                                                <div class="ai-summary-note">{{ activeModelsByPurpose.video?.has_config ? '已启用' : '点击卡片配置' }}</div>
+                                                <div class="ai-summary-label">{{ $t('ai_config.video') }}</div>
+                                                <div class="ai-summary-value">{{ activeModelsByPurpose.video?.model?.name || $t('ai_config.not_configured') }}</div>
+                                                <div class="ai-summary-note">{{ activeModelsByPurpose.video?.has_config ? $t('ai_config.enabled') : $t('ai_config.click_to_config') }}</div>
                                             </div>
                                             <div class="ai-summary-card">
-                                                <div class="ai-summary-label">语音合成</div>
-                                                <div class="ai-summary-value">{{ activeModelsByPurpose.tts?.model?.name || '未配置' }}</div>
-                                                <div class="ai-summary-note">{{ activeModelsByPurpose.tts?.has_config ? '已启用' : '点击卡片配置' }}</div>
+                                                <div class="ai-summary-label">{{ $t('ai_config.tts') }}</div>
+                                                <div class="ai-summary-value">{{ activeModelsByPurpose.tts?.model?.name || $t('ai_config.not_configured') }}</div>
+                                                <div class="ai-summary-note">{{ activeModelsByPurpose.tts?.has_config ? $t('ai_config.enabled') : $t('ai_config.click_to_config') }}</div>
                                             </div>
                                         </div>
                                     </div>
@@ -10648,10 +10649,10 @@
                             <div class="ai-pane-header">
                                 <div class="ai-pane-title">
                                     <i class="fas fa-th-large"></i>
-                                    <span>模型用途配置</span>
+                                    <span>{{ $t('ai_config.purpose_title') }}</span>
                                 </div>
                             </div>
-                            <div class="ai-pane-subtitle">为6种AI能力配置专用模型，点击卡片查看详情或编辑配置。</div>
+                            <div class="ai-pane-subtitle">{{ $t('ai_config.purpose_subtitle') }}</div>
                             <div class="ai-pane-body">
                                 <div class="purpose-cards-grid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 16px;">
                                     <div 
@@ -10702,10 +10703,10 @@
                                         ">
                                             <div class="status-text" style="font-size: 13px; color: var(--text-secondary);">
                                                 <template v-if="activeModelsByPurpose[purpose]?.has_config">
-                                                    <span style="color: #10b981;">●</span> 已配置: {{ activeModelsByPurpose[purpose].model.name }}
+                                                    <span style="color: #10b981;">●</span> {{ $t('ai_config.configured') }}: {{ activeModelsByPurpose[purpose].model.name }}
                                                 </template>
                                                 <template v-else>
-                                                    <span style="color: #9ca3af;">○</span> 未配置
+                                                    <span style="color: #9ca3af;">○</span> {{ $t('ai_config.not_configured') }}
                                                 </template>
                                             </div>
                                             <i class="fas fa-chevron-right" style="color: var(--text-secondary); font-size: 12px;"></i>
@@ -10719,16 +10720,16 @@
                             <div class="ai-pane-header">
                                 <div class="ai-pane-title">
                                     <i class="fas fa-layer-group"></i>
-                                    <span>已保存的模型配置</span>
+                                    <span>{{ $t('ai_config.saved_title') }}</span>
                                 </div>
                             </div>
-                            <div class="ai-pane-subtitle">这里直接展示已经保存的模型卡片，可以快速测试、应用或继续编辑，不用每次先打开弹窗。</div>
+                            <div class="ai-pane-subtitle">{{ $t('ai_config.saved_subtitle') }}</div>
                             <div class="ai-pane-body">
                                 <div v-if="aiModels.length === 0" class="empty-state" style="padding: 20px;">
                                     <i class="fas fa-robot" style="font-size: 40px; color: var(--text-secondary); margin-bottom: 12px;"></i>
-                                    <p>还没有已保存的模型配置</p>
+                                    <p>{{ $t('ai_config.no_saved') }}</p>
                                     <button class="btn btn-primary" @click="openModelEditModal()" style="margin-top: 12px;">
-                                        创建第一个配置
+                                        {{ $t('ai_config.create_first') }}
                                     </button>
                                 </div>
                                     <div v-else class="ai-saved-grid">
@@ -10752,26 +10753,26 @@
                                                     </div>
                                                 </div>
                                                 <span class="badge" :class="model.enabled ? (activeModelId === model.id ? 'badge-primary' : 'badge-success') : 'badge-secondary'">
-                                                    {{ activeModelId === model.id ? '当前使用' : (model.enabled ? '已启用' : '已禁用') }}
+                                                    {{ activeModelId === model.id ? $t('ai_config.current_use') : (model.enabled ? $t('app.enabled') : $t('app.disabled')) }}
                                                 </span>
                                             </div>
                                         <div class="ai-saved-flags">
-                                            <span class="ai-saved-flag">{{ model.supports_tools ? '工具调用' : '纯聊天' }}</span>
-                                            <span class="ai-saved-flag">{{ model.supports_reasoning ? '展示思考' : '不展示思考' }}</span>
-                                            <span class="ai-saved-flag">{{ model.supports_stream ? '支持流式' : '无流式' }}</span>
+                                            <span class="ai-saved-flag">{{ model.supports_tools ? $t('ai_config.supports_tools') : $t('ai_config.pure_chat') }}</span>
+                                            <span class="ai-saved-flag">{{ model.supports_reasoning ? $t('ai_config.show_reasoning') : $t('ai_config.hide_reasoning') }}</span>
+                                            <span class="ai-saved-flag">{{ model.supports_stream ? $t('ai_config.supports_stream') : $t('ai_config.no_stream') }}</span>
                                         </div>
                                         <div class="ai-saved-actions">
                                             <button class="btn btn-secondary btn-sm" @click="testModel(model)" :disabled="isTesting">
-                                                <i class="fas" :class="isTesting ? 'fa-spinner fa-spin' : 'fa-vial'"></i> 测试
+                                                <i class="fas" :class="isTesting ? 'fa-spinner fa-spin' : 'fa-vial'"></i> {{ $t('ai_config.test') }}
                                             </button>
                                             <button class="btn btn-text btn-sm" @click="openModelEditModal(model)">
-                                                <i class="fas fa-edit"></i> 编辑
+                                                <i class="fas fa-edit"></i> {{ $t('ai_config.edit') }}
                                             </button>
                                             <button class="btn btn-text btn-sm" @click="cloneModel(model)">
-                                                <i class="fas fa-copy"></i> 复制
+                                                <i class="fas fa-copy"></i> {{ $t('ai_config.copy') }}
                                             </button>
                                             <button class="btn btn-danger btn-sm" @click="deleteModel(model)" :disabled="isDeleting">
-                                                <i class="fas" :class="isDeleting ? 'fa-spinner fa-spin' : 'fa-trash'"></i> 删除
+                                                <i class="fas" :class="isDeleting ? 'fa-spinner fa-spin' : 'fa-trash'"></i> {{ $t('ai_config.delete') }}
                                             </button>
                                         </div>
                                         <div class="ai-saved-watermark" aria-hidden="true">
@@ -10789,15 +10790,15 @@
                                     <div class="ai-pane-header">
                                         <div class="ai-pane-title">
                                             <i class="fas fa-plug"></i>
-                                            <span>连接设置</span>
+                                            <span>{{ $t('ai_config.connection_settings') }}</span>
                                         </div>
                                         <span class="badge" :class="aiStatus.class">{{ aiStatus.text }}</span>
                                     </div>
-                                    <div class="ai-pane-subtitle">这一组只处理连接本身，出问题时优先检查这里。</div>
+                                    <div class="ai-pane-subtitle">{{ $t('ai_config.connection_hint') }}</div>
                                     <div class="ai-pane-body">
                                         <div class="form-row">
                                             <div class="form-group">
-                                                <label class="form-label">AI 提供商 <span class="required">*</span></label>
+                                                <label class="form-label">{{ $t('ai_config.provider') }} <span class="required">*</span></label>
                                                 <select v-model="aiConfig.provider" class="form-select" @change="onProviderChange">
                                                     <option value="openai">OpenAI</option>
                                                     <option value="anthropic">Anthropic (Claude)</option>
@@ -10805,32 +10806,32 @@
                                                     <option value="azure">Azure OpenAI</option>
                                                     <option value="siliconflow">SiliconFlow</option>
                                                     <option value="deepseek">DeepSeek</option>
-                                                    <option value="custom">自定义</option>
+                                                    <option value="custom">{{ $t('ai_config.custom') }}</option>
                                                 </select>
                                             </div>
                                             <div class="form-group">
-                                                <label class="form-label">Provider 类型</label>
+                                                <label class="form-label">{{ $t('ai_config.provider_type') }}</label>
                                                 <select v-model="aiConfig.provider_type" class="form-select">
                                                     <option value="openai_compatible">OpenAI Compatible</option>
                                                     <option value="anthropic">Anthropic Messages</option>
                                                 </select>
-                                                <div class="form-hint">显式 provider 类型会直接影响后端请求格式和测试连接行为。</div>
+                                                <div class="form-hint">{{ $t('ai_config.provider_hint') }}</div>
                                             </div>
                                         </div>
                                         <div class="form-group">
-                                            <label class="form-label">API Key <span class="required">*</span></label>
+                                            <label class="form-label">{{ $t('ai_config.api_key') }} <span class="required">*</span></label>
                                             <div class="input-with-icon">
-                                                <input v-model="aiConfig.api_key" :type="showApiKey ? 'text' : 'password'" class="form-input" placeholder="输入 API Key">
+                                                <input v-model="aiConfig.api_key" :type="showApiKey ? 'text' : 'password'" class="form-input" :placeholder="$t('ai_config.api_key')">
                                                 <button class="icon-btn" @click="showApiKey = !showApiKey">
                                                     <i :class="showApiKey ? 'fas fa-eye-slash' : 'fas fa-eye'"></i>
                                                 </button>
                                             </div>
-                                            <div class="form-hint">保存后会做掩码显示；如果是新 Key，建议保存前先测试一次连接。</div>
+                                            <div class="form-hint">{{ $t('ai_config.api_key_hint') }}</div>
                                         </div>
                                         <div class="form-group">
-                                            <label class="form-label">API Base URL</label>
+                                            <label class="form-label">{{ $t('ai_config.base_url') }}</label>
                                             <input v-model="aiConfig.base_url" type="text" class="form-input" :placeholder="getBaseUrlPlaceholder()">
-                                            <div class="form-hint">留空时使用默认地址；私有网关或代理需要填完整基础地址。</div>
+                                            <div class="form-hint">{{ $t('ai_config.base_url_hint') }}</div>
                                         </div>
                                         <div class="form-row">
                                             <div class="form-group flex-2">
@@ -11830,7 +11831,7 @@
                     <div v-if="currentPage === 'logs'" class="fade-in">
                         <div class="card">
                             <div class="card-header">
-                                <span class="card-title">系统日志</span>
+                                <span class="card-title">{{ $t('page.logs') }}</span>
                                 <div style="display: flex; gap: 8px;">
                                     <select v-model="logLevel" class="form-select" style="width: 120px;">
                                         <option value="all">全部</option>
@@ -11863,7 +11864,7 @@
                     <div v-if="currentPage === 'settings'" class="fade-in">
                         <div class="card">
                             <div class="card-header">
-                                <span class="card-title">系统设置</span>
+                                <span class="card-title">{{ $t('page.settings') }}</span>
                                 <button class="btn btn-primary" @click="saveSettings" :disabled="isLoading">
                                     <i class="fas fa-save"></i> 保存设置
                                 </button>
@@ -11885,6 +11886,17 @@
                                     <div class="form-group">
                                         <label class="form-label">机器人 QQ 号</label>
                                         <input v-model="settings.bot_id" type="text" class="form-input">
+                                    </div>
+                                </div>
+                                <div class="form-group" style="margin-top: 20px;">
+                                    <label class="form-label">{{ $t('language.title') }}</label>
+                                    <div class="grid-2">
+                                        <div class="form-group">
+                                            <select v-model="currentLanguage" @change="changeLanguage(currentLanguage)" class="form-input">
+                                                <option value="zh">{{ $t('language.zh') }}</option>
+                                                <option value="en">{{ $t('language.en') }}</option>
+                                            </select>
+                                        </div>
                                     </div>
                                 </div>
                                 <div class="form-group" style="margin-top: 20px;">
@@ -11940,7 +11952,7 @@
                     <div v-if="currentPage === 'skills'" class="fade-in">
                         <div class="card">
                             <div class="card-header">
-                                <span class="card-title"><i class="fas fa-magic"></i> Skills 配置</span>
+                                <span class="card-title"><i class="fas fa-magic"></i> {{ $t('page.skills') }}</span>
                                 <div style="display: flex; gap: 8px;">
                                     <button class="btn btn-secondary" @click="loadSkillsStorage" :disabled="isLoading">
                                         <i class="fas fa-folder"></i> 查看存储空间
@@ -12059,7 +12071,7 @@
                     <div v-if="currentPage === 'tools'" class="fade-in">
                         <div class="card">
                             <div class="card-header">
-                                <span class="card-title"><i class="fas fa-toolbox"></i> 工具列表</span>
+                                <span class="card-title"><i class="fas fa-toolbox"></i> {{ $t('page.tools') }}</span>
                             </div>
                             <div class="card-body">
                                 <div v-if="tools.length === 0" class="empty-state">
@@ -12105,7 +12117,7 @@
                     <div v-if="currentPage === 'channels'" class="fade-in">
                         <div class="card">
                             <div class="card-header">
-                                <span class="card-title"><i class="fas fa-plug"></i> 频道管理</span>
+                                <span class="card-title"><i class="fas fa-plug"></i> {{ $t('page.channels') }}</span>
                                 <div style="display: flex; gap: 8px; flex-wrap: wrap;">
                                     <button class="btn btn-secondary" @click="applyChannelPresetById('telegram')" :disabled="isLoading">
                                         <i class="fab fa-telegram"></i> Telegram 预设
@@ -14083,33 +14095,34 @@
                     username: sessionStorage.getItem('username') || '',
                     password: '',
                     currentPage: 'dashboard',
+                    currentLanguage: localStorage.getItem('nbot-language') || 'zh',
                     
                     navItems: {
                         overview: [
-                            { id: 'dashboard', label: '仪表盘', icon: 'fas fa-chart-line' }
+                            { id: 'dashboard', labelKey: 'nav.dashboard', icon: 'fas fa-chart-line' }
                         ],
                         chat: [
-                            { id: 'chat', label: '聊天', icon: 'fas fa-comments' },
-                            { id: 'sessions', label: '会话管理', icon: 'fas fa-list' },
-                            { id: 'message-style', label: '样式编辑', icon: 'fas fa-paint-brush' }
+                            { id: 'chat', labelKey: 'nav.chat_chat', icon: 'fas fa-comments' },
+                            { id: 'sessions', labelKey: 'nav.sessions', icon: 'fas fa-list' },
+                            { id: 'message-style', labelKey: 'nav.message_style', icon: 'fas fa-paint-brush' }
                         ],
                         config: [
-                            { id: 'task-center', label: '任务中心', icon: 'fas fa-calendar-check' },
-                            { id: 'workflows', label: '工作流', icon: 'fas fa-project-diagram' },
-                            { id: 'heartbeat', label: '定时任务', icon: 'fas fa-heartbeat' },
-                            { id: 'personality', label: '人格设置', icon: 'fas fa-user-circle' },
-                            { id: 'memory', label: '记忆管理', icon: 'fas fa-brain' },
-                            { id: 'knowledge', label: '知识库', icon: 'fas fa-book' },
-                            { id: 'skills', label: 'Skills 配置', icon: 'fas fa-magic' },
-                            { id: 'tools', label: 'Tools 配置', icon: 'fas fa-toolbox' }
-                            , { id: 'channels', label: '频道管理', icon: 'fas fa-plug' }
+                            { id: 'task-center', labelKey: 'nav.task_center', icon: 'fas fa-calendar-check' },
+                            { id: 'workflows', labelKey: 'nav.workflows', icon: 'fas fa-project-diagram' },
+                            { id: 'heartbeat', labelKey: 'nav.heartbeat', icon: 'fas fa-heartbeat' },
+                            { id: 'personality', labelKey: 'nav.personality', icon: 'fas fa-user-circle' },
+                            { id: 'memory', labelKey: 'nav.memory', icon: 'fas fa-brain' },
+                            { id: 'knowledge', labelKey: 'nav.knowledge', icon: 'fas fa-book' },
+                            { id: 'skills', labelKey: 'nav.skills', icon: 'fas fa-magic' },
+                            { id: 'tools', labelKey: 'nav.tools', icon: 'fas fa-toolbox' }
+                            , { id: 'channels', labelKey: 'nav.channels', icon: 'fas fa-plug' }
                         ],
                         system: [
-                            { id: 'ai-config', label: 'AI 配置', icon: 'fas fa-robot' },
-                            { id: 'tokens', label: 'Token 用量', icon: 'fas fa-coins' },
-                            { id: 'logs', label: '系统日志', icon: 'fas fa-file-alt' },
-                            { id: 'settings', label: '系统设置', icon: 'fas fa-cog' },
-                            { id: 'debug', label: '调试台', icon: 'fas fa-bug' }
+                            { id: 'ai-config', labelKey: 'nav.ai_config', icon: 'fas fa-robot' },
+                            { id: 'tokens', labelKey: 'nav.tokens', icon: 'fas fa-coins' },
+                            { id: 'logs', labelKey: 'nav.logs', icon: 'fas fa-file-alt' },
+                            { id: 'settings', labelKey: 'nav.settings', icon: 'fas fa-cog' },
+                            { id: 'debug', labelKey: 'nav.debug', icon: 'fas fa-bug' }
                         ]
                     },
                     
@@ -14139,9 +14152,9 @@
                     platformChart: null,
                     selectedPeriod: 'day',
                     timePeriods: [
-                        { value: 'day', label: '过去1天' },
-                        { value: 'week', label: '过去7天' },
-                        { value: 'month', label: '过去30天' }
+                        { value: 'day', labelKey: 'dashboard.last_1d' },
+                        { value: 'week', labelKey: 'dashboard.last_7d' },
+                        { value: 'month', labelKey: 'dashboard.last_30d' }
                     ],
                     messageTrendData: [],
                     platformStatsData: [],
@@ -15130,6 +15143,15 @@
             },
             
             methods: {
+                // 语言切换
+                changeLanguage(lang) {
+                    this.$setLanguage(lang);
+                    this.currentLanguage = lang;
+                    // 强制刷新页面以应用新语言
+                    this.$forceUpdate();
+                    this.showToast(this.$t('language.changed'), 'success');
+                },
+
                 handleGlobalModalOverlayClick(event) {
                     if (this.themeSettings.closeModalOnOverlayClick) {
                         return;
@@ -23139,8 +23161,13 @@ def main(params):
             directives: {
                 'click-outside': clickOutside
             }
-        }).mount('#app');
-        window.__nbotVueApp = nbotVueApp;
+        });
+        
+        // 注册 i18n 国际化插件
+        nbotVueApp.use(i18nPlugin);
+        
+        const nbotVueAppMounted = nbotVueApp.mount('#app');
+        window.__nbotVueApp = nbotVueAppMounted;
         window.__nbotAppReady = true;
         window.dispatchEvent(new Event('nbot-app-ready'));
         if (window.__hideNbotBootOverlay) window.__hideNbotBootOverlay();
