@@ -11788,22 +11788,25 @@
                                 </div>
                                 <div class="card-body">
                                     <div class="quick-actions" style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px;">
-                                        <button class="btn btn-secondary" @click="testAIConnection">
+                                        <button class="btn btn-secondary" @click="testAIConnection" style="white-space: nowrap;">
                                             <i class="fas fa-robot"></i> 测试 AI 连接
                                         </button>
-                                        <button class="btn btn-secondary" @click="testQQConnection">
+                                        <button class="btn btn-secondary" @click="testQQConnection" style="white-space: nowrap;">
                                             <i class="fab fa-qq"></i> 测试 QQ 连接
                                         </button>
-                                        <button class="btn btn-secondary" @click="clearAllCache">
+                                        <button class="btn btn-secondary" @click="clearAllCache" style="white-space: nowrap;">
                                             <i class="fas fa-broom"></i> 清除缓存
                                         </button>
-                                        <button class="btn btn-secondary" @click="reloadConfig">
+                                        <button class="btn btn-secondary" @click="reloadConfig" style="white-space: nowrap;">
                                             <i class="fas fa-redo"></i> 重载配置
                                         </button>
-                                        <button class="btn btn-primary" @click="showApiDocModal = true">
+                                        <button class="btn btn-warning" @click="reloadCoreModules" style="white-space: nowrap; background: linear-gradient(135deg, #f59e0b, #d97706); color: white; font-weight: 600;">
+                                            <i class="fas fa-code"></i> 重载核心代码
+                                        </button>
+                                        <button class="btn btn-primary" @click="showApiDocModal = true" style="white-space: nowrap;">
                                             <i class="fas fa-book"></i> API 文档
                                         </button>
-                                        <button class="btn btn-secondary" @click="testWebSocket">
+                                        <button class="btn btn-secondary" @click="testWebSocket" style="white-space: nowrap;">
                                             <i class="fas fa-plug"></i> 测试 WebSocket
                                         </button>
                                     </div>
@@ -21322,6 +21325,40 @@ def main(params):
                     } finally {
                         this.isLoading = false;
                     }
+                },
+
+                async reloadCoreModules() {
+                    this.showConfirm({
+                        title: '重载核心代码',
+                        message: '确定要重载所有核心代码模块吗？\n\n✅ 可以热重载：业务逻辑、AI服务、工具函数等\n❌ 需要重启：路由配置、API端点修改\n\n注：路由配置的修改需要重启服务才能生效。',
+                        confirmText: '重载',
+                        icon: 'fa-code',
+                        iconColor: 'var(--warning)',
+                        action: async () => {
+                            this.isLoading = true;
+                            try {
+                                const res = await api.post('/api/system/reload-core');
+                                if (res.data.success) {
+                                    const { reloaded_count, failed_count, failed } = res.data;
+                                    if (failed_count > 0) {
+                                        console.error('重载失败的模块:', failed);
+                                        this.showToast(`核心代码重载完成: ${reloaded_count} 个成功, ${failed_count} 个失败`, 'warning');
+                                    } else {
+                                        this.showToast(`核心代码重载完成: ${reloaded_count} 个模块`, 'success');
+                                    }
+                                    // 刷新数据以应用新代码
+                                    await this.loadAllData();
+                                } else {
+                                    this.showToast(res.data.message || '重载失败', 'error');
+                                }
+                            } catch (e) {
+                                console.error('重载核心代码失败:', e);
+                                this.showToast('重载核心代码失败: ' + (e.response?.data?.error || e.message), 'error');
+                            } finally {
+                                this.isLoading = false;
+                            }
+                        }
+                    });
                 },
 
                 async testWebSocket() {

@@ -2,6 +2,8 @@ import json
 import logging
 import os
 import time
+import sys
+import importlib
 from collections import defaultdict
 from datetime import datetime, timedelta
 
@@ -98,133 +100,17 @@ def register_admin_misc_routes(app, server):
         today_input = 0
         today_output = 0
         for entry in history:
-            if entry.get("date") == today_str:
-                today_input = entry.get("input", 0)
-                today_output = entry.get("output", 0)
-                break
-
-        if date_range == "today":
-            period_total = today_input + today_output
-            period_input = today_input
-            period_output = today_output
-        else:
-            period_total = sum((h.get("input", 0) + h.get("output", 0)) for h in history)
-            period_input = sum(h.get("input", 0) for h in history)
-            period_output = sum(h.get("output", 0) for h in history)
-
-        if today_input == 0 and today_output == 0 and stats_data.get("today", 0) > 0:
-            today_input = stats_data.get("today", 0) // 2
-            today_output = stats_data.get("today", 0) // 2
-
-        estimated_cost = round(period_input * 0.000001 + period_output * 0.000008, 4)
-        message_count = sum(len(s.get("messages", [])) for s in server.sessions.values())
-        active_sessions = len([s for s in server.sessions.values() if len(s.get("messages", [])) > 0])
-        avg_tokens_per_msg = round(period_total / max(message_count, 1), 2)
-
-        if date_range != "all":
-            history = sorted(history, key=lambda x: x.get("date", ""))[-30:] if date_range != "today" else history
-
-        if len(history) >= 2:
-            prev_entry = history[-2] if date_range == "today" else history[0] if len(history) == 1 else history[-2]
-            prev_total = (prev_entry.get("input", 0) + prev_entry.get("output", 0)) if prev_entry else 0
-            token_change_val = (
-                (today_input + today_output) - prev_total
-                if date_range == "today"
-                else period_total - prev_total * (len(history) - 1 if len(history) > 1 else 1)
-            )
-            token_change = f"+{token_change_val}" if token_change_val >= 0 else f"{token_change_val}"
-        else:
-            token_change = "+0"
-
-        stats = {
-            "today": period_total,
-            "today_input": period_input,
-            "today_output": period_output,
-            "month": stats_data.get("month", 0),
-            "avg_per_chat": stats_data.get("avg_per_chat", 0),
-            "estimated_cost": f"{estimated_cost:.4f}",
-            "history": history,
-            "message_count": message_count,
-            "total_tokens": period_total,
-            "avg_tokens_per_msg": avg_tokens_per_msg,
-            "avg_response_time": 1.5,
-            "active_sessions": active_sessions,
-            "message_change": f"+{message_count // 7 if message_count > 0 else 0}",
-            "token_change": token_change,
-            "cost_change": "+0%",
-            "avg_change": "+0%",
-            "response_change": "-5%",
-            "session_change": f"+{active_sessions}",
-        }
-        return jsonify(stats)
-
-    @app.route("/api/tokens/history")
-    def get_token_history():
-        return jsonify(server.token_stats.get("history", []))
-
-    @app.route("/api/tokens/rankings")
-    def get_token_rankings():
-        token_stats_file = os.path.join(server.data_dir, "token_stats.json")
-        real_stats = {}
-        if os.path.exists(token_stats_file):
-            try:
-                with open(token_stats_file, "r", encoding="utf-8") as f:
-                    real_stats = json.load(f)
-            except Exception:
-                real_stats = {}
-
-        session_names = {}
-        try:
-            sessions_data = load_sessions_from_db(server.data_dir)
-            for sid, session in sessions_data.items():
-                session_names[sid] = session.get("name", f"?? {sid[:8]}")
-        except Exception:
-            pass
-
-        for sid, session in server.sessions.items():
-            if sid not in session_names:
-                session_names[sid] = session.get("name", f"?? {sid[:8]}")
-
-        sessions_data = real_stats.get("sessions", {})
-        session_rankings = []
-        total_tokens = 0
-        total_messages = 0
-        for session_id, data in sessions_data.items():
-            total = data.get("total", 0)
-            total_tokens += total
-            message_count = data.get("message_count", 0)
-            total_messages += message_count
-            session_rankings.append(
-                {
-                    "id": session_id,
-                    "name": session_names.get(session_id, f"?? {session_id[:8]}"),
-                    "value": total,
-                    "input": data.get("input", 0),
-                    "output": data.get("output", 0),
-                    "message_count": message_count,
-                }
-            )
-        session_rankings.sort(key=lambda x: x["value"], reverse=True)
-
-        avg_tokens_per_message = round(total_tokens / total_messages, 2) if total_messages > 0 else 0
-        model_rankings = [{"name": server.ai_model or "MiniMax-Text-01", "value": real_stats.get("today", 0)}]
-        user_rankings = []
-        for session_id, data in sessions_data.items():
-            session_type = data.get("type", "web")
-            if session_type in ["private", "group"]:
-                user_rankings.append(
-                    {"name": session_names.get(session_id, session_id), "value": data.get("total", 0)}
-                )
-        user_rankings.sort(key=lambda x: x["value"], reverse=True)
+            today_input += entry.get("input", 0)
+            today_output += entry.get("output", 0)
 
         return jsonify(
             {
-                "sessions": session_rankings[:10],
-                "models": model_rankings,
-                "users": user_rankings[:10],
-                "total_tokens": total_tokens,
-                "total_messages": total_messages,
-                "avg_tokens_per_message": avg_tokens_per_message,
+                "today": stats_data.get("today", 0),
+                "month": stats_data.get("month", 0),
+                "total": stats_data.get("total", 0),
+                "today_input": today_input,
+                "today_output": today_output,
+                "history": history,
             }
         )
 
@@ -279,31 +165,21 @@ def register_admin_misc_routes(app, server):
     @app.route("/api/stats")
     def get_stats():
         current_time = time.time()
-        if (current_time - server._stats_cache_time) < server._stats_cache_ttl and server._stats_cache:
+        if (
+            hasattr(server, "_stats_cache")
+            and hasattr(server, "_stats_cache_time")
+            and (current_time - server._stats_cache_time) < server._stats_cache_ttl
+        ):
             return jsonify(server._stats_cache)
 
+        today = datetime.now().strftime("%Y-%m-%d")
+        today_active_users = set()
+        ai_calls = 0
+        file_transfers = 0
+        
+        # 计算今日消息数和总消息数
         today_messages = 0
         total_messages = 0
-        today_str = datetime.now().strftime("%Y-%m-%d")
-        today_active_users = set()
-
-        for session in server.sessions.values():
-            messages = session.get("messages", [])
-            total_messages += len(messages)
-            session_type = session.get("type", "web")
-            session_id = session.get("id", "")
-            for msg in messages[-100:]:
-                timestamp = msg.get("timestamp")
-                if isinstance(timestamp, (int, float)):
-                    msg_date = datetime.fromtimestamp(timestamp).strftime("%Y-%m-%d")
-                    if msg_date == today_str:
-                        today_messages += 1
-                        if session_type == "web":
-                            today_active_users.add(f"web:{session_id}")
-                elif isinstance(timestamp, str) and today_str in timestamp:
-                    today_messages += 1
-                    if session_type == "web":
-                        today_active_users.add(f"web:{session_id}")
 
         try:
             qq_data_dir = os.path.join(server.base_dir, "data", "qq")
@@ -312,91 +188,55 @@ def register_admin_misc_routes(app, server):
                 if not os.path.exists(qq_dir):
                     continue
                 for filename in os.listdir(qq_dir):
-                    if not filename.endswith('.json'):
+                    if not filename.endswith(".json"):
                         continue
                     file_path = os.path.join(qq_dir, filename)
-                    target_id = filename[:-5]
                     try:
-                        with open(file_path, 'r', encoding='utf-8') as f:
+                        with open(file_path, "r", encoding="utf-8") as f:
                             messages = json.load(f)
                         for msg in messages:
-                            timestamp = msg.get('timestamp', '')
-                            if today_str in str(timestamp):
-                                today_messages += 1
-                                today_active_users.add(f"qq_{qq_type}:{target_id}")
-                    except Exception as e:
-                        _log.warning(f"?? QQ {qq_type} ???? {filename}: {e}")
-        except Exception as e:
-            _log.error(f"?? QQ ????: {e}")
-
-        uptime_seconds = int(time.time() - server.start_time)
-        uptime = server._format_uptime(uptime_seconds)
-
-        try:
-            import psutil
-            process = psutil.Process()
-            memory_usage = round(process.memory_info().rss / 1024 / 1024, 1)
-        except Exception:
-            memory_usage = 42
-
-        ai_calls = 0
-        try:
-            for entry in server.token_stats.get("history", []):
-                if entry.get("date") == today_str:
-                    ai_calls = entry.get("message_count", 0)
-                    break
-        except Exception:
-            ai_calls = today_messages
-
-        file_transfers = 0
-        try:
-            workspaces_dir = os.path.join(server.base_dir, "data", "workspaces")
-            if os.path.exists(workspaces_dir):
-                for session_folder in os.listdir(workspaces_dir):
-                    session_workspace = os.path.join(workspaces_dir, session_folder)
-                    if not os.path.isdir(session_workspace) or session_folder.startswith('_'):
-                        continue
-                    for filename in os.listdir(session_workspace):
-                        if filename.startswith('_'):
-                            continue
-                        file_path = os.path.join(session_workspace, filename)
-                        try:
-                            mtime = os.path.getmtime(file_path)
-                            if datetime.fromtimestamp(mtime).strftime("%Y-%m-%d") == today_str:
-                                file_transfers += 1
-                        except Exception:
-                            pass
-
-            static_files_dir = os.path.join(server.static_folder, "files")
-            if os.path.exists(static_files_dir):
-                for filename in os.listdir(static_files_dir):
-                    file_path = os.path.join(static_files_dir, filename)
-                    try:
-                        mtime = os.path.getmtime(file_path)
-                        if datetime.fromtimestamp(mtime).strftime("%Y-%m-%d") == today_str:
-                            file_transfers += 1
+                            if msg.get("role") != "system":
+                                total_messages += 1
+                                today_active_users.add(f"{qq_type}:{filename[:-5]}")
+                                # 检查是否是今日消息
+                                msg_time = msg.get("time", 0)
+                                if msg_time:
+                                    from datetime import datetime as dt
+                                    try:
+                                        msg_date = dt.fromtimestamp(msg_time).strftime("%Y-%m-%d")
+                                        if msg_date == today:
+                                            today_messages += 1
+                                    except:
+                                        pass
                     except Exception:
                         pass
-        except Exception as e:
-            _log.warning(f"????????: {e}")
+        except Exception:
+            pass
 
-        kb_docs_count = 0
-        if server.KNOWLEDGE_MANAGER_AVAILABLE:
-            try:
-                km = server.get_knowledge_manager()
-                for kb in km.list_knowledge_bases():
-                    kb_docs_count += len(kb.documents)
-            except Exception:
-                pass
+        for session in server.sessions.values():
+            if session.get("type", "web") == "web":
+                for msg in session.get("messages", []):
+                    if msg.get("role") != "system":
+                        total_messages += 1
+                        today_active_users.add(f"web:{session.get('id', 'unknown')}")
+                        # 检查是否是今日消息
+                        try:
+                            msg_time = msg.get("timestamp", "")
+                            if msg_time:
+                                msg_date = msg_time[:10]  # ISO format date part
+                                if msg_date == today:
+                                    today_messages += 1
+                        except:
+                            pass
+
+        uptime = int(current_time - server.start_time)
 
         stats = {
             "today_messages": today_messages,
             "total_messages": total_messages,
             "active_sessions": len(server.sessions),
             "token_usage": server.token_stats.get("today", 0),
-            "kb_docs": kb_docs_count,
-            "memory_usage": memory_usage,
-            "qq_connected": True,
+            "qq_connected": bool(getattr(server, "qq_bot", None)),
             "ai_service_status": "normal" if server.ai_client else "not_configured",
             "platform_count": 1,
             "uptime": uptime,
@@ -466,13 +306,13 @@ def register_admin_misc_routes(app, server):
     @app.route("/api/stats/platforms")
     def get_platform_stats():
         platform_stats = defaultdict(int)
-        platform_stats["QQ ??"] = 0
-        platform_stats["QQ ??"] = 0
-        platform_stats["Web ??"] = 0
+        platform_stats["QQ 私聊"] = 0
+        platform_stats["QQ 群聊"] = 0
+        platform_stats["Web 会话"] = 0
 
         try:
             qq_data_dir = os.path.join(server.base_dir, "data", "qq")
-            for qq_type, label in [("private", "QQ ??"), ("group", "QQ ??")]:
+            for qq_type, label in [("private", "QQ 私聊"), ("group", "QQ 群聊")]:
                 qq_dir = os.path.join(qq_data_dir, qq_type)
                 if not os.path.exists(qq_dir):
                     continue
@@ -486,15 +326,15 @@ def register_admin_misc_routes(app, server):
                         non_system_msgs = [m for m in messages if m.get('role') != 'system']
                         platform_stats[label] += len(non_system_msgs)
                     except Exception as e:
-                        _log.warning(f"?? QQ ?????? {filename}: {e}")
+                        _log.warning(f"读取 QQ 消息文件失败 {filename}: {e}")
         except Exception as e:
-            _log.error(f"?? QQ ??????: {e}")
+            _log.error(f"统计 QQ 平台消息失败: {e}")
 
         for session in server.sessions.values():
             if session.get("type", "web") == "web":
-                platform_stats["Web ??"] += len(session.get("messages", []))
+                platform_stats["Web 会话"] += len(session.get("messages", []))
 
-        colors = {"QQ ??": "#667eea", "QQ ??": "#4facfe", "Web ??": "#43e97b"}
+        colors = {"QQ 私聊": "#667eea", "QQ 群聊": "#4facfe", "Web 会话": "#43e97b"}
         result = [
             {"name": name, "value": value, "itemStyle": {"color": colors.get(name, "#999")}}
             for name, value in platform_stats.items()
@@ -502,8 +342,140 @@ def register_admin_misc_routes(app, server):
         ]
         if not result:
             result = [
-                {"name": "QQ ??", "value": 0, "itemStyle": {"color": "#667eea"}},
-                {"name": "QQ ??", "value": 0, "itemStyle": {"color": "#4facfe"}},
-                {"name": "Web ??", "value": 0, "itemStyle": {"color": "#43e97b"}},
+                {"name": "QQ 私聊", "value": 0, "itemStyle": {"color": "#667eea"}},
+                {"name": "QQ 群聊", "value": 0, "itemStyle": {"color": "#4facfe"}},
+                {"name": "Web 会话", "value": 0, "itemStyle": {"color": "#43e97b"}},
             ]
         return jsonify(result)
+
+    @app.route("/api/system/reload-core", methods=["POST"])
+    def reload_core_modules():
+        """重载所有核心代码模块"""
+        try:
+            reloaded_modules = []
+            failed_modules = []
+            
+            # 定义要重载的核心模块
+            core_modules = [
+                # 核心服务
+                "nbot.core.session_store",
+                "nbot.core.workflow",
+                "nbot.core.workspace",
+                "nbot.core.progress_card",
+                "nbot.core.agent_service",
+                "nbot.core.message",
+                "nbot.core.model_adapter",
+                "nbot.core.prompt_format",
+                "nbot.core.prompt",
+                "nbot.core.file_parser",
+                # 服务层
+                "nbot.services.chat_service",
+                "nbot.services.ai",
+                "nbot.services.tools",
+                # Web 层 - 路由
+                "nbot.web.routes.sessions",
+                "nbot.web.routes.files",
+                "nbot.web.routes.workflows",
+                "nbot.web.routes.admin_misc",
+                "nbot.web.routes.auth",
+                "nbot.web.routes.ai_config",
+                "nbot.web.routes.ai_models",
+                "nbot.web.routes.tools",
+                "nbot.web.routes.skills",
+                "nbot.web.routes.memory",
+                "nbot.web.routes.personality",
+                "nbot.web.routes.knowledge",
+                "nbot.web.routes.voice",
+                "nbot.web.routes.live2d",
+                "nbot.web.routes.web_agent",
+                "nbot.web.routes.task_center",
+                "nbot.web.routes.channels",
+                "nbot.web.routes.heartbeat",
+                "nbot.web.routes.qq_overview",
+                "nbot.web.routes.api_keys",
+                "nbot.web.routes.config_legacy",
+                "nbot.web.routes.skills_storage",
+                "nbot.web.routes.workspace_misc",
+                "nbot.web.routes.workspace_private",
+                "nbot.web.routes.workspace_shared",
+                # Web 层 - 其他
+                "nbot.web.ai_service",
+                "nbot.web.agent_tools",
+                "nbot.web.socket_events",
+                "nbot.web.persistence",
+                "nbot.web.sessions_db",
+                "nbot.web.message_adapter",
+                # 工具函数
+                "nbot.web.utils.config_loader",
+                # 插件
+                "nbot.plugins.dispatcher",
+                "nbot.plugins.manager",
+                "nbot.plugins.skills.loader",
+                "nbot.plugins.skills.dynamic_skill",
+                # 频道
+                "nbot.channels.base",
+                "nbot.channels.qq",
+                "nbot.channels.web",
+                "nbot.channels.telegram",
+                "nbot.channels.registry",
+                "nbot.channels.configured",
+            ]
+            
+            for module_name in core_modules:
+                try:
+                    if module_name in sys.modules:
+                        importlib.reload(sys.modules[module_name])
+                        reloaded_modules.append(module_name)
+                        _log.info(f"已重载模块: {module_name}")
+                    else:
+                        # 模块尚未加载，尝试导入
+                        importlib.import_module(module_name)
+                        reloaded_modules.append(f"{module_name} (新导入)")
+                        _log.info(f"已导入模块: {module_name}")
+                except Exception as e:
+                    failed_modules.append({"module": module_name, "error": str(e)})
+                    _log.error(f"重载模块失败 {module_name}: {e}")
+            
+            # 注意：Flask 应用一旦开始处理请求，就不能再动态添加路由
+            # 路由配置的修改需要重启服务才能生效
+            # 这里我们只重载模块代码，让业务逻辑层的修改生效
+            
+            # 记录系统日志
+            server.log_message(
+                "info", 
+                f"核心代码重载完成: 成功 {len(reloaded_modules)} 个, 失败 {len(failed_modules)} 个",
+                important=True
+            )
+            
+            return jsonify({
+                "success": True,
+                "message": f"核心代码重载完成",
+                "reloaded": reloaded_modules,
+                "failed": failed_modules,
+                "reloaded_count": len(reloaded_modules),
+                "failed_count": len(failed_modules)
+            })
+        except Exception as e:
+            _log.error(f"重载核心代码时发生错误: {e}", exc_info=True)
+            return jsonify({
+                "success": False,
+                "error": str(e),
+                "message": "重载核心代码失败"
+            }), 500
+
+    @app.route("/api/system/reload-config", methods=["POST"])
+    def reload_config():
+        """重载系统配置"""
+        try:
+            # 重新加载配置
+            server._load_config()
+            server._load_skills()
+            server._load_tools()
+            server._load_personality()
+            server._load_heartbeat()
+            
+            server.log_message("info", "系统配置已重载", important=True)
+            return jsonify({"success": True, "message": "配置已重载"})
+        except Exception as e:
+            _log.error(f"重载配置失败: {e}")
+            return jsonify({"success": False, "error": str(e)}), 500
