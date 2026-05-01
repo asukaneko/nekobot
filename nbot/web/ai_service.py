@@ -1671,15 +1671,15 @@ def stream_ai_response(self, messages: List[Dict], session_id: str, callback):
         session_id: 会话 ID
         callback: 回调函数，接收 (chunk: str) 参数
     """
-    if not server.ai_client:
+    if not self.ai_client:
         _log.warning("AI client not initialized")
         callback("AI 服务未配置，请在 AI 配置页面设置 API Key 和 Base URL。")
         return
 
     try:
         # 获取流式响应
-        for chunk in server.ai_client.chat_completion(
-            model=server.ai_model, messages=messages, stream=True
+        for chunk in self.ai_client.chat_completion(
+            model=self.ai_model, messages=messages, stream=True
         ):
             # 清理内容
             chunk = chunk.strip()
@@ -1692,7 +1692,7 @@ def stream_ai_response(self, messages: List[Dict], session_id: str, callback):
 
 
 def stream_send_response(
-server, session_id: str, message: Dict, thinking_content: str = None
+    server, session_id: str, message: Dict, thinking_content: str = None
 ):
     """通过 WebSocket 发送流式响应
 

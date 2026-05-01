@@ -7,7 +7,10 @@ import sys
 import json
 import asyncio
 from abc import ABC, abstractmethod
-from typing import Dict, Any, List, Optional, Callable
+from typing import Dict, Any, List, Optional, Callable, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .app import CLIApp
 from datetime import datetime
 
 from rich.console import Console, Group

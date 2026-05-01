@@ -81,9 +81,16 @@ def tts(content: str) -> MessageChain:
 
 def upload_voice(file_path: str, name: str, text: str):
     import requests
+
+    tts_config = _get_tts_config()
+    api_key = tts_config.get("api_key", "")
+
+    if not api_key:
+        raise ValueError("未配置 SiliconFlow API Key")
+
     url = "https://api.siliconflow.cn/v1/uploads/audio/voice"
     headers = {
-        "Authorization": f"Bearer {silicon_api_key}"
+        "Authorization": f"Bearer {api_key}"
     }
     files = {
         "file": open(fr"{file_path}", "rb")
