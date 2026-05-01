@@ -1,4 +1,5 @@
 # NekoBot
+![cover](docs/cover.png)
 
 <div align="center">
 
