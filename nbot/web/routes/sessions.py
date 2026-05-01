@@ -460,8 +460,7 @@ def register_session_routes(app, server):
         if not session:
             return jsonify({"error": "Session not found"}), 404
 
-        limit = request.args.get("limit", 50, type=int)
-        messages = session.get("messages", [])[-limit:]
+        messages = session.get("messages", [])
         display_messages = [m for m in messages if m.get("role") != "system"]
         return jsonify(display_messages)
 
