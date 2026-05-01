@@ -2797,6 +2797,84 @@
             background: var(--bg-primary);
         }
 
+        /* 历史记录总结样式 */
+        .history-summary-container {
+            margin-bottom: 20px;
+            background: linear-gradient(135deg, rgba(102, 126, 234, 0.1), rgba(118, 75, 162, 0.1));
+            border: 1px solid var(--accent-primary);
+            border-radius: 12px;
+            overflow: hidden;
+        }
+
+        .history-summary-header {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 12px 16px;
+            cursor: pointer;
+            background: rgba(102, 126, 234, 0.15);
+            transition: background 0.2s ease;
+            font-weight: 600;
+            color: var(--accent-primary);
+        }
+
+        .history-summary-header:hover {
+            background: rgba(102, 126, 234, 0.25);
+        }
+
+        .history-summary-header i:first-child {
+            font-size: 16px;
+        }
+
+        .history-summary-header span {
+            flex: 1;
+        }
+
+        .history-summary-header .fa-chevron-down {
+            transition: transform 0.3s ease;
+        }
+
+        .history-summary-header .fa-rotate-180 {
+            transform: rotate(180deg);
+        }
+
+        .history-summary-list {
+            padding: 12px 16px;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+
+        .history-summary-item {
+            padding: 10px 12px;
+            margin-bottom: 10px;
+            background: var(--bg-secondary);
+            border-radius: 8px;
+            border-left: 3px solid var(--accent-primary);
+        }
+
+        .history-summary-item:last-child {
+            margin-bottom: 0;
+        }
+
+        .history-summary-time {
+            font-size: 11px;
+            color: var(--text-secondary);
+            margin-bottom: 4px;
+        }
+
+        .history-summary-content {
+            font-size: 13px;
+            color: var(--text-primary);
+            line-height: 1.5;
+            margin-bottom: 4px;
+        }
+
+        .history-summary-meta {
+            font-size: 11px;
+            color: var(--text-secondary);
+            text-align: right;
+        }
+
         .scroll-to-bottom-btn {
             position: absolute;
             bottom: 100px;
@@ -8974,6 +9052,21 @@
                                 </div>
 
                                 <div class="messages-container" ref="messagesContainer" @scroll="handleMessagesScroll">
+                                    <!-- 历史记录总结 -->
+                                    <div v-if="currentSession?.historySummary && currentSession.historySummary.length > 0" class="history-summary-container">
+                                        <div class="history-summary-header" @click="currentSession.showHistorySummary = !currentSession.showHistorySummary">
+                                            <i class="fas fa-history"></i>
+                                            <span>历史记录总结 ({{ currentSession.historySummary.length }} 次压缩)</span>
+                                            <i class="fas fa-chevron-down" :class="{ 'fa-rotate-180': currentSession.showHistorySummary }"></i>
+                                        </div>
+                                        <div v-show="currentSession.showHistorySummary" class="history-summary-list">
+                                            <div v-for="(item, index) in currentSession.historySummary" :key="index" class="history-summary-item">
+                                                <div class="history-summary-time">{{ formatTime(item.time) }}</div>
+                                                <div class="history-summary-content">{{ item.summary }}</div>
+                                                <div class="history-summary-meta">压缩了 {{ item.compressedCount }} 条消息</div>
+                                            </div>
+                                        </div>
+                                    </div>
                                     <!-- 全局进度卡片（当找不到父消息时显示） -->
                                     <div v-if="showThinkingCard && thinkingCards.length > 0" class="global-thinking-cards">
                                         <div v-for="(card, index) in thinkingCards" :key="card.id || index" class="thinking-card" :class="{ 'is-complete': card.is_complete }">
@@ -14751,7 +14844,8 @@
                 async refreshSessionMessages(sessionId) {
                     // 如果当前查看的正是这个会话，刷新消息
                     if (this.currentSession && this.currentSession.id === sessionId) {
-                        await this.loadMessages();
+                        // 刷新消息不强制滚动，避免打扰用户
+                        await this.loadMessages(false);
                     }
                     // 同时刷新会话列表（更新最后消息时间等）
                     await this.loadSessions();
@@ -14879,15 +14973,26 @@
                 
                 async compressContext() {
                     if (this.isCompressing || !this.currentSession) return;
-                    
+
                     this.isCompressing = true;
                     try {
                         // 调用后端API压缩上下文
                         const res = await api.post(`/api/sessions/${this.currentSession.id}/compress`, {});
-                        
+
                         if (res.data.success) {
-                            // 重新加载会话消息
-                            await this.loadMessages();
+                            // 保存总结信息到会话
+                            if (res.data.summary) {
+                                if (!this.currentSession.historySummary) {
+                                    this.currentSession.historySummary = [];
+                                }
+                                this.currentSession.historySummary.push({
+                                    time: new Date().toISOString(),
+                                    summary: res.data.summary,
+                                    compressedCount: res.data.compressed_count
+                                });
+                            }
+                            // 重新加载会话消息，强制滚动到底部显示新结构
+                            await this.loadMessages(true);
                             this.updateContextStats();
                             this.showToast('上下文压缩成功', 'success');
                         } else {
@@ -15012,7 +15117,8 @@
 
                 async refreshCurrentChat() {
                     if (this.currentSession) {
-                        await this.loadMessages();
+                        // 手动刷新时强制滚动到底部
+                        await this.loadMessages(true);
                     } else if (this.currentQqId) {
                         await this.selectQqChat(this.chatTab === 'qq_private' ? 'private' : 'group', this.currentQqId);
                     } else {
@@ -15110,7 +15216,8 @@
                     try {
                         // 如果在聊天页面且有当前会话，重新加载会话消息
                         if (this.currentPage === 'chat' && this.currentSession) {
-                            await this.loadMessages();
+                            // 手动刷新时强制滚动到底部
+                            await this.loadMessages(true);
                             this.showToast('会话已刷新', 'success');
                         } else if (this.currentPage === 'chat' && this.currentQqId) {
                             // 重新加载 QQ 会话消息
@@ -16754,13 +16861,15 @@ def main(params):
                     
                     socket.emit('leave_session');
                     socket.emit('join_session', { session_id: session.id });
-                    await this.loadMessages();
+                    // 切换会话时强制滚动到底部
+                    await this.loadMessages(true);
                     this.updateContextStats();
                     
                     // 设置新的消息刷新定时器（每 2 秒）
                     this.messageRefreshTimer = setInterval(() => {
                         if (this.currentSession && this.currentPage === 'chat') {
-                            this.loadMessages();
+                            // 定时刷新不强制滚动，避免打扰用户查看历史消息
+                            this.loadMessages(false);
                         }
                     }, 2000);
                     
@@ -16833,18 +16942,18 @@ def main(params):
                     }, 2000);
                 },
                 
-                async loadMessages() {
+                async loadMessages(forceScroll = false) {
                     if (!this.currentSession) return;
-                    
+
                     // 如果是临时会话，跳过加载消息
                     if (this.currentSession._isTemp || this.currentSession.id.startsWith('temp_')) {
                         return;
                     }
-                    
+
                     try {
                         const res = await api.get(`/api/sessions/${this.currentSession.id}/messages`);
                         const newMessages = res.data;
-                        
+
                         // 保留现有的 thinking_cards 数据（避免被刷新覆盖）
                         newMessages.forEach(newMsg => {
                             const existingMsg = this.currentMessages.find(m => m.id === newMsg.id);
@@ -16855,7 +16964,7 @@ def main(params):
                                 newMsg.change_cards = existingMsg.change_cards;
                             }
                         });
-                        
+
                         this.currentMessages = newMessages.map(msg => {
                             if (!msg.thinking_cards || !msg.thinking_cards.length) return msg;
                             return {
@@ -16872,7 +16981,8 @@ def main(params):
                             };
                         });
                         this.updateContextStats();
-                        this.$nextTick(() => this.scrollToBottom());
+                        // 只有在强制滚动或用户没有手动滚动时才滚动到底部
+                        this.$nextTick(() => this.scrollToBottom(forceScroll));
                     } catch (e) {
                         console.error('Failed to load messages:', e);
                     }
@@ -17255,7 +17365,8 @@ def main(params):
 
                     if (isCurrentSession) {
                         this.currentMessages.push(userMessage);
-                        this.$nextTick(() => this.scrollToBottom());
+                        // 用户发送消息时强制滚动到底部
+                        this.$nextTick(() => this.scrollToBottom(true));
                     }
 
                     this.isTyping = true;
@@ -21559,29 +21670,30 @@ def main(params):
                                 }
                                 // 强制 Vue 更新以确保进度变化能正确渲染
                                 this.$forceUpdate();
-                                this.$nextTick(() => this.scrollToBottom());
+                                // 只在用户没有手动滚动时才滚动
+                                this.$nextTick(() => this.scrollToBottom(false));
                                 return;  // 不添加到消息列表
                             }
-                            
+
                             // 处理 Todo 卡片（优先处理，避免被添加到消息列表）
                             if (msg.type === 'todo_card') {
                                 // 如果后端没发 id，前端自己生成一个
                                 if (!msg.id) {
                                     msg.id = 'td_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5);
                                 }
-                                
+
                                 const parentMsgId = msg.parent_message_id;
-                                
+
                                 if (parentMsgId) {
                                     const parentMsg = this.currentMessages.find(m => m.id === parentMsgId);
-                                    
+
                                     if (parentMsg) {
                                         // Vue 3 中直接赋值即可触发响应式更新
                                         if (!parentMsg.todo_cards) {
                                             parentMsg.todo_cards = [];
                                         }
                                         const existingIdx = parentMsg.todo_cards.findIndex(c => c.id === msg.id);
-                                        
+
                                         if (existingIdx !== -1) {
                                             parentMsg.todo_cards[existingIdx] = msg;
                                         } else {
@@ -21589,7 +21701,8 @@ def main(params):
                                         }
                                     }
                                 }
-                                this.$nextTick(() => this.scrollToBottom());
+                                // 只在用户没有手动滚动时才滚动
+                                this.$nextTick(() => this.scrollToBottom(false));
                                 return;  // 不添加到消息列表
                             }
 
@@ -21616,15 +21729,17 @@ def main(params):
                                         }
                                     }
                                 }
-                                this.$nextTick(() => this.scrollToBottom());
+                                // 只在用户没有手动滚动时才滚动
+                                this.$nextTick(() => this.scrollToBottom(false));
                                 return;
                             }
-                            
+
                             // 检查是否已存在（排除 thinking_card 类型）
                             const exists = this.currentMessages.find(m => m.id === msg.id);
                             if (!exists) {
                                 this.currentMessages.push(msg);
-                                this.$nextTick(() => this.scrollToBottom());
+                                // 只在用户没有手动滚动时才滚动
+                                this.$nextTick(() => this.scrollToBottom(false));
                             }
 
                             // 如果是助手消息且不是进度消息且不是文件消息，取消正在思考动画
@@ -21658,12 +21773,13 @@ def main(params):
                                 this.currentMessages.push(msg);
                             }
                             console.log('[Stream] 消息已添加，当前消息数:', this.currentMessages.length);
-                            this.$nextTick(() => this.scrollToBottom());
+                            // 只在用户没有手动滚动时才滚动
+                            this.$nextTick(() => this.scrollToBottom(false));
                         } else {
                             console.log('[Stream] 会话不匹配，忽略事件');
                         }
                     });
-                    
+
                     socket.on('ai_stream_chunk', (data) => {
                         console.log('[Stream] AI stream chunk:', data.chunk);
                         if (this.currentSession && data.session_id === this.currentSession.id) {
@@ -21674,7 +21790,8 @@ def main(params):
                                     ...currentMessage,
                                     content: (currentMessage.content || '') + (data.chunk || '')
                                 });
-                                this.$nextTick(() => this.scrollToBottom());
+                                // 只在用户没有手动滚动时才滚动
+                                this.$nextTick(() => this.scrollToBottom(false));
                             } else {
                                 console.log('[Stream] 未找到消息，创建占位消息:', data.message_id);
                                 this.currentMessages.push({
@@ -21685,7 +21802,8 @@ def main(params):
                                     timestamp: new Date().toISOString(),
                                     session_id: data.session_id
                                 });
-                                this.$nextTick(() => this.scrollToBottom());
+                                // 只在用户没有手动滚动时才滚动
+                                this.$nextTick(() => this.scrollToBottom(false));
                             }
                         }
                     });
@@ -21731,10 +21849,12 @@ def main(params):
                                     thinking_cards: data.message.thinking_cards || existingMessage.thinking_cards || [],
                                     change_cards: data.message.change_cards || existingMessage.change_cards || []
                                 });
-                                this.$nextTick(() => this.scrollToBottom());
+                                // 只在用户没有手动滚动时才滚动
+                                this.$nextTick(() => this.scrollToBottom(false));
                             } else {
                                 this.currentMessages.push(data.message);
-                                this.$nextTick(() => this.scrollToBottom());
+                                // 只在用户没有手动滚动时才滚动
+                                this.$nextTick(() => this.scrollToBottom(false));
                             }
                         } else {
                             console.log('AI response ignored: session mismatch', this.currentSession?.id, data.session_id);
@@ -21781,7 +21901,8 @@ def main(params):
                             this.currentMessages = [...this.currentMessages, newMessage];
                             console.log('[DEBUG] Message added, total messages:', this.currentMessages.length);
                             this.$nextTick(() => {
-                                this.scrollToBottom();
+                                // 只在用户没有手动滚动时才滚动
+                                this.scrollToBottom(false);
                                 console.log('[DEBUG] Scrolled to bottom');
                             });
                         } else {
@@ -21829,7 +21950,8 @@ def main(params):
                             } else {
                                 this.currentMessages.push(data.message);
                             }
-                            this.$nextTick(() => this.scrollToBottom());
+                            // 只在用户没有手动滚动时才滚动
+                            this.$nextTick(() => this.scrollToBottom(false));
                         }
                         this.processPendingQueue(finishedSessionId);
                     });
@@ -21884,12 +22006,14 @@ def main(params):
                 handleMessagesScroll() {
                     const container = this.$refs.messagesContainer;
                     if (!container) return;
-                    
+
                     const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
-                    if (distanceFromBottom > 100) {
+                    // 当距离底部超过 30px 时，认为用户在查看历史消息
+                    if (distanceFromBottom > 30) {
                         this.isUserScrolling = true;
                         this.showScrollToBottom = true;
                     } else {
+                        // 只有滚动到底部附近才重置状态
                         this.isUserScrolling = false;
                         this.showScrollToBottom = false;
                     }
@@ -22366,15 +22490,16 @@ def main(params):
                                 delete this.orphanCards[res.data.prompt_message_id];
                             }
                         } else {
-                            await this.loadMessages();
+                            await this.loadMessages(true);
                         }
                         this.showToast('已开始重新生成', 'success');
-                        this.$nextTick(() => this.scrollToBottom());
+                        // 重新生成时强制滚动到底部
+                        this.$nextTick(() => this.scrollToBottom(true));
                     } catch (e) {
                         this.isTyping = false;
                         this.isLoading = false;
                         this.loadingSessionId = null;
-                        await this.loadMessages();
+                        await this.loadMessages(true);
                         this.showToast(e.response?.data?.error || '重新生成失败', 'error');
                     }
                 },
