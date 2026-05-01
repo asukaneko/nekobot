@@ -6,9 +6,10 @@ from selenium.webdriver.edge.service import Service
 from selenium.webdriver.edge.options import Options
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-import time, re, os, json
+import time
+import re
+import json
 from bs4 import BeautifulSoup
-import configparser
 
 class NovelDownloader:
     def __init__(self):

@@ -1,6 +1,6 @@
 import logging
 from typing import Dict, Any, Optional, List
-from nbot.plugins.skills.base import BaseSkill, SkillRegistry, SkillContext, SkillResult
+from nbot.plugins.skills.base import SkillRegistry, SkillContext, SkillResult
 from nbot.plugins.skills.loader import SkillLoader
 from nbot.plugins.skills.builtin import register_all_builtin_skills
 from nbot.plugins.dispatcher import SkillDispatcher, get_skill_dispatcher

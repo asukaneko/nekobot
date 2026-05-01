@@ -1,6 +1,5 @@
 import json
 import uuid
-from datetime import datetime
 
 
 def _ok(data=None, message="ok"):

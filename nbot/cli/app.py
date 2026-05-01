@@ -5,10 +5,7 @@ CLI 应用程序主类 - 实现动态界面和屏幕切换
 import os
 import sys
 import time
-import threading
-import asyncio
-from typing import Dict, Any, Optional
-from contextlib import contextmanager
+from typing import Dict, Optional
 
 try:
     from rich.console import Console

@@ -2,26 +2,17 @@
 CLI 界面组件 - 使用 Rich 库构建美观的UI组件
 """
 
-import os
-import sys
-import time
 from datetime import datetime
-from typing import List, Dict, Any, Optional, Callable
+from typing import List, Dict, Any, Optional
 from dataclasses import dataclass
 
 from rich.console import Console, Group
 from rich.panel import Panel
 from rich.text import Text
 from rich.table import Table
-from rich.layout import Layout
-from rich.live import Live
-from rich.box import Box, ROUNDED, DOUBLE, HEAVY
-from rich.syntax import Syntax
+from rich.box import ROUNDED, HEAVY
 from rich.progress import Progress, SpinnerColumn, TextColumn
-from rich.prompt import Prompt
 from rich.align import Align
-from rich.tree import Tree
-from rich import box
 
 
 @dataclass

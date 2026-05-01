@@ -1,10 +1,9 @@
 import asyncio
-import json
 import logging
-from typing import List, Dict, Any, Optional
+from typing import List, Optional
 from dataclasses import dataclass, field
 
-from nbot.plugins.skills.base import SkillContext, SkillResult
+from nbot.plugins.skills.base import SkillContext
 from nbot.plugins.manager import get_plugin_manager
 from nbot.plugins.dispatcher import get_skill_dispatcher
 

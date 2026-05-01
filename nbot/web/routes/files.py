@@ -1,4 +1,3 @@
-import json
 import os
 import time
 
@@ -23,7 +22,6 @@ def register_file_routes(app, server, workspace_available, workspace_manager):
 
     @app.route("/api/files/<path:safe_name>/preview", methods=["GET"])
     def preview_static_file(safe_name):
-        import mimetypes
         from nbot.core.file_parser import FileParser
 
         files_dir = os.path.join(server.static_folder, "files")

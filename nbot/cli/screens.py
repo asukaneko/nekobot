@@ -3,11 +3,9 @@ CLI 屏幕/界面模块 - 实现多级界面切换
 """
 
 import os
-import sys
 import json
-import asyncio
 from abc import ABC, abstractmethod
-from typing import Dict, Any, List, Optional, Callable, TYPE_CHECKING
+from typing import Dict, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from .app import CLIApp
@@ -18,7 +16,6 @@ from rich.panel import Panel
 from rich.text import Text
 from rich.table import Table
 from rich.layout import Layout
-from rich.align import Align
 from rich import box
 
 try:
@@ -32,7 +29,7 @@ except ImportError:
 from .components import (
     Header, Footer, Sidebar, MessagePanel, InputBox,
     ToolPanel, SessionPanel, ConfigPanel, HelpPanel,
-    Message, LoadingSpinner
+    Message
 )
 
 

@@ -1,9 +1,8 @@
 # 外部技能加载器
-import os
 import importlib.util
 import logging
 from pathlib import Path
-from typing import List, Optional
+from typing import List
 
 _log = logging.getLogger(__name__)
 

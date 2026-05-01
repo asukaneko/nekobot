@@ -4,7 +4,6 @@ NekoBot CLI - 简化版命令行界面
 """
 
 import os
-import sys
 import json
 import uuid
 import requests
@@ -17,16 +16,10 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.text import Text
 from rich.table import Table
-from rich.layout import Layout
-from rich.live import Live
 from rich.box import ROUNDED, HEAVY
 from rich.prompt import Prompt
 from rich.align import Align
-from rich import box
 from rich.markdown import Markdown
-from rich.syntax import Syntax
-from rich.tree import Tree
-from rich.console import Group
 
 # 尝试导入pyfiglet用于ASCII艺术字
 try:
@@ -193,7 +186,7 @@ class SimpleCLI:
         if TOOLS_AVAILABLE:
             self.console.print(f"[dim]工具支持: [green]已启用[/green] ({len(TOOL_DEFINITIONS)} 个工具)[/dim]")
         else:
-            self.console.print(f"[dim]工具支持: [yellow]未启用[/yellow][/dim]")
+            self.console.print("[dim]工具支持: [yellow]未启用[/yellow][/dim]")
 
         self.console.print()
 
@@ -552,7 +545,7 @@ class SimpleCLI:
             self.console.print("[yellow]警告：没有配置AI模型，聊天功能不可用[/yellow]")
 
         if TOOLS_AVAILABLE:
-            self.console.print(f"[dim]工具支持: [green]已启用[/green] - 输入 /tools 查看可用工具[/dim]")
+            self.console.print("[dim]工具支持: [green]已启用[/green] - 输入 /tools 查看可用工具[/dim]")
 
         self.console.print("[dim]输入 /back 返回主菜单，/help 查看帮助[/dim]")
         self.console.print()
@@ -635,7 +628,7 @@ class SimpleCLI:
                 self.messages.append(assistant_message)
 
                 # 显示AI回复（使用Markdown渲染）
-                self.console.print(f"[bold cyan]🐱 NekoBot:[/bold cyan]")
+                self.console.print("[bold cyan]🐱 NekoBot:[/bold cyan]")
                 self._render_markdown(content)
                 self.console.print()
 

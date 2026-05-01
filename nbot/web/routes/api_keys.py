@@ -32,7 +32,7 @@ def save_api_keys(server, api_keys):
         with open(file_path, "w", encoding="utf-8") as f:
             json.dump(api_keys, f, ensure_ascii=False, indent=2)
         return True
-    except Exception as e:
+    except Exception:
         return False
 
 

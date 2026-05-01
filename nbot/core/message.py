@@ -11,7 +11,7 @@
 import os
 import json
 import uuid
-from typing import Optional, List, Dict, Any
+from typing import List, Dict
 from datetime import datetime
 from dataclasses import dataclass, field, asdict
 from nbot.web.persistence import is_web_visible_session

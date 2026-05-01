@@ -233,7 +233,7 @@ def trigger_ai_response_for_request(server, chat_request: ChatRequest, adapter=N
             _log.info(f"[Knowledge] 检索结果长度: {len(knowledge_text)} 字符")
             if knowledge_text:
                 knowledge_retrieved = True
-                _log.info(f"[Knowledge] 知识库检索成功")
+                _log.info("[Knowledge] 知识库检索成功")
         except Exception as e:
             _log.error(f"[Knowledge] 知识库检索失败: {e}")
 
@@ -467,9 +467,9 @@ def trigger_ai_response_for_request(server, chat_request: ChatRequest, adapter=N
                                                                 file_path = os.path.join(
                                                                     server.data_dir, "workspace", filename
                                                                 )
-                                                        except Exception as e:
+                                                        except Exception:
                                                             pass
-                                                except Exception as e:
+                                                except Exception:
                                                     pass
                                             else:
                                                 # 其他路径，尝试直接使用
@@ -847,12 +847,12 @@ def trigger_ai_response_for_request(server, chat_request: ChatRequest, adapter=N
 
             # 知识库检索成功，更新进度
             if progress_card and knowledge_retrieved:
-                _log.info(f"[ProgressCard] 准备更新 KNOWLEDGE 步骤")
+                _log.info("[ProgressCard] 准备更新 KNOWLEDGE 步骤")
                 progress_card.update(StepType.KNOWLEDGE, "📚 知识库检索...")
                 progress_card.update(
                     StepType.KNOWLEDGE_DONE, "📚 知识库已加载", True
                 )
-                _log.info(f"[ProgressCard] KNOWLEDGE 步骤更新完成")
+                _log.info("[ProgressCard] KNOWLEDGE 步骤更新完成")
 
             # 合并文件内容到用户消息
             enhanced_content = user_content
@@ -892,7 +892,7 @@ def trigger_ai_response_for_request(server, chat_request: ChatRequest, adapter=N
                                 step['detail'] = f"图片识别完成 ({len(image_recognition_result)} 字符)"
                                 break
                         progress_card._emit_update()
-                    except Exception as e:
+                    except Exception:
                         pass
             
             # 如果有图片识别结果，将其加入对话上下文
@@ -1368,7 +1368,7 @@ def trigger_ai_response_for_request(server, chat_request: ChatRequest, adapter=N
                         consecutive_errors = loop_result.consecutive_errors
 
                         if not final_content:
-                            _log.warning(f"[Tools] AI 未生成最终回复，使用默认提示")
+                            _log.warning("[Tools] AI 未生成最终回复，使用默认提示")
                             final_content = (
                                 "抱歉，处理过程中出现了问题，请稍后再试~"
                             )
@@ -1378,7 +1378,7 @@ def trigger_ai_response_for_request(server, chat_request: ChatRequest, adapter=N
                         # 检查是否为等待确认状态（exec_command 非白名单）
                         if final_content and '[请求ID:' in final_content:
                             # 命令等待用户确认，不标记完成，不发送 AI 消息
-                            _log.info(f"[Tools] 等待用户确认命令执行，保持进度卡片等待状态")
+                            _log.info("[Tools] 等待用户确认命令执行，保持进度卡片等待状态")
                             # 进度卡片已在 execute_web_tool 中更新为等待状态，直接跳过后续处理
                         else:
                             # 将进度卡片标记为完成（不再删除）
@@ -1452,7 +1452,7 @@ def trigger_ai_response_for_request(server, chat_request: ChatRequest, adapter=N
 
             # 如果是等待用户确认状态，不发送 AI 消息，直接返回
             if final_content and '[请求ID:' in final_content:
-                _log.info(f"[Tools] 命令等待用户确认中，跳过 AI 响应发送")
+                _log.info("[Tools] 命令等待用户确认中，跳过 AI 响应发送")
                 # 清理事件上下文，但不标记完成
                 if progress_card:
                     progress_card._emit_update()
@@ -1472,7 +1472,7 @@ def trigger_ai_response_for_request(server, chat_request: ChatRequest, adapter=N
             )
 
             # 使用流式发送
-            _log.info(f"[Stream] _trigger_ai_response 准备发送流式响应")
+            _log.info("[Stream] _trigger_ai_response 准备发送流式响应")
             if channel_capabilities.supports_stream:
                 server._stream_send_response(session_id, assistant_message)
             else:
@@ -1575,7 +1575,7 @@ def trigger_ai_response_for_request(server, chat_request: ChatRequest, adapter=N
                     or not current_name
                     or current_name.startswith("Web 会话")
                 ) and message_count >= 4:
-                    _log.info(f"[SessionRename] 条件满足，开始生成新名称...")
+                    _log.info("[SessionRename] 条件满足，开始生成新名称...")
                     new_name = server._generate_session_name(
                         session["messages"],
                         session_id=session_id,
@@ -1594,7 +1594,7 @@ def trigger_ai_response_for_request(server, chat_request: ChatRequest, adapter=N
                             f"[SessionRename] 会话 {session_id[:8]}... 已重命名为: {new_name}"
                         )
                     else:
-                        _log.warning(f"[SessionRename] 生成名称失败，返回 None")
+                        _log.warning("[SessionRename] 生成名称失败，返回 None")
                 else:
                     _log.info(
                         f"[SessionRename] 条件不满足: startswith={current_name.startswith('会话')}, empty={not current_name}, count={message_count}"
@@ -1717,7 +1717,7 @@ def stream_send_response(
             },
             room=session_id,
         )
-        _log.info(f"[Stream] 已发送 ai_stream_start")
+        _log.info("[Stream] 已发送 ai_stream_start")
 
         # 清理并分割内容
         content = content.strip()
@@ -1747,7 +1747,7 @@ def stream_send_response(
             {"session_id": session_id, "message_id": message["id"], "is_end": True},
             room=session_id,
         )
-        _log.info(f"[Stream] 流式发送完成")
+        _log.info("[Stream] 流式发送完成")
 
     except Exception as e:
         _log.error(f"Stream send error: {e}", exc_info=True)
@@ -1799,7 +1799,7 @@ def get_ai_response_with_images(
                     api_key = config.get("ApiKey", "silicon_api_key", fallback="") or config.get("ApiKey", "api_key", fallback="")
                     base_url = "https://api.siliconflow.cn/v1"
                     model = config.get("pic", "model", fallback="zai-org/GLM-4.6V")
-                except Exception as e:
+                except Exception:
                     pass
 
         if not api_key:
@@ -1860,7 +1860,7 @@ def get_ai_response_with_images(
         content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
         return content.strip() if content else "图片处理完成，但未返回内容。"
 
-    except ImportError as e:
+    except ImportError:
         return "图片处理失败：缺少 requests 库。"
     except Exception as e:
         # 回退到普通响应
@@ -2023,7 +2023,7 @@ server,
                     break
                 except StopIteration:
                     # 用户停止生成，立即抛出
-                    _log.info(f"[AI] 检测到停止信号，中断 Silicon API 请求")
+                    _log.info("[AI] 检测到停止信号，中断 Silicon API 请求")
                     raise
                 except requests.exceptions.Timeout as e:
                     last_error = e
@@ -2173,7 +2173,7 @@ server,
                     break
                 except StopIteration:
                     # 用户停止生成，立即抛出
-                    _log.info(f"[AI] 检测到停止信号，中断 API 请求")
+                    _log.info("[AI] 检测到停止信号，中断 API 请求")
                     raise
                 except requests.exceptions.Timeout as e:
                     last_error = e

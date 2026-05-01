@@ -7,7 +7,7 @@ import cmd
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from nbot import commands
-from nbot.services.ai import ai_client, user_messages, group_messages
+from nbot.services.ai import user_messages, group_messages
 from nbot.services.chat_service import chat as do_chat, load_prompt
 
 logging.basicConfig(level=logging.INFO)
@@ -220,7 +220,7 @@ class NekoBotShell(cmd.Cmd):
                     return
                 wf_name = parts[1]
                 result = asyncio.run(engine.execute_workflow(wf_name, {"test": "data"}))
-                print(f"=== 工作流执行结果 ===")
+                print("=== 工作流执行结果 ===")
                 print(f"状态: {result.status}")
                 print("日志:")
                 for log in result.logs:

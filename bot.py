@@ -139,7 +139,7 @@ def run_cli():
     except ImportError as e:
         _log.error(f"Failed to import CLI module: {e}")
         _log.info("Install rich to enable CLI: pip install rich")
-        print(f"\n错误: 需要安装 rich 库")
+        print("\n错误: 需要安装 rich 库")
         print("请运行: pip install rich")
     except Exception as e:
         _log.error(f"CLI error: {e}")

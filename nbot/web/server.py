@@ -14,8 +14,8 @@ import hashlib
 import secrets
 from datetime import datetime, timedelta
 from typing import Dict, Any, Optional, List
-from flask import Flask, request, jsonify, send_from_directory, g
-from flask_socketio import SocketIO, emit, join_room, leave_room
+from flask import Flask, request, jsonify, g
+from flask_socketio import SocketIO
 from nbot.web.ai_service import (
     get_ai_response,
     get_ai_response_with_images,
@@ -23,10 +23,8 @@ from nbot.web.ai_service import (
     parse_tool_call_from_text,
     stream_ai_response,
     stream_send_response,
-    trigger_ai_response,
     trigger_ai_response_for_request,
 )
-from nbot.web.message_adapter import WebMessageAdapter
 from nbot.web.persistence import (
     init_default_data,
     init_default_skills,
@@ -2700,7 +2698,7 @@ class WebChatServer:
                         "heartbeat",
                         {"content": content, "timestamp": datetime.now().isoformat()},
                     )
-                    _log.info(f"Heartbeat broadcast to all web clients")
+                    _log.info("Heartbeat broadcast to all web clients")
         except Exception as e:
             _log.error(f"Failed to send heartbeat to {target}: {e}")
 

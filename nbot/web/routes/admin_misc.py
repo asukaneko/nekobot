@@ -8,7 +8,6 @@ from collections import defaultdict
 from datetime import datetime, timedelta
 
 from flask import jsonify, request
-from nbot.web.sessions_db import load_sessions as load_sessions_from_db
 
 
 _log = logging.getLogger(__name__)
@@ -449,7 +448,7 @@ def register_admin_misc_routes(app, server):
             
             return jsonify({
                 "success": True,
-                "message": f"核心代码重载完成",
+                "message": "核心代码重载完成",
                 "reloaded": reloaded_modules,
                 "failed": failed_modules,
                 "reloaded_count": len(reloaded_modules),

@@ -3,7 +3,7 @@ Anthropic Messages API 适配器
 将OpenAI格式的请求转换为Anthropic Messages API格式
 """
 import json
-from typing import Dict, List, Any, Optional, Iterator
+from typing import Dict, List, Any, Optional
 
 
 def convert_openai_messages_to_anthropic(messages: List[Dict[str, Any]]) -> tuple:

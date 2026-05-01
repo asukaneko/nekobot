@@ -1,9 +1,8 @@
-import json
 import logging
 from datetime import datetime
 
 from flask import jsonify, request
-from nbot.core.knowledge import TextProcessor, KnowledgeManager, Document, KnowledgeBase
+from nbot.core.knowledge import TextProcessor
 
 _log = logging.getLogger(__name__)
 

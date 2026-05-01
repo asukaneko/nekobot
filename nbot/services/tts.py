@@ -1,4 +1,5 @@
-import os, time
+import os
+import time
 import configparser
 from ncatbot.core.element import Record, MessageChain
 from nbot.web.utils.config_loader import get_tts_model_config

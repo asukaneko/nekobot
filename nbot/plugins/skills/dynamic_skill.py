@@ -1,7 +1,7 @@
 """
 动态 Skill - 从 Web 配置执行
 """
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 import logging
 
 from nbot.plugins.skills.base import BaseSkill, SkillContext, SkillResult

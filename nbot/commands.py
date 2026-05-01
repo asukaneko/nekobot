@@ -4,13 +4,23 @@ from nbot.core.heartbeat import HeartbeatCore
 
 from nbot.web.utils.config_loader import load_config
 from nbot.services.chat_service import group_messages, user_messages, chat, generate_today_summary, summarize_group_text
-from nbot.services.chat_service import delete_session_workspace, get_qq_session_id, ensure_workspace, WORKSPACE_AVAILABLE
+from nbot.services.chat_service import delete_session_workspace, get_qq_session_id, WORKSPACE_AVAILABLE
 from nbot.services.ai import ai_client
 from nbot.services.tts import tts
 import base64
 import hashlib
 import html
-import jmcomic,requests,random,configparser,json,yaml,re,os,asyncio,time,smtplib
+import jmcomic
+import requests
+import random
+import configparser
+import json
+import yaml
+import re
+import os
+import asyncio
+import time
+import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from email.mime.base import MIMEBase
@@ -19,23 +29,9 @@ from jmcomic import *
 from typing import Dict, List
 from datetime import datetime
 from PIL import Image as PILImage
-from difflib import get_close_matches  # 用于模糊匹配
 from ncatbot.core import (
     MessageChain,  
-    Text,         
-    Reply,         
-    At,           
-    AtAll,         
-    Dice,          
-    Face,          
-    Image,         
-    Json,          
-    Music,         
-    CustomMusic,   
-    Record,        
-    Rps,          
-    Video,         
-    File,          
+    Music,          
 )
 #----------------------
 # region 全局变量设置
@@ -1144,13 +1140,13 @@ async def handle_jmcomic(msg, is_group=True):
                         await msg.reply(text=f"该漫画已存在喵~,文件大小：{file_size:.2f} MB，正在发送到群组喵~")
                         await bot.api.post_group_file(msg.group_id, file=pdf_path)
                 else:
-                    await msg.reply(text=f"群组发送漫画已关闭喵~")
+                    await msg.reply(text="群组发送漫画已关闭喵~")
             else:
                 if switch.get_switch_state('jm_send', user_id=str(msg.user_id)):
                     await bot.api.post_private_msg(msg.user_id,text=f"该漫画已存在喵~,文件大小：{file_size:.2f} MB，正在发送喵~")
                     await bot.api.upload_private_file(msg.user_id, pdf_path, f"{comic_id}.pdf")
                 else:
-                    await msg.reply(text=f"该漫画已下载，但用户私信发送漫画已关闭喵~")
+                    await msg.reply(text="该漫画已下载，但用户私信发送漫画已关闭喵~")
             return
 
         if int(comic_id) <= len(comic_cache) and len(comic_cache) > 0 :
@@ -1166,7 +1162,7 @@ async def handle_jmcomic(msg, is_group=True):
         
         try:
             client = JmOption.default().new_jm_client()
-        except JmcomicException as e:
+        except JmcomicException:
             error_msg = "当前禁漫站点接口不可用喵~ 可能是 /setting 接口返回异常，请稍后重试或检查jmcomic配置喵~"
             if is_group:
                 await msg.reply(text=error_msg)
@@ -1175,8 +1171,8 @@ async def handle_jmcomic(msg, is_group=True):
             return
         try:
             album: JmAlbumDetail = client.get_album_detail(comic_id)
-        except MissingAlbumPhotoException as e:
-            error_msg = f"该漫画ID不存在喵~"
+        except MissingAlbumPhotoException:
+            error_msg = "该漫画ID不存在喵~"
             if is_group:
                 await msg.reply(text=error_msg)
             else:
@@ -2129,7 +2125,7 @@ async def handle_precise_remind(msg, is_group=True):
             await bot.api.post_private_msg(msg.user_id, text=reply)
             asyncio.create_task(schedule_task_by_date(target_time, bot.api.post_private_msg, msg.user_id, content))
             
-    except ValueError as e:
+    except ValueError:
         error_msg = "格式错误喵~ 使用: /precise_remind MM-DD HH:MM 提醒内容"
         if is_group:
             await msg.reply(text=error_msg)
@@ -2389,7 +2385,7 @@ async def handle_set(msg, is_group=True):
             await msg.reply(text=text)
         else:
             await bot.api.post_private_msg(msg.user_id, text=text)
-    except Exception as e:
+    except Exception:
         text = "设置失败喵~"
         if is_group:
             await msg.reply(text=text)
@@ -3139,7 +3135,7 @@ def search_wenku8_books(search_term: str, search_type: str, max_pages: int = 3) 
         
         # 检查网站是否关闭
         if '有缘再相聚' in response.text or '网站已关闭' in response.text:
-            _log.warning(f"wenku8.net 网站已关闭")
+            _log.warning("wenku8.net 网站已关闭")
             break
         
         response.encoding = "gbk"
@@ -3262,7 +3258,7 @@ def get_book_detail_by_url(book_url: str) -> dict:
         
         # 检查网站是否关闭
         if response.status_code == 404 or '网站已关闭' in response.text or '有缘再相聚' in response.text:
-            _log.warning(f"wenku8.net 网站已关闭或页面不存在")
+            _log.warning("wenku8.net 网站已关闭或页面不存在")
             return None
         
         response.encoding = "gbk"
@@ -3908,7 +3904,7 @@ async def handle_hotnovel(msg, is_group=True):
 
     except Exception as e:
         _log.error(f"Error in handle_hotnovel: {e}")
-        reply = f"获取热门榜单失败了喵，请稍后再试喵~"
+        reply = "获取热门榜单失败了喵，请稍后再试喵~"
         if is_group:
             await msg.reply(text=reply)
         else:
@@ -4028,7 +4024,7 @@ async def handle_mc(msg, is_group=True):
             await msg.reply(text=reply)
         else:
             await bot.api.post_private_msg(msg.user_id, text=reply)
-    except Exception as e:
+    except Exception:
         reply = "获取服务器状态失败喵~"
         if is_group:
             await msg.reply(text=reply)
@@ -4109,7 +4105,7 @@ async def handle_gf(msg,is_group=True):
 
         if ('x' not in size) and ('k' not in size) :
             size = default_size   
-    except Exception as e:
+    except Exception:
         error_msg = f"请输入图片描述喵~ 格式: {prefix} <描述> [大小，默认{default_size}]"
         await (msg.reply(text=error_msg) if is_group else bot.api.post_private_msg(msg.user_id, text=error_msg))
         return
@@ -4339,7 +4335,7 @@ async def handle_help(msg, is_group=True):
                     "commands": [cmd for category in command_categories.values() for cmd in category["commands"]] + ["/help 或者 /h -> 查看帮助"]
                 }
                 if len(command_categories[selected_category]['commands']) == 0:
-                    help_text += f"你没有权限查看当前分类的命令喵~\n"
+                    help_text += "你没有权限查看当前分类的命令喵~\n"
 
                 for cmd_text in command_categories[selected_category]['commands']:
                     help_text += f"{cmd_text}\n"
@@ -4508,7 +4504,6 @@ async def handle_private_message(msg):
 
 
 # 获取机器人QQ号
-import configparser
 config_parser = configparser.ConfigParser()
 config_parser.read('config.ini', encoding='utf-8')
 BOT_UIN = str(config_parser.get('BotConfig', 'bot_uin', fallback=""))
@@ -4607,7 +4602,6 @@ def _save_incoming_files_to_workspace(msg, is_group: bool):
                 if not file_url and file_id:
                     # 使用 OneBot HTTP API 获取文件下载链接
                     try:
-                        import aiohttp
                         # 构造 OneBot API 请求
                         # 参考: https://github.com/botuniverse/onebot-11/blob/master/api/public.md#get_file-
                         api_url = "http://127.0.0.1:3000"  # 默认 OneBot HTTP 地址
@@ -4634,7 +4628,7 @@ def _save_incoming_files_to_workspace(msg, is_group: bool):
                     
                     # 如果上面的方法失败，尝试直接通过 file_id 下载
                     if not file_url:
-                        _log.info(f"[文件保存] 尝试直接使用 file_id 下载")
+                        _log.info("[文件保存] 尝试直接使用 file_id 下载")
                         # 某些协议支持直接通过 file_id 下载
                         try:
                             # 尝试从 ncatbot 配置中获取基础 URL

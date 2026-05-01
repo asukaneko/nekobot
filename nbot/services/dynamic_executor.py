@@ -7,7 +7,7 @@ import logging
 import re
 import requests
 import datetime
-from typing import Dict, Any, Optional
+from typing import Dict, Any
 
 _log = logging.getLogger(__name__)
 
@@ -409,7 +409,6 @@ class DynamicExecutor:
         
         try:
             # 使用正则表达式替换 {{var}} 格式的变量
-            import re
             result = template
             for key, value in variables.items():
                 # 替换 {{key}} 格式

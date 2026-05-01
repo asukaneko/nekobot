@@ -1,4 +1,9 @@
-import os, json, datetime, time, re, copy
+import os
+import json
+import datetime
+import time
+import re
+import copy
 from concurrent.futures import ThreadPoolExecutor, TimeoutError
 from nbot.services.ai import (
     ai_client, user_messages, group_messages, MAX_HISTORY_LENGTH,
@@ -289,7 +294,7 @@ def _get_ai_response_with_tools_qq(messages: list, tools: list, session_id: str 
                         # 检查是否需要用户确认（exec_command 的特殊处理）
                         if tool_result.get('require_confirmation'):
                             # 返回确认请求，中断工具调用流程
-                            confirmation_msg = tool_result.get('message', f"AI 请求执行命令，需要您的确认。")
+                            confirmation_msg = tool_result.get('message', "AI 请求执行命令，需要您的确认。")
                             request_id = tool_result.get('request_id', '')
                             return f"{confirmation_msg}\n\n请回复「确认」来执行，或回复「取消」来拒绝。\n[请求ID: {request_id[:8] if request_id else 'N/A'}]"
                         

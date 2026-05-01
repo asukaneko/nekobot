@@ -9,7 +9,7 @@ Skills 工具模块 - 提供 AI 访问 Skills 存储的功能
 """
 import logging
 import os
-from typing import Dict, Any, List
+from typing import Dict, Any
 from nbot.services.tool_registry import register_tool
 
 _log = logging.getLogger(__name__)

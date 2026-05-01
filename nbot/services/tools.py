@@ -374,7 +374,6 @@ class ToolExecutor:
         try:
             import feedparser
             import socket
-            import urllib.error
             import re
 
             # 设置超时
@@ -780,7 +779,7 @@ class ToolExecutor:
                 "image_url": processed_image_url
             }
             
-            _log.info(f"[VLM] 发送图片理解请求")
+            _log.info("[VLM] 发送图片理解请求")
             _log.info(f"[VLM] Prompt: {prompt[:100]}{'...' if len(prompt) > 100 else ''}")
             _log.info(f"[VLM] Image: {image_source[:100]}{'...' if len(image_source) > 100 else ''}")
             
@@ -873,7 +872,7 @@ class ToolExecutor:
                 if re.search(pattern, command, re.IGNORECASE):
                     return {
                         "success": False,
-                        "error": f"命令包含危险操作模式，已阻止执行",
+                        "error": "命令包含危险操作模式，已阻止执行",
                         "command": command,
                         "blocked_reason": "dangerous_pattern"
                     }
@@ -1103,7 +1102,6 @@ class ToolExecutor:
         try:
             import os
             import json
-            from datetime import datetime
 
             if not session_id:
                 return {

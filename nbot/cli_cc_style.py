@@ -12,26 +12,19 @@ import requests
 import copy
 import logging
 import threading
-import queue
 import shutil
-import time
 from datetime import datetime
 from typing import Dict, Any, List, Optional
-from concurrent.futures import ThreadPoolExecutor, Future
 
 from rich.console import Console, Group
 from rich.panel import Panel
 from rich.text import Text
 from rich.table import Table
-from rich.box import ROUNDED, HEAVY, DOUBLE
-from rich.prompt import Prompt
+from rich.box import ROUNDED, HEAVY
 from rich.align import Align
 from rich import box
-from rich.markdown import Markdown
 from rich.syntax import Syntax
-from rich.layout import Layout
 from rich.live import Live
-from rich.status import Status
 
 try:
     from nbot.core import build_cli_session_id
@@ -252,7 +245,7 @@ class CCStyleCLI:
                         if m.get("enabled", True)
                     ]
                     self.current_model_id = data.get("active_model_id")
-            except Exception as e:
+            except Exception:
                 pass
 
     def _get_current_model(self) -> Optional[Dict]:
@@ -564,7 +557,7 @@ No recent activity
             text.append(f"Long conversation ({msg_count} msgs)", style="dim magenta")
         
         # 显示模型信息
-        text.append(f"  [", style="dim")
+        text.append("  [", style="dim")
         text.append(escape_rich_tags(model_name[:15]), style="dim cyan")
         text.append("]", style="dim")
         
@@ -628,7 +621,6 @@ No recent activity
         """以卡片样式渲染工具调用和结果"""
         from rich.text import Text
         from rich.panel import Panel
-        from rich.console import Group
         
         # 工具名称不截断，完整显示
         tool_name_display = escape_rich_tags(tool_name)
@@ -914,8 +906,6 @@ No recent activity
         返回: {"content": str, "thinking": str, "tool_calls": list, "interrupted": bool}
         """
         import json
-        from rich.live import Live
-        from rich.panel import Panel
         from rich.text import Text
         
         content_parts = []
@@ -1138,7 +1128,7 @@ No recent activity
                     if name and name not in existing_names:
                         tools.append(tool)
                         existing_names.add(name)
-            except Exception as e:
+            except Exception:
                 pass
         
         return tools
@@ -1499,7 +1489,7 @@ No recent activity
             os.makedirs(os.path.dirname(sessions_file), exist_ok=True)
             with open(sessions_file, 'w', encoding='utf-8') as f:
                 json.dump(sessions, f, ensure_ascii=False, indent=2)
-        except Exception as e:
+        except Exception:
             pass
 
     def _handle_command(self, cmd_line: str):
@@ -1787,7 +1777,6 @@ No recent activity
         selected_idx = 0
 
         # 使用 Live 实现动态更新
-        from rich.live import Live
         from rich.table import Table
         from rich.box import ROUNDED
 
@@ -2117,7 +2106,7 @@ No recent activity
             if choice_lower in preset["name"].lower():
                 self._apply_personality(preset)
                 self.console.print(f"[green]✓ Switched to {preset['name']}[/green]")
-                self.console.print(f"[dim]New personality will take effect in the next message[/dim]")
+                self.console.print("[dim]New personality will take effect in the next message[/dim]")
                 return
         
         self.console.print(f"[red]Personality not found: {choice}[/red]")
@@ -2184,7 +2173,7 @@ No recent activity
             os.makedirs(os.path.dirname(personality_file), exist_ok=True)
             with open(personality_file, 'w', encoding='utf-8') as f:
                 json.dump(default_personality, f, ensure_ascii=False, indent=2)
-        except Exception as e:
+        except Exception:
             pass
         
         # 注意：不修改 neko.txt，因为它是初始提示词模板
@@ -2320,14 +2309,14 @@ No recent activity
             model_name = escape_rich_tags(current_model.get('name', 'Unknown'))
             self.console.print(f"[green]●[/green] Model: {model_name}")
         else:
-            self.console.print(f"[red]●[/red] Model: Not configured")
+            self.console.print("[red]●[/red] Model: Not configured")
 
         # 工具状态
         tool_count = len(self._get_all_tool_names())
         if tool_count > 0:
             self.console.print(f"[green]●[/green] Tools: {tool_count} available")
         else:
-            self.console.print(f"[red]●[/red] Tools: Not available")
+            self.console.print("[red]●[/red] Tools: Not available")
 
         # 会话数量
         sessions_file = os.path.join("data", "web", "sessions.json")
@@ -2337,7 +2326,7 @@ No recent activity
                     sessions = json.load(f)
                 self.console.print(f"[green]●[/green] Sessions: {len(sessions)}")
             except:
-                self.console.print(f"[dim]●[/dim] Sessions: Unknown")
+                self.console.print("[dim]●[/dim] Sessions: Unknown")
 
         # 记忆数量
         memory_file = os.path.join("data", "web", "memories.json")
@@ -2395,7 +2384,6 @@ No recent activity
         
         import re
         from rich.text import Text
-        from rich.syntax import Syntax
         from rich.table import Table
         from rich.box import ROUNDED
         
@@ -2638,7 +2626,7 @@ No recent activity
                 import subprocess
                 subprocess.run(['xdg-open', file_path], check=True)
             return True
-        except Exception as e:
+        except Exception:
             return False
     
     def _escape_rich_tags_in_markdown(self, content: str) -> str:
@@ -2845,7 +2833,7 @@ No recent activity
         self.messages.append(assistant_message)
 
         if interrupted:
-            self.console.print(f"[dim][interrupted][/dim]")
+            self.console.print("[dim][interrupted][/dim]")
 
         self.save_session()
         

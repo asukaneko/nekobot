@@ -2,7 +2,7 @@ import asyncio
 import logging
 from typing import Optional, List, Dict, Any
 from nbot.core.prompt_format import format_skills_prompt
-from nbot.plugins.skills.base import SkillContext, SkillResult, SkillRegistry
+from nbot.plugins.skills.base import SkillContext, SkillRegistry
 
 _log = logging.getLogger(__name__)
 

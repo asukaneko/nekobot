@@ -2,7 +2,6 @@
 Todo 工具模块 - 提供 AI 待办事项管理功能
 用于复杂任务的管理和跟踪
 """
-import json
 import logging
 from typing import Dict, Any, List
 from datetime import datetime
