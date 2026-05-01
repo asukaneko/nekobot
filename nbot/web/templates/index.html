@@ -6610,6 +6610,275 @@
             gap: 12px;
         }
 
+        /* Message Style Editor */
+        .style-editor-content {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 24px;
+        }
+
+        .style-settings-panel {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+            font-size: 15px;
+        }
+
+        .style-section {
+            background: var(--bg-tertiary);
+            border-radius: 12px;
+            padding: 20px;
+        }
+
+        .style-section h4 {
+            margin: 0 0 20px 0;
+            font-size: 16px;
+            font-weight: 600;
+            color: var(--text-primary);
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .style-section .form-label {
+            font-size: 14px;
+            font-weight: 500;
+            color: var(--text-secondary);
+            margin-bottom: 10px;
+        }
+
+        .style-section .form-group {
+            margin-bottom: 18px;
+        }
+
+        .style-section .form-group:last-child {
+            margin-bottom: 0;
+        }
+
+        .form-range {
+            width: 100%;
+            height: 24px;
+            border-radius: 12px;
+            background: transparent;
+            outline: none;
+            -webkit-appearance: none;
+            cursor: pointer;
+            margin-top: 8px;
+            margin-bottom: 8px;
+            position: relative;
+            overflow: visible;
+            padding: 0;
+        }
+
+        .form-range::after {
+            content: '';
+            position: absolute;
+            left: 0;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 100%;
+            height: 8px;
+            background: var(--border-color);
+            border-radius: 4px;
+            z-index: 0;
+            pointer-events: none;
+        }
+
+        .form-range::before {
+            content: '';
+            position: absolute;
+            left: 0;
+            top: 50%;
+            transform: translateY(-50%);
+            height: 8px;
+            width: var(--progress, 50%);
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border-radius: 4px;
+            pointer-events: none;
+            z-index: 1;
+        }
+
+        .form-range::-webkit-slider-runnable-track {
+            height: 8px;
+            border-radius: 4px;
+            background: var(--border-color);
+            display: flex;
+            align-items: center;
+        }
+
+        .form-range::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 22px;
+            height: 22px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            cursor: grab;
+            box-shadow: 0 3px 12px rgba(102, 126, 234, 0.5), inset 0 2px 4px rgba(255, 255, 255, 0.3);
+            border: 3px solid white;
+            transition: transform 0.2s, box-shadow 0.2s;
+            position: relative;
+            z-index: 3;
+            margin-top: -6px;
+        }
+
+        .form-range::-webkit-slider-thumb:hover {
+            transform: scale(1.15);
+            box-shadow: 0 5px 16px rgba(102, 126, 234, 0.7), inset 0 2px 4px rgba(255, 255, 255, 0.3);
+        }
+
+        .form-range::-webkit-slider-thumb:active {
+            cursor: grabbing;
+            transform: scale(1.05);
+        }
+
+        .form-range::-moz-range-track {
+            height: 8px;
+            border-radius: 4px;
+            background: var(--border-color);
+        }
+
+        .form-range::-moz-range-thumb {
+            width: 22px;
+            height: 22px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            cursor: grab;
+            border: 3px solid white;
+            box-shadow: 0 3px 12px rgba(102, 126, 234, 0.5), inset 0 2px 4px rgba(255, 255, 255, 0.3);
+        }
+
+        .form-range::-moz-range-thumb:hover {
+            transform: scale(1.15);
+            box-shadow: 0 5px 16px rgba(102, 126, 234, 0.7), inset 0 2px 4px rgba(255, 255, 255, 0.3);
+        }
+
+        .form-range::-moz-range-thumb:active {
+            cursor: grabbing;
+        }
+
+        .color-picker-row {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+        }
+
+        .form-color-picker {
+            width: 40px;
+            height: 40px;
+            border: 2px solid var(--border-color);
+            border-radius: 8px;
+            cursor: pointer;
+            background: none;
+            padding: 2px;
+        }
+
+        .form-color-picker::-webkit-color-swatch-wrapper {
+            padding: 0;
+        }
+
+        .form-color-picker::-webkit-color-swatch {
+            border-radius: 4px;
+            border: none;
+        }
+
+        .style-preview-panel {
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+
+        .style-preview-panel h4 {
+            margin: 0;
+            font-size: 16px;
+            font-weight: 600;
+            color: var(--text-primary);
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .style-preview-container {
+            background: var(--bg-tertiary);
+            border-radius: 12px;
+            padding: 20px;
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+            overflow-y: auto;
+            min-height: 300px;
+        }
+
+        .preview-message {
+            display: flex;
+            gap: 12px;
+            align-items: flex-start;
+        }
+
+        .preview-message.user {
+            flex-direction: row-reverse;
+        }
+
+        .preview-avatar {
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            background: var(--accent-primary);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 14px;
+            flex-shrink: 0;
+        }
+
+        .preview-bubble {
+            max-width: 70%;
+            padding: 12px 16px;
+            border-radius: 12px;
+            word-break: break-word;
+        }
+
+        .preview-message.user .preview-bubble {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border-bottom-right-radius: 4px;
+        }
+
+        .preview-message.assistant .preview-bubble {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-bottom-left-radius: 4px;
+        }
+
+        .preview-bubble p {
+            margin: 0;
+        }
+
+        .preview-bubble p + p {
+            margin-top: var(--paragraph-spacing, 12px);
+        }
+
+        @media (max-width: 768px) {
+            .style-editor-content {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        /* Style Editor Page */
+        .style-editor-page-content {
+            display: grid;
+            grid-template-columns: 380px 1fr;
+            gap: 24px;
+            min-height: 600px;
+        }
+
+        @media (max-width: 968px) {
+            .style-editor-page-content {
+                grid-template-columns: 1fr;
+            }
+        }
+
         /* Theme Settings */
         .theme-mode-selector {
             display: flex;
@@ -9738,6 +10007,107 @@
                                                             <i class="fas fa-trash"></i>
                                                         </button>
                                                     </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Message Style Editor Page -->
+                    <div v-if="currentPage === 'message-style'" class="fade-in">
+                        <div class="card">
+                            <div class="card-header">
+                                <span class="card-title"><i class="fas fa-paint-brush"></i> 消息样式编辑</span>
+                                <div style="display: flex; gap: 12px;">
+                                    <button class="btn" @click="resetMessageStyle">
+                                        <i class="fas fa-undo"></i> 恢复默认
+                                    </button>
+                                    <button class="btn btn-primary" @click="saveMessageStyle">
+                                        <i class="fas fa-save"></i> 保存设置
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="card-body">
+                                <div class="style-editor-page-content">
+                                    <!-- 左侧：设置面板 -->
+                                    <div class="style-settings-panel">
+                                        <div class="style-section">
+                                            <h4><i class="fas fa-font"></i> 文字样式</h4>
+                                            <div class="form-group">
+                                                <label class="form-label">字体</label>
+                                                <select v-model="messageStyle.fontFamily" class="form-select" @change="updateStylePreview">
+                                                    <option value="system-ui, -apple-system, sans-serif">系统默认</option>
+                                                    <option value="'Microsoft YaHei', 'PingFang SC', sans-serif">微软雅黑/苹方</option>
+                                                    <option value="'SimSun', 'Songti SC', serif">宋体</option>
+                                                    <option value="'SimHei', 'Heiti SC', sans-serif">黑体</option>
+                                                    <option value="'KaiTi', 'Kaiti SC', serif">楷体</option>
+                                                    <option value="'Courier New', monospace">等宽字体</option>
+                                                </select>
+                                            </div>
+                                            <div class="form-group">
+                                                <label class="form-label">字号: {{ messageStyle.fontSize }}px</label>
+                                                <input type="range" v-model.number="messageStyle.fontSize" min="12" max="24" class="form-range" @input="updateStylePreview">
+                                            </div>
+                                            <div class="form-group">
+                                                <label class="form-label">行高: {{ messageStyle.lineHeight }}</label>
+                                                <input type="range" v-model.number="messageStyle.lineHeight" min="1.2" max="2.5" step="0.1" class="form-range" @input="updateStylePreview">
+                                            </div>
+                                            <div class="form-group">
+                                                <label class="form-label">段间距: {{ messageStyle.paragraphSpacing }}px</label>
+                                                <input type="range" v-model.number="messageStyle.paragraphSpacing" min="0" max="30" class="form-range" @input="updateStylePreview">
+                                            </div>
+                                            <div class="form-group">
+                                                <label class="form-label">文字颜色</label>
+                                                <div class="color-picker-row">
+                                                    <input type="color" v-model="messageStyle.textColor" class="form-color-picker" @input="updateStylePreview">
+                                                    <input type="text" v-model="messageStyle.textColor" class="form-input" placeholder="留空使用默认" style="flex: 1;">
+                                                    <button class="btn btn-sm" @click="messageStyle.textColor = ''; updateStylePreview()">重置</button>
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        <div class="style-section">
+                                            <h4><i class="fas fa-comment-dots"></i> 气泡样式</h4>
+                                            <div class="form-group">
+                                                <label class="form-label">用户气泡颜色</label>
+                                                <div class="color-picker-row">
+                                                    <input type="color" v-model="messageStyle.userBubbleColor" class="form-color-picker" @input="updateStylePreview">
+                                                    <input type="text" v-model="messageStyle.userBubbleColor" class="form-input" placeholder="留空使用默认" style="flex: 1;">
+                                                    <button class="btn btn-sm" @click="messageStyle.userBubbleColor = ''; updateStylePreview()">重置</button>
+                                                </div>
+                                            </div>
+                                            <div class="form-group">
+                                                <label class="form-label">助手气泡颜色</label>
+                                                <div class="color-picker-row">
+                                                    <input type="color" v-model="messageStyle.assistantBubbleColor" class="form-color-picker" @input="updateStylePreview">
+                                                    <input type="text" v-model="messageStyle.assistantBubbleColor" class="form-input" placeholder="留空使用默认" style="flex: 1;">
+                                                    <button class="btn btn-sm" @click="messageStyle.assistantBubbleColor = ''; updateStylePreview()">重置</button>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <!-- 右侧：实时预览 -->
+                                    <div class="style-preview-panel">
+                                        <h4><i class="fas fa-eye"></i> 实时预览</h4>
+                                        <div class="style-preview-container" :style="previewContainerStyle">
+                                            <!-- 用户消息预览 -->
+                                            <div class="preview-message user" :style="userBubbleStyle">
+                                                <div class="preview-avatar"><i class="fas fa-user"></i></div>
+                                                <div class="preview-bubble" :style="userBubbleContentStyle">
+                                                    <p>这是一段用户发送的消息预览。</p>
+                                                    <p>可以看到字体、颜色和间距的实时效果。</p>
+                                                </div>
+                                            </div>
+                                            <!-- 助手消息预览 -->
+                                            <div class="preview-message assistant" :style="assistantBubbleStyle">
+                                                <div class="preview-avatar"><i class="fas fa-robot"></i></div>
+                                                <div class="preview-bubble" :style="assistantBubbleContentStyle">
+                                                    <p>这是助手回复的消息预览。</p>
+                                                    <p>第二段文字，用于展示段落间距效果。</p>
                                                 </div>
                                             </div>
                                         </div>
@@ -13720,7 +14090,8 @@
                         ],
                         chat: [
                             { id: 'chat', label: '聊天', icon: 'fas fa-comments' },
-                            { id: 'sessions', label: '会话管理', icon: 'fas fa-list' }
+                            { id: 'sessions', label: '会话管理', icon: 'fas fa-list' },
+                            { id: 'message-style', label: '样式编辑', icon: 'fas fa-paint-brush' }
                         ],
                         config: [
                             { id: 'task-center', label: '任务中心', icon: 'fas fa-calendar-check' },
@@ -13799,7 +14170,19 @@
                     draggedSession: null,  // 当前被拖动的会话
                     dragOverSessionId: null,  // 拖动覆盖的会话 ID
                     dragPosition: 'top',  // 放置位置：top 或 bottom
-                    
+
+                    // 消息样式设置
+                    messageStyle: {
+                        fontFamily: localStorage.getItem('messageFontFamily') || 'system-ui, -apple-system, sans-serif',
+                        fontSize: parseInt(localStorage.getItem('messageFontSize')) || 14,
+                        lineHeight: parseFloat(localStorage.getItem('messageLineHeight')) || 1.6,
+                        paragraphSpacing: parseInt(localStorage.getItem('messageParagraphSpacing')) || 12,
+                        textColor: localStorage.getItem('messageTextColor') || '',
+                        userBubbleColor: localStorage.getItem('userBubbleColor') || '',
+                        assistantBubbleColor: localStorage.getItem('assistantBubbleColor') || ''
+                    },
+                    showMessageStyleModal: false,
+
                     // QQ Chat
                     chatTab: 'web',  // web, cli, qq_private, qq_group
                     qqPrivateUsers: [],
@@ -14375,6 +14758,7 @@
                         dashboard: '仪表盘',
                         chat: '聊天',
                         sessions: '会话管理',
+                        'message-style': '样式编辑',
                         workflows: '工作流',
                         personality: '人格设置',
                         memory: '记忆管理',
@@ -14386,6 +14770,47 @@
                         debug: '调试台'
                     };
                     return titles[this.currentPage] || 'NekoBot';
+                },
+
+                // 消息样式预览计算属性
+                previewContainerStyle() {
+                    return {
+                        fontFamily: this.messageStyle.fontFamily,
+                        fontSize: this.messageStyle.fontSize + 'px',
+                        lineHeight: this.messageStyle.lineHeight,
+                        '--paragraph-spacing': this.messageStyle.paragraphSpacing + 'px'
+                    };
+                },
+
+                userBubbleStyle() {
+                    return {};
+                },
+
+                userBubbleContentStyle() {
+                    const style = {};
+                    if (this.messageStyle.textColor) {
+                        style.color = this.messageStyle.textColor;
+                    }
+                    if (this.messageStyle.userBubbleColor) {
+                        style.background = this.messageStyle.userBubbleColor;
+                    }
+                    return style;
+                },
+
+                assistantBubbleStyle() {
+                    return {};
+                },
+
+                assistantBubbleContentStyle() {
+                    const style = {};
+                    if (this.messageStyle.textColor) {
+                        style.color = this.messageStyle.textColor;
+                    }
+                    if (this.messageStyle.assistantBubbleColor) {
+                        style.background = this.messageStyle.assistantBubbleColor;
+                        style.borderColor = this.messageStyle.assistantBubbleColor;
+                    }
+                    return style;
                 },
 
                 filteredApiDocs() {
@@ -14606,6 +15031,9 @@
                 // 初始化主题
                 this.initTheme();
 
+                // 应用已保存的消息样式
+                this.applyMessageStyles();
+
                 // 尝试使用保存的 Token 自动登录
                 const savedToken = localStorage.getItem('auth_token');
                 const savedUsername = localStorage.getItem('username');
@@ -14713,6 +15141,97 @@
                         return;
                     }
                     event.stopPropagation();
+                },
+
+                // 消息样式编辑方法
+                openMessageStyleEditor() {
+                    this.showMessageStyleModal = true;
+                    this.$nextTick(() => this.updateStylePreview());
+                },
+
+                updateStylePreview() {
+                    // 实时预览由计算属性自动处理
+                    this.$forceUpdate();
+                    // 更新滑条进度显示
+                    this.$nextTick(() => {
+                        this.updateRangeProgress();
+                    });
+                },
+
+                updateRangeProgress() {
+                    // 更新所有滑条的进度条颜色
+                    const ranges = document.querySelectorAll('.style-editor-page-content .form-range');
+                    ranges.forEach(range => {
+                        const min = parseFloat(range.min) || 0;
+                        const max = parseFloat(range.max) || 100;
+                        const value = parseFloat(range.value) || 0;
+                        const progress = ((value - min) / (max - min)) * 100;
+                        range.style.setProperty('--progress', progress + '%');
+                    });
+                },
+
+                saveMessageStyle() {
+                    // 保存到 localStorage
+                    localStorage.setItem('messageFontFamily', this.messageStyle.fontFamily);
+                    localStorage.setItem('messageFontSize', this.messageStyle.fontSize);
+                    localStorage.setItem('messageLineHeight', this.messageStyle.lineHeight);
+                    localStorage.setItem('messageParagraphSpacing', this.messageStyle.paragraphSpacing);
+                    localStorage.setItem('messageTextColor', this.messageStyle.textColor);
+                    localStorage.setItem('userBubbleColor', this.messageStyle.userBubbleColor);
+                    localStorage.setItem('assistantBubbleColor', this.messageStyle.assistantBubbleColor);
+
+                    this.showMessageStyleModal = false;
+                    this.showToast('消息样式已保存', 'success');
+
+                    // 应用样式到当前聊天
+                    this.applyMessageStyles();
+                },
+
+                resetMessageStyle() {
+                    this.messageStyle = {
+                        fontFamily: 'system-ui, -apple-system, sans-serif',
+                        fontSize: 14,
+                        lineHeight: 1.6,
+                        paragraphSpacing: 12,
+                        textColor: '',
+                        userBubbleColor: '',
+                        assistantBubbleColor: ''
+                    };
+                    this.updateStylePreview();
+                },
+
+                applyMessageStyles() {
+                    // 创建样式标签
+                    let styleEl = document.getElementById('message-custom-styles');
+                    if (!styleEl) {
+                        styleEl = document.createElement('style');
+                        styleEl.id = 'message-custom-styles';
+                        document.head.appendChild(styleEl);
+                    }
+
+                    const textColor = this.messageStyle.textColor || 'inherit';
+                    const userBubbleColor = this.messageStyle.userBubbleColor || '';
+                    const assistantBubbleColor = this.messageStyle.assistantBubbleColor || '';
+
+                    styleEl.textContent = `
+                        .message-content,
+                        .message-content .markdown-body,
+                        .message-content .markdown-body p,
+                        .message-content .markdown-body li {
+                            font-family: ${this.messageStyle.fontFamily} !important;
+                            font-size: ${this.messageStyle.fontSize}px !important;
+                            line-height: ${this.messageStyle.lineHeight} !important;
+                            color: ${textColor} !important;
+                        }
+                        .message-content .markdown-body p {
+                            margin-bottom: ${this.messageStyle.paragraphSpacing}px !important;
+                        }
+                        .message-content .markdown-body p:last-child {
+                            margin-bottom: 0 !important;
+                        }
+                        ${userBubbleColor ? `.message.user .message-content { background: ${userBubbleColor} !important; }` : ''}
+                        ${assistantBubbleColor ? `.message.assistant .message-content { background: ${assistantBubbleColor} !important; }` : ''}
+                    `;
                 },
 
                 // 拖动排序方法
@@ -15072,6 +15591,12 @@
                     this.isMobileMenuOpen = false;
                     this.isMobileChatPickerOpen = false;
                     this.loadPageData(page);
+                    // 如果是样式编辑页面，初始化滑条进度
+                    if (page === 'message-style') {
+                        this.$nextTick(() => {
+                            this.updateRangeProgress();
+                        });
+                    }
                 },
 
                 toggleSidebar() {
