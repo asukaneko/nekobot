@@ -1,0 +1,190 @@
+        #boot-overlay {
+            position: fixed;
+            inset: 0;
+            z-index: 99999;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: radial-gradient(circle at top, rgba(236,72,153,0.18), transparent 32%), #0d1117;
+            color: #e6edf3;
+            transition: opacity 0.25s ease, visibility 0.25s ease;
+        }
+        #boot-overlay.is-hidden {
+            opacity: 0;
+            visibility: hidden;
+            pointer-events: none;
+        }
+        .boot-card {
+            width: min(560px, calc(100vw - 32px));
+            padding: 28px 24px;
+            border-radius: 20px;
+            background: rgba(22, 27, 34, 0.92);
+            border: 1px solid rgba(255,255,255,0.08);
+            box-shadow: 0 24px 80px rgba(0, 0, 0, 0.35);
+        }
+        .boot-row {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            margin-bottom: 14px;
+        }
+        .boot-logo {
+            width: 54px;
+            height: 54px;
+            border-radius: 14px;
+            object-fit: cover;
+            flex: none;
+        }
+        .boot-title {
+            margin: 0;
+            font-size: 22px;
+            font-weight: 700;
+        }
+        .boot-subtitle {
+            margin: 4px 0 0;
+            color: #8b949e;
+            font-size: 14px;
+        }
+        .boot-progress {
+            height: 8px;
+            overflow: hidden;
+            border-radius: 999px;
+            background: rgba(255,255,255,0.08);
+            margin: 18px 0 12px;
+        }
+        .boot-progress::after {
+            content: '';
+            display: block;
+            width: 36%;
+            height: 100%;
+            border-radius: inherit;
+            background: linear-gradient(90deg, #ec4899, #58a6ff);
+            animation: boot-loading 1.2s ease-in-out infinite;
+        }
+        .boot-status {
+            margin: 0;
+            color: #c9d1d9;
+            font-size: 14px;
+            line-height: 1.6;
+        }
+        .boot-status strong {
+            color: #fff;
+        }
+        .boot-tips {
+            margin-top: 12px;
+            color: #8b949e;
+            font-size: 13px;
+            line-height: 1.6;
+        }
+        .boot-error {
+            margin-top: 14px;
+            padding: 12px 14px;
+            border-radius: 12px;
+            background: rgba(218,54,51,0.12);
+            border: 1px solid rgba(218,54,51,0.28);
+            color: #ffb4b0;
+            font-size: 13px;
+            line-height: 1.6;
+            display: none;
+        }
+        .boot-error.is-visible {
+            display: block;
+        }
+        @keyframes boot-loading {
+            0% { transform: translateX(-120%); }
+            100% { transform: translateX(320%); }
+        }
+        /* 左右拖动式开关 */
+        .toggle-switch {
+            position: relative;
+            width: 48px;
+            height: 26px;
+            background: var(--border-color);
+            border-radius: 13px;
+            cursor: pointer;
+            transition: background 0.3s ease;
+        }
+        .toggle-switch.active {
+            background: var(--success);
+        }
+        .toggle-slider {
+            position: absolute;
+            top: 3px;
+            left: 3px;
+            width: 20px;
+            height: 20px;
+            background: white;
+            border-radius: 50%;
+            transition: transform 0.3s ease;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+        }
+        .toggle-switch.active .toggle-slider {
+            transform: translateX(22px);
+        }
+
+        /* 功能开关网格布局 */
+        .feature-switches-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 12px;
+        }
+
+        .feature-switch-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 12px 16px;
+            background: var(--bg-tertiary);
+            border-radius: 10px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            border: 1px solid transparent;
+        }
+
+        .feature-switch-item:hover {
+            background: var(--surface);
+            border-color: var(--border-color);
+        }
+
+        .feature-switch-info {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex: 1;
+        }
+
+        .feature-switch-icon {
+            width: 32px;
+            height: 32px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: var(--bg-secondary);
+            border-radius: 8px;
+            color: var(--accent-primary);
+            font-size: 14px;
+        }
+
+        .feature-switch-label {
+            color: var(--text-primary);
+            font-size: 14px;
+            font-weight: 500;
+        }
+
+        @media (max-width: 1200px) {
+            .feature-switches-grid {
+                grid-template-columns: repeat(3, 1fr);
+            }
+        }
+
+        @media (max-width: 900px) {
+            .feature-switches-grid {
+                grid-template-columns: repeat(2, 1fr);
+            }
+        }
+
+        @media (max-width: 600px) {
+            .feature-switches-grid {
+                grid-template-columns: 1fr;
+            }
+        }
