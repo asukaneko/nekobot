@@ -48,6 +48,36 @@ def _feature_enabled(server, name: str, default: bool = True) -> bool:
     return bool(settings.get(name, default))
 
 
+def _looks_like_tool_request(content: str) -> bool:
+    text = (content or "").lower()
+    if not text:
+        return False
+    keywords = (
+        "搜索",
+        "查询",
+        "天气",
+        "新闻",
+        "待办",
+        "文件",
+        "工作区",
+        "创建",
+        "编辑",
+        "删除",
+        "读取",
+        "列出",
+        "运行",
+        "执行",
+        "命令",
+        "todo",
+        "search",
+        "weather",
+        "file",
+        "workspace",
+        "command",
+    )
+    return any(keyword in text for keyword in keywords)
+
+
 def _build_channel_assistant_message(
     chat_response: ChatResponse,
     *,
@@ -268,6 +298,7 @@ def trigger_ai_response_for_request(server, chat_request: ChatRequest, adapter=N
 
             image_urls = []
             file_contents = []
+            streamed_assistant_message = None
             stopped_prematurely = False  # 初始化变量
             tool_messages = []  # 初始化变量
 
@@ -874,6 +905,38 @@ def trigger_ai_response_for_request(server, chat_request: ChatRequest, adapter=N
                         _log.warning(f"[ThinkingCard] 标记完成失败: {e}")
 
             # 检查是否有图片附件，如果有则使用多模态AI进行图片识别
+            def get_normal_ai_response(response_messages):
+                nonlocal streamed_assistant_message
+
+                can_stream = (
+                    channel_capabilities.supports_stream
+                    and server.socketio
+                    and server.ai_client
+                    and bool(getattr(server.ai_client, "supports_stream", False))
+                    and bool(getattr(server, "ai_config", {}).get("stream", True))
+                )
+                if not can_stream:
+                    return server._get_ai_response(response_messages)
+
+                streamed_assistant_message = _build_channel_assistant_message(
+                    ChatResponse(final_content=""),
+                    session_id=session_id,
+                    adapter=adapter,
+                )
+                try:
+                    return stream_provider_response_to_web(
+                        server,
+                        response_messages,
+                        session_id,
+                        streamed_assistant_message,
+                    )
+                except Exception as e:
+                    streamed_assistant_message = None
+                    _log.warning(
+                        f"[Stream] Provider streaming failed, falling back to non-stream response: {e}"
+                    )
+                    return server._get_ai_response(response_messages)
+
             image_recognition_result = None
             if image_urls:
                 # 使用多模态AI处理图片，获取图片识别结果
@@ -927,7 +990,7 @@ def trigger_ai_response_for_request(server, chat_request: ChatRequest, adapter=N
                     _log.info(
                         f"[Tools] 已加载 {len(enabled_tools)} 个工具: {tool_names}"
                     )
-                    if enabled_tools:
+                    if enabled_tools and _looks_like_tool_request(user_content):
                         # 构建工具上下文（包含 session_id）
                         tool_context = {
                             "session_id": session_id,
@@ -1391,7 +1454,7 @@ def trigger_ai_response_for_request(server, chat_request: ChatRequest, adapter=N
                             and messages_for_ai[-1].get("role") == "user"
                         ):
                             messages_for_ai[-1]["content"] = enhanced_content
-                        final_content = server._get_ai_response(messages_for_ai)
+                        final_content = get_normal_ai_response(messages_for_ai)
                         # 完成进度卡片
                         complete_thinking_card()
                 except ImportError:
@@ -1402,7 +1465,7 @@ def trigger_ai_response_for_request(server, chat_request: ChatRequest, adapter=N
                         and messages_for_ai[-1].get("role") == "user"
                     ):
                         messages_for_ai[-1]["content"] = enhanced_content
-                    final_content = server._get_ai_response(messages_for_ai)
+                    final_content = get_normal_ai_response(messages_for_ai)
                     # 完成进度卡片
                     complete_thinking_card()
                 except Exception as e:
@@ -1415,7 +1478,7 @@ def trigger_ai_response_for_request(server, chat_request: ChatRequest, adapter=N
                         and messages_for_ai[-1].get("role") == "user"
                     ):
                         messages_for_ai[-1]["content"] = enhanced_content
-                    final_content = server._get_ai_response(messages_for_ai)
+                    final_content = get_normal_ai_response(messages_for_ai)
                     # 完成进度卡片
                     complete_thinking_card()
 
@@ -1460,20 +1523,26 @@ def trigger_ai_response_for_request(server, chat_request: ChatRequest, adapter=N
 
             assistant_content = final_content
 
-            assistant_message = _build_channel_assistant_message(
-                ChatResponse(
-                    final_content=assistant_content,
-                    tool_trace=current_round_tool_trace
-                    if "current_round_tool_trace" in locals()
-                    else [],
-                ),
-                session_id=session_id,
-                adapter=adapter,
-            )
+            if streamed_assistant_message is not None:
+                assistant_message = streamed_assistant_message
+                assistant_message["content"] = assistant_content
+            else:
+                assistant_message = _build_channel_assistant_message(
+                    ChatResponse(
+                        final_content=assistant_content,
+                        tool_trace=current_round_tool_trace
+                        if "current_round_tool_trace" in locals()
+                        else [],
+                    ),
+                    session_id=session_id,
+                    adapter=adapter,
+                )
 
             # 使用流式发送
             _log.info("[Stream] _trigger_ai_response 准备发送流式响应")
-            if channel_capabilities.supports_stream:
+            if streamed_assistant_message is not None:
+                pass
+            elif channel_capabilities.supports_stream:
                 server._stream_send_response(session_id, assistant_message)
             else:
                 server.socketio.emit(
@@ -1702,6 +1771,109 @@ def stream_ai_response(self, messages: List[Dict], session_id: str, callback):
     except Exception as e:
         _log.error(f"AI stream error: {e}", exc_info=True)
         callback(f"\n\nAI 服务出错: {str(e)}")
+
+
+def stream_provider_response_to_web(
+    server,
+    messages: List[Dict],
+    session_id: str,
+    message: Dict,
+    thinking_content: str = None,
+) -> str:
+    """Stream provider chunks directly to the web chat bubble."""
+    if not server.ai_client:
+        raise RuntimeError("AI client not initialized")
+
+    stream_iter = server.ai_client.chat_completion(
+        model=server.ai_model,
+        messages=messages,
+        stream=True,
+    )
+
+    message["content"] = ""
+    server.socketio.emit(
+        "ai_stream_start",
+        {
+            "session_id": session_id,
+            "message": message,
+            "thinking_content": thinking_content,
+        },
+        room=session_id,
+    )
+
+    content_parts = []
+    pending_parts = []
+    last_emit_at = time.monotonic()
+
+    def normalize_provider_chunk(raw_chunk: str) -> str:
+        chunk_text = str(raw_chunk or "")
+        if not chunk_text:
+            return ""
+        existing = "".join(content_parts)
+        if not existing:
+            return chunk_text
+        if chunk_text.startswith(existing):
+            return chunk_text[len(existing):]
+        if existing.endswith(chunk_text):
+            return ""
+
+        max_overlap = min(len(existing), len(chunk_text), 32)
+        for overlap in range(max_overlap, 2, -1):
+            if existing.endswith(chunk_text[:overlap]):
+                return chunk_text[overlap:]
+        return chunk_text
+
+    def emit_pending(force: bool = False):
+        nonlocal last_emit_at
+        if not pending_parts:
+            return
+        pending_text = "".join(pending_parts)
+        if not force and len(pending_text) < 4 and time.monotonic() - last_emit_at < 0.02:
+            return
+        pending_parts.clear()
+        server.socketio.emit(
+            "ai_stream_chunk",
+            {
+                "session_id": session_id,
+                "message_id": message["id"],
+                "chunk": pending_text,
+                "is_end": False,
+            },
+            room=session_id,
+        )
+        last_emit_at = time.monotonic()
+        server.socketio.sleep(0)
+
+    try:
+        for chunk in stream_iter:
+            if chunk is None:
+                continue
+            chunk = normalize_provider_chunk(chunk)
+            if not chunk:
+                continue
+            content_parts.append(chunk)
+            pending_parts.append(chunk)
+            emit_pending()
+    except Exception as e:
+        _log.error(f"Provider stream error: {e}", exc_info=True)
+        if not content_parts:
+            raise
+        error_chunk = f"\n\n[stream interrupted: {e}]"
+        content_parts.append(error_chunk)
+        pending_parts.append(error_chunk)
+        emit_pending(force=True)
+    else:
+        emit_pending(force=True)
+    finally:
+        server.socketio.emit(
+            "ai_stream_end",
+            {"session_id": session_id, "message_id": message["id"], "is_end": True},
+            room=session_id,
+        )
+
+    final_content = "".join(content_parts)
+    message["content"] = final_content
+    return final_content
 
 
 def stream_send_response(

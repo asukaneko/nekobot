@@ -307,13 +307,24 @@
         }
 
         * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        html,
+        body,
+        #app {
+            width: 100%;
+            height: 100%;
+            min-height: 100%;
+            overflow: hidden;
+        }
+
+        html,
+        body {
+            background: var(--bg-primary);
+        }
         
         body { 
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei', sans-serif; 
-            background: var(--bg-primary); 
             color: var(--text-primary);
-            height: 100vh; 
-            overflow: hidden; 
             transition: background-color 0.3s ease, color 0.3s ease;
         }
 
@@ -324,7 +335,13 @@
         ::-webkit-scrollbar-thumb:hover { background: var(--bg-hover); }
 
         /* Layout */
-        .app-container { display: flex; height: 100vh; }
+        .app-container {
+            display: flex;
+            height: 100%;
+            min-height: 100vh;
+            min-height: 100dvh;
+            overflow: hidden;
+        }
         
         /* Sidebar */
         .sidebar {
@@ -2945,9 +2962,43 @@
         }
 
         /* Markdown 样式 */
+        .message-body {
+            font-size: 14px;
+            line-height: 1.6;
+            overflow-wrap: anywhere;
+        }
+
+        .streaming-text {
+            min-height: 1.6em;
+        }
+
+        .streaming-text::after {
+            content: '';
+            display: inline-block;
+            width: 0.5em;
+            height: 1em;
+            margin-left: 2px;
+            vertical-align: -0.12em;
+            background: currentColor;
+            opacity: 0.55;
+            animation: streamCaretBlink 1s steps(2, start) infinite;
+        }
+
+        @keyframes streamCaretBlink {
+            50% { opacity: 0; }
+        }
+
         .markdown-body {
             font-size: 14px;
             line-height: 1.6;
+        }
+
+        .streaming-text p {
+            margin-bottom: 8px;
+        }
+
+        .streaming-text p:last-child {
+            margin-bottom: 0;
         }
 
         /* 段落间距 */
@@ -9506,7 +9557,12 @@
                                                 <i :class="msg.role === 'user' ? 'fas fa-user' : 'fas fa-robot'"></i>
                                             </div>
                                             <div class="message-content">
-                                                <div v-if="msg.content" class="markdown-body" v-html="renderMarkdown(parseMessageContent(msg.content, msg))"></div>
+                                                <div
+                                                    v-if="msg.content || msg.is_streaming"
+                                                    class="message-body"
+                                                    :class="{ 'streaming-text': msg.is_streaming, 'markdown-body': !msg.is_streaming }"
+                                                    v-html="renderMessageBody(msg)"
+                                                ></div>
                                                 <!-- 用户上传的附件 -->
                                                 <div v-if="msg.attachments && msg.attachments.length > 0" class="message-attachments">
                                                     <div v-for="(att, idx) in msg.attachments" :key="idx" class="attachment-card" @click="previewAttachment(att)">
@@ -14316,6 +14372,12 @@
                     sessions: [],
                     currentSession: null,
                     currentMessages: [],
+                    streamTypeQueues: {},
+                    streamTypeTimers: {},
+                    streamEndPending: {},
+                    activeStreamMessages: {},
+                    completedStreamMessages: {},
+                    streamScrollTimer: null,
                     inputMessage: '',
                     pushSupported: false,
                     pushSubscribed: false,
@@ -17803,7 +17865,7 @@ def main(params):
                             }
                         });
 
-                        this.currentMessages = newMessages.map(msg => {
+                        const normalizedMessages = newMessages.map(msg => {
                             if (!msg.thinking_cards || !msg.thinking_cards.length) return msg;
                             return {
                                 ...msg,
@@ -17818,6 +17880,17 @@ def main(params):
                                 }))
                             };
                         });
+                        const streamingMessages = this.currentMessages.filter(msg =>
+                            msg.is_streaming ||
+                            this.streamTypeQueues[msg.id] ||
+                            this.streamEndPending[msg.id]
+                        );
+                        streamingMessages.forEach(streamMsg => {
+                            if (!normalizedMessages.some(msg => msg.id === streamMsg.id)) {
+                                normalizedMessages.push(streamMsg);
+                            }
+                        });
+                        this.currentMessages = normalizedMessages;
                         this.updateContextStats();
                         // 只有在强制滚动或用户没有手动滚动时才滚动到底部
                         this.$nextTick(() => this.scrollToBottom(forceScroll));
@@ -22344,6 +22417,119 @@ def main(params):
                     });
                 },
 
+                appendStreamText(messageId, text = '', isStreaming = true) {
+                    const msgIdx = this.currentMessages.findIndex(m => m.id === messageId);
+                    if (msgIdx === -1) return;
+
+                    const currentMessage = this.currentMessages[msgIdx];
+                    currentMessage.content = (currentMessage.content || '') + text;
+                    currentMessage.is_streaming = isStreaming;
+                    if (!isStreaming) {
+                        currentMessage.stream_complete = true;
+                    }
+                },
+
+                normalizeStreamChunk(messageId, text = '') {
+                    const incoming = String(text || '');
+                    if (!incoming) return '';
+
+                    const msg = this.currentMessages.find(m => m.id === messageId);
+                    const queued = (this.streamTypeQueues[messageId] || []).join('');
+                    const existing = `${msg?.content || ''}${queued}`;
+                    if (!existing) return incoming;
+
+                    if (incoming.startsWith(existing)) {
+                        return incoming.slice(existing.length);
+                    }
+                    if (existing.endsWith(incoming)) {
+                        return '';
+                    }
+
+                    const maxOverlap = Math.min(existing.length, incoming.length, 32);
+                    for (let overlap = maxOverlap; overlap >= 3; overlap--) {
+                        if (existing.endsWith(incoming.slice(0, overlap))) {
+                            return incoming.slice(overlap);
+                        }
+                    }
+                    return incoming;
+                },
+
+                enqueueStreamText(messageId, text = '') {
+                    const normalizedText = this.normalizeStreamChunk(messageId, text);
+                    const chars = Array.from(normalizedText || '');
+                    if (!chars.length) return;
+                    if (!this.streamTypeQueues[messageId]) {
+                        this.streamTypeQueues[messageId] = [];
+                    }
+                    this.streamTypeQueues[messageId].push(...chars);
+                    this.scheduleStreamType(messageId);
+                },
+
+                scheduleStreamType(messageId) {
+                    if (this.streamTypeTimers[messageId]) return;
+                    this.streamTypeTimers[messageId] = setTimeout(() => {
+                        delete this.streamTypeTimers[messageId];
+                        const queue = this.streamTypeQueues[messageId] || [];
+                        if (queue.length) {
+                            let takeCount = 1;
+                            if (queue.length > 160) takeCount = 4;
+                            else if (queue.length > 80) takeCount = 3;
+                            else if (queue.length > 40) takeCount = 2;
+
+                            const nextText = queue.splice(0, takeCount).join('');
+                            this.appendStreamText(messageId, nextText, true);
+                            this.scheduleStreamScroll();
+                            this.scheduleStreamType(messageId);
+                            return;
+                        }
+
+                        if (this.streamEndPending[messageId]) {
+                            this.finishStreamMessage(messageId);
+                        }
+                    }, 18);
+                },
+
+                scheduleStreamScroll(force = false) {
+                    if (!force && this.isUserScrolling) return;
+                    if (this.streamScrollTimer) return;
+                    this.streamScrollTimer = setTimeout(() => {
+                        this.streamScrollTimer = null;
+                        this.$nextTick(() => this.scrollToBottom(force, true));
+                    }, 100);
+                },
+
+                finishStreamMessage(messageId) {
+                    const msgIdx = this.currentMessages.findIndex(m => m.id === messageId);
+                    const messageSessionId = msgIdx !== -1 ? this.currentMessages[msgIdx].session_id : null;
+                    const queue = this.streamTypeQueues[messageId] || [];
+                    if (queue.length) {
+                        this.appendStreamText(messageId, queue.splice(0).join(''), true);
+                    }
+                    if (this.streamTypeTimers[messageId]) {
+                        clearTimeout(this.streamTypeTimers[messageId]);
+                        delete this.streamTypeTimers[messageId];
+                    }
+                    delete this.streamTypeQueues[messageId];
+                    delete this.streamEndPending[messageId];
+                    this.appendStreamText(messageId, '', false);
+                    if (messageSessionId && this.activeStreamMessages[messageSessionId] === messageId) {
+                        delete this.activeStreamMessages[messageSessionId];
+                        this.completedStreamMessages[messageSessionId] = messageId;
+                        setTimeout(() => {
+                            if (this.completedStreamMessages[messageSessionId] === messageId) {
+                                delete this.completedStreamMessages[messageSessionId];
+                            }
+                        }, 15000);
+                    }
+                    this.scheduleStreamScroll(true);
+                    this.isTyping = false;
+                    this.isLoading = false;
+                    this.loadingSessionId = null;
+                    this.loadingStartTime = null;
+                    localStorage.removeItem('nbot_loading_session_id');
+                    localStorage.removeItem('nbot_loading_start_time');
+                },
+
                 // Socket.io
                 initSocket() {
                     socket.on('connect', () => {
@@ -22435,7 +22621,7 @@ def main(params):
                             if (msg.type === 'thinking_card') {
                                 // 如果进度卡片被关闭，仅保持打字状态，让龙骨加载动画显示
                                 if (!this.showThinkingCard) {
-                                    this.isTyping = true;
+                                    this.isTyping = this.isLoading && !msg.is_complete;
                                     return; // 不处理卡片，但保持加载动画
                                 }
                                 msg = {
@@ -22530,7 +22716,7 @@ def main(params):
                                 // 强制 Vue 更新以确保进度变化能正确渲染
                                 this.$forceUpdate();
                                 // 只在用户没有手动滚动时才滚动
-                                this.$nextTick(() => this.scrollToBottom(false));
+                                this.scheduleStreamScroll();
                                 return;  // 不添加到消息列表
                             }
 
@@ -22561,7 +22747,6 @@ def main(params):
                                     }
                                 }
                                 // 只在用户没有手动滚动时才滚动
-                                this.$nextTick(() => this.scrollToBottom(false));
                                 return;  // 不添加到消息列表
                             }
 
@@ -22589,7 +22774,7 @@ def main(params):
                                     }
                                 }
                                 // 只在用户没有手动滚动时才滚动
-                                this.$nextTick(() => this.scrollToBottom(false));
+                                this.scheduleStreamScroll();
                                 return;
                             }
 
@@ -22623,48 +22808,52 @@ def main(params):
                         this.isTyping = false;
                         if (this.currentSession && data.session_id === this.currentSession.id) {
                             const existingIdx = this.currentMessages.findIndex(m => m.id === data.message.id);
-                            const msg = { ...data.message, content: '' };
+                            const msg = { ...data.message, content: '', is_streaming: true };
+                            this.activeStreamMessages[data.session_id] = data.message.id;
+                            delete this.completedStreamMessages[data.session_id];
+                            this.streamTypeQueues[data.message.id] = [];
+                            this.streamEndPending[data.message.id] = false;
+                            if (this.streamTypeTimers[data.message.id]) {
+                                clearTimeout(this.streamTypeTimers[data.message.id]);
+                                delete this.streamTypeTimers[data.message.id];
+                            }
                             if (existingIdx !== -1) {
-                                this.currentMessages.splice(existingIdx, 1, {
-                                    ...this.currentMessages[existingIdx],
-                                    ...msg,
-                                    content: ''
-                                });
+                                Object.assign(this.currentMessages[existingIdx], msg, { content: '' });
                             } else {
                                 this.currentMessages.push(msg);
                             }
                             console.log('[Stream] 消息已添加，当前消息数:', this.currentMessages.length);
                             // 只在用户没有手动滚动时才滚动
-                            this.$nextTick(() => this.scrollToBottom(false));
+                            this.scheduleStreamScroll(true);
                         } else {
                             console.log('[Stream] 会话不匹配，忽略事件');
                         }
                     });
 
                     socket.on('ai_stream_chunk', (data) => {
-                        console.log('[Stream] AI stream chunk:', data.chunk);
                         if (this.currentSession && data.session_id === this.currentSession.id) {
-                            const msgIdx = this.currentMessages.findIndex(m => m.id === data.message_id);
+                            const activeMessageId = this.activeStreamMessages[data.session_id];
+                            const hasEventMessage = this.currentMessages.some(m => m.id === data.message_id);
+                            const targetMessageId = hasEventMessage ? data.message_id : activeMessageId;
+                            const msgIdx = this.currentMessages.findIndex(m => m.id === targetMessageId);
                             if (msgIdx !== -1) {
-                                const currentMessage = this.currentMessages[msgIdx];
-                                this.currentMessages.splice(msgIdx, 1, {
-                                    ...currentMessage,
-                                    content: (currentMessage.content || '') + (data.chunk || '')
-                                });
-                                // 只在用户没有手动滚动时才滚动
-                                this.$nextTick(() => this.scrollToBottom(false));
+                                this.enqueueStreamText(targetMessageId, data.chunk || '');
                             } else {
                                 console.log('[Stream] 未找到消息，创建占位消息:', data.message_id);
+                                const fallbackMessageId = data.message_id || `stream-${Date.now()}`;
+                                this.activeStreamMessages[data.session_id] = fallbackMessageId;
                                 this.currentMessages.push({
-                                    id: data.message_id,
+                                    id: fallbackMessageId,
                                     role: 'assistant',
                                     sender: 'AI',
-                                    content: data.chunk || '',
+                                    content: '',
+                                    is_streaming: true,
                                     timestamp: new Date().toISOString(),
                                     session_id: data.session_id
                                 });
-                                // 只在用户没有手动滚动时才滚动
-                                this.$nextTick(() => this.scrollToBottom(false));
+                                this.streamTypeQueues[fallbackMessageId] = [];
+                                this.streamEndPending[fallbackMessageId] = false;
+                                this.enqueueStreamText(fallbackMessageId, data.chunk || '');
                             }
                         }
                     });
@@ -22672,6 +22861,19 @@ def main(params):
                     socket.on('ai_stream_end', (data) => {
                         console.log('[Stream] AI stream end:', data);
                         const finishedSessionId = data?.session_id || this.loadingSessionId || this.currentSession?.id;
+                        const finishedMessageId = data?.message_id && this.currentMessages.some(m => m.id === data.message_id)
+                            ? data.message_id
+                            : this.activeStreamMessages[finishedSessionId];
+                        if (finishedMessageId) {
+                            this.streamEndPending[finishedMessageId] = true;
+                            this.isTyping = false;
+                            this.isLoading = false;
+                            this.loadingSessionId = null;
+                            this.loadingStartTime = null;
+                            localStorage.removeItem('nbot_loading_session_id');
+                            localStorage.removeItem('nbot_loading_start_time');
+                            this.scheduleStreamType(finishedMessageId);
+                        }
                         if (this.currentSession && finishedSessionId === this.currentSession.id && window.__nbotLive2dComment) {
                             // Collect last 5 rounds (up to 10 messages) for Live2D commentary
                             const allMsgs = this.currentMessages.filter(m => m.role === 'user' || m.role === 'assistant');
@@ -22680,12 +22882,19 @@ def main(params):
                                 window.__nbotLive2dComment(recent);
                             }
                         }
-                        this.isTyping = false;
-                        this.isLoading = false;
-                        this.loadingSessionId = null;
-                        this.loadingStartTime = null;
-                        localStorage.removeItem('nbot_loading_session_id');
-                        localStorage.removeItem('nbot_loading_start_time');
+                        if (finishedMessageId) {
+                            const queue = this.streamTypeQueues[finishedMessageId] || [];
+                            if (!queue.length && !this.streamTypeTimers[finishedMessageId]) {
+                                this.finishStreamMessage(finishedMessageId);
+                            }
+                        } else {
+                            this.isTyping = false;
+                            this.isLoading = false;
+                            this.loadingSessionId = null;
+                            this.loadingStartTime = null;
+                            localStorage.removeItem('nbot_loading_session_id');
+                            localStorage.removeItem('nbot_loading_start_time');
+                        }
                         this.processPendingQueue(finishedSessionId);
                     });
 
@@ -22709,16 +22918,38 @@ def main(params):
                             const existingIdx = this.currentMessages.findIndex(m => m.id === data.message.id);
                             if (existingIdx !== -1) {
                                 const existingMessage = this.currentMessages[existingIdx];
-                                this.currentMessages.splice(existingIdx, 1, {
-                                    ...existingMessage,
-                                    ...data.message,
-                                    thinking_cards: data.message.thinking_cards || existingMessage.thinking_cards || [],
-                                    change_cards: data.message.change_cards || existingMessage.change_cards || []
-                                });
+                                const isStreamOwned = existingMessage.is_streaming || existingMessage.stream_complete || this.streamEndPending[data.message.id];
+                                if (isStreamOwned) {
+                                    existingMessage.thinking_cards = data.message.thinking_cards || existingMessage.thinking_cards || [];
+                                    existingMessage.change_cards = data.message.change_cards || existingMessage.change_cards || [];
+                                    existingMessage.attachments = data.message.attachments || existingMessage.attachments || [];
+                                } else {
+                                    Object.assign(existingMessage, data.message, {
+                                        thinking_cards: data.message.thinking_cards || existingMessage.thinking_cards || [],
+                                        change_cards: data.message.change_cards || existingMessage.change_cards || []
+                                    });
+                                }
                                 // 只在用户没有手动滚动时才滚动
                                 this.$nextTick(() => this.scrollToBottom(false));
                             } else {
-                                this.currentMessages.push(data.message);
+                                const streamMessageId = this.activeStreamMessages[data.session_id] || this.completedStreamMessages[data.session_id];
+                                const activeIdx = streamMessageId
+                                    ? this.currentMessages.findIndex(m => m.id === streamMessageId)
+                                    : -1;
+                                if (activeIdx !== -1) {
+                                    const activeMessage = this.currentMessages[activeIdx];
+                                    const queue = this.streamTypeQueues[streamMessageId] || [];
+                                    if (!activeMessage.content && !queue.length && data.message?.content) {
+                                        this.enqueueStreamText(streamMessageId, data.message.content);
+                                    }
+                                    activeMessage.thinking_cards = data.message.thinking_cards || activeMessage.thinking_cards || [];
+                                    activeMessage.change_cards = data.message.change_cards || activeMessage.change_cards || [];
+                                    activeMessage.attachments = data.message.attachments || activeMessage.attachments || [];
+                                    this.streamEndPending[streamMessageId] = true;
+                                    this.scheduleStreamType(streamMessageId);
+                                } else {
+                                    this.currentMessages.push(data.message);
+                                }
                                 // 只在用户没有手动滚动时才滚动
                                 this.$nextTick(() => this.scrollToBottom(false));
                             }
@@ -22815,10 +23046,7 @@ def main(params):
                         ) {
                             const existingIdx = this.currentMessages.findIndex(m => m.id === data.message.id);
                             if (existingIdx !== -1) {
-                                this.currentMessages.splice(existingIdx, 1, {
-                                    ...this.currentMessages[existingIdx],
-                                    ...data.message
-                                });
+                                Object.assign(this.currentMessages[existingIdx], data.message);
                             } else {
                                 this.currentMessages.push(data.message);
                             }
@@ -22992,6 +23220,23 @@ def main(params):
 
                     // 如果都不是JSON，返回原始内容
                     return content;
+                },
+
+                renderMessageBody(msg) {
+                    const content = this.parseMessageContent(msg?.content || '', msg);
+                    if (msg?.is_streaming) {
+                        return this.renderStreamingHtml(content);
+                    }
+                    return this.renderMarkdown(content);
+                },
+
+                renderStreamingHtml(content) {
+                    const normalized = String(content || '').replace(/\r\n/g, '\n');
+                    if (!normalized) return '';
+                    return normalized
+                        .split(/\n{2,}/)
+                        .map(part => `<p>${this.escapeHtml(part).replace(/\n/g, '<br>')}</p>`)
+                        .join('');
                 },
 
                 // 判断是否为 Markdown 文件

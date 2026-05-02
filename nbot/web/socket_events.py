@@ -61,6 +61,10 @@ def register_socket_events(server):
     @server.socketio.on("join_session")
     def handle_join_session(data):
         session_id = data.get("session_id")
+        if not session_store.get_session(session_id):
+            disk_session = get_session_from_db(server.data_dir, session_id)
+            if disk_session:
+                session_store.set_session(session_id, disk_session)
         if session_store.get_session(session_id):
             join_room(session_id)
             server.active_connections[request.sid] = session_id
