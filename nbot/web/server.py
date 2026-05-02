@@ -47,6 +47,7 @@ from nbot.web.routes import (
     register_live2d_routes,
     register_memory_routes,
     register_personality_routes,
+    register_push_routes,
     register_qq_overview_routes,
     register_session_routes,
     register_skill_routes,
@@ -420,6 +421,7 @@ class WebChatServer:
             _log.info("[TodoCard] Todo 卡片管理器已初始化")
         self.web_users: Dict[str, str] = {}
         self.active_connections: Dict[str, str] = {}
+        self.visible_web_sessions: Dict[str, str] = {}
 
         # 内存数据存储
         self.workflows: List[Dict] = []
@@ -2158,6 +2160,7 @@ class WebChatServer:
         register_live2d_routes(self.app, self)
         register_memory_routes(self.app, self)
         register_personality_routes(self.app, self)
+        register_push_routes(self.app, self)
         register_qq_overview_routes(self.app, self)
         register_session_routes(self.app, self)
         register_skill_routes(self.app, self)

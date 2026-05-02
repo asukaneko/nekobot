@@ -52,6 +52,7 @@ def register_socket_events(server):
     def handle_disconnect():
         user_id = server.web_users.pop(request.sid, "unknown")
         server.active_connections.pop(f"auth:{request.sid}", None)
+        getattr(server, "visible_web_sessions", {}).pop(request.sid, None)
         session_id = server.active_connections.pop(request.sid, None)
         if session_id:
             leave_room(session_id)
@@ -72,8 +73,22 @@ def register_socket_events(server):
     @server.socketio.on("leave_session")
     def handle_leave_session():
         session_id = server.active_connections.pop(request.sid, None)
+        getattr(server, "visible_web_sessions", {}).pop(request.sid, None)
         if session_id:
             leave_room(session_id)
+
+    @server.socketio.on("web_visibility")
+    def handle_web_visibility(data):
+        session_id = (data or {}).get("session_id")
+        visible = bool((data or {}).get("visible"))
+        visible_sessions = getattr(server, "visible_web_sessions", None)
+        if visible_sessions is None:
+            server.visible_web_sessions = {}
+            visible_sessions = server.visible_web_sessions
+        if visible and session_id:
+            visible_sessions[request.sid] = session_id
+        else:
+            visible_sessions.pop(request.sid, None)
 
     @server.socketio.on("send_message")
     def handle_send_message(data):

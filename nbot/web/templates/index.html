@@ -1,10 +1,12 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>NekoBot Dashboard</title>
     <link rel="icon" type="image/png" href="/static/neko.png">
+    <link rel="manifest" href="/manifest.webmanifest">
+    <meta name="theme-color" content="#111827">
     <script src="/static/vendor/socket.io.min.js"></script>
     <script src="/static/vendor/vue.global.prod.js"></script>
     <script src="/static/vendor/vue-router.global.prod.js"></script>
@@ -15,6 +17,7 @@
     <script src="/static/vendor/highlight.min.js"></script>
     <link rel="stylesheet" href="/static/vendor/styles/font-awesome.min.css">
     <script src="/static/js/i18n.js"></script>
+    <script src="/static/js/push.js"></script>
     <script>
         window.__nbotCoreDepsReady = Promise.resolve();
         window.__nbotOptionalDepsReady = Promise.resolve();
@@ -7614,6 +7617,138 @@
             100% { background-position: -200% 0; }
         }
 
+        /* 龙骨框架加载动画 - 科技感脉冲效果 */
+        .dragon-bone-loading {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            padding: 16px 18px;
+            min-width: 240px;
+            max-width: 400px;
+        }
+
+        .dragon-bone-loading .bone-row {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .dragon-bone-loading .bone-avatar {
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, var(--accent-primary), var(--info));
+            opacity: 0.6;
+            animation: bone-pulse 1.6s ease-in-out infinite;
+        }
+
+        .dragon-bone-loading .bone-line {
+            height: 10px;
+            border-radius: 5px;
+            background: linear-gradient(90deg, 
+                rgba(88, 166, 255, 0.15) 0%, 
+                rgba(88, 166, 255, 0.35) 25%, 
+                rgba(88, 166, 255, 0.55) 50%, 
+                rgba(88, 166, 255, 0.35) 75%, 
+                rgba(88, 166, 255, 0.15) 100%);
+            background-size: 300% 100%;
+            animation: bone-flow 2s ease-in-out infinite;
+            box-shadow: 0 0 8px rgba(88, 166, 255, 0.2);
+        }
+
+        .dragon-bone-loading .bone-line.short {
+            width: 35%;
+            animation-delay: 0.1s;
+        }
+
+        .dragon-bone-loading .bone-line.medium {
+            width: 65%;
+            animation-delay: 0.3s;
+        }
+
+        .dragon-bone-loading .bone-line.long {
+            width: 90%;
+            animation-delay: 0.5s;
+        }
+
+        .dragon-bone-loading .bone-dots {
+            display: flex;
+            gap: 6px;
+            margin-top: 4px;
+        }
+
+        .dragon-bone-loading .bone-dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: var(--accent-primary);
+            animation: bone-dot-pulse 1.4s ease-in-out infinite;
+            box-shadow: 0 0 6px rgba(88, 166, 255, 0.5);
+        }
+
+        .dragon-bone-loading .bone-dot:nth-child(2) {
+            animation-delay: 0.2s;
+        }
+
+        .dragon-bone-loading .bone-dot:nth-child(3) {
+            animation-delay: 0.4s;
+        }
+
+        @keyframes bone-pulse {
+            0%, 100% { 
+                opacity: 0.4; 
+                transform: scale(0.95);
+                box-shadow: 0 0 0 rgba(88, 166, 255, 0);
+            }
+            50% { 
+                opacity: 0.8; 
+                transform: scale(1.05);
+                box-shadow: 0 0 12px rgba(88, 166, 255, 0.4);
+            }
+        }
+
+        @keyframes bone-flow {
+            0% { background-position: 300% 0; }
+            100% { background-position: -300% 0; }
+        }
+
+        @keyframes bone-dot-pulse {
+            0%, 100% { 
+                opacity: 0.3; 
+                transform: scale(0.8);
+            }
+            50% { 
+                opacity: 1; 
+                transform: scale(1.2);
+                box-shadow: 0 0 10px rgba(88, 166, 255, 0.8);
+            }
+        }
+
+        /* 龙骨框架气泡样式 */
+        .message.dragon-bone-message .message-content {
+            background: linear-gradient(145deg, 
+                rgba(22, 27, 34, 0.95) 0%, 
+                rgba(13, 17, 23, 0.98) 100%);
+            border: 1px solid rgba(88, 166, 255, 0.25);
+            box-shadow: 0 8px 32px rgba(88, 166, 255, 0.15), 
+                        inset 0 1px 0 rgba(255, 255, 255, 0.05);
+            border-radius: 16px;
+            animation: bone-glow 2s ease-in-out infinite alternate;
+        }
+
+        @keyframes bone-glow {
+            0% { 
+                border-color: rgba(88, 166, 255, 0.2);
+                box-shadow: 0 8px 32px rgba(88, 166, 255, 0.1), 
+                            inset 0 1px 0 rgba(255, 255, 255, 0.05);
+            }
+            100% { 
+                border-color: rgba(88, 166, 255, 0.4);
+                box-shadow: 0 8px 32px rgba(88, 166, 255, 0.2), 
+                            inset 0 1px 0 rgba(255, 255, 255, 0.08);
+            }
+        }
+
         /* Chat polish: lighter message cards and calmer markdown tables */
         .messages-container {
             background:
@@ -8705,6 +8840,11 @@
             .mobile-chat-current {
                 height: 40px;
                 padding: 0 9px;
+                min-width: 0;
+            }
+
+            .mobile-chat-current-text {
+                min-width: 0;
             }
 
             .expand-editor-modal {
@@ -9211,8 +9351,8 @@
                                     </span>
                                     <i class="fas fa-chevron-down"></i>
                                 </button>
-                                <button class="mobile-chat-refresh-btn" @click="refreshCurrentChat" title="刷新">
-                                    <i class="fas fa-sync-alt"></i>
+                                <button class="mobile-chat-nav-btn mobile-push-btn" @click="togglePushNotifications" :title="pushButtonTitle" :disabled="pushBusy">
+                                    <i :class="pushSubscribed ? 'fas fa-bell' : 'far fa-bell'"></i>
                                 </button>
                             </div>
                             <!-- Web 会话为空 -->
@@ -9309,6 +9449,9 @@
                                         </div>
                                     </div>
                                     <div class="chat-actions">
+                                        <button class="btn-icon" @click="togglePushNotifications" :title="pushButtonTitle" :disabled="pushBusy">
+                                            <i :class="pushSubscribed ? 'fas fa-bell' : 'far fa-bell'"></i>
+                                        </button>
                                         <button class="btn-icon" @click="exportCurrentSession" title="导出会话" :disabled="isLoading">
                                             <i class="fas fa-file-export"></i>
                                         </button>
@@ -9515,13 +9658,23 @@
                                         </div>
                                     </template>
                                     
-                                    <!-- 机器人正在输入动画（仅在无进度卡片时显示） -->
-                                    <div v-if="isTyping && !currentMessages.some(m => m.thinking_cards && m.thinking_cards.length > 0)" class="message assistant">
+                                    <!-- 机器人正在输入动画（仅在无进度卡片或进度卡片关闭时显示） -->
+                                    <div v-if="isTyping && (!showThinkingCard || !currentMessages.some(m => m.thinking_cards && m.thinking_cards.length > 0))" class="message assistant dragon-bone-message">
                                         <div class="message-avatar"><i class="fas fa-robot"></i></div>
-                                        <div class="message-content" style="min-width: 200px;">
-                                            <div class="skeleton-line" style="width: 85%; height: 12px; margin-bottom: 8px;"></div>
-                                            <div class="skeleton-line" style="width: 100%; height: 12px; margin-bottom: 8px;"></div>
-                                            <div class="skeleton-line" style="width: 60%; height: 12px;"></div>
+                                        <div class="message-content">
+                                            <div class="dragon-bone-loading">
+                                                <div class="bone-row">
+                                                    <div class="bone-avatar"></div>
+                                                    <div class="bone-line short"></div>
+                                                </div>
+                                                <div class="bone-line medium"></div>
+                                                <div class="bone-line long"></div>
+                                                <div class="bone-dots">
+                                                    <div class="bone-dot"></div>
+                                                    <div class="bone-dot"></div>
+                                                    <div class="bone-dot"></div>
+                                                </div>
+                                            </div>
                                         </div>
                                     </div>
                                 </div>
@@ -12414,10 +12567,10 @@
         <div v-if="showThemePanel" class="modal-overlay" @click.self="showThemePanel = false">
             <div class="modal" style="max-width: 480px;">
                 <div class="modal-header">
-                    <span class="modal-title"><i class="fas fa-palette"></i> 主题设置</span>
+                    <span class="modal-title"><i class="fas fa-palette"></i> {{ $t('nav.theme') }}</span>
                     <button class="modal-close" @click="showThemePanel = false">&times;</button>
                 </div>
-                <div class="modal-body">
+                <div class="modal-body" v-init-theme-sliders>
                     <!-- 主题模式 -->
                     <div class="form-group">
                         <label class="form-label">主题模式</label>
@@ -14086,8 +14239,8 @@
                 return {
                     isLoggedIn: false,
                     isLoading: false,
-                    loadingSessionId: null,  // 追踪哪个会话正在加载
-                    loadingStartTime: null,  // 记录加载开始时间，用于超时检测
+                    loadingSessionId: localStorage.getItem('nbot_loading_session_id') || null,  // 追踪哪个会话正在加载，从localStorage恢复
+                    loadingStartTime: localStorage.getItem('nbot_loading_start_time') ? parseInt(localStorage.getItem('nbot_loading_start_time')) : null,  // 记录加载开始时间，用于超时检测
                     isUserScrolling: false,
                     isSidebarCollapsed: false,
                     isMobileMenuOpen: false,
@@ -14164,6 +14317,11 @@
                     currentSession: null,
                     currentMessages: [],
                     inputMessage: '',
+                    pushSupported: false,
+                    pushSubscribed: false,
+                    pushPermission: 'default',
+                    pushSecureContext: false,
+                    pushBusy: false,
                     commandCatalog: [],
                     selectedCommandCategory: null,
                     activeCommandSuggestionIndex: 0,
@@ -14785,6 +14943,12 @@
                     return titles[this.currentPage] || 'NekoBot';
                 },
 
+                pushButtonTitle() {
+                    if (!this.pushSecureContext) return 'Browser notifications require HTTPS or localhost';
+                    if (!this.pushSupported) return 'Current browser does not support Web Push';
+                    return this.pushSubscribed ? 'Disable browser notifications' : 'Enable browser notifications';
+                },
+
                 // 消息样式预览计算属性
                 previewContainerStyle() {
                     return {
@@ -15047,6 +15211,19 @@
                 // 应用已保存的消息样式
                 this.applyMessageStyles();
 
+                // 检查并清理过期的加载状态（超过2分钟）
+                const savedLoadingStartTime = localStorage.getItem('nbot_loading_start_time');
+                if (savedLoadingStartTime) {
+                    const loadingStartTime = parseInt(savedLoadingStartTime);
+                    const isExpired = Date.now() - loadingStartTime > 120000; // 2分钟超时
+                    if (isExpired) {
+                        localStorage.removeItem('nbot_loading_session_id');
+                        localStorage.removeItem('nbot_loading_start_time');
+                        this.loadingSessionId = null;
+                        this.loadingStartTime = null;
+                    }
+                }
+
                 // 尝试使用保存的 Token 自动登录
                 const savedToken = localStorage.getItem('auth_token');
                 const savedUsername = localStorage.getItem('username');
@@ -15097,11 +15274,14 @@
                 }
                 
                 this.initSocket();
+                await this.refreshPushState();
 
                 // 监听窗口大小变化，调整图表
                 window.addEventListener('resize', this.handleResize);
                 this._modalOverlayClickCaptureHandler = (event) => this.handleGlobalModalOverlayClick(event);
                 document.addEventListener('click', this._modalOverlayClickCaptureHandler, true);
+                this._visibilityHandler = () => this.updateWebVisibility();
+                document.addEventListener('visibilitychange', this._visibilityHandler);
                 
                 // 定时刷新会话列表（每 5 秒，减少频率）
                 this.sessionRefreshTimer = setInterval(() => {
@@ -15116,6 +15296,10 @@
                 if (this._modalOverlayClickCaptureHandler) {
                     document.removeEventListener('click', this._modalOverlayClickCaptureHandler, true);
                     this._modalOverlayClickCaptureHandler = null;
+                }
+                if (this._visibilityHandler) {
+                    document.removeEventListener('visibilitychange', this._visibilityHandler);
+                    this._visibilityHandler = null;
                 }
                 if (this.sessionRefreshTimer) {
                     clearInterval(this.sessionRefreshTimer);
@@ -15143,6 +15327,56 @@
             },
             
             methods: {
+                async refreshPushState() {
+                    if (!window.NekoPush) {
+                        this.pushSupported = false;
+                        this.pushPermission = 'unsupported';
+                        this.pushSubscribed = false;
+                        return;
+                    }
+                    const state = await window.NekoPush.state();
+                    this.pushSupported = state.supported;
+                    this.pushPermission = state.permission;
+                    this.pushSubscribed = state.subscribed;
+                    this.pushSecureContext = !!state.secureContext;
+                },
+
+                async togglePushNotifications() {
+                    if (!window.NekoPush || this.pushBusy) return;
+                    if (!this.pushSupported) {
+                        this.showToast(this.pushSecureContext ? 'Current browser does not support Web Push' : 'Browser notifications require HTTPS or localhost', 'error');
+                        return;
+                    }
+                    this.pushBusy = true;
+                    try {
+                        if (this.pushSubscribed) {
+                            await window.NekoPush.disable();
+                            this.pushSubscribed = false;
+                            this.showToast('Browser notifications disabled', 'info');
+                        } else {
+                            await window.NekoPush.enable(this.currentSession?.id || '');
+                            this.pushSubscribed = true;
+                            await api.post('/api/push/test', {
+                                session_id: this.currentSession?.id || '',
+                                body: 'NekoBot browser notifications are enabled.'
+                            });
+                            this.showToast('Browser notifications enabled', 'success');
+                        }
+                        await this.refreshPushState();
+                    } catch (e) {
+                        this.showToast(e.message || 'Failed to update browser notifications', 'error');
+                    } finally {
+                        this.pushBusy = false;
+                    }
+                },
+
+                updateWebVisibility() {
+                    if (!socket || !socket.connected) return;
+                    socket.emit('web_visibility', {
+                        session_id: this.currentSession?.id || '',
+                        visible: document.visibilityState === 'visible' && this.currentPage === 'chat'
+                    });
+                },
                 // 语言切换
                 changeLanguage(lang) {
                     this.$setLanguage(lang);
@@ -16029,6 +16263,21 @@
 
                     // 更新图表颜色
                     this.updateChartColors();
+
+                    // 更新所有滑块进度条（如果主题面板打开）
+                    this.$nextTick(() => {
+                        const modalBody = document.querySelector('.modal-overlay .modal-body');
+                        if (modalBody) {
+                            const ranges = modalBody.querySelectorAll('input[type="range"].form-range');
+                            ranges.forEach(range => {
+                                const min = parseFloat(range.min) || 0;
+                                const max = parseFloat(range.max) || 100;
+                                const value = parseFloat(range.value) || 0;
+                                const progress = ((value - min) / (max - min)) * 100;
+                                range.style.setProperty('--progress', progress + '%');
+                            });
+                        }
+                    });
                 },
 
                 adjustBrightness(color, percent) {
@@ -16074,12 +16323,30 @@
                     reader.readAsDataURL(file);
                 },
 
-                updateBgOpacity() {
+                updateBgOpacity(e) {
                     this.applyTheme();
+                    // 更新滑块进度条
+                    if (e && e.target) {
+                        const range = e.target;
+                        const min = parseFloat(range.min) || 0;
+                        const max = parseFloat(range.max) || 100;
+                        const value = parseFloat(range.value) || 0;
+                        const progress = ((value - min) / (max - min)) * 100;
+                        range.style.setProperty('--progress', progress + '%');
+                    }
                 },
 
-                updateCardOpacity() {
+                updateCardOpacity(e) {
                     this.applyTheme();
+                    // 更新滑块进度条
+                    if (e && e.target) {
+                        const range = e.target;
+                        const min = parseFloat(range.min) || 0;
+                        const max = parseFloat(range.max) || 100;
+                        const value = parseFloat(range.value) || 0;
+                        const progress = ((value - min) / (max - min)) * 100;
+                        range.style.setProperty('--progress', progress + '%');
+                    }
                 },
 
                 updateChartColors() {
@@ -16116,6 +16383,24 @@
                     this.applyTheme();
                     localStorage.removeItem('themeSettings');
                     this.showToast('已恢复默认主题', 'success');
+                },
+
+                initThemeSliders() {
+                    // 初始化主题设置面板的滑块进度条
+                    this.$nextTick(() => {
+                        // 使用更精确的选择器找到主题面板中的滑块
+                        const modalBody = document.querySelector('.modal-overlay .modal-body');
+                        if (modalBody) {
+                            const ranges = modalBody.querySelectorAll('input[type="range"].form-range');
+                            ranges.forEach(range => {
+                                const min = parseFloat(range.min) || 0;
+                                const max = parseFloat(range.max) || 100;
+                                const value = parseFloat(range.value) || 0;
+                                const progress = ((value - min) / (max - min)) * 100;
+                                range.style.setProperty('--progress', progress + '%');
+                            });
+                        }
+                    });
                 },
 
                 async loadSessions() {
@@ -17384,6 +17669,7 @@ def main(params):
                     
                     // 切换到新会话，清除所有状态
                     this.currentSession = session;
+                    this.updateWebVisibility();
                     if (window.__nbotLive2dSay) {
                         window.__nbotLive2dSay(`\u5df2\u5207\u6362\u5230\u300c${session.name || '\u5f53\u524d\u4f1a\u8bdd'}\u300d\u3002`, 3200, 3);
                     }
@@ -17425,6 +17711,8 @@ def main(params):
                     
                     // 恢复当前会话的加载状态（如果这个会话正在生成）
                     this.isLoading = (this.loadingSessionId === session.id);
+                    // 恢复打字状态，确保龙骨加载动画在切换回正在生成的会话时正确显示
+                    this.isTyping = (this.loadingSessionId === session.id);
                 },
                 
                 async switchChatTab(tab) {
@@ -17776,11 +18064,15 @@ def main(params):
                             this.isLoading = false;
                             this.loadingSessionId = null;
                             this.loadingStartTime = null;
+                            localStorage.removeItem('nbot_loading_session_id');
+                            localStorage.removeItem('nbot_loading_start_time');
                         } else if (isTimeout) {
                             console.log('[Queue] 生成超时，自动重置状态');
                             this.isLoading = false;
                             this.loadingSessionId = null;
                             this.loadingStartTime = null;
+                            localStorage.removeItem('nbot_loading_session_id');
+                            localStorage.removeItem('nbot_loading_start_time');
                             this.showToast('生成响应超时，请重试', 'warning');
                         } else {
                             // 如果正在生成中，等待一段时间后重试
@@ -17841,6 +18133,9 @@ def main(params):
                     this.isLoading = true;
                     this.loadingSessionId = sessionId;
                     this.loadingStartTime = Date.now();
+                    // 持久化加载状态到localStorage，以便页面刷新后恢复
+                    localStorage.setItem('nbot_loading_session_id', sessionId);
+                    localStorage.setItem('nbot_loading_start_time', Date.now().toString());
                     let uploadedFilesInfo = [];
 
                     if (files.length > 0) {
@@ -17891,6 +18186,8 @@ def main(params):
                             this.showToast('文件上传失败: ' + e.message, 'error');
                             this.isLoading = false;
                             this.loadingSessionId = null;
+                            localStorage.removeItem('nbot_loading_session_id');
+                            localStorage.removeItem('nbot_loading_start_time');
                             return;
                         }
                     }
@@ -17934,6 +18231,8 @@ def main(params):
                         this.isTyping = false;
                         this.isLoading = false;
                         this.loadingSessionId = null;
+                        localStorage.removeItem('nbot_loading_session_id');
+                        localStorage.removeItem('nbot_loading_start_time');
                         this.showToast('发送失败', 'error');
                         console.error('发送消息失败:', e);
                     }
@@ -18202,6 +18501,8 @@ def main(params):
                     this.isLoading = false;
                     this.loadingSessionId = null;
                     this.loadingStartTime = null;
+                    localStorage.removeItem('nbot_loading_session_id');
+                    localStorage.removeItem('nbot_loading_start_time');
                     this.showToast('正在停止生成...', 'info');
 
                     try {
@@ -18217,6 +18518,8 @@ def main(params):
                         this.isLoading = true;
                         this.loadingSessionId = this.currentSession?.id;
                         this.loadingStartTime = Date.now();
+                        localStorage.setItem('nbot_loading_session_id', this.currentSession?.id || '');
+                        localStorage.setItem('nbot_loading_start_time', Date.now().toString());
                     }
                 },
 
@@ -22046,6 +22349,7 @@ def main(params):
                     socket.on('connect', () => {
                         console.log('Socket connected');
                         this.socketConnected = true;
+                        this.updateWebVisibility();
                     });
                     
                     socket.on('disconnect', () => {
@@ -22128,7 +22432,12 @@ def main(params):
                             }
 
                             // 处理进度卡片（优先处理，避免被添加到消息列表）
-                            if (msg.type === 'thinking_card' && this.showThinkingCard) {
+                            if (msg.type === 'thinking_card') {
+                                // 如果进度卡片被关闭，仅保持打字状态，让龙骨加载动画显示
+                                if (!this.showThinkingCard) {
+                                    this.isTyping = true;
+                                    return; // 不处理卡片，但保持加载动画
+                                }
                                 msg = {
                                     ...msg,
                                     content: this.normalizeDisplayText(msg.content || ''),
@@ -22297,6 +22606,8 @@ def main(params):
                                 this.isTyping = false;
                                 this.isLoading = false;
                                 this.loadingSessionId = null;
+                                localStorage.removeItem('nbot_loading_session_id');
+                                localStorage.removeItem('nbot_loading_start_time');
                                 // 如果开启了TTS，播放语音
                                 if (this.ttsEnabled && msg.content) {
                                     this.speakText(msg.content);
@@ -22369,9 +22680,12 @@ def main(params):
                                 window.__nbotLive2dComment(recent);
                             }
                         }
+                        this.isTyping = false;
                         this.isLoading = false;
                         this.loadingSessionId = null;
                         this.loadingStartTime = null;
+                        localStorage.removeItem('nbot_loading_session_id');
+                        localStorage.removeItem('nbot_loading_start_time');
                         this.processPendingQueue(finishedSessionId);
                     });
 
@@ -22382,6 +22696,8 @@ def main(params):
                         this.isLoading = false;
                         this.loadingSessionId = null;
                         this.loadingStartTime = null;
+                        localStorage.removeItem('nbot_loading_session_id');
+                        localStorage.removeItem('nbot_loading_start_time');
                         if (this.currentSession && data.session_id === this.currentSession.id) {
                             if (data.message?.content && window.__nbotLive2dComment) {
                                 const allMsgs = this.currentMessages.filter(m => m.role === 'user' || m.role === 'assistant');
@@ -22419,6 +22735,8 @@ def main(params):
                         this.isLoading = false;
                         this.loadingSessionId = null;
                         this.loadingStartTime = null;
+                        localStorage.removeItem('nbot_loading_session_id');
+                        localStorage.removeItem('nbot_loading_start_time');
                         if (this.currentSession && failedSessionId === this.currentSession.id && window.__nbotLive2dSay) {
                             window.__nbotLive2dSay('\u8fd9\u6b21\u8bf7\u6c42\u51fa\u9519\u4e86\uff0c\u53ef\u4ee5\u770b\u4e00\u4e0b\u9519\u8bef\u63d0\u793a\u3002', 4200, 6);
                         }
@@ -22466,6 +22784,8 @@ def main(params):
                         this.isLoading = false;
                         this.loadingSessionId = null;
                         this.isTyping = false;
+                        localStorage.removeItem('nbot_loading_session_id');
+                        localStorage.removeItem('nbot_loading_start_time');
                         if (this.currentSession && data.session_id === this.currentSession.id) {
                             this.execConfirmData = {
                                 requestId: data.request_id || '',
@@ -22485,6 +22805,8 @@ def main(params):
                         const finishedSessionId = data?.session_id || this.loadingSessionId || this.currentSession?.id;
                         this.isLoading = false;
                         this.loadingSessionId = null;
+                        localStorage.removeItem('nbot_loading_session_id');
+                        localStorage.removeItem('nbot_loading_start_time');
 
                         if (
                             this.currentSession &&
@@ -22521,6 +22843,8 @@ def main(params):
                     this.showExecConfirmModal = false;
                     this.isLoading = true;
                     this.loadingSessionId = this.execConfirmData.sessionId;
+                    localStorage.setItem('nbot_loading_session_id', this.execConfirmData.sessionId);
+                    localStorage.setItem('nbot_loading_start_time', Date.now().toString());
                     this.showToast('命令已确认，正在执行...', 'info');
                 },
 
@@ -23030,6 +23354,8 @@ def main(params):
                     this.isTyping = true;
                     this.isLoading = true;
                     this.loadingSessionId = sessionId;
+                    localStorage.setItem('nbot_loading_session_id', sessionId);
+                    localStorage.setItem('nbot_loading_start_time', Date.now().toString());
 
                     try {
                         const res = await api.post(`/api/sessions/${sessionId}/regenerate`, {
@@ -23049,6 +23375,8 @@ def main(params):
                         this.isTyping = false;
                         this.isLoading = false;
                         this.loadingSessionId = null;
+                        localStorage.removeItem('nbot_loading_session_id');
+                        localStorage.removeItem('nbot_loading_start_time');
                         await this.loadMessages(true);
                         this.showToast(e.response?.data?.error || '重新生成失败', 'error');
                     }
@@ -23159,7 +23487,21 @@ def main(params):
                 }
             },
             directives: {
-                'click-outside': clickOutside
+                'click-outside': clickOutside,
+                'init-theme-sliders': {
+                    mounted(el, binding, vnode) {
+                        // 初始化主题设置面板的滑块进度条
+                        setTimeout(() => {
+                            vnode.ctx.initThemeSliders();
+                        }, 100);
+                    },
+                    updated(el, binding, vnode) {
+                        // 更新时重新初始化
+                        setTimeout(() => {
+                            vnode.ctx.initThemeSliders();
+                        }, 50);
+                    }
+                }
             }
         });
         

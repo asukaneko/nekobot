@@ -30,3 +30,6 @@ rich>=13.0.0
 pyfiglet>=1.0.0
 prompt_toolkit
 faster-whisper
+cryptography>=42.0.0,<44
+py-vapid>=1.8,<1.9
+pywebpush>=2.0.3

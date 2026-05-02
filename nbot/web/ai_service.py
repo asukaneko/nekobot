@@ -1483,6 +1483,19 @@ def trigger_ai_response_for_request(server, chat_request: ChatRequest, adapter=N
                 )
 
             session_store.append_message(session_id, assistant_message)
+            try:
+                from nbot.web.routes.push import send_web_push
+
+                send_web_push(
+                    server,
+                    title="NekoBot",
+                    body=assistant_content[:160],
+                    url=f"/?session_id={session_id}",
+                    session_id=session_id,
+                    tag=f"nekobot-session-{session_id}",
+                )
+            except Exception as push_error:
+                _log.warning("Failed to send Web Push notification: %s", push_error)
             _emit_change_card(
                 server,
                 session_store,
