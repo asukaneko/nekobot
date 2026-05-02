@@ -7678,6 +7678,26 @@
             max-width: 400px;
         }
 
+        .stream-waiting-body.dragon-bone-loading {
+            padding: 0;
+            min-width: min(240px, 58vw);
+            max-width: 360px;
+            gap: 8px;
+        }
+
+        .stream-waiting-body.dragon-bone-loading .bone-avatar {
+            width: 24px;
+            height: 24px;
+        }
+
+        .stream-waiting-body.dragon-bone-loading .bone-line {
+            height: 9px;
+        }
+
+        .stream-waiting-body.dragon-bone-loading .bone-dots {
+            margin-top: 2px;
+        }
+
         .dragon-bone-loading .bone-row {
             display: flex;
             align-items: center;
@@ -9552,13 +9572,26 @@
                                     </div>
                                     <template v-for="msg in currentMessages.filter(m => !m.hide_in_web)" :key="msg.id">
                                         <!-- 消息主体 -->
-                                        <div class="message" :class="[msg.role, { 'is-progress': isProgressMessage(msg) }]">
+                                        <div class="message" :class="[msg.role, { 'is-progress': isProgressMessage(msg), 'dragon-bone-message': isStreamAwaiting(msg) }]">
                                             <div class="message-avatar">
                                                 <i :class="msg.role === 'user' ? 'fas fa-user' : 'fas fa-robot'"></i>
                                             </div>
                                             <div class="message-content">
+                                                <div v-if="isStreamAwaiting(msg)" class="stream-waiting-body dragon-bone-loading">
+                                                    <div class="bone-row">
+                                                        <div class="bone-avatar"></div>
+                                                        <div class="bone-line short"></div>
+                                                    </div>
+                                                    <div class="bone-line medium"></div>
+                                                    <div class="bone-line long"></div>
+                                                    <div class="bone-dots">
+                                                        <div class="bone-dot"></div>
+                                                        <div class="bone-dot"></div>
+                                                        <div class="bone-dot"></div>
+                                                    </div>
+                                                </div>
                                                 <div
-                                                    v-if="msg.content || msg.is_streaming"
+                                                    v-else-if="msg.content || msg.is_streaming"
                                                     class="message-body"
                                                     :class="{ 'streaming-text': msg.is_streaming, 'markdown-body': !msg.is_streaming }"
                                                     v-html="renderMessageBody(msg)"
@@ -23228,6 +23261,10 @@ def main(params):
                         return this.renderStreamingHtml(content);
                     }
                     return this.renderMarkdown(content);
+                },
+
+                isStreamAwaiting(msg) {
+                    return !!(msg && msg.is_streaming && !(msg.content || '').length);
                 },
 
                 renderStreamingHtml(content) {
