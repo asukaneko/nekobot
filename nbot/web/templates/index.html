@@ -499,6 +499,8 @@
             transition: all 0.2s;
             color: var(--text-secondary);
             font-size: 14px;
+            position: relative;
+            overflow: hidden;
         }
 
         .nav-item:hover {
@@ -511,9 +513,84 @@
             color: var(--accent-primary);
         }
 
+        /* 导航项点击动画 */
+        .nav-item:active {
+            transform: scale(0.96);
+        }
+
+        .nav-item.clicked {
+            animation: nav-click-pulse 0.4s ease-out;
+        }
+
+        @keyframes nav-click-pulse {
+            0% {
+                transform: scale(1);
+                box-shadow: 0 0 0 0 rgba(88, 166, 255, 0.4);
+            }
+            50% {
+                transform: scale(0.96);
+                box-shadow: 0 0 0 8px rgba(88, 166, 255, 0);
+            }
+            100% {
+                transform: scale(1);
+                box-shadow: 0 0 0 0 rgba(88, 166, 255, 0);
+            }
+        }
+
+        /* 波纹效果 */
+        .nav-item::after {
+            content: '';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 0;
+            height: 0;
+            background: rgba(88, 166, 255, 0.3);
+            border-radius: 50%;
+            transform: translate(-50%, -50%);
+            transition: width 0.3s ease-out, height 0.3s ease-out, opacity 0.3s ease-out;
+            opacity: 0;
+            pointer-events: none;
+        }
+
+        .nav-item.clicked::after {
+            width: 200%;
+            height: 200%;
+            opacity: 0;
+            animation: nav-ripple 0.5s ease-out;
+        }
+
+        @keyframes nav-ripple {
+            0% {
+                width: 0;
+                height: 0;
+                opacity: 0.5;
+            }
+            100% {
+                width: 200%;
+                height: 200%;
+                opacity: 0;
+            }
+        }
+
+        /* 图标点击动画 */
+        .nav-item.clicked i {
+            animation: nav-icon-bounce 0.4s ease-out;
+        }
+
+        @keyframes nav-icon-bounce {
+            0%, 100% {
+                transform: scale(1);
+            }
+            50% {
+                transform: scale(1.2);
+            }
+        }
+
         .nav-item i {
             width: 20px;
             text-align: center;
+            transition: transform 0.2s ease;
         }
 
         .sidebar-footer {
@@ -805,11 +882,20 @@
             align-items: center;
             justify-content: center;
             box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
-            transition: all 0.3s;
+            opacity: 0;
+            transform: scale(0.7);
+            pointer-events: none;
+            transition: opacity 0.25s ease, transform 0.25s ease, box-shadow 0.3s;
             z-index: 100;
         }
 
-        .scroll-to-bottom-btn:hover {
+        .scroll-to-bottom-btn.visible {
+            opacity: 1;
+            transform: scale(1);
+            pointer-events: auto;
+        }
+
+        .scroll-to-bottom-btn.visible:hover {
             transform: scale(1.1);
             box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
         }
@@ -817,7 +903,7 @@
         .scroll-to-bottom-btn i {
             font-size: 18px;
         }
-        
+
         .thinking-cards-container {
             padding: 10px 20px;
             position: relative;
@@ -2710,15 +2796,100 @@
             padding: 12px;
             border-radius: 8px;
             cursor: pointer;
-            transition: background 0.2s;
+            transition: background 0.2s, transform 0.2s, box-shadow 0.2s;
             margin-bottom: 4px;
             height: 64px;
             box-sizing: border-box;
             background: var(--bg-secondary);
+            position: relative;
+            overflow: hidden;
         }
 
         .session-item:hover { background: var(--bg-tertiary); }
         .session-item.active { background: color-mix(in srgb, var(--accent-primary) 14%, transparent); }
+
+        /* 新会话加入动画 */
+        .session-item.session-new {
+            animation: session-slide-in 0.5s ease-out, session-glow-pulse 1s ease-out;
+        }
+
+        @keyframes session-slide-in {
+            0% {
+                opacity: 0;
+                transform: translateY(24px) scale(0.95);
+                max-height: 0;
+                margin-bottom: 0;
+                padding-top: 0;
+                padding-bottom: 0;
+            }
+            50% {
+                opacity: 0.7;
+                transform: translateY(-4px) scale(1.01);
+            }
+            100% {
+                opacity: 1;
+                transform: translateY(0) scale(1);
+                max-height: 64px;
+                margin-bottom: 4px;
+                padding-top: 12px;
+                padding-bottom: 12px;
+            }
+        }
+
+        @keyframes session-glow-pulse {
+            0% {
+                box-shadow: 0 0 0 0 rgba(88, 166, 255, 0.6);
+                border: 1px solid rgba(88, 166, 255, 0.3);
+            }
+            50% {
+                box-shadow: 0 0 20px 4px rgba(88, 166, 255, 0.3);
+                border: 1px solid rgba(88, 166, 255, 0.6);
+            }
+            100% {
+                box-shadow: 0 0 0 0 rgba(88, 166, 255, 0);
+                border: 1px solid transparent;
+            }
+        }
+
+        /* 新会话图标动画 */
+        .session-item.session-new .session-icon {
+            animation: session-icon-pop 0.5s ease-out 0.2s both;
+        }
+
+        @keyframes session-icon-pop {
+            0% {
+                transform: scale(0) rotate(-180deg);
+                opacity: 0;
+            }
+            60% {
+                transform: scale(1.15) rotate(10deg);
+            }
+            100% {
+                transform: scale(1) rotate(0deg);
+                opacity: 1;
+            }
+        }
+
+        /* 新会话文字动画 */
+        .session-item.session-new .session-name {
+            animation: session-text-fade-in 0.4s ease-out 0.3s both;
+        }
+
+        @keyframes session-text-fade-in {
+            0% {
+                opacity: 0;
+                transform: translateX(-10px);
+            }
+            100% {
+                opacity: 1;
+                transform: translateX(0);
+            }
+        }
+
+        /* 新会话时间动画 */
+        .session-item.session-new .session-time {
+            animation: session-text-fade-in 0.4s ease-out 0.4s both;
+        }
         
         /* 拖动排序样式 */
         .session-item[draggable="true"] {
@@ -2816,6 +2987,11 @@
             position: relative;
             min-height: 0;
             background: var(--bg-primary);
+            transition: opacity 0.15s ease;
+        }
+
+        .messages-container.session-switching {
+            opacity: 0;
         }
 
         /* 历史记录总结样式 */
@@ -2911,11 +3087,20 @@
             align-items: center;
             justify-content: center;
             box-shadow: 0 2px 8px rgba(0,0,0,0.2);
-            transition: all 0.2s ease;
+            opacity: 0;
+            transform: scale(0.7);
+            pointer-events: none;
+            transition: opacity 0.25s ease, transform 0.25s ease, box-shadow 0.2s ease;
             z-index: 100;
         }
 
-        .scroll-to-bottom-btn:hover {
+        .scroll-to-bottom-btn.visible {
+            opacity: 1;
+            transform: scale(1);
+            pointer-events: auto;
+        }
+
+        .scroll-to-bottom-btn.visible:hover {
             transform: translateY(-2px);
             box-shadow: 0 4px 12px rgba(0,0,0,0.3);
         }
@@ -4668,7 +4853,10 @@
             transition: all 0.3s ease;
         }
 
-        .chat-input:focus { border-color: var(--accent-primary); }
+        .chat-input:focus {
+            border-color: var(--accent-primary);
+            box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-primary) 25%, transparent);
+        }
 
         .command-suggestions {
             position: absolute;
@@ -9055,7 +9243,7 @@
                             :key="item.id"
                             class="nav-item"
                             :class="{ active: currentPage === item.id }"
-                            @click="navigateTo(item.id)"
+                            @click="navigateTo(item.id, $event)"
                         >
                             <i :class="item.icon" class="nav-icon"></i>
                             <span class="nav-text">{{ $t(item.labelKey) }}</span>
@@ -9069,7 +9257,7 @@
                             :key="item.id"
                             class="nav-item"
                             :class="{ active: currentPage === item.id }"
-                            @click="navigateTo(item.id)"
+                            @click="navigateTo(item.id, $event)"
                         >
                             <i :class="item.icon" class="nav-icon"></i>
                             <span class="nav-text">{{ $t(item.labelKey) }}</span>
@@ -9083,7 +9271,7 @@
                             :key="item.id"
                             class="nav-item"
                             :class="{ active: currentPage === item.id }"
-                            @click="navigateTo(item.id)"
+                            @click="navigateTo(item.id, $event)"
                         >
                             <i :class="item.icon" class="nav-icon"></i>
                             <span class="nav-text">{{ $t(item.labelKey) }}</span>
@@ -9097,7 +9285,7 @@
                             :key="item.id"
                             class="nav-item"
                             :class="{ active: currentPage === item.id }"
-                            @click="navigateTo(item.id)"
+                            @click="navigateTo(item.id, $event)"
                         >
                             <i :class="item.icon" class="nav-icon"></i>
                             <span class="nav-text">{{ $t(item.labelKey) }}</span>
@@ -9262,15 +9450,6 @@
                                 <button v-if="chatTab === 'web'" class="btn btn-primary" style="width: 100%;" @click="createNewSession" :disabled="isLoading">
                                     <i class="fas fa-plus"></i> {{ $t('chat.new_session') }}
                                 </button>
-                                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px;">
-                                    <button class="btn btn-secondary" @click="triggerSessionImport" :disabled="isLoading" :title="$t('session.import')">
-                                        <i class="fas fa-file-import"></i> {{ $t('app.import') }}
-                                    </button>
-                                    <button class="btn btn-secondary" @click="exportVisibleSessions" :disabled="isLoading || filteredSessions.length === 0" :title="$t('session.export_current')">
-                                        <i class="fas fa-file-export"></i> {{ $t('app.export') }}
-                                    </button>
-                                </div>
-                                <input type="file" ref="sessionImportInput" accept=".json,application/json" @change="handleSessionImportFile" style="display: none;">
                                 <div class="search-box" :style="{ marginTop: chatTab === 'web' ? '12px' : '0' }">
                                     <i class="fas fa-search" style="color: var(--text-muted);"></i>
                                     <input v-model="sessionSearch" type="text" :placeholder="$t('session.search')">
@@ -9279,60 +9458,24 @@
                             
                             <!-- Web 会话列表 -->
                             <div class="session-list" v-if="chatTab === 'web' || chatTab === 'cli'">
-                                <div 
-                                    v-for="session in filteredSessions" 
+                                <div
+                                    v-for="session in filteredSessions"
                                     :key="session.id"
                                     class="session-item"
-                                    :class="{ 
+                                    :class="{
                                         active: currentSession?.id === session.id,
-                                        'drag-over': dragOverSessionId === session.id && dragPosition === 'top',
-                                        'drag-over-bottom': dragOverSessionId === session.id && dragPosition === 'bottom'
+                                        'session-new': session._isNew
                                     }"
-                                    draggable="true"
                                     @click="openSession(session)"
-                                    @dragstart="onDragStart($event, session)"
-                                    @dragend="onDragEnd($event)"
-                                    @dragover="onDragOver($event, session)"
-                                    @dragleave="onDragLeave($event)"
-                                    @drop="onDrop($event, session)"
                                 >
-                                    <div class="drag-handle" @click.stop>
-                                        <i class="fas fa-grip-vertical"></i>
-                                    </div>
                                     <div class="session-icon">
                                         <i :class="session.type === 'qq' ? 'fab fa-qq' : 'fas fa-comment'"></i>
                                     </div>
                                     <div class="session-info">
-                                        <input 
-                                            v-if="editingSessionId === session.id"
-                                            v-model="editingSessionName"
-                                            class="session-name-input"
-                                            @click.stop
-                                            @keyup.enter="saveSessionName(session)"
-                                            @keyup.escape="cancelEditSessionName"
-                                            @blur="saveSessionName(session)"
-                                            ref="sessionNameInput"
-                                        >
-                                        <div 
-                                            v-else
-                                            class="session-name"
-                                        >
-                                            {{ session.name }}
-                                        </div>
+                                        <div class="session-name">{{ session.name }}</div>
                                         <div class="session-meta">
                                             {{ session.message_count }} 条消息 · {{ formatTime(session.created_at) }}
                                         </div>
-                                    </div>
-                                    <div class="session-actions" @click.stop>
-                                        <button class="btn-icon-small" @click="viewSessionDetails(session)" title="查看详情">
-                                            <i class="fas fa-info-circle"></i>
-                                        </button>
-                                        <button class="btn-icon-small" @click="startEditSessionName(session)" title="编辑名称">
-                                            <i class="fas fa-edit"></i>
-                                        </button>
-                                        <button class="btn-icon-small" @click="confirmDeleteSession(session)" title="删除">
-                                            <i class="fas fa-trash"></i>
-                                        </button>
                                     </div>
                                 </div>
                                 <div v-if="filteredSessions.length === 0" class="empty-hint">
@@ -9489,7 +9632,7 @@
                                 </div>
                                 
                                 <!-- 滑到底部按钮 -->
-                                <button v-if="showQqScrollButton" class="scroll-to-bottom-btn" @click="scrollQqToBottom" title="滑到底部">
+                                <button class="scroll-to-bottom-btn" :class="{ visible: showQqScrollButton }" @click="scrollQqToBottom" title="滑到底部">
                                     <i class="fas fa-chevron-down"></i>
                                 </button>
                                 
@@ -9535,7 +9678,7 @@
                                     </div>
                                 </div>
 
-                                <div class="messages-container" ref="messagesContainer" @scroll="handleMessagesScroll">
+                                <div class="messages-container" ref="messagesContainer" :class="{ 'session-switching': sessionSwitching }" @scroll="handleMessagesScroll">
                                     <!-- 历史记录总结 -->
                                     <div v-if="currentSession?.historySummary && currentSession.historySummary.length > 0" class="history-summary-container">
                                         <div class="history-summary-header" @click="currentSession.showHistorySummary = !currentSession.showHistorySummary">
@@ -9769,7 +9912,7 @@
                                 </div>
                                 
                                 <!-- 滚动到底部按钮 -->
-                                <button v-if="showScrollToBottom" class="scroll-to-bottom-btn" @click="scrollToBottom(true, false)" title="滚动到底部">
+                                <button class="scroll-to-bottom-btn" :class="{ visible: showScrollToBottom }" @click="scrollToBottom(true, false)" title="滚动到底部">
                                     <i class="fas fa-arrow-down"></i>
                                 </button>
                             </div>
@@ -14427,16 +14570,12 @@
                     orphanCards: {},  // 找不到父消息的孤儿卡片（按 parentMsgId 分组）
                     isUserScrolling: false,
                     showScrollToBottom: false,
+                    sessionSwitching: false,
                     sessionSearch: '',
                     sessionArchiveFilter: 'all',
                     selectedSessions: [],  // 批量选择的会话
                     showFileMenu: false,  // 文件上传菜单显示状态
                     
-                    // 拖动排序
-                    draggedSession: null,  // 当前被拖动的会话
-                    dragOverSessionId: null,  // 拖动覆盖的会话 ID
-                    dragPosition: 'top',  // 放置位置：top 或 bottom
-
                     // 消息样式设置
                     messageStyle: {
                         fontFamily: localStorage.getItem('messageFontFamily') || 'system-ui, -apple-system, sans-serif',
@@ -14845,8 +14984,6 @@
                     toasts: [],
                     showEditSessionModal: false,
                     editingSession: {},
-                    editingSessionName: '',
-                    editingSessionId: null,
                     showSessionDetailsModal: false,
                     viewingSession: null,
                     showConfirmModal: false,
@@ -15585,117 +15722,7 @@
                     `;
                 },
 
-                // 拖动排序方法
-                onDragStart(event, session) {
-                    this.draggedSession = session;
-                    event.dataTransfer.effectAllowed = 'move';
-                    event.dataTransfer.setData('text/plain', session.id);
-                    // 添加视觉反馈
-                    setTimeout(() => {
-                        event.target.classList.add('dragging');
-                    }, 0);
-                },
-                
-                onDragEnd(event) {
-                    event.target.classList.remove('dragging');
-                    this.draggedSession = null;
-                    this.dragOverSessionId = null;
-                    this.dragPosition = 'top';
-                },
-                
-                onDragOver(event, session) {
-                    if (!this.draggedSession || this.draggedSession.id === session.id) {
-                        return;
-                    }
-                    
-                    event.preventDefault();
-                    event.dataTransfer.dropEffect = 'move';
-                    
-                    // 计算放置位置
-                    const rect = event.currentTarget.getBoundingClientRect();
-                    const midY = rect.top + rect.height / 2;
-                    this.dragPosition = event.clientY < midY ? 'top' : 'bottom';
-                    this.dragOverSessionId = session.id;
-                },
-                
-                onDragLeave(event) {
-                    // 只在真正离开时清除
-                    if (!event.currentTarget.contains(event.relatedTarget)) {
-                        this.dragOverSessionId = null;
-                    }
-                },
-                
-                onDrop(event, targetSession) {
-                    event.preventDefault();
-                    
-                    if (!this.draggedSession || this.draggedSession.id === targetSession.id) {
-                        return;
-                    }
-                    
-                    // 获取当前会话列表
-                    const sessions = [...this.sessions];
-                    const draggedIdx = sessions.findIndex(s => s.id === this.draggedSession.id);
-                    const targetIdx = sessions.findIndex(s => s.id === targetSession.id);
-                    
-                    if (draggedIdx === -1 || targetIdx === -1) {
-                        return;
-                    }
-                    
-                    // 移除被拖动的会话
-                    sessions.splice(draggedIdx, 1);
-                    
-                    // 计算新的插入位置
-                    let newIdx = this.dragPosition === 'top' ? targetIdx : targetIdx + 1;
-                    // 如果拖动位置在目标位置之后，插入时要调整
-                    if (draggedIdx < targetIdx && this.dragPosition === 'bottom') {
-                        newIdx = targetIdx;
-                    } else if (draggedIdx > targetIdx && this.dragPosition === 'top') {
-                        newIdx = targetIdx;
-                    } else if (draggedIdx > targetIdx && this.dragPosition === 'bottom') {
-                        newIdx = targetIdx + 1;
-                    }
-                    
-                    // 插入到新位置
-                    sessions.splice(newIdx, 0, this.draggedSession);
-                    
-                    // 更新会话列表
-                    this.sessions = sessions;
-                    
-                    // 保存排序到 localStorage
-                    this.saveSessionOrder();
-                    
-                    // 清除状态
-                    this.draggedSession = null;
-                    this.dragOverSessionId = null;
-                    this.dragPosition = 'top';
-                },
-                
-                saveSessionOrder() {
-                    // 保存会话排序到 localStorage
-                    const order = this.sessions.map(s => s.id);
-                    localStorage.setItem('session_order', JSON.stringify(order));
-                },
-                
-                loadSessionOrder() {
-                    // 从 localStorage 加载会话排序
-                    try {
-                        const order = JSON.parse(localStorage.getItem('session_order') || '[]');
-                        if (order.length > 0 && this.sessions.length > 0) {
-                            // 按排序重新排列会话
-                            const orderMap = new Map(order.map((id, idx) => [id, idx]));
-                            this.sessions.sort((a, b) => {
-                                const orderA = orderMap.get(a.id);
-                                const orderB = orderMap.get(b.id);
-                                if (orderA === undefined && orderB === undefined) return 0;
-                                if (orderA === undefined) return 1;
-                                if (orderB === undefined) return -1;
-                                return orderA - orderB;
-                            });
-                        }
-                    } catch (e) {
-                        console.error('加载会话排序失败:', e);
-                    }
-                },
+
                 
                 // 文件上传菜单方法
                 toggleFileMenu() {
@@ -15937,7 +15964,16 @@
                     this.showToast('已登出', 'info');
                 },
                 
-                navigateTo(page) {
+                navigateTo(page, event) {
+                    // 添加点击动画效果
+                    if (event && event.currentTarget) {
+                        const navItem = event.currentTarget;
+                        navItem.classList.add('clicked');
+                        setTimeout(() => {
+                            navItem.classList.remove('clicked');
+                        }, 400);
+                    }
+
                     this.currentPage = page;
                     this.isMobileMenuOpen = false;
                     this.isMobileChatPickerOpen = false;
@@ -16513,9 +16549,6 @@
                         
                         // 合并：临时会话 + 服务器会话
                         this.sessions = [...localTempSessions, ...serverSessions];
-                        
-                        // 恢复排序
-                        this.loadSessionOrder();
                     } catch (e) {
                         console.error('Failed to load sessions:', e);
                         this.showToast('加载会话失败', 'error');
@@ -17761,7 +17794,10 @@ def main(params):
                 // Chat Functions
                 async selectSession(session) {
                     const previousSessionId = this.currentSession?.id;
-                    
+
+                    // 切换会话时触发消息区淡出
+                    this.sessionSwitching = true;
+
                     // 切换到新会话，清除所有状态
                     this.currentSession = session;
                     this.updateWebVisibility();
@@ -17795,7 +17831,10 @@ def main(params):
                     // 切换会话时强制滚动到底部
                     await this.loadMessages(true);
                     this.updateContextStats();
-                    
+
+                    // 消息加载完成，淡入
+                    this.sessionSwitching = false;
+
                     // 设置新的消息刷新定时器（每 2 秒）
                     this.messageRefreshTimer = setInterval(() => {
                         if (this.currentSession && this.currentPage === 'chat') {
@@ -17933,65 +17972,38 @@ def main(params):
                 },
                 
                 async createNewSession() {
-                    // 显示加载状态
+                    if (this.isLoading) return;
                     this.isLoading = true;
-
-                    // 创建临时会话（乐观更新）
-                    const tempId = 'temp_' + Date.now();
-                    const tempSession = {
-                        id: tempId,
-                        name: `会话 ${new Date().toLocaleTimeString()}`,
-                        type: 'web',
-                        user_id: this.username,
-                        created_at: new Date().toISOString(),
-                        messages: [],
-                        _isTemp: true  // 标记为临时会话
-                    };
-
-                    // 立即添加到列表底部并切换
-                    this.sessions.push(tempSession);
-                    await this.selectSession(tempSession);
-
                     try {
-                        // 调用后端API创建真实会话
+                        const now = new Date();
+                        const defaultName = `新对话 ${now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
                         const res = await api.post('/api/sessions', {
-                            name: tempSession.name,
+                            name: defaultName,
                             type: 'web',
                             user_id: this.username,
                             system_prompt: this.personality.prompt
                         });
-
-                        // 获取服务器返回的真实会话
-                        const serverSession = res.data.session;
-
-                        // 替换临时会话
-                        const tempIndex = this.sessions.findIndex(s => s.id === tempId);
-                        if (tempIndex !== -1) {
-                            this.sessions.splice(tempIndex, 1, serverSession);
-                        }
-
-                        // 如果当前选中的是临时会话，切换到真实会话并重新加入会话
-                        if (this.currentSession && this.currentSession.id === tempId) {
-                            this.currentSession = serverSession;
-                            // 重新发送 join_session，确保 Socket.IO 监听正确的会话 ID
-                            socket.emit('leave_session');
-                            socket.emit('join_session', { session_id: serverSession.id });
-                        }
-
-                        this.showToast('会话创建成功', 'success');
-
+                        const newSession = { ...res.data.session, _isNew: true };
+                        this.sessions = [
+                            ...this.sessions.filter(session => session.id !== newSession.id),
+                            newSession
+                        ];
+                        this.chatTab = 'web';
+                        await this.selectSession(newSession);
+                        setTimeout(() => {
+                            const session = this.sessions.find(s => s.id === newSession.id);
+                            if (session) {
+                                session._isNew = false;
+                            }
+                        }, 1500);
+                        this.showToast('已创建新对话', 'success');
                     } catch (e) {
-                        console.error('创建会话失败:', e);
-                        // 移除临时会话
-                        this.sessions = this.sessions.filter(s => s.id !== tempId);
-                        if (this.currentSession && this.currentSession.id === tempId) {
-                            this.currentSession = null;
-                            this.currentMessages = [];
-                        }
-                        this.showToast('创建会话失败: ' + (e.response?.data?.error || e.message), 'error');
+                        console.error('Failed to create session:', e);
+                        this.showToast('创建新对话失败: ' + (e.response?.data?.error || e.message), 'error');
                     } finally {
                         this.isLoading = false;
                     }
+
                 },
 
                 downloadJson(data, filename) {
@@ -18041,21 +18053,6 @@ def main(params):
                         ? this.sessions.filter(s => this.selectedSessions.includes(s.id))
                         : this.managedSessions;
                     const ids = source.map(s => s.id).filter(Boolean);
-                    if (!ids.length) {
-                        this.showToast('没有可导出的会话', 'warning');
-                        return;
-                    }
-                    try {
-                        const res = await api.get(`/api/sessions/export?ids=${encodeURIComponent(ids.join(','))}`);
-                        this.downloadJson(res.data, `sessions_export_${new Date().toISOString().slice(0, 10)}.json`);
-                        this.showToast(`已导出 ${res.data.total || ids.length} 个会话`, 'success');
-                    } catch (e) {
-                        this.showToast('导出会话失败: ' + (e.response?.data?.error || e.message), 'error');
-                    }
-                },
-
-                async exportVisibleSessions() {
-                    const ids = this.filteredSessions.map(s => s.id).filter(Boolean);
                     if (!ids.length) {
                         this.showToast('没有可导出的会话', 'warning');
                         return;
@@ -19083,41 +19080,7 @@ def main(params):
                     // 滚动后隐藏按钮
                     this.showQqScrollButton = false;
                 },
-                
-                confirmDeleteSession(session) {
-                    this.showConfirm({
-                        title: '删除会话',
-                        message: `确定要删除会话"${session.name}"吗？此操作不可恢复。`,
-                        confirmText: '删除',
-                        icon: 'fa-trash',
-                        iconColor: 'var(--error)',
-                        danger: true,
-                        action: async () => {
-                            const sessionId = session.id;
-                            const sessionIndex = this.sessions.findIndex(s => s.id === sessionId);
-                            
-                            this.sessions = this.sessions.filter(s => s.id !== sessionId);
-                            
-                            if (this.currentSession && this.currentSession.id === sessionId) {
-                                this.currentSession = null;
-                                this.currentMessages = [];
-                            }
-                            
-                            this.showToast('会话已删除', 'success');
-                            
-                            try {
-                                await api.delete(`/api/sessions/${sessionId}`);
-                            } catch (e) {
-                                console.error('同步删除会话失败:', e);
-                                if (sessionIndex !== -1) {
-                                    this.sessions.splice(sessionIndex, 0, { id: sessionId, name: '已删除的会话' });
-                                }
-                                this.showToast('删除同步失败，请刷新页面', 'warning');
-                            }
-                        }
-                    });
-                },
-                
+
                 toggleSelectAllSessions(event) {
                     if (event.target.checked) {
                         this.selectedSessions = this.managedSessions.map(s => s.id);
@@ -19234,49 +19197,7 @@ def main(params):
                     this.copyToClipboard(data);
                 },
                 
-                startEditSessionName(session) {
-                    this.editingSessionId = session.id;
-                    this.editingSessionName = session.name;
-                    this.$nextTick(() => {
-                        const inputs = this.$refs.sessionNameInput;
-                        if (inputs) {
-                            const input = Array.isArray(inputs) ? inputs[0] : inputs;
-                            if (input) {
-                                input.focus();
-                                input.select();
-                            }
-                        }
-                    });
-                },
-                
-                async saveSessionName(session) {
-                    if (!this.editingSessionName.trim()) {
-                        this.cancelEditSessionName();
-                        return;
-                    }
-                    
-                    const newName = this.editingSessionName.trim();
-                    if (newName === session.name) {
-                        this.cancelEditSessionName();
-                        return;
-                    }
-                    
-                    try {
-                        await api.put(`/api/sessions/${session.id}`, { name: newName });
-                        session.name = newName;
-                        this.showToast('会话名称已更新', 'success');
-                    } catch (e) {
-                        console.error('更新会话名称失败:', e);
-                        this.showToast('更新失败', 'error');
-                    } finally {
-                        this.cancelEditSessionName();
-                    }
-                },
-                
-                cancelEditSessionName() {
-                    this.editingSessionId = null;
-                    this.editingSessionName = '';
-                },
+
                 
                 async saveSessionEdit() {
                     this.isLoading = true;
