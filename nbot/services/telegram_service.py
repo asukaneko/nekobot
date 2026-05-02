@@ -85,7 +85,7 @@ def _extract_ai_text(response: Any) -> str:
 
 def _build_messages(server: Any, parsed: Dict[str, Any]) -> list:
     messages = []
-    system_prompt = str(getattr(server, "personality", {}).get("prompt") or "").strip()
+    system_prompt = str(getattr(server, "personality", {}).get("systemPrompt") or "").strip()
     if system_prompt:
         messages.append({"role": "system", "content": system_prompt})
     messages.append({"role": "user", "content": parsed["content"]})

@@ -84,7 +84,7 @@ def register_session_routes(app, server):
     
         # 使用人格提示词作为默认系统提示词
         system_prompt = data.get(
-            "system_prompt", server.personality.get("prompt", "")
+            "system_prompt", server.personality.get("systemPrompt", "")
         )
     
         # 获取所有记忆（标题+摘要）并加入系统提示词
@@ -151,6 +151,15 @@ def register_session_routes(app, server):
             "messages": [{"role": "system", "content": system_prompt}],
             "system_prompt": system_prompt,
         }
+
+        # 如果有开场白，添加为第一条 assistant 消息
+        first_message = server.personality.get("firstMessage", "")
+        if first_message:
+            session["messages"].append({
+                "role": "assistant",
+                "content": first_message,
+                "sender": server.personality.get("name", "AI")
+            })
         if not is_web_visible_session(session_id, session):
             return jsonify({"error": "Invalid session type"}), 400
     

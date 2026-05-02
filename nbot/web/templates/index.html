@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
@@ -579,7 +579,7 @@
                                         <!-- 消息主体 -->
                                         <div class="message" :class="[msg.role, { 'is-progress': isProgressMessage(msg), 'dragon-bone-message': isStreamAwaiting(msg) }]">
                                             <div class="message-avatar">
-                                                <i :class="msg.role === 'user' ? 'fas fa-user' : 'fas fa-robot'"></i>
+                                                <i :class="msg.role === 'user' ? 'fas fa-user' : (personality.avatar || 'fas fa-robot')"></i>
                                             </div>
                                             <div class="message-content">
                                                 <div v-if="isStreamAwaiting(msg)" class="stream-waiting-body dragon-bone-loading">
@@ -754,7 +754,7 @@
                                     
                                     <!-- 机器人正在输入动画（仅在无进度卡片或进度卡片关闭时显示） -->
                                     <div v-if="isTyping && (!showThinkingCard || !currentMessages.some(m => m.thinking_cards && m.thinking_cards.length > 0))" class="message assistant dragon-bone-message">
-                                        <div class="message-avatar"><i class="fas fa-robot"></i></div>
+                                        <div class="message-avatar"><i :class="personality.avatar || 'fas fa-robot'"></i></div>
                                         <div class="message-content">
                                             <div class="dragon-bone-loading">
                                                 <div class="bone-row">
@@ -1428,56 +1428,203 @@
                         </div>
                     </div>
 
-                    <!-- Personality -->
+                    <!-- Personality - 角色卡编辑器 -->
                     <div v-if="currentPage === 'personality'" class="fade-in">
                         <div class="grid-2" style="align-items: start;">
-                            <!-- 左侧：当前人格提示词 -->
+                            <!-- 左侧：角色卡编辑器 -->
                             <div class="card" style="height: fit-content;">
                                 <div class="card-header">
-                                    <span class="card-title">{{ $t('page.personality') }}</span>
-                                    <button class="btn btn-primary" @click="savePersonality" :disabled="isLoading">
-                                        <i class="fas fa-save"></i> 保存
-                                    </button>
+                                    <span class="card-title">角色卡编辑器</span>
+                                    <div style="display: flex; gap: 8px;">
+                                        <button class="btn btn-secondary btn-sm" @click="previewCompiledPrompt">
+                                            <i class="fas fa-eye"></i> 预览Prompt
+                                        </button>
+                                        <button class="btn btn-primary" @click="savePersonality" :disabled="isLoading">
+                                            <i class="fas fa-save"></i> 应用
+                                        </button>
+                                        <button class="btn btn-success" @click="savePersonalityAsPreset" :disabled="isLoading || !personality.name">
+                                            <i class="fas fa-plus-circle"></i> 保存到角色库
+                                        </button>
+                                    </div>
                                 </div>
                                 <div class="card-body">
-                                    <div class="form-group">
-                                        <label class="form-label">人格名称</label>
-                                        <input v-model="personality.name" type="text" class="form-input" placeholder="输入人格名称" @change="personalityHasUnsavedChanges = true">
+                                    <!-- 基础信息 -->
+                                    <div class="form-section">
+                                        <div class="section-title">
+                                            <i class="fas fa-id-card"></i> 基础信息
+                                        </div>
+                                        <div class="form-group">
+                                            <label class="form-label">角色名称</label>
+                                            <input v-model="personality.name" type="text" class="form-input" placeholder="输入角色名称" @change="personalityHasUnsavedChanges = true">
+                                        </div>
+                                        <div class="form-group">
+                                            <label class="form-label">角色描述</label>
+                                            <input v-model="personality.description" type="text" class="form-input" placeholder="简短描述这个角色，会显示在卡片上" @change="personalityHasUnsavedChanges = true">
+                                        </div>
+                                        <div class="form-row">
+                                            <div class="form-group" style="flex: 0 0 80px;">
+                                                <label class="form-label">头像</label>
+                                                <div style="display: flex; align-items: center; gap: 10px;">
+                                                    <div style="width: 48px; height: 48px; background: var(--bg-tertiary); border-radius: 12px; display: flex; align-items: center; justify-content: center; cursor: pointer; border: 2px dashed var(--border-color);" @click="showAvatarPicker = true">
+                                                        <i :class="personality.avatar || 'fas fa-user-circle'" style="font-size: 28px; color: var(--accent-primary);"></i>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            <div class="form-group" style="flex: 1;">
+                                                <label class="form-label">标签</label>
+                                                <input v-model="personalityTagsInput" type="text" class="form-input" placeholder="用空格分隔标签，如：猫娘 陪伴 可爱" @change="updatePersonalityTags">
+                                            </div>
+                                        </div>
                                     </div>
-                                    <div class="form-group">
-                                        <label class="form-label">系统提示词 (System Prompt)</label>
-                                        <textarea v-model="personality.prompt" class="form-textarea" rows="12" placeholder="输入系统提示词，定义 AI 的人格和行为..." @change="personalityHasUnsavedChanges = true"></textarea>
-                                        <div class="form-hint">这是 AI 的核心人格定义，会影响所有对话的回复风格</div>
+
+                                    <!-- 角色设定 -->
+                                    <div class="form-section">
+                                        <div class="section-title">
+                                            <i class="fas fa-user-edit"></i> 角色设定
+                                        </div>
+                                        <div class="form-group">
+                                            <label class="form-label">基本信息</label>
+                                            <textarea v-model="personality.basicInfo" class="form-textarea" rows="4" placeholder="填写角色的基本信息，如：&#10;身高：160cm&#10;体重：50kg&#10;年龄：18岁&#10;职业：学生&#10;喜好：看书、听音乐..." @change="personalityHasUnsavedChanges = true"></textarea>
+                                            <div class="form-hint">角色的详细基本资料，会用于生成更具体的角色形象</div>
+                                        </div>
+                                        <div class="form-group">
+                                            <label class="form-label">性格特点</label>
+                                            <textarea v-model="personality.personality" class="form-textarea" rows="3" placeholder="描述角色的性格，如：活泼、粘人、忠诚..." @change="personalityHasUnsavedChanges = true"></textarea>
+                                        </div>
+                                        <div class="form-group">
+                                            <label class="form-label">背景设定</label>
+                                            <textarea v-model="personality.scenario" class="form-textarea" rows="3" placeholder="描述角色的背景故事、世界观..." @change="personalityHasUnsavedChanges = true"></textarea>
+                                        </div>
+                                        <div class="form-group">
+                                            <label class="form-label">开场白 (First Message)</label>
+                                            <textarea v-model="personality.firstMessage" class="form-textarea" rows="4" placeholder="新建会话时 AI 会自动发送的第一次消息..." @change="personalityHasUnsavedChanges = true"></textarea>
+                                            <div class="form-hint">留空则不自动发送开场消息</div>
+                                        </div>
+                                        <div class="form-group">
+                                            <label class="form-label">示例对话</label>
+                                            <textarea v-model="personality.exampleDialogues" class="form-textarea" rows="4" placeholder="<user>你好
+<assistant>你好呀！很高兴见到你~" @change="personalityHasUnsavedChanges = true"></textarea>
+                                            <div class="form-hint">用 &lt;user&gt; 和 &lt;assistant&gt; 标记对话角色</div>
+                                        </div>
+                                    </div>
+
+                                    <!-- 对话控制 -->
+                                    <div class="form-section">
+                                        <div class="section-title">
+                                            <i class="fas fa-sliders-h"></i> 对话控制
+                                        </div>
+                                        <div class="form-group">
+                                            <label class="form-label">回复格式</label>
+                                            <textarea v-model="personality.responseFormat" class="form-textarea" rows="2" placeholder="描述期望的回复格式，如：（动作）语言【附加信息】" @change="personalityHasUnsavedChanges = true"></textarea>
+                                        </div>
+                                        <div class="form-group">
+                                            <label class="form-label">规则列表</label>
+                                            <div v-for="(rule, index) in personality.rules" :key="index" style="display: flex; gap: 8px; margin-bottom: 8px;">
+                                                <input v-model="personality.rules[index]" type="text" class="form-input" placeholder="输入规则，如：每段话末尾加喵" @change="personalityHasUnsavedChanges = true">
+                                                <button class="btn btn-sm" @click="removePersonalityRule(index)" style="color: var(--danger);">
+                                                    <i class="fas fa-times"></i>
+                                                </button>
+                                            </div>
+                                            <button class="btn btn-secondary btn-sm" @click="addPersonalityRule">
+                                                <i class="fas fa-plus"></i> 添加规则
+                                            </button>
+                                        </div>
+                                    </div>
+
+                                    <!-- 状态 -->
+                                    <div class="form-section">
+                                        <div class="section-title">
+                                            <i class="fas fa-heart"></i> 角色状态
+                                        </div>
+                                        <div class="form-row">
+                                            <div class="form-group" style="flex: 1;">
+                                                <label class="form-label">好感度 ({{ personality.state.affection }})</label>
+                                                <input v-model.number="personality.state.affection" type="range" min="-100" max="100" class="form-range" @change="personalityHasUnsavedChanges = true" @input="updateRangeProgress">
+                                            </div>
+                                            <div class="form-group" style="flex: 1;">
+                                                <label class="form-label">心情</label>
+                                                <select v-model="personality.state.mood" class="form-select" @change="personalityHasUnsavedChanges = true">
+                                                    <option value="开心">😊 开心</option>
+                                                    <option value="平静">😌 平静</option>
+                                                    <option value="兴奋">🤩 兴奋</option>
+                                                    <option value="困倦">😴 困倦</option>
+                                                    <option value="难过">😢 难过</option>
+                                                    <option value="生气">😠 生气</option>
+                                                </select>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <!-- 高级系统提示词 -->
+                                    <div class="form-section">
+                                        <div class="section-title" style="display: flex; justify-content: space-between; align-items: center;">
+                                            <span><i class="fas fa-code"></i> 系统提示词（高级）</span>
+                                            <button class="btn btn-sm btn-secondary" @click="regenerateSystemPrompt">
+                                                <i class="fas fa-magic"></i> 重新生成
+                                            </button>
+                                        </div>
+                                        <div class="form-group">
+                                            <textarea v-model="personality.systemPrompt" class="form-textarea" rows="8" placeholder="这是最终发送给AI的系统提示词。如果不填写，会自动根据上面的设定生成。" @change="personalityHasUnsavedChanges = true"></textarea>
+                                            <div class="form-hint">高级用户可以直接编辑，覆盖自动生成的提示词</div>
+                                        </div>
                                     </div>
                                 </div>
                             </div>
 
-                            <!-- 右侧：预设人格 + 自定义人格 -->
+                            <!-- 右侧：角色卡列表 -->
                             <div style="display: flex; flex-direction: column; gap: 20px;">
+                                <!-- 当前角色卡预览 -->
+                                <div class="card" v-if="personality.name">
+                                    <div class="card-header">
+                                        <span class="card-title">当前角色卡</span>
+                                    </div>
+                                    <div class="card-body" style="padding: 16px;">
+                                        <div style="display: flex; align-items: center; gap: 16px; margin-bottom: 16px;">
+                                            <div style="width: 64px; height: 64px; background: linear-gradient(135deg, var(--primary), var(--accent)); border-radius: 16px; display: flex; align-items: center; justify-content: center;">
+                                                <i :class="personality.avatar || 'fas fa-user-circle'" style="font-size: 36px; color: white;"></i>
+                                            </div>
+                                            <div style="flex: 1;">
+                                                <div style="font-weight: 600; font-size: 18px; margin-bottom: 4px;">{{ personality.name }}</div>
+                                                <div style="font-size: 13px; color: var(--text-muted); line-height: 1.4;">{{ personality.description || '暂无描述' }}</div>
+                                            </div>
+                                        </div>
+                                        <div v-if="personality.tags && personality.tags.length > 0" style="display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px;">
+                                            <span v-for="tag in personality.tags" :key="tag" class="badge badge-secondary">{{ tag }}</span>
+                                        </div>
+                                        <div style="display: flex; gap: 12px; font-size: 12px; color: var(--text-muted);">
+                                            <span><i class="fas fa-heart" style="color: var(--danger);"></i> 好感度: {{ personality.state.affection }}</span>
+                                            <span><i class="fas fa-smile" style="color: var(--warning);"></i> 心情: {{ personality.state.mood }}</span>
+                                        </div>
+                                    </div>
+                                </div>
+
                                 <!-- 预设人格 -->
                                 <div class="card">
                                     <div class="card-header">
-                                        <span class="card-title">预设人格</span>
+                                        <span class="card-title">预设角色卡</span>
                                     </div>
                                     <div class="card-body" style="padding: 12px;">
                                         <div v-if="personalityPresets.length === 0" class="empty-state" style="padding: 20px;">
                                             <div class="empty-state-icon">🎭</div>
                                             <div class="empty-state-title">加载中...</div>
                                         </div>
-                                        <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px;">
+                                        <div style="display: flex; flex-direction: column; gap: 10px;">
                                             <div v-for="preset in personalityPresets" :key="preset.id" 
-                                                 style="padding: 12px; border: 1px solid var(--border-color); border-radius: 8px; cursor: pointer; transition: all 0.2s;"
-                                                 @click="loadPersonalityPreset(preset)"
-                                                 onmouseover="this.style.borderColor='var(--primary)'; this.style.background='var(--bg-tertiary)'"
-                                                 onmouseout="this.style.borderColor='var(--border-color)'; this.style.background=''">
-                                                <div style="display: flex; align-items: center; gap: 10px;">
-                                                    <div style="width: 36px; height: 36px; background: var(--bg-tertiary); border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 16px; flex-shrink: 0;">
-                                                        {{ preset.icon }}
+                                                 class="character-card"
+                                                 @click="loadPersonalityPreset(preset)">
+                                                <div class="character-card-avatar">
+                                                    <i :class="preset.avatar || preset.icon || 'fas fa-user-circle'"></i>
+                                                </div>
+                                                <div class="character-card-info">
+                                                    <div class="character-card-name">{{ preset.name }}</div>
+                                                    <div class="character-card-desc">{{ preset.description }}</div>
+                                                    <div v-if="preset.tags && preset.tags.length" class="character-card-tags">
+                                                        <span v-for="tag in preset.tags.slice(0, 3)" :key="tag" class="tag">{{ tag }}</span>
                                                     </div>
-                                                    <div style="min-width: 0;">
-                                                        <div style="font-weight: 600; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{{ preset.name }}</div>
-                                                        <div style="font-size: 11px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{{ preset.description }}</div>
-                                                    </div>
+                                                </div>
+                                                <div class="character-card-stats" v-if="preset.state">
+                                                    <span class="stat"><i class="fas fa-heart"></i> {{ preset.state.affection || 50 }}</span>
+                                                    <span class="stat"><i class="fas fa-smile"></i> {{ preset.state.mood || '开心' }}</span>
                                                 </div>
                                             </div>
                                         </div>
@@ -1487,31 +1634,29 @@
                                 <!-- 自定义人格预设 -->
                                 <div class="card">
                                     <div class="card-header">
-                                        <span class="card-title">自定义人格预设</span>
-                                        <button class="btn btn-primary btn-sm" @click="openAddPersonalityPresetModal">
-                                            <i class="fas fa-plus"></i> 添加
+                                        <span class="card-title">我的角色卡</span>
+                                        <button class="btn btn-primary btn-sm" @click="createNewPersonality">
+                                            <i class="fas fa-plus"></i> 新建
                                         </button>
                                     </div>
                                     <div class="card-body" style="padding: 12px;">
                                         <div v-if="customPersonalityPresets.length === 0" class="empty-state" style="padding: 30px;">
                                             <div class="empty-state-icon">✨</div>
-                                            <div class="empty-state-title">暂无自定义人格</div>
-                                            <div class="empty-state-desc">点击上方按钮添加你的人格预设</div>
+                                            <div class="empty-state-title">暂无自定义角色</div>
+                                            <div class="empty-state-desc">点击上方按钮创建你的角色卡</div>
                                         </div>
-                                        <div v-else style="display: flex; flex-direction: column; gap: 8px;">
-                                            <div v-for="(preset, index) in customPersonalityPresets" :key="preset.id" 
-                                                 style="padding: 10px 12px; border: 1px solid var(--border-color); border-radius: 6px; display: flex; align-items: center; gap: 10px; transition: all 0.2s;"
-                                                 onmouseover="this.style.borderColor='var(--primary)'; this.style.background='var(--bg-tertiary)'"
-                                                 onmouseout="this.style.borderColor='var(--border-color)'; this.style.background=''">
-                                                <div style="width: 32px; height: 32px; background: var(--bg-tertiary); border-radius: 6px; display: flex; align-items: center; justify-content: center; font-size: 14px; cursor: pointer; flex-shrink: 0;"
-                                                     @click="loadPersonalityPreset(preset)">
-                                                    {{ preset.icon }}
+                                        <div v-else style="display: flex; flex-direction: column; gap: 10px;">
+                                            <div v-for="(preset, index) in customPersonalityPresets" :key="preset.id"
+                                                 class="character-card"
+                                                 @click="loadPersonalityPreset(preset)">
+                                                <div class="character-card-avatar">
+                                                    <i :class="preset.avatar || 'fas fa-user-circle'"></i>
                                                 </div>
-                                                <div style="flex: 1; cursor: pointer; min-width: 0;" @click="loadPersonalityPreset(preset)">
-                                                    <div style="font-weight: 500; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{{ preset.name }}</div>
-                                                    <div style="font-size: 11px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{{ preset.description || '自定义人格预设' }}</div>
+                                                <div class="character-card-info">
+                                                    <div class="character-card-name">{{ preset.name }}</div>
+                                                    <div class="character-card-desc">{{ preset.description || '自定义角色卡' }}</div>
                                                 </div>
-                                                <button class="btn btn-sm" @click.stop="deleteCustomPersonalityPreset(preset, index)" style="color: var(--danger); padding: 4px 8px; flex-shrink: 0;">
+                                                <button class="btn btn-sm" @click.stop="deleteCustomPersonalityPreset(preset, index)" style="color: var(--danger);">
                                                     <i class="fas fa-trash"></i>
                                                 </button>
                                             </div>
@@ -3618,6 +3763,62 @@
             </div>
         </div>
 
+        <!-- 信息展示模态框 -->
+        <div v-if="showInfoModal" class="modal-overlay" @click.self="showInfoModal = false">
+            <div class="modal" style="max-width: 700px; max-height: 80vh;">
+                <div class="modal-header">
+                    <span class="modal-title">{{ infoModalConfig.title }}</span>
+                    <button class="modal-close" @click="showInfoModal = false">&times;</button>
+                </div>
+                <div class="modal-body" style="overflow-y: auto;">
+                    <div v-html="infoModalConfig.message"></div>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-primary" @click="showInfoModal = false">{{ infoModalConfig.confirmText }}</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 头像选择模态框 -->
+        <div v-if="showAvatarPicker" class="modal-overlay" @click.self="showAvatarPicker = false">
+            <div class="modal" style="max-width: 500px; max-height: 90vh;">
+                <div class="modal-header">
+                    <span class="modal-title"><i class="fas fa-image"></i> 选择头像</span>
+                    <button class="modal-close" @click="showAvatarPicker = false">&times;</button>
+                </div>
+                <div class="modal-body" style="overflow-y: auto;">
+                    <div class="form-group">
+                        <label class="form-label">预设图标</label>
+                        <div style="display: grid; grid-template-columns: repeat(6, 1fr); gap: 12px; margin-top: 8px;">
+                            <div v-for="icon in avatarPresets" :key="icon"
+                                 style="width: 48px; height: 48px; background: var(--bg-tertiary); border-radius: 12px; display: flex; align-items: center; justify-content: center; cursor: pointer; border: 2px solid transparent; transition: all 0.2s;"
+                                 :style="{ borderColor: personality.avatar === icon ? 'var(--accent-primary)' : 'transparent' }"
+                                 @click="selectAvatar(icon)">
+                                <i :class="icon" style="font-size: 24px; color: var(--accent-primary);"></i>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">自定义图标类名</label>
+                        <input v-model="customAvatarInput" type="text" class="form-input" placeholder="例如: fas fa-cat">
+                        <div class="form-hint">可以使用 FontAwesome 图标类名</div>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">预览</label>
+                        <div style="display: flex; align-items: center; gap: 16px;">
+                            <div style="width: 64px; height: 64px; background: linear-gradient(135deg, var(--primary), var(--accent)); border-radius: 16px; display: flex; align-items: center; justify-content: center;">
+                                <i :class="customAvatarInput || personality.avatar || 'fas fa-user-circle'" style="font-size: 36px; color: white;"></i>
+                            </div>
+                            <button class="btn btn-primary" @click="selectAvatar(customAvatarInput)">使用此图标</button>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn" @click="showAvatarPicker = false">关闭</button>
+                </div>
+            </div>
+        </div>
+
         <!-- 添加自定义人格预设模态框 -->
         <div v-if="showAddPersonalityPresetModal" class="modal-overlay" @click.self="closeAddPersonalityPresetModal">
             <div class="modal" style="max-width: 500px; max-height: 90vh;">
@@ -5279,13 +5480,13 @@
                         chat: [
                             { id: 'chat', labelKey: 'nav.chat_chat', icon: 'fas fa-comments' },
                             { id: 'sessions', labelKey: 'nav.sessions', icon: 'fas fa-list' },
-                            { id: 'message-style', labelKey: 'nav.message_style', icon: 'fas fa-paint-brush' }
+                            { id: 'message-style', labelKey: 'nav.message_style', icon: 'fas fa-paint-brush' },
+                            { id: 'personality', labelKey: 'nav.personality', icon: 'fas fa-user-circle' }
                         ],
                         config: [
                             { id: 'task-center', labelKey: 'nav.task_center', icon: 'fas fa-calendar-check' },
                             { id: 'workflows', labelKey: 'nav.workflows', icon: 'fas fa-project-diagram' },
                             { id: 'heartbeat', labelKey: 'nav.heartbeat', icon: 'fas fa-heartbeat' },
-                            { id: 'personality', labelKey: 'nav.personality', icon: 'fas fa-user-circle' },
                             { id: 'memory', labelKey: 'nav.memory', icon: 'fas fa-brain' },
                             { id: 'knowledge', labelKey: 'nav.knowledge', icon: 'fas fa-book' },
                             { id: 'skills', labelKey: 'nav.skills', icon: 'fas fa-magic' },
@@ -5455,14 +5656,46 @@
                     showAiGenerateModal: false,
                     aiGeneratePrompt: '',
                     aiGeneratedWorkflow: null,
-                    // Personality
+                    // Personality - 角色卡系统
                     personality: {
+                        // 基础信息（卡片展示层）
                         name: '',
-                        prompt: ''
+                        description: '',
+                        avatar: '',
+                        tags: [],
+
+                        // 角色设定层
+                        systemPrompt: '',
+                        basicInfo: '',
+                        personality: '',
+                        scenario: '',
+                        firstMessage: '',
+                        exampleDialogues: '',
+                        
+                        // 对话控制
+                        responseFormat: '',
+                        rules: [],
+                        
+                        // 状态
+                        state: {
+                            affection: 50,
+                            mood: '开心'
+                        }
                     },
                     personalityPresets: [],
                     customPersonalityPresets: [], // 用户自定义人格预设
                     personalityHasUnsavedChanges: false, // 是否有未保存的修改
+                    personalityTagsInput: '', // 标签输入框的临时值
+                    showAvatarPicker: false, // 头像选择器
+                    customAvatarInput: '', // 自定义头像输入
+                    avatarPresets: [ // 预设头像图标
+                        'fas fa-cat', 'fas fa-dog', 'fas fa-dragon', 'fas fa-robot',
+                        'fas fa-ghost', 'fas fa-otter', 'fas fa-paw', 'fas fa-feather',
+                        'fas fa-moon', 'fas fa-sun', 'fas fa-star', 'fas fa-heart',
+                        'fas fa-book', 'fas fa-music', 'fas fa-gamepad', 'fas fa-coffee',
+                        'fas fa-user-circle', 'fas fa-smile', 'fas fa-grin-stars', 'fas fa-laugh-beam',
+                        'fas fa-angry', 'fas fa-sad-tear', 'fas fa-meh', 'fas fa-surprise'
+                    ],
                     showConfirmDialog: false,
                     confirmDialogConfig: {
                         title: '确认',
@@ -5470,12 +5703,24 @@
                         onConfirm: null,
                         onCancel: null
                     },
+                    showInfoModal: false,
+                    infoModalConfig: {
+                        title: '',
+                        message: '',
+                        confirmText: '确认'
+                    },
                     showAddPersonalityPresetModal: false,
                     newPersonalityPreset: {
                         name: '',
                         description: '',
-                        icon: '🎭',
-                        prompt: ''
+                        avatar: '🎭',
+                        tags: [],
+                        personality: '',
+                        scenario: '',
+                        firstMessage: '',
+                        exampleDialogues: '',
+                        responseFormat: '',
+                        rules: []
                     },
                     
                     // Memory

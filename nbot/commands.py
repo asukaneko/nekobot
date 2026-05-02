@@ -1690,9 +1690,9 @@ async def handle_del_prompt(msg, is_group=True):
             del group_messages[id_str]
             try:
                 os.remove(f"resources/prompts/group/group_{id_str}.txt")
-                with open("resources/prompts/neko.txt", "r", encoding="utf-8") as file:
-                    prompt = file.read()
-                    group_messages[id_str] = [{"role": "system", "content": prompt}]
+                from nbot.core.prompt import prompt_manager
+                prompt = prompt_manager.load_base_prompt(group_id=id_str)
+                group_messages[id_str] = [{"role": "system", "content": prompt}]
                 await msg.reply(text="提示词已删除喵~本子娘回来了喵~")
             except FileNotFoundError:
                 await msg.reply(text="没有可以删除的提示词喵~")
@@ -1702,9 +1702,9 @@ async def handle_del_prompt(msg, is_group=True):
             del user_messages[id_str]
             try:
                 os.remove(f"resources/prompts/user/user_{id_str}.txt")
-                with open("resources/prompts/neko.txt", "r", encoding="utf-8") as file:
-                    prompt = file.read()
-                    user_messages[id_str] = [{"role": "system", "content": prompt}]
+                from nbot.core.prompt import prompt_manager
+                prompt = prompt_manager.load_base_prompt(user_id=id_str)
+                user_messages[id_str] = [{"role": "system", "content": prompt}]
                 await bot.api.post_private_msg(msg.user_id, text="提示词已删除喵~本子娘回来了喵~")
             except FileNotFoundError:
                 await bot.api.post_private_msg(msg.user_id, text="没有可以删除的提示词喵~")

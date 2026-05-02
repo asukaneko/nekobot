@@ -1997,7 +1997,7 @@ No recent activity
         self.console.print("\n[dim]Use /personality <number> or /personality <name> to switch[/dim]")
         
         # 显示当前 prompt 预览
-        prompt = current_personality.get("prompt", "")
+        prompt = current_personality.get("systemPrompt") or current_personality.get("prompt", "")
         if prompt:
             self.console.print("\n[bold]Current Prompt Preview:[/bold]")
             preview = prompt[:200] + "..." if len(prompt) > 200 else prompt
@@ -2013,16 +2013,25 @@ No recent activity
                 return server.personality
         except:
             pass
-        
-        # 从文件获取
-        personality_file = os.path.join("data", "web", "personality.json")
-        if os.path.exists(personality_file):
+
+        # 优先从新版 personality.json 获取
+        new_personality_file = os.path.join("resources", "prompts", "personality.json")
+        if os.path.exists(new_personality_file):
             try:
-                with open(personality_file, 'r', encoding='utf-8') as f:
+                with open(new_personality_file, 'r', encoding='utf-8') as f:
                     return json.load(f)
             except:
                 pass
-        
+
+        # 回退到旧版 personality.json
+        old_personality_file = os.path.join("data", "web", "personality.json")
+        if os.path.exists(old_personality_file):
+            try:
+                with open(old_personality_file, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+            except:
+                pass
+
         # 默认人格
         return {"name": "猫娘助手", "prompt": ""}
     
@@ -2076,11 +2085,25 @@ No recent activity
     
     def _get_neko_prompt(self) -> str:
         """获取猫娘助手的 prompt"""
+        # 优先从 neko.txt 读取
         prompt_file = os.path.join("resources", "prompts", "neko.txt")
         if os.path.exists(prompt_file):
             try:
                 with open(prompt_file, 'r', encoding='utf-8') as f:
-                    return f.read()
+                    content = f.read()
+                if content.strip():
+                    return content
+            except:
+                pass
+        # 回退到 personality.json
+        personality_file = os.path.join("resources", "prompts", "personality.json")
+        if os.path.exists(personality_file):
+            try:
+                with open(personality_file, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                prompt = data.get("systemPrompt", "")
+                if prompt:
+                    return prompt
             except:
                 pass
         return "你是 NekoBot，一个活泼可爱的猫娘助手。"
@@ -2143,10 +2166,10 @@ No recent activity
 
     def _apply_personality_to_session(self, personality: Dict):
         """将人格应用到当前会话（只添加 system 消息，不修改配置文件）"""
-        prompt = personality.get("prompt", "")
+        prompt = personality.get("systemPrompt") or personality.get("prompt", "")
         if not prompt:
             return
-        
+
         # 添加 system 消息到当前会话（让 AI 知道人格设定）
         # 先移除旧的 system 消息
         self.messages = [msg for msg in self.messages if msg.get("role") != "system"]

@@ -175,7 +175,7 @@ def _parse_json_array(raw):
 
 def _build_system_prompt(server, extra_instruction):
     personality = getattr(server, "personality", {}) or {}
-    base_prompt = str(personality.get("prompt") or "").strip()
+    base_prompt = str(personality.get("systemPrompt") or "").strip()
     return (
         f"{base_prompt}\n\n"
         f"{extra_instruction}\n"

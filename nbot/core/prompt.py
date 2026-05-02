@@ -33,9 +33,11 @@ class PromptManager:
         self.base_dir = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
         self.prompts_dir = os.path.join(self.base_dir, 'resources', 'prompts')
         self.default_prompt_file = os.path.join(self.prompts_dir, 'neko.txt')
-        
+        self.personality_file = os.path.join(self.prompts_dir, 'personality.json')
+
         self._prompt_cache: Dict[str, str] = {}
         self._memories_cache: List[Dict] = []
+        self._personality_prompt: str = None
         self._load_memories()
     
     def _load_memories(self):
@@ -82,6 +84,21 @@ class PromptManager:
         except Exception as e:
             print(f"保存记忆文件失败: {e}")
     
+    def _get_personality_prompt(self) -> str:
+        """从 personality.json 加载角色卡的系统提示词（懒加载+缓存）"""
+        if self._personality_prompt is not None:
+            return self._personality_prompt
+        try:
+            if os.path.exists(self.personality_file):
+                with open(self.personality_file, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                self._personality_prompt = data.get('systemPrompt', '') or ''
+            else:
+                self._personality_prompt = ''
+        except Exception:
+            self._personality_prompt = ''
+        return self._personality_prompt
+
     def load_base_prompt(self, user_id: str = None, group_id: str = None) -> str:
         """加载基础提示词
         
@@ -110,10 +127,17 @@ class PromptManager:
         if os.path.exists(self.default_prompt_file):
             try:
                 with open(self.default_prompt_file, 'r', encoding='utf-8') as f:
-                    return f.read()
+                    content = f.read()
+                if content.strip():
+                    return content
             except Exception as e:
                 print(f"加载默认提示词失败: {e}")
-        
+
+        # 回退到 personality.json 中的系统提示词
+        personality_prompt = self._get_personality_prompt()
+        if personality_prompt:
+            return personality_prompt
+
         return ""
     
     def load_memories(self, user_id: str = None, group_id: str = None) -> str:

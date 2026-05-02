@@ -241,9 +241,6 @@ def init_default_data(server):
         },
     ]
 
-    # 加载人格提示词
-    server._load_personality()
-
     # 默认 AI 配置
     server.ai_config = {
         "provider": "openai",
@@ -684,6 +681,9 @@ def load_all_data(server):
         if os.path.exists(custom_presets_file):
             with open(custom_presets_file, "r", encoding="utf-8") as f:
                 server.custom_personality_presets = json.load(f)
+
+        # 加载 personality（角色卡配置）
+        server._load_personality()
 
         # 加载系统日志
         logs_file = os.path.join(server.data_dir, "system_logs.json")

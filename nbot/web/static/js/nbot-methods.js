@@ -93,7 +93,7 @@ const NbotMethods = {
 
                 updateRangeProgress() {
                     // 更新所有滑条的进度条颜色
-                    const ranges = document.querySelectorAll('.style-editor-page-content .form-range');
+                    const ranges = document.querySelectorAll('.form-range');
                     ranges.forEach(range => {
                         const min = parseFloat(range.min) || 0;
                         const max = parseFloat(range.max) || 100;
@@ -423,8 +423,8 @@ const NbotMethods = {
                     this.isMobileMenuOpen = false;
                     this.isMobileChatPickerOpen = false;
                     this.loadPageData(page);
-                    // 如果是样式编辑页面，初始化滑条进度
-                    if (page === 'message-style') {
+                    // 如果是样式编辑页面或人格设置页面，初始化滑条进度
+                    if (page === 'message-style' || page === 'personality') {
                         this.$nextTick(() => {
                             this.updateRangeProgress();
                         });
@@ -1183,6 +1183,7 @@ const NbotMethods = {
                     try {
                         const res = await api.get('/api/personality');
                         this.personality = res.data;
+                        this.personalityTagsInput = (this.personality.tags || []).join(' ');
                     } catch (e) {
                         console.error('Failed to load personality:', e);
                     }
@@ -2426,7 +2427,7 @@ def main(params):
                             name: defaultName,
                             type: 'web',
                             user_id: this.username,
-                            system_prompt: this.personality.prompt
+                            system_prompt: this.personality.systemPrompt || this.personality.prompt
                         });
                         const newSession = { ...res.data.session, _isNew: true };
                         this.sessions = [
@@ -5314,12 +5315,110 @@ def main(params):
                         title: '加载人格预设',
                         message: `确定要加载预设人格 "${preset.name}" 吗？`,
                         onConfirm: () => {
-                            this.personality.name = preset.name;
-                            this.personality.prompt = preset.prompt;
+                            this.personality = {
+                                name: preset.name || '',
+                                description: preset.description || '',
+                                avatar: preset.avatar || preset.icon || '',
+                                tags: preset.tags || [],
+                                systemPrompt: preset.systemPrompt || preset.prompt || '',
+                                basicInfo: preset.basicInfo || '',
+                                personality: preset.personality || '',
+                                scenario: preset.scenario || '',
+                                firstMessage: preset.firstMessage || '',
+                                exampleDialogues: preset.exampleDialogues || '',
+                                responseFormat: preset.responseFormat || '',
+                                rules: preset.rules || [],
+                                state: preset.state || { affection: 50, mood: '开心' }
+                            };
                             this.personalityHasUnsavedChanges = true;
                             this.showToast('已加载预设人格，请保存以应用', 'success');
                         }
                     });
+                },
+
+                previewCompiledPrompt() {
+                    const p = this.personality;
+                    let prompt = '';
+
+                    if (p.name) prompt += `【角色名称】${p.name}\n`;
+                    if (p.basicInfo) prompt += `【基本信息】\n${p.basicInfo}\n`;
+                    if (p.personality) prompt += `【性格特点】${p.personality}\n`;
+                    if (p.scenario) prompt += `【背景设定】${p.scenario}\n`;
+                    if (p.responseFormat) prompt += `【回复格式】${p.responseFormat}\n`;
+                    if (p.rules && p.rules.length > 0) {
+                        prompt += `【行为规则】\n`;
+                        p.rules.forEach((rule, i) => {
+                            if (rule) prompt += `${i + 1}. ${rule}\n`;
+                        });
+                    }
+                    if (p.exampleDialogues) prompt += `【示例对话】\n${p.exampleDialogues}\n`;
+                    
+                    if (prompt) {
+                        prompt = `你是角色 "${p.name || '未命名'}"。\n\n` + prompt;
+                    } else {
+                        prompt = '请定义你的角色设定。';
+                    }
+                    
+                    this.infoModalConfig = {
+                        title: 'Prompt 预览',
+                        message: `<pre style="white-space: pre-wrap; word-break: break-word; font-size: 13px; line-height: 1.6;">${this.escapeHtml(prompt)}</pre>`,
+                        confirmText: '关闭'
+                    };
+                    this.showInfoModal = true;
+                },
+
+                regenerateSystemPrompt() {
+                    const p = this.personality;
+                    let prompt = '';
+
+                    if (p.name) prompt += `【角色名称】${p.name}\n`;
+                    if (p.basicInfo) prompt += `【基本信息】\n${p.basicInfo}\n`;
+                    if (p.personality) prompt += `【性格特点】${p.personality}\n`;
+                    if (p.scenario) prompt += `【背景设定】${p.scenario}\n`;
+                    if (p.responseFormat) prompt += `【回复格式】${p.responseFormat}\n`;
+                    if (p.rules && p.rules.length > 0) {
+                        prompt += `【行为规则】\n`;
+                        p.rules.forEach((rule, i) => {
+                            if (rule) prompt += `${i + 1}. ${rule}\n`;
+                        });
+                    }
+                    if (p.exampleDialogues) prompt += `【示例对话】\n${p.exampleDialogues}\n`;
+                    
+                    if (prompt) {
+                        prompt = `你是角色 "${p.name || '未命名'}"。\n\n` + prompt;
+                        this.personality.systemPrompt = prompt;
+                        this.personalityHasUnsavedChanges = true;
+                        this.showToast('已重新生成系统提示词', 'success');
+                    } else {
+                        this.showToast('请先填写角色设定', 'warning');
+                    }
+                },
+
+                addPersonalityRule() {
+                    if (!this.personality.rules) {
+                        this.personality.rules = [];
+                    }
+                    this.personality.rules.push('');
+                    this.personalityHasUnsavedChanges = true;
+                },
+
+                removePersonalityRule(index) {
+                    if (this.personality.rules) {
+                        this.personality.rules.splice(index, 1);
+                        this.personalityHasUnsavedChanges = true;
+                    }
+                },
+
+                updatePersonalityTags() {
+                    const input = this.personalityTagsInput || '';
+                    this.personality.tags = input.split(/\s+/).filter(tag => tag.trim());
+                    this.personalityHasUnsavedChanges = true;
+                },
+
+                escapeHtml(text) {
+                    const div = document.createElement('div');
+                    div.textContent = text;
+                    return div.innerHTML;
                 },
 
                 // 自定义确认对话框方法
@@ -5338,8 +5437,15 @@ def main(params):
                     this.newPersonalityPreset = {
                         name: '',
                         description: '',
-                        icon: '🎭',
-                        prompt: ''
+                        avatar: '🎭',
+                        tags: [],
+                        personality: '',
+                        scenario: '',
+                        firstMessage: '',
+                        exampleDialogues: '',
+                        responseFormat: '',
+                        rules: [],
+                        state: { affection: 50, mood: '开心' }
                     };
                     this.showAddPersonalityPresetModal = true;
                 },
@@ -5348,16 +5454,91 @@ def main(params):
                     this.showAddPersonalityPresetModal = false;
                 },
 
-                async addCustomPersonalityPreset() {
-                    if (!this.newPersonalityPreset.name || !this.newPersonalityPreset.prompt) {
-                        this.showToast('请填写人格名称和提示词', 'error');
+                // 新建角色 - 清空编辑器
+                createNewPersonality() {
+                    this.personality = {
+                        name: '',
+                        description: '',
+                        avatar: '',
+                        tags: [],
+                        systemPrompt: '',
+                        basicInfo: '',
+                        personality: '',
+                        scenario: '',
+                        firstMessage: '',
+                        exampleDialogues: '',
+                        responseFormat: '',
+                        rules: [],
+                        state: { affection: 50, mood: '开心' }
+                    };
+                    this.personalityTagsInput = '';
+                    this.personalityHasUnsavedChanges = false;
+                    this.showToast('请在左侧编辑器中填写角色信息，然后点击保存', 'info');
+                },
+
+                // 选择头像
+                selectAvatar(icon) {
+                    if (icon) {
+                        this.personality.avatar = icon;
+                        this.personalityHasUnsavedChanges = true;
+                        this.showToast('头像已选择', 'success');
+                    }
+                },
+
+                // 保存当前角色到自定义预设
+                async savePersonalityAsPreset() {
+                    if (!this.personality.name) {
+                        this.showToast('请填写角色名称', 'error');
                         return;
                     }
 
                     try {
-                        const res = await api.post('/api/personality/custom-presets', this.newPersonalityPreset);
+                        const presetData = {
+                            name: this.personality.name,
+                            description: this.personality.description || '',
+                            avatar: this.personality.avatar || '',
+                            tags: this.personality.tags || [],
+                            basicInfo: this.personality.basicInfo || '',
+                            personality: this.personality.personality || '',
+                            scenario: this.personality.scenario || '',
+                            firstMessage: this.personality.firstMessage || '',
+                            exampleDialogues: this.personality.exampleDialogues || '',
+                            responseFormat: this.personality.responseFormat || '',
+                            rules: this.personality.rules || [],
+                            state: this.personality.state || { affection: 50, mood: '开心' }
+                        };
+                        const res = await api.post('/api/personality/custom-presets', presetData);
                         this.customPersonalityPresets.push(res.data);
-                        this.showToast('自定义人格预设已添加', 'success');
+                        this.showToast('角色卡已保存到"我的角色卡"', 'success');
+                    } catch (e) {
+                        console.error('保存角色卡失败:', e);
+                        this.showToast('保存失败: ' + (e.response?.data?.error || e.message), 'error');
+                    }
+                },
+
+                async addCustomPersonalityPreset() {
+                    if (!this.newPersonalityPreset.name) {
+                        this.showToast('请填写角色名称', 'error');
+                        return;
+                    }
+
+                    try {
+                        const presetData = {
+                            name: this.newPersonalityPreset.name,
+                            description: this.newPersonalityPreset.description || '',
+                            avatar: this.newPersonalityPreset.avatar || '🎭',
+                            tags: this.newPersonalityPreset.tags || [],
+                            personality: this.newPersonalityPreset.personality || '',
+                            scenario: this.newPersonalityPreset.scenario || '',
+                            firstMessage: this.newPersonalityPreset.firstMessage || '',
+                            exampleDialogues: this.newPersonalityPreset.exampleDialogues || '',
+                            responseFormat: this.newPersonalityPreset.responseFormat || '',
+                            rules: this.newPersonalityPreset.rules || [],
+                            state: this.newPersonalityPreset.state || { affection: 50, mood: '开心' }
+                        };
+                        const res = await api.post('/api/personality/custom-presets', presetData);
+                        this.customPersonalityPresets.push(res.data);
+                        this.showToast('自定义角色卡已添加', 'success');
                         this.closeAddPersonalityPresetModal();
                     } catch (e) {
                         console.error('添加自定义人格预设失败:', e);
