@@ -4,6 +4,7 @@ import datetime
 import time
 import re
 import copy
+from typing import Any, Dict, List, Optional
 from concurrent.futures import ThreadPoolExecutor, TimeoutError
 from nbot.services.ai import (
     ai_client, user_messages, group_messages, MAX_HISTORY_LENGTH,
@@ -31,6 +32,13 @@ from nbot.core import (
 )
 from nbot.channels.qq import QQChannelAdapter
 from nbot.channels.registry import get_channel_adapter, register_channel_handler
+from nbot.core.ai_pipeline import (
+    AIPipeline,
+    PipelineContext,
+    PipelineCallbacks,
+    PipelineResult,
+    handle_tool_confirmation,
+)
 from nbot.core.message import create_message
 
 # 工作区管理
@@ -89,6 +97,113 @@ def _get_qq_store() -> QQSessionStore:
         max_history=MAX_HISTORY_LENGTH,
         save_callback=_save_legacy_qq_histories,
     )
+
+
+# ============================================================================
+# QQ 管道回调
+# ============================================================================
+
+
+class QQCallbacks(PipelineCallbacks):
+    """QQ 频道的管道回调实现。"""
+
+    def __init__(
+        self,
+        qq_store: QQSessionStore,
+        user_id: str = None,
+        group_id: str = None,
+        group_user_id: str = None,
+    ):
+        self.qq_store = qq_store
+        self.user_id = str(user_id) if user_id else None
+        self.group_id = str(group_id) if group_id else None
+        self.group_user_id = str(group_user_id) if group_user_id else None
+        self._token_stats = None  # (prompt_tokens, completion_tokens, total_tokens)
+
+    def load_messages(self, ctx: PipelineContext) -> List[Dict[str, Any]]:
+        """从 QQSessionStore 加载历史消息。"""
+        if self.user_id:
+            return self.qq_store.ensure_history(user_id=self.user_id)
+        elif self.group_id:
+            return self.qq_store.ensure_history(
+                group_id=self.group_id, group_user_id=self.group_user_id
+            )
+        return []
+
+    def get_system_prompt(self, ctx: PipelineContext) -> str:
+        return load_prompt(
+            user_id=self.user_id,
+            group_id=self.group_id,
+            include_skills=True,
+        )
+
+    def search_knowledge(self, ctx: PipelineContext, query: str) -> str:
+        return search_knowledge_base(query, self.user_id, self.group_id)
+
+    def save_assistant_message(
+        self, ctx: PipelineContext, message: Dict[str, Any]
+    ) -> None:
+        """QQ 消息通过 BotAPI 补丁自动保存，此处记录 token 用量。"""
+        content = message.get("content", "")
+        prompt_chars = len(json.dumps(ctx.messages, ensure_ascii=False))
+        completion_chars = len(content or "")
+        self._token_stats = (
+            prompt_chars,
+            completion_chars,
+            prompt_chars + completion_chars,
+        )
+        self.qq_store.save()
+
+    def get_workspace_context(self, ctx: PipelineContext) -> Dict[str, Any]:
+        return get_workspace_context(self.user_id, self.group_id, self.group_user_id)
+
+    def check_confirmation(
+        self, ctx: PipelineContext, user_input: str
+    ) -> Optional[str]:
+        """QQ 确认关键词检测。"""
+        if not TOOLS_AVAILABLE or not get_pending_by_session:
+            return None
+        try:
+            session_id = get_qq_session_id(
+                self.user_id, self.group_id, self.group_user_id
+            )
+            stripped = (user_input or "").strip().lower()
+            is_confirm = any(
+                kw == stripped or (len(stripped) <= 4 and kw in stripped)
+                for kw in _CONFIRM_KEYWORDS
+            )
+            is_reject = any(
+                kw == stripped or (len(stripped) <= 4 and kw in stripped)
+                for kw in _REJECT_KEYWORDS
+            )
+            if is_confirm and not is_reject:
+                request_id = get_pending_by_session(session_id)
+                if request_id:
+                    return "confirm"
+            elif is_reject:
+                request_id = get_pending_by_session(session_id)
+                if request_id:
+                    return "reject"
+        except Exception:
+            pass
+        return None
+
+    def on_response_complete(
+        self, ctx: PipelineContext, result: PipelineResult
+    ) -> None:
+        """更新 token 统计。"""
+        if self._token_stats:
+            _update_token_stats(
+                self.user_id,
+                self.group_id,
+                *self._token_stats,
+            )
+
+    def send_response(
+        self, ctx: PipelineContext, message: Dict[str, Any]
+    ) -> None:
+        """QQ 频道通过 BotAPI 补丁自动发送消息，此处为空操作。"""
+        pass
 
 
 def search_knowledge_base(query: str, user_id: str = None, group_id: str = None) -> str:
@@ -181,265 +296,6 @@ def ensure_workspace(user_id=None, group_id=None, group_user_id=None) -> str:
         return ""
     session_type = "qq_private" if user_id else "qq_group"
     return workspace_manager.get_or_create(session_id, session_type)
-
-
-def _get_ai_response_with_tools_qq(messages: list, tools: list, session_id: str = None, max_iterations: int = 10) -> str:
-    runtime_ai = refresh_runtime_ai_config()
-    """
-    QQ 端带工具调用的 AI 响应获取
-    支持多轮工具调用，直到得到最终回复
-    直接使用 HTTP 请求，不依赖 ai_client.chat_completion
-    """
-    if not TOOLS_AVAILABLE or not tools:
-        response = ai_client.chat_completion(
-            model=runtime_ai.get("model") or ai_client.model,
-            messages=messages,
-            stream=False,
-        )
-        return response.choices[0].message.content
-
-    return _get_ai_response_with_tools_qq_unified(
-        messages, tools, session_id=session_id, max_iterations=max_iterations
-    )
-
-    import requests
-    
-    if not TOOLS_AVAILABLE or not tools:
-        # 不支持工具，直接调用 AI
-        response = ai_client.chat_completion(
-            model=runtime_ai.get("model") or ai_client.model,
-            messages=messages,
-            stream=False
-        )
-        return response.choices[0].message.content
-    
-    # 获取 API 配置
-    url_base = (runtime_ai.get("base_url") or "").rstrip("/")
-    if not url_base:
-        raise ValueError("base_url 未配置")
-    url = resolve_chat_completion_url(
-        runtime_ai.get("base_url") or "",
-        model=runtime_ai.get("model") or "",
-        provider_type=runtime_ai.get("provider_type") or "openai_compatible",
-    )
-    
-    headers = {
-        "Authorization": f"Bearer {runtime_ai.get('api_key') or ''}",
-        "Content-Type": "application/json"
-    }
-    
-    tool_messages = copy.deepcopy(messages)
-    final_content = ""
-    
-    for iteration in range(max_iterations):
-        try:
-            # 构造请求 payload
-            payload = {
-                "model": runtime_ai.get("model") or ai_client.model,
-                "messages": tool_messages,
-                "tools": tools,
-                "tool_choice": "auto",
-                "stream": False
-            }
-            
-            # 发送请求
-            resp = requests.post(url, json=payload, headers=headers, timeout=120)
-            resp.raise_for_status()
-            data = resp.json()
-            
-            # 解析响应
-            choice = data.get("choices", [{}])[0]
-            message = choice.get("message", {})
-            
-            # 检查是否有工具调用
-            if message.get("tool_calls"):
-                tool_calls = message["tool_calls"]
-                
-                # 添加 AI 的回复到消息历史
-                tool_messages.append({
-                    "role": "assistant",
-                    "content": message.get("content", ""),
-                    "tool_calls": [
-                        {
-                            "id": tc.get("id"),
-                            "type": "function",
-                            "function": {
-                                "name": tc.get("function", {}).get("name"),
-                                "arguments": tc.get("function", {}).get("arguments")
-                            }
-                        } for tc in tool_calls
-                    ]
-                })
-                
-                # 执行所有工具调用
-                for tool_call in tool_calls:
-                    tool_name = tool_call.get("function", {}).get("name")
-                    try:
-                        arguments = json.loads(tool_call.get("function", {}).get("arguments", "{}"))
-                    except:
-                        arguments = {}
-                    
-                    print(f"[QQ Tools] 执行工具: {tool_name}, 参数: {arguments}")
-                    
-                    # 执行工具，传入 session_id（使用线程池避免阻塞）
-                    try:
-                        # 添加 session_id 到参数中
-                        tool_context = {'session_id': session_id} if session_id else {}
-                        
-                        # 使用线程池异步执行工具，避免阻塞 Web 服务
-                        future = _tool_executor.submit(execute_tool, tool_name, arguments, tool_context)
-                        # 设置 60 秒超时
-                        tool_result = future.result(timeout=60)
-                        
-                        # 检查是否需要用户确认（exec_command 的特殊处理）
-                        if tool_result.get('require_confirmation'):
-                            # 返回确认请求，中断工具调用流程
-                            confirmation_msg = tool_result.get('message', "AI 请求执行命令，需要您的确认。")
-                            request_id = tool_result.get('request_id', '')
-                            return f"{confirmation_msg}\n\n请回复「确认」来执行，或回复「取消」来拒绝。\n[请求ID: {request_id[:8] if request_id else 'N/A'}]"
-                        
-                        result_content = json.dumps(tool_result, ensure_ascii=False)
-                    except TimeoutError:
-                        result_content = json.dumps({"error": "工具执行超时（60秒）"}, ensure_ascii=False)
-                    except Exception as e:
-                        result_content = json.dumps({"error": str(e)}, ensure_ascii=False)
-                    
-                    # 添加工具结果到消息历史
-                    tool_messages.append({
-                        "role": "tool",
-                        "tool_call_id": tool_call.get("id"),
-                        "content": result_content
-                    })
-                    
-                    print(f"[QQ Tools] 工具结果: {result_content[:200]}...")
-            else:
-                # 没有工具调用，得到最终回复
-                final_content = message.get("content", "")
-                break
-                
-        except Exception as e:
-            print(f"[QQ Tools] 工具调用出错: {e}")
-            # 出错时返回最后一次 AI 回复或错误信息
-            if tool_messages and tool_messages[-1].get("role") == "assistant":
-                final_content = tool_messages[-1].get("content", "")
-            if not final_content:
-                final_content = f"处理出错: {str(e)}"
-            break
-    
-    # 如果超过最大迭代次数，使用最后一条消息
-    if not final_content and tool_messages:
-        last_msg = tool_messages[-1]
-        if last_msg.get("role") == "assistant":
-            final_content = last_msg.get("content", "处理完成")
-    
-    return final_content
-
-
-def _call_qq_ai_with_tools(messages: list, tools: list, stop_event=None) -> dict:
-    import requests
-    runtime_ai = refresh_runtime_ai_config()
-
-    url_base = (runtime_ai.get("base_url") or "").rstrip("/")
-    if not url_base:
-        raise ValueError("base_url 未配置")
-    url = resolve_chat_completion_url(
-        runtime_ai.get("base_url") or "",
-        model=runtime_ai.get("model") or "",
-        provider_type=runtime_ai.get("provider_type") or "openai_compatible",
-    )
-
-    headers = {
-        "Authorization": f"Bearer {runtime_ai.get('api_key') or ''}",
-        "Content-Type": "application/json",
-    }
-    payload = build_chat_completion_payload(
-        runtime_ai.get("model") or ai_client.model,
-        messages,
-        base_url=runtime_ai.get("base_url") or "",
-        provider_type=runtime_ai.get("provider_type") or "openai_compatible",
-        tools=tools,
-        tool_choice="auto",
-        stream=False,
-    )
-
-    resp = requests.post(url, json=payload, headers=headers, timeout=120)
-    resp.raise_for_status()
-    data = resp.json()
-
-    normalized = normalize_chat_completion_data(
-        data,
-        base_url=runtime_ai.get("base_url") or "",
-        model=runtime_ai.get("model") or "",
-        provider_type=runtime_ai.get("provider_type") or "openai_compatible",
-    )
-    return normalized.to_dict()
-
-
-def _get_ai_response_with_tools_qq_unified(
-    messages: list, tools: list, session_id: str = None, max_iterations: int = 10
-) -> str:
-    def model_call(current_messages, stop_event=None):
-        return _call_qq_ai_with_tools(current_messages, tools, stop_event=stop_event)
-
-    def execute_qq_tool(tool_call, thinking_content, iteration, tool_messages):
-        tool_name = tool_call.get("name")
-        arguments = tool_call.get("arguments", {})
-        print(f"[QQ Tools] 鎵ц宸ュ叿: {tool_name}, 鍙傛暟: {arguments}")
-
-        try:
-            tool_context = {"session_id": session_id} if session_id else {}
-            future = _tool_executor.submit(
-                execute_tool, tool_name, arguments, tool_context
-            )
-            tool_result = future.result(timeout=60)
-            if tool_result.get("require_confirmation"):
-                confirmation_msg = tool_result.get(
-                    "message", "AI 请求执行命令，需要您的确认。"
-                )
-                request_id = tool_result.get('request_id', '')
-                raise ToolLoopExit(
-                    f"{confirmation_msg}\n\n请回复「确认」来执行，或回复「取消」来拒绝。\n[请求ID: {request_id[:8] if request_id else 'N/A'}]"
-                )
-
-            print(
-                f"[QQ Tools] 宸ュ叿缁撴灉: {json.dumps(tool_result, ensure_ascii=False)[:200]}..."
-            )
-            return tool_result
-        except TimeoutError:
-            return {"error": "宸ュ叿鎵ц瓒呮椂锛?0绉掞級"}
-        except ToolLoopExit:
-            raise
-        except Exception as e:
-            return {"error": str(e)}
-
-    try:
-        execution_result = run_tool_loop_session(
-            ToolLoopSession(
-                initial_messages=messages,
-                model_call=model_call,
-                tool_executor=execute_qq_tool,
-                max_iterations=max_iterations,
-            )
-        )
-        loop_result = execution_result.loop_result
-    except Exception as e:
-        print(f"[QQ Tools] 宸ュ叿璋冪敤鍑洪敊: {e}")
-        return f"澶勭悊鍑洪敊: {str(e)}"
-
-    return resolve_loop_final_content(
-        loop_result,
-        "\u62b1\u6b49\uff0c\u6211\u6682\u65f6\u6ca1\u6709\u751f\u6210\u51fa\u6709\u6548\u56de\u590d\u3002",
-    )
-
-    if loop_result.final_content:
-        return loop_result.final_content
-
-    if loop_result.tool_messages:
-        last_msg = loop_result.tool_messages[-1]
-        if last_msg.get("role") == "assistant":
-            return last_msg.get("content", "澶勭悊瀹屾垚")
-
-    return "澶勭悊瀹屾垚"
 
 
 def delete_session_workspace(user_id=None, group_id=None, group_user_id=None) -> bool:
@@ -571,6 +427,7 @@ def _run_qq_chat_request(
     adapter = adapter or get_channel_adapter("qq") or QQChannelAdapter()
     runtime_ai = refresh_runtime_ai_config()
     channel_capabilities = adapter.get_capabilities()
+
     content = chat_request.content
     user_id = chat_request.user_id
     group_id = chat_request.metadata.get("group_id")
@@ -583,174 +440,73 @@ def _run_qq_chat_request(
 
     if user_id:
         user_id = str(user_id)
-        history_messages = qq_store.ensure_history(user_id=user_id)
-    elif group_id:
+    if group_id:
         group_id = str(group_id)
-        history_messages = qq_store.ensure_history(
-            group_id=group_id, group_user_id=group_user_id
+
+    # === 确认/拒绝待执行命令检测 ===
+    if content and not image and not video and TOOLS_AVAILABLE:
+        session_id_check = get_qq_session_id(user_id, group_id, group_user_id)
+        content = handle_tool_confirmation(
+            content, session_id_check, log_prefix="QQ Confirm"
         )
-    else:
-        if TOOLS_AVAILABLE and not runtime_ai.get("supports_tools", True):
-            print("[QQ Tools] 当前配置声明不支持工具调用，已跳过工具链")
-        if TOOLS_AVAILABLE and not runtime_ai.get("supports_tools", True):
-            print("[QQ Tools] 当前配置声明不支持工具调用，已跳过工具链")
-        history_messages = []
+        chat_request.content = content
 
-    messages = copy.deepcopy(history_messages)
-
-    # === 确认/拒绝待执行命令检测（QQ 通道） ===
-    _confirmation_handled = False
-    if content and not image and not video and TOOLS_AVAILABLE and get_pending_by_session:
-        try:
-            session_id_check = get_qq_session_id(user_id, group_id, group_user_id)
-            content_stripped = content.strip().lower()
-            is_confirm = any(kw == content_stripped or (len(content_stripped) <= 4 and kw in content_stripped) for kw in _CONFIRM_KEYWORDS)
-            is_reject = any(kw == content_stripped or (len(content_stripped) <= 4 and kw in content_stripped) for kw in _REJECT_KEYWORDS)
-
-            if is_confirm and not is_reject:
-                request_id = get_pending_by_session(session_id_check)
-                if request_id:
-                    print(f'[QQ Confirm] 用户确认执行待处理命令: session={session_id_check}, request_id={request_id[:8]}')
-                    exec_result = execute_pending_command(request_id)
-                    if exec_result.get('executed'):
-                        cmd = exec_result.get('command', '')
-                        stdout = exec_result.get('stdout', '')
-                        stderr = exec_result.get('stderr', '')
-                        result_msg = f"[系统] 用户已确认执行命令 `{cmd}`。\n\n执行结果:\n{stdout}"
-                        if stderr:
-                            result_msg += f"\n\n错误输出:\n{stderr}"
-                        messages.append({"role": "user", "content": result_msg})
-                        _confirmation_handled = True
-                    else:
-                        error_msg = exec_result.get('error', '命令执行失败')
-                        messages.append({"role": "user", "content": f"[系统] 执行命令失败: {error_msg}"})
-                        _confirmation_handled = True
-            elif is_reject:
-                request_id = get_pending_by_session(session_id_check)
-                if request_id:
-                    print(f'[QQ Reject] 用户拒绝执行待处理命令: session={session_id_check}')
-                    reject_result = reject_pending_command(request_id)
-                    cmd = reject_result.get('command', '')
-                    messages.append({"role": "user", "content": f"[系统] 用户已拒绝执行命令 `{cmd}`。"})
-                    _confirmation_handled = True
-        except Exception as e:
-            print(f"[QQ Confirm] failed to handle pending command confirmation: {e}")
-    if group_user_id:
-        pre_text = f"用户{group_user_id}说："
-    else:
-        pre_text = ""
-
-    # 搜索功能已移除，使用工具调用替代
-    search_status = 0
-    search_res = ""
+    # === 预处理：图片/视频/URL 描述 ===
+    pre_text = f"用户{group_user_id}说：" if group_user_id else ""
 
     if image:
         print(f"[图片识别] chat 函数收到图片请求, URL: {url}")
         response = chat_image(url)
-        print(f"[图片识别] chat 函数获取到图片描述: {response[:80] if response else '空'}...")
-        messages.append({"role": "user", "content": f"(当前时间：{now_time})"})
-        if search_status == 1:
-            messages.append({"role": "user", "content": f"{pre_text}用户发送了一张图片，这是图片的描述：{response} 这是联网搜索的结果：{search_res}这是用户说的话：{content}"})
-        else:
-            messages.append({"role": "user", "content": f"{pre_text}用户发送了一张图片，这是图片的描述：{response} 这是用户说的话：{content}"})
+        print(f"[图片识别] 获取到图片描述: {response[:80] if response else '空'}...")
+        enhanced_content = f"(当前时间：{now_time})\n{pre_text}用户发送了一张图片，这是图片的描述：{response} 这是用户说的话：{content}"
     elif video:
         response = chat_video(video)
-        messages.append({"role": "user", "content": f"(当前时间：{now_time})"})
-        messages.append({"role": "user", "content": f"{pre_text}这是视频的描述：{response}这是用户说的话：{content}"})
+        enhanced_content = f"(当前时间：{now_time})\n{pre_text}这是视频的描述：{response}这是用户说的话：{content}"
     else:
-        messages.append({"role": "user", "content": f"(当前时间：{now_time})"})
-        if search_status == 1:
-            messages.append({"role": "user", "content": f"{pre_text}这是联网搜索的结果：{search_res}这是用户说的话：{content}"})
-        else:
-            messages.append({"role": "user", "content": f"{pre_text}{content}"})
+        enhanced_content = f"(当前时间：{now_time})\n{pre_text}{content}"
 
-    des = ""
+    # URL 链接描述
     pattern = r"(?:https?:\/\/)?(?:www\.)?[a-zA-Z0-9-]+(?:\.[a-zA-Z]{2,})+(?:\/[^\s?]*)?(?:\?[^\s]*)?"
     matches = re.findall(pattern, content)
     if matches:
-        tot = 0
-        for match in matches:
-            tot += 1
-            des += f"第{tot}个链接{match}的描述：" + chat_webpage(match) + "\n"
-        messages.append({"role": "user", "content": f"{pre_text}{des}"})
+        des = ""
+        for i, match in enumerate(matches, 1):
+            des += f"第{i}个链接{match}的描述：" + chat_webpage(match) + "\n"
+        enhanced_content += f"\n{pre_text}{des}"
 
-    # 记录用户消息到新消息模块
+    # 更新 chat_request 内容为预处理后的内容
+    chat_request.content = enhanced_content
+
+    # 记录用户消息
     record_user_message(content, user_id, group_id, group_user_id)
 
-    # 知识库检索 - 根据用户提问匹配相关内容
-    knowledge_res = search_knowledge_base(content, user_id, group_id)
-    prepared_context = prepare_chat_context(
-        messages,
-        content,
-        knowledge_text=knowledge_res,
-        max_total_chars=100000,
-    )
-    messages = prepared_context.messages
-
-    # 获取工作区上下文（用于工具调用）
-    workspace_context = get_workspace_context(user_id, group_id, group_user_id)
-    
-    # 使用带工具调用的 AI 响应获取
+    # === 确定是否启用工具 ===
+    tools = None
     if (
         TOOLS_AVAILABLE
         and runtime_ai.get("supports_tools", True)
         and channel_capabilities.supports_file_send
-        and workspace_context.get('session_id')
     ):
-        # 准备工具上下文
-        tool_context = {
-            'session_id': workspace_context['session_id'],
-            'user_id': user_id,
-            'group_id': group_id,
-            'source': 'qq'
-        }
-        
-        # 执行带工具的 AI 调用
-        assistant_response = _get_ai_response_with_tools_qq(
-            messages, 
-            TOOL_DEFINITIONS,
-            session_id=workspace_context.get('session_id'),
-            max_iterations=10
-        )
-    else:
-        # 普通 AI 调用（不支持工具）
-        response = ai_client.chat_completion(
-            model=runtime_ai.get("model") or ai_client.model,
-            messages=messages,
-            stream=False
-        )
-        assistant_response = response.choices[0].message.content
+        tools = TOOL_DEFINITIONS
 
-    if not assistant_response:
-        print("[DEBUG] API返回内容为空")
+    # === 通过管道处理 AI 响应 ===
+    ctx = PipelineContext(chat_request=chat_request, adapter=adapter)
+    callbacks = QQCallbacks(qq_store, user_id, group_id, group_user_id)
 
-    # 获取 token 使用量（工具调用模式下使用估算）
-    prompt_tokens = len(str(messages))
-    completion_tokens = len(assistant_response)
-    total_tokens = prompt_tokens + completion_tokens
+    pipeline = AIPipeline()
+    result = pipeline.process(ctx, callbacks, tools=tools, max_context_chars=100000)
 
-    # 更新 token 统计（使用真实数据）
-    _update_token_stats(user_id, group_id, prompt_tokens, completion_tokens, total_tokens)
-
-    # 注意：QQ 消息已通过新模块 message_manager 统一管理，存储在 data/qq/ 目录
-    # 不再同步到 data/web/sessions.json
-
-    assistant_response = clean_response_content(assistant_response)
-
-    # 解析 JSON 返回给 QQ
+    # === 后处理 ===
+    assistant_response = clean_response_content(result.final_content)
     display_response = extract_display_text(assistant_response)
-    if assistant_response and assistant_response.strip().startswith('{'):
+    if assistant_response and assistant_response.strip().startswith("{"):
         try:
-            # 先替换中文引号和冒号为英文
-            fixed = assistant_response.replace(chr(8220), '"').replace(chr(8221), '"').replace(chr(65306), ':')
+            fixed = assistant_response.replace(chr(8220), '"').replace(chr(8221), '"').replace(chr(65306), ":")
             parsed = json.loads(fixed)
-            if isinstance(parsed, dict) and 'msg' in parsed:
-                display_response = parsed['msg']
-        except:
+            if isinstance(parsed, dict) and "msg" in parsed:
+                display_response = parsed["msg"]
+        except Exception:
             pass
-
-    # 注意：AI回复的记录已通过 BotAPI 的补丁自动处理（wrapped_post_group_msg）
-    # 这里不需要再调用 record_assistant_message，避免重复保存
 
     qq_store.save()
 

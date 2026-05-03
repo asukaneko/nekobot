@@ -33,3 +33,4 @@ faster-whisper
 cryptography>=42.0.0,<44
 py-vapid>=1.8,<1.9
 pywebpush>=2.0.3
+lark-oapi>=1.4.0

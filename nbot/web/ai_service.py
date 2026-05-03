@@ -7,7 +7,7 @@ import threading
 import time
 import uuid
 from datetime import datetime
-from typing import Dict, List
+from typing import Dict, List, Optional
 from nbot.channels.registry import get_channel_adapter
 from nbot.channels.web import WebChannelAdapter
 from nbot.core import (
@@ -24,6 +24,12 @@ from nbot.core import (
     ToolLoopSession,
     WebSessionStore,
     run_tool_loop_session,
+)
+from nbot.core.ai_pipeline import (
+    AIPipeline,
+    PipelineContext,
+    PipelineCallbacks,
+    PipelineResult,
 )
 from nbot.web.utils.config_loader import get_vision_model_config
 
@@ -188,6 +194,467 @@ def _emit_change_card(
     return change_card
 
 
+# ============================================================================
+# Web 频道管道回调
+# ============================================================================
+
+
+class WebProgressReporter:
+    """Web 频道的进度报告实现，封装 ProgressCard 和 TodoCard。"""
+
+    def __init__(self, server, session_id: str, parent_message_id: str, session_store):
+        self.server = server
+        self.session_id = session_id
+        self.parent_message_id = parent_message_id
+        self.session_store = session_store
+        self.progress_card = None
+        self.todo_card = None
+        self._init_cards()
+
+    def _init_cards(self):
+        if (
+            self.server.PROGRESS_CARD_AVAILABLE
+            and self.server.progress_card_manager
+            and self.server.socketio
+        ):
+            self.progress_card = self.server.progress_card_manager.create_card(
+                session_id=self.session_id,
+                parent_message_id=self.parent_message_id,
+                max_iterations=50,
+            )
+
+        if (
+            self.server.TODO_CARD_AVAILABLE
+            and self.server.todo_card_manager
+            and self.server.socketio
+        ):
+            self.todo_card = self.server.todo_card_manager.create_card(
+                session_id=self.session_id,
+                parent_message_id=self.parent_message_id,
+            )
+
+    def on_thinking_start(self, ctx) -> None:
+        if self.progress_card:
+            from nbot.core.progress_card import StepType
+            self.progress_card.update(StepType.THINKING, "AI 正在思考...")
+
+    def on_knowledge_start(self, ctx) -> None:
+        pass
+
+    def on_knowledge_done(self, ctx, retrieved: bool) -> None:
+        if self.progress_card and retrieved:
+            from nbot.core.progress_card import StepType
+            self.progress_card.update(StepType.KNOWLEDGE_DONE, "知识库检索完成")
+
+    def on_tool_start(self, ctx, tool_name: str, arguments: dict, thinking: str) -> None:
+        if self.progress_card:
+            from nbot.core.progress_card import StepType
+            display_name = _get_tool_display_name(tool_name)
+            self.progress_card.update(
+                StepType.TOOL,
+                display_name,
+                json.dumps(arguments, ensure_ascii=False)[:100],
+                step_arguments=arguments,
+                thinking_content=thinking,
+            )
+
+    def on_tool_done(self, ctx, tool_name: str, result: dict, thinking: str) -> None:
+        if self.progress_card:
+            from nbot.core.progress_card import StepType
+            result_preview = json.dumps(result, ensure_ascii=False)[:200]
+            self.progress_card.update(
+                StepType.TOOL_DONE,
+                _get_tool_display_name(tool_name),
+                result_preview,
+                thinking_content=thinking,
+            )
+        if self.todo_card:
+            try:
+                # 更新 Todo 卡片
+                self.server.todo_card_manager.update_from_tool_result(
+                    self.todo_card, tool_name, result
+                )
+            except Exception:
+                pass
+
+    def on_tool_iteration(self, ctx, iteration: int) -> None:
+        pass
+
+    def on_attachment_start(self, ctx, count: int) -> None:
+        if self.progress_card:
+            from nbot.core.progress_card import StepType
+            self.progress_card.update(StepType.UPLOAD, f"正在处理 {count} 个附件...")
+
+    def on_attachment_item(self, ctx, name: str, item_type: str) -> None:
+        pass
+
+    def on_attachment_item_done(self, ctx, name: str, success: bool, result_preview: str = "") -> None:
+        pass
+
+    def on_attachments_done(self, ctx) -> None:
+        pass
+
+    def on_done(self, ctx) -> None:
+        pass
+
+    def on_waiting_confirmation(self, ctx, command: str, request_id: str) -> None:
+        pass
+
+    def dispose(self):
+        """清理卡片资源。"""
+        self.progress_card = None
+        self.todo_card = None
+
+
+class WebCallbacks(PipelineCallbacks):
+    """Web 频道的管道回调实现。"""
+
+    def __init__(
+        self,
+        server,
+        session_store,
+        session_id: str,
+        adapter,
+        parent_message_id: str = None,
+        progress_reporter: WebProgressReporter = None,
+    ):
+        self.server = server
+        self.session_store = session_store
+        self.session_id = session_id
+        self.adapter = adapter
+        self.parent_message_id = parent_message_id
+        self._progress = progress_reporter
+
+    # ---- 会话 / 消息 I/O ----
+
+    def load_messages(self, ctx: PipelineContext) -> List[Dict]:
+        import copy
+        session = self.session_store.get_session(self.session_id)
+        if session:
+            return copy.deepcopy(session.get("messages", []))
+        return []
+
+    def get_system_prompt(self, ctx: PipelineContext) -> str:
+        return str(
+            getattr(self.server, "personality", {}).get("systemPrompt") or ""
+        ).strip()
+
+    def save_assistant_message(self, ctx: PipelineContext, message: Dict) -> None:
+        self.session_store.append_message(self.session_id, message)
+
+    # ---- AI 模型交互 ----
+
+    def build_model_call(self, ctx, tools):
+        """Web 频道使用服务器的 AI 方法。"""
+        server = self.server
+        return lambda messages, stop_event=None: _call_web_ai(
+            server, messages, tools, stop_event
+        )
+
+    def build_model_call_streaming(self, ctx, tools):
+        """返回 provider 级流式迭代器。"""
+        server = self.server
+        session_id = self.session_id
+
+        def streamer(messages, stop_event=None):
+            return _stream_to_web(server, messages, tools, session_id, stop_event)
+
+        return streamer
+
+    # ---- 输出 / 回复 ----
+
+    def send_response(self, ctx: PipelineContext, message: Dict) -> None:
+        if ctx.metadata.get("streamed"):
+            # 流式已发送，无需再次发送
+            return
+        self.server.socketio.emit(
+            "ai_response",
+            {"session_id": self.session_id, "message": message},
+            room=self.session_id,
+        )
+
+    def on_stream_start(self, ctx: PipelineContext, message: Dict) -> None:
+        self.server.socketio.emit(
+            "ai_stream_start",
+            {"session_id": self.session_id, "message": message},
+            room=self.session_id,
+        )
+
+    def on_stream_chunk(self, ctx: PipelineContext, chunk: str, message_id: str) -> None:
+        self.server.socketio.emit(
+            "ai_stream_chunk",
+            {
+                "session_id": self.session_id,
+                "message_id": message_id,
+                "chunk": chunk,
+                "is_end": False,
+            },
+            room=self.session_id,
+        )
+
+    def on_stream_end(self, ctx: PipelineContext, message_id: str) -> None:
+        self.server.socketio.emit(
+            "ai_stream_end",
+            {
+                "session_id": self.session_id,
+                "message_id": message_id,
+                "is_end": True,
+            },
+            room=self.session_id,
+        )
+
+    # ---- 进度 ----
+
+    def get_progress_reporter(self, ctx: PipelineContext):
+        if self._progress:
+            return self._progress
+        from nbot.core.ai_pipeline import NoOpProgressReporter
+        return NoOpProgressReporter()
+
+    # ---- 工具确认 ----
+
+    def on_confirmation_required(self, ctx: PipelineContext, request_id: str, command: str) -> None:
+        self.server.socketio.emit(
+            "exec_confirm_request",
+            {
+                "request_id": request_id,
+                "command": command,
+                "message": f"命令 `{command}` 需要您的确认",
+                "session_id": self.session_id,
+            },
+            room=self.session_id,
+        )
+
+    # ---- 知识库 ----
+
+    def search_knowledge(self, ctx: PipelineContext, query: str) -> str:
+        if not _feature_enabled(self.server, "knowledge", True):
+            return ""
+        try:
+            return self.server._retrieve_knowledge(query)
+        except Exception:
+            return ""
+
+    # ---- 工作区 ----
+
+    def ensure_workspace(self, ctx: PipelineContext) -> str:
+        if getattr(self.server, "WORKSPACE_AVAILABLE", False) and self.server.workspace_manager:
+            return self.server.workspace_manager.get_or_create(
+                self.session_id, "web"
+            )
+        return ""
+
+    def get_workspace_context(self, ctx: PipelineContext) -> Dict:
+        return {"session_id": self.session_id, "session_type": "web"}
+
+    # ---- 附件解析 ----
+
+    def resolve_attachment_data(self, ctx: PipelineContext, attachment: Dict) -> Optional[Dict]:
+        """Web 频道附件解析：静态文件 / 工作区文件 / 数据 URL。"""
+        att_path = attachment.get("path", "")
+        att_url = attachment.get("url", "")
+        att_data = attachment.get("data", "")
+        att_name = attachment.get("name", "unknown")
+
+        result = {"type": attachment.get("type", ""), "name": att_name}
+
+        # 数据 URL 直接返回
+        if att_data:
+            result["data"] = att_data
+            return result
+
+        path_to_use = att_path or att_url
+        if not path_to_use:
+            return None
+
+        try:
+            file_path = None
+            if path_to_use.startswith("/static/"):
+                file_path = os.path.join(
+                    self.server.static_folder,
+                    path_to_use.replace("/static/", ""),
+                )
+            elif "/workspace/files/" in path_to_use:
+                filename = path_to_use.split("/workspace/files/")[-1]
+                if self.server.workspace_manager:
+                    file_path = self.server.workspace_manager.get_file_path(
+                        self.session_id, filename
+                    )
+                    if not file_path:
+                        ws_path = self.server.workspace_manager.get_workspace(
+                            self.session_id
+                        )
+                        if ws_path:
+                            file_path = os.path.join(ws_path, filename)
+
+            if file_path and os.path.isfile(file_path):
+                result["path"] = file_path
+                # 读取文本文件内容
+                att_type = attachment.get("type", "")
+                ext = os.path.splitext(att_name)[1].lower()
+                from nbot.core.ai_pipeline import AIPipeline
+                if att_type in AIPipeline.TEXT_MIME_TYPES or ext in AIPipeline.TEXT_EXTENSIONS:
+                    with open(file_path, "r", encoding="utf-8", errors="replace") as f:
+                        result["text_content"] = f.read()
+                return result
+        except Exception:
+            pass
+
+        return None
+
+    # ---- 后处理 ----
+
+    def on_response_complete(self, ctx: PipelineContext, result: PipelineResult) -> None:
+        # 自动重命名会话
+        self._auto_rename_session(ctx)
+        # 文件变更卡片
+        if ctx.round_file_changes:
+            _emit_change_card(
+                self.server,
+                self.session_store,
+                session_id=self.session_id,
+                parent_message_id=self.parent_message_id,
+                file_changes=ctx.round_file_changes,
+            )
+
+    def _auto_rename_session(self, ctx: PipelineContext) -> None:
+        """自动重命名会话（基于对话内容）。"""
+        try:
+            session = self.session_store.get_session(self.session_id)
+            if not session:
+                return
+            name = session.get("name", "")
+            if name and name != "新对话":
+                return
+            messages = session.get("messages", [])
+            user_count = sum(1 for m in messages if m.get("role") == "user")
+            if user_count < 2:
+                return
+            # 简化：取第一条用户消息的前30字作为会话名
+            first_user_msg = ""
+            for m in messages:
+                if m.get("role") == "user":
+                    content = m.get("content", "").strip()
+                    if content and len(content) > 3:
+                        first_user_msg = content
+                        break
+            if first_user_msg:
+                new_name = first_user_msg[:30] + ("..." if len(first_user_msg) > 30 else "")
+                session["name"] = new_name
+                self.session_store.set_session(self.session_id, session)
+        except Exception:
+            pass
+
+
+# ---- Web 频道的 model_call 辅助函数 ----
+
+def _call_web_ai(server, messages: List[Dict], tools: list, stop_event=None) -> Dict:
+    """Web 频道的 model_call 实现。"""
+    import requests
+    from nbot.services.ai import refresh_runtime_ai_config
+
+    if stop_event and stop_event.is_set():
+        raise StopIteration("User stopped")
+
+    runtime_ai = refresh_runtime_ai_config()
+    base_url = runtime_ai.get("base_url") or ""
+    model = runtime_ai.get("model") or ""
+    provider_type = runtime_ai.get("provider_type") or "openai_compatible"
+    api_key = runtime_ai.get("api_key") or ""
+
+    url = resolve_chat_completion_url(base_url, model=model, provider_type=provider_type)
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+    payload = build_chat_completion_payload(
+        model, messages,
+        base_url=base_url, provider_type=provider_type,
+        tools=tools if tools else None,
+        tool_choice="auto" if tools else None,
+        stream=False,
+    )
+    resp = requests.post(url, json=payload, headers=headers, timeout=120)
+    resp.raise_for_status()
+    normalized = normalize_chat_completion_data(
+        resp.json(),
+        base_url=base_url, model=model, provider_type=provider_type,
+    )
+    return normalized.to_dict()
+
+
+def _stream_to_web(server, messages: List[Dict], tools: list, session_id: str, stop_event=None):
+    """Web 频道的 provider 级流式实现。"""
+    import requests
+    from nbot.services.ai import refresh_runtime_ai_config
+
+    runtime_ai = refresh_runtime_ai_config()
+    base_url = runtime_ai.get("base_url") or ""
+    model = runtime_ai.get("model") or ""
+    provider_type = runtime_ai.get("provider_type") or "openai_compatible"
+    api_key = runtime_ai.get("api_key") or ""
+
+    url = resolve_chat_completion_url(base_url, model=model, provider_type=provider_type)
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+    payload = build_chat_completion_payload(
+        model, messages,
+        base_url=base_url, provider_type=provider_type,
+        tools=tools if tools else None,
+        tool_choice="auto" if tools else None,
+        stream=True,
+    )
+    resp = requests.post(url, json=payload, headers=headers, stream=True, timeout=120)
+    resp.raise_for_status()
+
+    for line in resp.iter_lines(decode_unicode=True):
+        if stop_event and stop_event.is_set():
+            break
+        if line and line.startswith("data: "):
+            data_str = line[6:]
+            if data_str.strip() == "[DONE]":
+                break
+            try:
+                data = json.loads(data_str)
+                choices = data.get("choices", [{}])
+                delta = choices[0].get("delta", {})
+                content = delta.get("content", "")
+                if content:
+                    yield {"content": content}
+            except json.JSONDecodeError:
+                continue
+
+
+def _get_tool_display_name(tool_name: str) -> str:
+    """获取工具显示名称。"""
+    names = {
+        "search_web": "网页搜索",
+        "search_news": "新闻搜索",
+        "get_weather": "天气查询",
+        "get_date_time": "日期时间",
+        "http_get": "HTTP 请求",
+        "understand_image": "图片理解",
+        "exec_command": "命令执行",
+        "download_file": "文件下载",
+        "save_to_memory": "保存记忆",
+        "read_memory": "读取记忆",
+        "workspace_create_file": "创建工作区文件",
+        "workspace_read_file": "读取工作区文件",
+        "workspace_edit_file": "编辑工作区文件",
+        "workspace_delete_file": "删除工作区文件",
+        "workspace_list_files": "列出工作区文件",
+        "workspace_send_file": "发送工作区文件",
+        "workspace_parse_file": "解析文件",
+        "todo_add": "添加待办",
+        "todo_list": "列出待办",
+        "todo_complete": "完成待办",
+        "todo_delete": "删除待办",
+    }
+    return names.get(tool_name, tool_name)
+
+
 def trigger_ai_response(
     server,
     session_id: str,
@@ -209,41 +676,32 @@ def trigger_ai_response(
 
 
 def trigger_ai_response_for_request(server, chat_request: ChatRequest, adapter=None):
+    """通过统一管道处理 Web 频道的 AI 请求。"""
     adapter = adapter or getattr(server, "web_channel_adapter", None) or get_channel_adapter("web") or WebChannelAdapter()
     session_store = WebSessionStore(
         server.sessions, save_callback=lambda: server._save_data("sessions")
     )
     session_id = chat_request.conversation_id
     user_content = chat_request.content
-    sender = chat_request.sender
     attachments = list(chat_request.attachments or [])
     parent_message_id = chat_request.parent_message_id
     channel_capabilities = adapter.get_capabilities()
 
-    # 强制转换为列表
-    if not attachments or not isinstance(attachments, list):
+    if not isinstance(attachments, list):
         attachments = []
 
     session = session_store.get_session(session_id)
     if not session:
         _log.warning(f"Session not found: {session_id}")
-        server.log_message("warning", f"Session not found: {session_id}")
         return ChatResponse(error=f"Session not found: {session_id}")
 
-    # 检查是否有图片附件
     has_image = False
     try:
         for att in attachments:
-            if isinstance(att, dict):
-                att_type = att.get("type", "")
-                if (
-                    att_type
-                    and hasattr(att_type, "startswith")
-                    and att_type.startswith("image/")
-                ):
-                    has_image = True
-                    break
-    except:
+            if isinstance(att, dict) and str(att.get("type", "")).startswith("image/"):
+                has_image = True
+                break
+    except Exception:
         attachments = []
 
     server.log_message(
@@ -251,1461 +709,122 @@ def trigger_ai_response_for_request(server, chat_request: ChatRequest, adapter=N
         f"开始生成AI回复 for session {session_id[:8]}... (附件: {len(attachments)}, 图片: {has_image})",
     )
 
-    # 知识库检索
-    knowledge_retrieved = False
-    knowledge_text = ""
-    knowledge_enabled = _feature_enabled(server, "knowledge", True)
-    _log.info(f"[Knowledge] 知识库开关状态: {knowledge_enabled}")
-    if knowledge_enabled:
+    # 创建停止事件
+    stop_event = threading.Event()
+    server.stop_events[session_id] = stop_event
+
+    # 进度/待办卡片
+    progress_reporter = None
+    if (
+        channel_capabilities.supports_progress_updates
+        and server.PROGRESS_CARD_AVAILABLE
+        and server.progress_card_manager
+    ):
+        progress_reporter = WebProgressReporter(
+            server, session_id, parent_message_id, session_store
+        )
+
+    # 确定是否启用工具
+    tools = None
+    has_tools = (
+        _looks_like_tool_request(user_content)
+        and getattr(server, "ai_config", {}).get("supports_tools", True)
+    )
+    if has_tools:
         try:
-            _log.info(f"[Knowledge] 开始检索，查询: {user_content[:50]}...")
-            knowledge_text = server._retrieve_knowledge(user_content)
-            _log.info(f"[Knowledge] 检索结果长度: {len(knowledge_text)} 字符")
-            if knowledge_text:
-                knowledge_retrieved = True
-                _log.info("[Knowledge] 知识库检索成功")
-        except Exception as e:
-            _log.error(f"[Knowledge] 知识库检索失败: {e}")
+            from nbot.services.tools import get_enabled_tools
+            tools = get_enabled_tools()
+        except Exception:
+            tools = None
 
-    def get_response():
+    # 构建管道上下文和回调
+    ctx = PipelineContext(
+        chat_request=chat_request,
+        adapter=adapter,
+        stop_event=stop_event,
+    )
+    callbacks = WebCallbacks(
+        server=server,
+        session_store=session_store,
+        session_id=session_id,
+        adapter=adapter,
+        parent_message_id=parent_message_id,
+        progress_reporter=progress_reporter,
+    )
+
+    # 上下文字符预算
+    try:
+        context_char_budget = int(
+            getattr(server, "ai_config", {}).get("max_context_length", 100000)
+        )
+    except (TypeError, ValueError):
+        context_char_budget = 100000
+    context_char_budget = max(100000, context_char_budget)
+
+    def run_pipeline():
         try:
-            # 使用深拷贝避免修改原始消息
-            import copy
-
-            messages_for_ai = copy.deepcopy(session["messages"])
-            tool_call_history = None
-            try:
-                context_char_budget = int(
-                    getattr(server, "ai_config", {}).get("max_context_length", 100000)
-                )
-            except (TypeError, ValueError):
-                context_char_budget = 100000
-            # 最低 100k token
-            context_char_budget = max(100000, context_char_budget)
-
-            prepared_context = prepare_chat_context(
-                messages_for_ai,
-                chat_request.content,
-                knowledge_text=knowledge_text,
-                max_total_chars=context_char_budget,
-            )
-            messages_for_ai = prepared_context.messages
-            tool_call_history = prepared_context.tool_call_history
-            if tool_call_history:
-                _log.info(
-                    f"[Continue] 检测到继续请求，恢复 {len(tool_call_history)} 条工具调用记录"
-                )
-
-            image_urls = []
-            file_contents = []
-            streamed_assistant_message = None
-            stopped_prematurely = False  # 初始化变量
-            tool_messages = []  # 初始化变量
-
-            # 支持的文本文件MIME类型
-            TEXT_MIME_TYPES = [
-                "text/plain",
-                "application/json",
-                "application/xml",
-                "text/csv",
-                "text/yaml",
-                "application/x-yaml",
-                "application/yaml",
-                "text/x-python",
-                "text/x-java",
-                "text/x-c",
-                "text/x-c++",
-                "text/html",
-                "text/css",
-                "text/javascript",
-                "application/javascript",
-                "text/markdown",
-                "text/x-markdown",
-                "application/x-httpd-php",
-                "text/x-php",
-            ]
-
-            # 根据扩展名判断是否为文本文件
-            TEXT_EXTENSIONS = [
-                ".txt",
-                ".json",
-                ".xml",
-                ".csv",
-                ".yaml",
-                ".yml",
-                ".py",
-                ".java",
-                ".c",
-                ".cpp",
-                ".h",
-                ".hpp",
-                ".html",
-                ".css",
-                ".js",
-                ".ts",
-                ".jsx",
-                ".tsx",
-                ".md",
-                ".markdown",
-                ".php",
-                ".rb",
-                ".go",
-                ".rs",
-                ".sh",
-                ".bash",
-                ".sql",
-                ".ini",
-                ".cfg",
-                ".conf",
-                ".log",
-                ".env",
-                ".properties",
-                ".toml",
-            ]
-
-            # 创建进度卡片（所有消息都创建，立即显示"AI 正在思考..."）
-            progress_card = None
-            todo_card = None
-            round_file_changes = []
-            has_attachments = (
-                attachments
-                and isinstance(attachments, list)
-                and len(attachments) > 0
+            pipeline = AIPipeline()
+            result = pipeline.process(
+                ctx, callbacks,
+                tools=tools,
+                max_context_chars=context_char_budget,
             )
 
-            if (
-                channel_capabilities.supports_progress_updates
-                and server.PROGRESS_CARD_AVAILABLE
-                and server.progress_card_manager
-                and server.socketio
-            ):
-                progress_card = server.progress_card_manager.create_card(
-                    session_id=session_id,
-                    parent_message_id=parent_message_id,
-                    max_iterations=50,
-                )
-                _log.info(f"[ProgressCard] 创建进度卡片: {progress_card.card_id}")
-                # 立即显示"AI 正在思考..."
-                from nbot.core.progress_card import StepType
-
-                progress_card.update(StepType.THINKING, "AI 正在思考...")
-
-            # 创建 Todo 卡片（用于显示待办事项）
-            if (
-                channel_capabilities.supports_progress_updates
-                and server.TODO_CARD_AVAILABLE
-                and server.todo_card_manager
-                and server.socketio
-            ):
-                todo_card = server.todo_card_manager.create_card(
-                    session_id=session_id, parent_message_id=parent_message_id
-                )
-                _log.info(f"[TodoCard] 创建 Todo 卡片: {todo_card.card_id}")
-
-            # 创建停止事件
-            stop_event = threading.Event()
-            server.stop_events[session_id] = stop_event
-
-            if has_attachments:
-                # 更新进度：开始处理附件
-                if progress_card:
-                    progress_card.update(
-                        StepType.UPLOAD, f"正在处理 {len(attachments)} 个附件..."
-                    )
-
-                for att in attachments:
-                    if isinstance(att, dict):
-                        att_type = att.get("type", "")
-                        att_data = att.get("data", "")
-                        att_path = att.get("path", "")
-                        att_name = att.get("name", "unknown")
-                        att_url = att.get("url", "")
-
-
-
-                        if isinstance(att_type, str):
-                            # 图片附件 - 优先使用 data URL，其次使用文件路径
-                            if att_type.startswith("image/"):
-                                # 更新进度：正在识别图片
-                                if progress_card:
-                                    progress_card.update(
-                                        StepType.IMAGE, f"正在识别图片: {att_name}"
-                                    )
-
-                                image_loaded = False
-                                if att_data:
-                                    image_urls.append(att_data)
-                                    image_loaded = True
-                                else:
-                                    # 优先使用path，如果没有path则使用url
-                                    path_to_use = att_path if att_path else att_url
-                                    if path_to_use:
-                                        # 尝试读取服务器上的图片文件
-                                        try:
-                                            file_path = None
-                                            
-                                            # 处理不同格式的路径
-                                            if path_to_use.startswith("/static/"):
-                                                # 静态文件路径
-                                                file_path = os.path.join(
-                                                    server.static_folder,
-                                                    path_to_use.replace("/static/", ""),
-                                                )
-                                            elif "/workspace/files/" in path_to_use:
-                                                # 工作区文件路径
-                                                try:
-                                                    # 从URL中提取文件名
-                                                    filename = path_to_use.split("/workspace/files/")[-1]
-                                                    
-                                                    # 尝试从workspace_manager获取文件路径
-                                                    workspace_available = getattr(server, 'WORKSPACE_AVAILABLE', False)
-                                                    if workspace_available and server.workspace_manager:
-                                                        # 从attachments中获取session_id
-                                                        session_id_from_att = None
-                                                        if isinstance(att, dict):
-                                                            # 尝试从url中提取session_id
-                                                            url = att.get("url", "")
-                                                            if "/sessions/" in url:
-                                                                parts = url.split("/sessions/")
-                                                                if len(parts) > 1:
-                                                                    session_id_from_att = parts[1].split("/")[0]
-                                                        
-                                                        if session_id_from_att:
-                                                            file_path = server.workspace_manager.get_file_path(session_id_from_att, filename)
-                                                    
-                                                    # 如果还没找到，尝试使用workspace_manager获取工作区路径
-                                                    if not file_path:
-                                                        try:
-                                                            if "/sessions/" in path_to_use:
-                                                                parts = path_to_use.split("/sessions/")
-                                                                if len(parts) > 1:
-                                                                    session_id_from_path = parts[1].split("/")[0]
-                                                                    # 使用workspace_manager获取正确的工作区路径
-                                                                    if server.workspace_manager:
-                                                                        ws_path = server.workspace_manager.get_workspace(session_id_from_path)
-                                                                        if ws_path:
-                                                                            file_path = os.path.join(ws_path, filename)
-                                                                        else:
-                                                                            # 工作区不存在，尝试使用get_or_create创建
-                                                                            ws_path = server.workspace_manager.get_or_create(session_id_from_path, "web")
-                                                                            file_path = os.path.join(ws_path, filename)
-                                                                    else:
-                                                                        # 没有workspace_manager，尝试直接构造路径
-                                                                        file_path = os.path.join(
-                                                                            server.data_dir, "workspace", f"web_{session_id_from_path[:8]}", filename
-                                                                        )
-                                                            else:
-                                                                file_path = os.path.join(
-                                                                    server.data_dir, "workspace", filename
-                                                                )
-                                                        except Exception:
-                                                            pass
-                                                except Exception:
-                                                    pass
-                                            else:
-                                                # 其他路径，尝试直接使用
-                                                file_path = path_to_use if os.path.exists(path_to_use) else None
-                                            
-                                            if file_path and os.path.exists(file_path):
-                                                with open(file_path, "rb") as f:
-                                                    import base64
-                                                    file_content = f.read()
-                                                    b64_data = base64.b64encode(file_content).decode("utf-8")
-                                                    image_urls.append(
-                                                        f"data:{att_type};base64,{b64_data}"
-                                                    )
-                                                    image_loaded = True
-                                            else:
-                                                _log.warning(
-                                                    f"图片文件不存在: file_path={file_path}, 原始path/url={path_to_use}"
-                                                )
-                                        except Exception as e:
-                                            _log.warning(
-                                                f"读取图片文件失败: {att_name}, {e}"
-                                            )
-                                # 无论成功还是失败，都更新完成状态
-                                if progress_card:
-                                    if image_loaded:
-                                        progress_card.update(
-                                            StepType.IMAGE_DONE,
-                                            f"图片已加载: {att_name}",
-                                            True,
-                                        )
-                                    else:
-                                        progress_card.update(
-                                            StepType.IMAGE_DONE,
-                                            f"图片加载失败: {att_name}",
-                                            False,
-                                        )
-
-                            # 文本文件 - 优先使用 data URL，其次使用文件路径
-                            elif att_type in TEXT_MIME_TYPES:
-                                # 更新进度：正在读取文件
-                                if progress_card:
-                                    progress_card.update(
-                                        StepType.FILE, f"正在读取文件: {att_name}"
-                                    )
-
-                                text_content = None
-                                # 从 data URL 提取内容
-                                if att_data and att_data.startswith("data:"):
-                                    try:
-                                        import base64
-
-                                        b64_data = (
-                                            att_data.split(",")[1]
-                                            if "," in att_data
-                                            else att_data
-                                        )
-                                        text_content = base64.b64decode(
-                                            b64_data
-                                        ).decode("utf-8", errors="ignore")
-                                    except Exception as e:
-                                        _log.warning(
-                                            f"提取文本文件失败: {att_name}, {e}"
-                                        )
-                                # 从文件路径读取内容
-                                elif att_path:
-                                    try:
-                                        file_path = os.path.join(
-                                            server.static_folder,
-                                            att_path.replace("/static/", ""),
-                                        )
-                                        if os.path.exists(file_path):
-                                            with open(
-                                                file_path,
-                                                "r",
-                                                encoding="utf-8",
-                                                errors="ignore",
-                                            ) as f:
-                                                text_content = f.read()
-                                    except Exception as e:
-                                        _log.warning(
-                                            f"读取文件失败: {att_name}, {e}"
-                                        )
-
-                                if text_content:
-                                    file_contents.append(
-                                        f"【文件 {att_name} 内容】:\n{text_content[:10000]}"
-                                    )
-                                    # 文件处理完成
-                                    if progress_card:
-                                        progress_card.update(
-                                            StepType.FILE_DONE,
-                                            f"文件已读取: {att_name}",
-                                            True,
-                                        )
-                                else:
-                                    # 文件处理失败
-                                    if progress_card:
-                                        progress_card.update(
-                                            StepType.FILE_DONE,
-                                            f"文件读取失败: {att_name}",
-                                            False,
-                                        )
-
-                            # 根据扩展名判断是否为文本文件
-                            elif any(
-                                att_name.lower().endswith(ext)
-                                for ext in TEXT_EXTENSIONS
-                            ):
-                                # 更新进度：正在读取文件
-                                if progress_card:
-                                    progress_card.update(
-                                        StepType.FILE, f"正在读取文件: {att_name}"
-                                    )
-
-                                text_content = None
-                                file_read_success = False
-
-                                # 从 data URL 提取内容
-                                if att_data and att_data.startswith("data:"):
-                                    try:
-                                        import base64
-
-                                        b64_data = (
-                                            att_data.split(",")[1]
-                                            if "," in att_data
-                                            else att_data
-                                        )
-                                        text_content = base64.b64decode(
-                                            b64_data
-                                        ).decode("utf-8", errors="ignore")
-                                        file_read_success = True
-                                    except Exception as e:
-                                        _log.warning(
-                                            f"提取文本文件失败: {att_name}, {e}"
-                                        )
-                                # 从文件路径读取内容
-                                elif att_path:
-                                    try:
-                                        file_path = os.path.join(
-                                            server.static_folder,
-                                            att_path.replace("/static/", ""),
-                                        )
-                                        if os.path.exists(file_path):
-                                            with open(
-                                                file_path,
-                                                "r",
-                                                encoding="utf-8",
-                                                errors="ignore",
-                                            ) as f:
-                                                text_content = f.read()
-                                                file_read_success = True
-                                    except Exception as e:
-                                        _log.warning(
-                                            f"读取文件失败: {att_name}, {e}"
-                                        )
-
-                                if text_content:
-                                    file_contents.append(
-                                        f"【文件 {att_name} 内容】:\n{text_content[:10000]}"
-                                    )
-
-                                # 更新完成状态
-                                if progress_card:
-                                    if file_read_success:
-                                        progress_card.update(
-                                            StepType.FILE_DONE,
-                                            f"文件已读取: {att_name}",
-                                            True,
-                                        )
-                                    else:
-                                        progress_card.update(
-                                            StepType.FILE_DONE,
-                                            f"文件读取失败: {att_name}",
-                                            False,
-                                        )
-
-                            # 工作区文件 - 从 URL 中提取路径并读取内容
-                            elif att_type == "workspace/file" or (
-                                att_path and "/workspace/files/" in str(att_path)
-                            ):
-                                # 更新进度：正在读取工作区文件
-                                if progress_card:
-                                    progress_card.update(
-                                        StepType.FILE,
-                                        f"正在读取工作区文件: {att_name}",
-                                    )
-
-                                text_content = None
-                                file_read_success = False
-
-                                # 尝试从 URL 中提取工作区文件路径
-                                try:
-                                    import re
-
-                                    url = att.get("url", "")
-                                    # 匹配 /api/sessions/{session_id}/workspace/files/{path}
-                                    match = re.search(
-                                        r"/workspace/files/([^?]+)", url
-                                    )
-                                    if match:
-                                        ws_file_path = match.group(1)
-                                        if (
-                                            server.WORKSPACE_AVAILABLE
-                                            and server.workspace_manager
-                                        ):
-                                            # 使用 server.workspace_manager 读取文件
-                                            ws_path = (
-                                                server.workspace_manager.get_workspace(
-                                                    session_id
-                                                )
-                                            )
-                                            if ws_path:
-                                                full_path = os.path.join(
-                                                    ws_path, ws_file_path
-                                                )
-                                                if os.path.exists(
-                                                    full_path
-                                                ) and os.path.isfile(full_path):
-                                                    with open(
-                                                        full_path,
-                                                        "r",
-                                                        encoding="utf-8",
-                                                        errors="ignore",
-                                                    ) as f:
-                                                        text_content = f.read()
-                                                        file_read_success = True
-                                                        _log.info(
-                                                            f"工作区文件已读取: {ws_file_path}"
-                                                        )
-                                except Exception as e:
-                                    _log.warning(
-                                        f"读取工作区文件失败: {att_name}, {e}"
-                                    )
-
-                                if text_content:
-                                    file_contents.append(
-                                        f"【文件 {att_name} 内容】:\n{text_content[:10000]}"
-                                    )
-
-                                # 更新完成状态
-                                if progress_card:
-                                    if file_read_success:
-                                        progress_card.update(
-                                            StepType.FILE_DONE,
-                                            f"工作区文件已读取: {att_name}",
-                                            True,
-                                        )
-                                    else:
-                                        progress_card.update(
-                                            StepType.FILE_DONE,
-                                            f"工作区文件读取失败: {att_name}",
-                                            False,
-                                        )
-
-                            # 使用本地解析器解析的文件类型
-                            elif (
-                                any(
-                                    att_name.lower().endswith(ext)
-                                    for ext in [
-                                        ".pdf",
-                                        ".doc",
-                                        ".docx",
-                                        ".ppt",
-                                        ".pptx",
-                                        ".xls",
-                                        ".xlsx",
-                                    ]
-                                )
-                                and att_path
-                            ):
-                                try:
-                                    file_abs_path = os.path.join(
-                                        server.static_folder,
-                                        att_path.replace("/static/", ""),
-                                    )
-                                    if os.path.exists(file_abs_path):
-                                        # 使用文件解析器获取元数据
-                                        if server.FILE_PARSER_AVAILABLE and server.file_parser:
-                                            metadata = (
-                                                server.file_parser.get_file_metadata(
-                                                    file_abs_path, att_name
-                                                )
-                                            )
-                                            if metadata.get("success"):
-                                                # 构建元数据信息
-                                                meta_parts = [f"文件: {att_name}"]
-                                                meta_parts.append(
-                                                    f"类型: {metadata.get('type', 'unknown')}"
-                                                )
-                                                meta_parts.append(
-                                                    f"大小: {metadata.get('size_str', 'unknown')}"
-                                                )
-
-                                                # 添加额外信息（页数、工作表数等）
-                                                if "pages" in metadata:
-                                                    meta_parts.append(
-                                                        f"页数: {metadata['pages']}"
-                                                    )
-                                                if "slides" in metadata:
-                                                    meta_parts.append(
-                                                        f"幻灯片数: {metadata['slides']}"
-                                                    )
-                                                if "sheets" in metadata:
-                                                    meta_parts.append(
-                                                        f"工作表数: {metadata['sheets']}"
-                                                    )
-                                                    if "sheet_names" in metadata:
-                                                        sheet_names = metadata[
-                                                            "sheet_names"
-                                                        ]
-                                                        if isinstance(
-                                                            sheet_names, list
-                                                        ):
-                                                            meta_parts.append(
-                                                                f"工作表: {', '.join(str(s) for s in sheet_names)}"
-                                                            )
-                                                if "paragraphs" in metadata:
-                                                    meta_parts.append(
-                                                        f"段落数: {metadata['paragraphs']}"
-                                                    )
-                                                if "tables" in metadata:
-                                                    meta_parts.append(
-                                                        f"表格数: {metadata['tables']}"
-                                                    )
-
-                                                meta_parts.append(
-                                                    "\n如需查看文件内容，请调用 workspace_parse_file 工具解析此文件。"
-                                                )
-
-                                                file_contents.append(
-                                                    "【文件元数据】\n"
-                                                    + "\n".join(meta_parts)
-                                                )
-                                                _log.info(
-                                                    f"文件元数据已提取: {att_name}"
-                                                )
-                                            else:
-                                                file_contents.append(
-                                                    f"【文件 {att_name}】类型: {att_type} (无法获取元数据)"
-                                                )
-                                        else:
-                                            file_contents.append(
-                                                f"【文件 {att_name}】类型: {att_type} (文件解析器不可用)"
-                                            )
-                                    else:
-                                        file_contents.append(
-                                            f"【文件 {att_name}】类型: {att_type} (文件不存在)"
-                                        )
-                                except Exception as e:
-                                    _log.warning(
-                                        f"获取文件元数据失败: {att_name}, {e}"
-                                    )
-                                    file_contents.append(
-                                        f"【文件 {att_name}】类型: {att_type} (获取元数据失败)"
-                                    )
-                            # 其他文件 - 告知AI文件类型
-                            elif att_type:
-                                file_contents.append(
-                                    f"【文件 {att_name}】类型: {att_type} (暂不支持解析)"
-                                )
-
-            # 附件处理完成，更新进度
-            if progress_card:
-                _log.info(
-                    f"[ProgressCard] 准备更新 UPLOAD_DONE，当前步骤数: {len(progress_card.steps)}"
-                )
-                progress_card.update(
-                    StepType.UPLOAD_DONE,
-                    f"附件处理完成 ({len(attachments)} 个文件)",
-                    True,
-                )
-                _log.info(
-                    f"[ProgressCard] UPLOAD_DONE 更新完成，步骤数: {len(progress_card.steps)}"
-                )
-
-            # 知识库检索成功，更新进度
-            if progress_card and knowledge_retrieved:
-                _log.info("[ProgressCard] 准备更新 KNOWLEDGE 步骤")
-                progress_card.update(StepType.KNOWLEDGE, "📚 知识库检索...")
-                progress_card.update(
-                    StepType.KNOWLEDGE_DONE, "📚 知识库已加载", True
-                )
-                _log.info("[ProgressCard] KNOWLEDGE 步骤更新完成")
-
-            # 合并文件内容到用户消息
-            enhanced_content = user_content
-            if file_contents:
-                enhanced_content = (
-                    user_content + "\n\n" + "\n\n".join(file_contents)
-                )
-
-            # 定义默认的完成函数（用于多模态AI分支）
-            def complete_thinking_card():
-                """将进度卡片标记为完成状态"""
-                if progress_card:
-                    try:
-                        from nbot.core.progress_card import StepType
-
-                        progress_card.update(StepType.DONE, "✅ 处理完成", True)
-                        progress_card.complete()
-                    except Exception as e:
-                        _log.warning(f"[ThinkingCard] 标记完成失败: {e}")
-
-            # 检查是否有图片附件，如果有则使用多模态AI进行图片识别
-            def get_normal_ai_response(response_messages):
-                nonlocal streamed_assistant_message
-
-                can_stream = (
-                    channel_capabilities.supports_stream
-                    and server.socketio
-                    and server.ai_client
-                    and bool(getattr(server.ai_client, "supports_stream", False))
-                    and bool(getattr(server, "ai_config", {}).get("stream", True))
-                )
-                if not can_stream:
-                    return server._get_ai_response(response_messages)
-
-                streamed_assistant_message = _build_channel_assistant_message(
-                    ChatResponse(final_content=""),
-                    session_id=session_id,
-                    adapter=adapter,
-                )
-                try:
-                    return stream_provider_response_to_web(
-                        server,
-                        response_messages,
-                        session_id,
-                        streamed_assistant_message,
-                    )
-                except Exception as e:
-                    streamed_assistant_message = None
-                    _log.warning(
-                        f"[Stream] Provider streaming failed, falling back to non-stream response: {e}"
-                    )
-                    return server._get_ai_response(response_messages)
-
-            image_recognition_result = None
-            if image_urls:
-                # 使用多模态AI处理图片，获取图片识别结果
-                image_recognition_result = server._get_ai_response_with_images(
-                    messages_for_ai, image_urls, enhanced_content
-                )
-                
-                # 更新进度卡片，保存图片识别结果
-                if progress_card:
-                    try:
-                        from nbot.core.progress_card import StepType
-                        # 更新图片处理步骤，添加识别结果
-                        for step in reversed(progress_card.steps):
-                            if step['type'] == 'image' and step['status'] == 'done':
-                                step['full_result'] = image_recognition_result
-                                step['detail'] = f"图片识别完成 ({len(image_recognition_result)} 字符)"
-                                break
-                        progress_card._emit_update()
-                    except Exception:
-                        pass
-            
-            # 如果有图片识别结果，将其加入对话上下文
-            if image_recognition_result:
-                # 构建增强的用户消息，包含图片识别结果
-                enhanced_user_content = user_content
-                if user_content:
-                    enhanced_user_content = f"{user_content}\n\n[图片内容描述]\n{image_recognition_result}"
-                else:
-                    enhanced_user_content = f"[图片内容描述]\n{image_recognition_result}"
-                
-                # 更新messages_for_ai，将图片识别结果加入上下文
-                if messages_for_ai and messages_for_ai[-1].get("role") == "user":
-                    messages_for_ai[-1]["content"] = enhanced_user_content            
-            # 继续正常的对话流程（工具调用或普通对话）
-            if False:  # 占位，实际逻辑在下面
-                pass  # 这个分支不会执行，只是为了保持代码结构
-            else:
-                # 尝试使用工具调用（多轮）
-                try:
-                    from nbot.services.tools import get_enabled_tools, execute_tool
-
-                    supports_tools = server.ai_config.get("supports_tools", True)
-                    enabled_tools = get_enabled_tools() if supports_tools else []
-                    # 记录加载的工具列表
-                    tool_names = [
-                        t.get("function", {}).get("name", "unknown")
-                        for t in enabled_tools
-                    ]
-                    if not supports_tools:
-                        _log.info("[Tools] 当前模型配置声明不支持工具调用，跳过工具链")
-                    _log.info(
-                        f"[Tools] 已加载 {len(enabled_tools)} 个工具: {tool_names}"
-                    )
-                    if enabled_tools and _looks_like_tool_request(user_content):
-                        # 构建工具上下文（包含 session_id）
-                        tool_context = {
-                            "session_id": session_id,
-                            "session_type": session.get("type", "unknown"),
-                            "user_id": session.get("user_id", session_id),
-                        }
-
-                        # 构建多轮消息（使用深拷贝）
-                        tool_messages = copy.deepcopy(messages_for_ai)
-                        if (
-                            file_contents
-                            and tool_messages
-                            and tool_messages[-1].get("role") == "user"
-                        ):
-                            tool_messages[-1]["content"] = enhanced_content
-
-                        max_iterations = 50
-                        consecutive_errors = 0
-                        max_consecutive_errors = 3
-                        final_content = None
-
-                        _log.info(
-                            f"[ThinkingCard] 使用 ProgressCard 系统, session_id={session_id}, card_id={progress_card.card_id if progress_card else 'None'}"
-                        )
-
-                        def update_thinking_card(
-                            step_type,
-                            step_name,
-                            step_detail=None,
-                            step_result=None,
-                            step_arguments=None,
-                            step_full_result=None,
-                            thinking_content=None,
-                        ):
-                            """更新进度卡片 - 使用新的 ProgressCard 系统"""
-                            if not progress_card:
-                                return
-
-                            try:
-                                from nbot.core.progress_card import StepType
-
-                                step_type_map = {
-                                    "start": StepType.START,
-                                    "thinking": StepType.THINKING,
-                                    "ai_thinking": StepType.AI_THINKING,
-                                    "tool": StepType.TOOL,
-                                    "tool_done": StepType.TOOL_DONE,
-                                    "image": StepType.IMAGE,
-                                    "image_done": StepType.IMAGE_DONE,
-                                    "file": StepType.FILE,
-                                    "file_done": StepType.FILE_DONE,
-                                    "upload": StepType.UPLOAD,
-                                    "upload_done": StepType.UPLOAD_DONE,
-                                    "knowledge": StepType.KNOWLEDGE,
-                                    "knowledge_done": StepType.KNOWLEDGE_DONE,
-                                }
-                                step_type_enum = step_type_map.get(step_type)
-                                if step_type_enum:
-                                    progress_card.update(
-                                        step_type_enum,
-                                        step_name,
-                                        step_detail,
-                                        step_result,
-                                        step_arguments,
-                                        step_full_result,
-                                        thinking_content,
-                                    )
-                            except Exception as e:
-                                _log.warning(f"[ThinkingCard] 更新进度失败: {e}")
-
-                        def update_thinking_stream(thinking_content):
-                            """流式更新AI思考内容"""
-                            if not progress_card:
-                                return
-                            try:
-                                progress_card.append_thinking_content(
-                                    thinking_content
-                                )
-                            except Exception as e:
-                                _log.warning(
-                                    f"[ThinkingCard] 流式更新思考内容失败: {e}"
-                                )
-
-                        # 注意：complete_thinking_card 函数已在前面定义
-
-                        def send_workspace_file_message(file_path, filename):
-                            if (
-                                channel_capabilities is not None
-                                and not channel_capabilities.supports_file_send
-                            ):
-                                _log.info(
-                                    f"[SendFile] channel does not support file sending: session_id={session_id}"
-                                )
-                                return
-                            _log.info(
-                                f"[SendFile] \u51c6\u5907\u53d1\u9001\u6587\u4ef6: {filename}, path={file_path}, session_id={session_id}"
-                            )
-                            if not file_path or not filename or not session_id:
-                                _log.warning(
-                                    f"[SendFile] \u65e0\u6cd5\u53d1\u9001\u6587\u4ef6: file_path={file_path}, filename={filename}, session_id={session_id}"
-                                )
-                                return
-
-                            try:
-                                import base64
-                                import mimetypes
-                                import shutil
-
-                                if not os.path.exists(file_path):
-                                    _log.error(f"[SendFile] \u6587\u4ef6\u4e0d\u5b58\u5728: {file_path}")
-                                    return
-
-                                file_size = os.path.getsize(file_path)
-                                mime_type, _ = mimetypes.guess_type(file_path)
-                                if not mime_type:
-                                    mime_type = "application/octet-stream"
-                                ext = os.path.splitext(file_path)[1].lower()
-                                is_image = mime_type.startswith("image/")
-
-                                files_dir = os.path.join(server.static_folder, "files")
-                                os.makedirs(files_dir, exist_ok=True)
-                                file_hash = hashlib.md5(
-                                    f"{file_path}{time.time()}".encode()
-                                ).hexdigest()[:8]
-                                safe_name = f"{file_hash}_{filename}"
-                                dest_path = os.path.join(files_dir, safe_name)
-                                os.makedirs(os.path.dirname(dest_path), exist_ok=True)
-                                shutil.copy2(file_path, dest_path)
-                                download_url = f"/static/files/{safe_name}"
-
-                                file_info = {
-                                    "id": str(uuid.uuid4()),
-                                    "role": "assistant",
-                                    "content": f"[\u6587\u4ef6: {filename}]",
-                                    "timestamp": datetime.now().isoformat(),
-                                    "sender": "AI",
-                                    "source": "web",
-                                    "session_id": session_id,
-                                    "file": {
-                                        "name": filename,
-                                        "type": mime_type,
-                                        "size": file_size,
-                                        "is_image": is_image,
-                                        "extension": ext,
-                                        "download_url": download_url,
-                                        "url": download_url,
-                                    },
-                                }
-
-                                if is_image and file_size < 5 * 1024 * 1024:
-                                    try:
-                                        with open(file_path, "rb") as f:
-                                            file_data = f.read()
-                                        b64_data = base64.b64encode(file_data).decode(
-                                            "utf-8"
-                                        )
-                                        file_info["file"][
-                                            "data"
-                                        ] = f"data:{mime_type};base64,{b64_data}"
-                                        file_info["file"]["preview_url"] = file_info[
-                                            "file"
-                                        ]["data"]
-                                    except Exception as img_err:
-                                        _log.warning(
-                                            f"[SendFile] \u56fe\u7247\u8f6c base64 \u5931\u8d25: {img_err}"
-                                        )
-
-                                if session_id in server.sessions:
-                                    session_store.append_message(session_id, file_info)
-
-                                server.socketio.emit(
-                                    "new_message", file_info, room=session_id
-                                )
-                                _log.info(
-                                    f"[SendFile] \u6587\u4ef6\u5df2\u53d1\u9001: {filename} ({mime_type}, {file_size} bytes)"
-                                )
-                            except Exception as send_err:
-                                _log.error(
-                                    f"[SendFile] \u53d1\u9001\u6587\u4ef6\u65f6\u51fa\u9519: {send_err}",
-                                    exc_info=True,
-                                )
-
-                        def get_tool_display_name(tool_name):
-                            return {
-                                "search_news": "\U0001F50D \u641c\u7d22\u65b0\u95fb",
-                                "get_weather": "\U0001F324\uFE0F \u67e5\u8be2\u5929\u6c14",
-                                "search_web": "\U0001F310 \u7f51\u9875\u641c\u7d22",
-                                "get_date_time": "\U0001F550 \u83b7\u53d6\u65f6\u95f4",
-                                "http_get": "\U0001F4E1 \u83b7\u53d6\u7f51\u9875",
-                                "understand_image": "\U0001F5BC\uFE0F \u7406\u89e3\u56fe\u7247",
-                                "workspace_create_file": "\U0001F4DD \u521b\u5efa\u6587\u4ef6",
-                                "workspace_read_file": "\U0001F4D6 \u8bfb\u53d6\u6587\u4ef6",
-                                "workspace_edit_file": "\u270F\uFE0F \u7f16\u8f91\u6587\u4ef6",
-                                "workspace_delete_file": "\U0001F5D1\uFE0F \u5220\u9664\u6587\u4ef6",
-                                "workspace_list_files": "\U0001F4C1 \u5217\u51fa\u6587\u4ef6",
-                                "workspace_tree": "\U0001F333 \u663e\u793a\u76ee\u5f55\u6811",
-                                "workspace_send_file": "\U0001F4E4 \u53d1\u9001\u6587\u4ef6",
-                                "todo_add": "\u2705 \u6dfb\u52a0\u5f85\u529e",
-                                "todo_list": "\U0001F4CB \u5217\u51fa\u5f85\u529e",
-                                "todo_complete": "\u2713 \u5b8c\u6210\u5f85\u529e",
-                                "todo_delete": "\U0001F5D1\uFE0F \u5220\u9664\u5f85\u529e",
-                                "todo_clear": "\U0001F9F9 \u6e05\u7a7a\u5f85\u529e",
-                            }.get(tool_name, f"\u2699\uFE0F {tool_name}")
-
-                        def execute_web_tool(
-                            tool_call, thinking_content, iteration, current_tool_messages
-                        ):
-                            result = execute_tool(
-                                tool_call["name"],
-                                tool_call["arguments"],
-                                context=tool_context,
-                            )
-                            # 检查是否需要用户确认（exec_command 非白名单）
-                            if result.get('require_confirmation'):
-                                request_id = result.get('request_id', '')
-                                command = result.get('command', '')
-                                _log.info(f"[Web Confirm] 请求确认: request_id={request_id[:8] if request_id else '?'}, cmd={command[:80]}")
-                                server.socketio.emit('exec_confirm_request', {
-                                    'request_id': request_id,
-                                    'command': command,
-                                    'message': result.get('message', ''),
-                                    'session_id': session_id,
-                                }, room=session_id)
-                                raise ToolLoopExit(
-                                    f"命令 `{command}` 需要您的确认，请在弹窗中操作。\n[请求ID: {request_id[:8] if request_id else 'N/A'}]"
-                                )
-                            return result
-
-                        def on_tool_start(
-                            tool_call, ai_thinking_content, iteration, current_tool_messages
-                        ):
-                            tool_name = tool_call["name"]
-                            arguments = tool_call["arguments"]
-                            tool_display_name = get_tool_display_name(tool_name)
-                            update_thinking_card(
-                                "tool",
-                                tool_display_name,
-                                json.dumps(arguments, ensure_ascii=False)[:100],
-                                None,
-                                arguments,
-                                None,
-                                ai_thinking_content if ai_thinking_content else None,
-                            )
-
-                            if tool_name.startswith("workspace_"):
-                                args_str = json.dumps(arguments, ensure_ascii=False)
-                                _log.info(f"[Workspace] \u5de5\u5177\u8c03\u7528: {tool_name}")
-                                if len(args_str) > 200:
-                                    _log.info(
-                                        f"[Workspace] \u53c2\u6570: {args_str[:200]}... ({len(args_str)} \u5b57\u7b26)"
-                                    )
-                                else:
-                                    _log.info(f"[Workspace] \u53c2\u6570: {args_str}")
-
-                        def on_tool_result(
-                            tool_call,
-                            tool_result,
-                            ai_thinking_content,
-                            iteration,
-                            current_tool_messages,
-                        ):
-                            tool_name = tool_call["name"]
-                            arguments = tool_call["arguments"]
-                            tool_display_name = get_tool_display_name(tool_name)
-
-                            if tool_result.get("success"):
-                                file_changes = tool_result.get("file_changes") or []
-                                if file_changes:
-                                    round_file_changes.extend(file_changes)
-                                    result_preview = "；".join(
-                                        f"{change.get('action', 'changed')}: {change.get('path', '')}"
-                                        for change in file_changes[:3]
-                                    )[:160]
-                                else:
-                                    result_preview = str(
-                                        tool_result.get(
-                                            "content", tool_result.get("files", tool_result)
-                                        )
-                                    )[:100]
-                                update_thinking_card(
-                                    "tool_done",
-                                    tool_display_name,
-                                    result_preview,
-                                    None,
-                                    step_arguments=arguments,
-                                    step_full_result=tool_result,
-                                    thinking_content=ai_thinking_content
-                                    if ai_thinking_content
-                                    else None,
-                                )
-                            else:
-                                update_thinking_card(
-                                    "tool_done",
-                                    tool_display_name,
-                                    None,
-                                    None,
-                                    step_arguments=arguments,
-                                    step_full_result=tool_result,
-                                    thinking_content=ai_thinking_content
-                                    if ai_thinking_content
-                                    else None,
-                                )
-
-                            if tool_name.startswith("workspace_"):
-                                if tool_result.get("success"):
-                                    _log.info(f"[Workspace] \u6267\u884c\u6210\u529f: {tool_name}")
-                                    _log.info(
-                                        f"[Workspace] \u7ed3\u679c\u9884\u89c8: {str(tool_result)[:300]}"
-                                    )
-                                else:
-                                    _log.error(
-                                        f"[Workspace] \u6267\u884c\u5931\u8d25: {tool_name} - {tool_result.get('error')}"
-                                    )
-
-                            if tool_name.startswith("todo_"):
-                                if tool_result.get("success"):
-                                    _log.info(
-                                        f"[Todo] \u6267\u884c\u6210\u529f: {tool_name} - {tool_result.get('message', '')}"
-                                    )
-                                    if todo_card and server.TODO_CARD_AVAILABLE:
-                                        try:
-                                            if tool_name == "todo_add":
-                                                todo_info = tool_result.get("todo", {})
-                                                todo_card.add_todo(
-                                                    todo_id=todo_info.get("id"),
-                                                    content=todo_info.get("content", ""),
-                                                    priority=todo_info.get(
-                                                        "priority", "medium"
-                                                    ),
-                                                )
-                                            elif tool_name == "todo_complete":
-                                                todo_info = tool_result.get("todo", {})
-                                                todo_card.complete_todo(
-                                                    todo_info.get("id")
-                                                )
-                                            elif tool_name == "todo_delete":
-                                                deleted_todo = tool_result.get(
-                                                    "deleted_todo", {}
-                                                )
-                                                todo_card.delete_todo(
-                                                    deleted_todo.get("id")
-                                                )
-                                            elif tool_name == "todo_list":
-                                                todo_card.update_todos(
-                                                    tool_result.get("todos", [])
-                                                )
-                                            elif tool_name == "todo_clear":
-                                                todo_card.todos = []
-                                                todo_card._emit_update()
-                                        except Exception as e:
-                                            _log.warning(
-                                                f"[TodoCard] \u66f4\u65b0 Todo \u5361\u7247\u5931\u8d25: {e}"
-                                            )
-                                else:
-                                    _log.error(
-                                        f"[Todo] \u6267\u884c\u5931\u8d25: {tool_name} - {tool_result.get('error', '')}"
-                                    )
-
-                            if (
-                                tool_name == "send_message"
-                                and tool_result.get("action") == "send_message"
-                            ):
-                                progress_msg = {
-                                    "id": str(uuid.uuid4()),
-                                    "role": "assistant",
-                                    "content": tool_result.get("content", ""),
-                                    "timestamp": datetime.now().isoformat(),
-                                    "sender": "AI",
-                                    "message_type": tool_result.get(
-                                        "message_type", "progress"
-                                    ),
-                                    "is_progress_message": True,
-                                }
-                                server.socketio.emit(
-                                    "progress_message",
-                                    {"session_id": session_id, "message": progress_msg},
-                                    room=session_id,
-                                )
-                                _log.info(
-                                    f"[SendMessage] \u5df2\u53d1\u9001\u8fdb\u5ea6\u6d88\u606f: {tool_result.get('content', '')[:50]}..."
-                                )
-                                return {
-                                    "role": "tool",
-                                    "tool_call_id": tool_call.get("id", ""),
-                                    "content": json.dumps(
-                                        {
-                                            "success": True,
-                                            "message": "\u6d88\u606f\u5df2\u53d1\u9001",
-                                        },
-                                        ensure_ascii=False,
-                                    ),
-                                }
-
-                            if (
-                                tool_name == "workspace_send_file"
-                                and tool_result.get("action") == "send_file"
-                            ):
-                                send_workspace_file_message(
-                                    tool_result.get("path", ""),
-                                    tool_result.get("filename", ""),
-                                )
-
-                            return None
-
-                        hooks = ToolLoopHooks(
-                            on_iteration_start=lambda iteration, current_tool_messages: (
-                                progress_card.increment_iteration()
-                                if progress_card
-                                else None
-                            ),
-                            on_tool_start=on_tool_start,
-                            on_tool_result=on_tool_result,
-                        )
-
-                        execution_result = run_tool_loop_session(
-                            ToolLoopSession(
-                                initial_messages=tool_messages,
-                                model_call=lambda current_messages, stop_event=None: server._get_ai_response_with_tools(
-                                    current_messages,
-                                    enabled_tools,
-                                    stop_event=stop_event,
-                                ),
-                                tool_executor=execute_web_tool,
-                                tool_call_history=tool_call_history,
-                                max_iterations=max_iterations,
-                                max_consecutive_errors=max_consecutive_errors,
-                                stop_event=stop_event,
-                                hooks=hooks,
-                            )
-                        )
-                        loop_result = execution_result.loop_result
-                        stopped_prematurely = loop_result.stopped
-                        final_content = loop_result.final_content
-                        tool_messages = loop_result.tool_messages
-                        current_round_tool_trace = extract_tool_call_history(
-                            tool_messages[len(execution_result.prepared_messages) :]
-                        )
-                        consecutive_errors = loop_result.consecutive_errors
-
-                        if not final_content:
-                            _log.warning("[Tools] AI 未生成最终回复，使用默认提示")
-                            final_content = (
-                                "抱歉，处理过程中出现了问题，请稍后再试~"
-                            )
-
-                        _log.info(f"[Tools] 最终回复长度: {len(final_content)}")
-
-                        # 检查是否为等待确认状态（exec_command 非白名单）
-                        if final_content and '[请求ID:' in final_content:
-                            # 命令等待用户确认，不标记完成，不发送 AI 消息
-                            _log.info("[Tools] 等待用户确认命令执行，保持进度卡片等待状态")
-                            # 进度卡片已在 execute_web_tool 中更新为等待状态，直接跳过后续处理
-                        else:
-                            # 将进度卡片标记为完成（不再删除）
-                            complete_thinking_card()
-                    else:
-                        # 无可用工具，使用普通 AI 调用
-                        if (
-                            file_contents
-                            and messages_for_ai
-                            and messages_for_ai[-1].get("role") == "user"
-                        ):
-                            messages_for_ai[-1]["content"] = enhanced_content
-                        final_content = get_normal_ai_response(messages_for_ai)
-                        # 完成进度卡片
-                        complete_thinking_card()
-                except ImportError:
-                    # 工具模块不可用，使用普通 AI 调用
-                    if (
-                        file_contents
-                        and messages_for_ai
-                        and messages_for_ai[-1].get("role") == "user"
-                    ):
-                        messages_for_ai[-1]["content"] = enhanced_content
-                    final_content = get_normal_ai_response(messages_for_ai)
-                    # 完成进度卡片
-                    complete_thinking_card()
-                except Exception as e:
-                    _log.warning(
-                        f"Tool calling error: {e}, falling back to normal AI"
-                    )
-                    if (
-                        file_contents
-                        and messages_for_ai
-                        and messages_for_ai[-1].get("role") == "user"
-                    ):
-                        messages_for_ai[-1]["content"] = enhanced_content
-                    final_content = get_normal_ai_response(messages_for_ai)
-                    # 完成进度卡片
-                    complete_thinking_card()
-
-            # 如果是提前停止，保存工具调用历史并添加继续按钮
-            if stopped_prematurely:
-                tool_call_history = extract_tool_call_history(tool_messages)
-                _log.info(
-                    f"[Stop] 保存工具调用历史，共 {len(tool_call_history)} 条记录"
-                )
-
-                assistant_message = _build_channel_assistant_message(
-                    build_continue_chat_response(tool_trace=tool_call_history),
-                    session_id=session_id,
-                    adapter=adapter,
-                )
-                session_store.append_message(session_id, assistant_message)
-                complete_thinking_card()
-                if channel_capabilities.supports_stream:
-                    server._stream_send_response(session_id, assistant_message)
-                else:
-                    server.socketio.emit(
-                        "ai_response",
-                        {"session_id": session_id, "message": assistant_message},
-                        room=session_id,
-                    )
-                _emit_change_card(
-                    server,
-                    session_store,
-                    session_id=session_id,
-                    parent_message_id=parent_message_id,
-                    file_changes=round_file_changes,
-                )
-                return
-
-            # 如果是等待用户确认状态，不发送 AI 消息，直接返回
-            if final_content and '[请求ID:' in final_content:
-                _log.info("[Tools] 命令等待用户确认中，跳过 AI 响应发送")
-                # 清理事件上下文，但不标记完成
-                if progress_card:
-                    progress_card._emit_update()
-                return
-
-            assistant_content = final_content
-
-            if streamed_assistant_message is not None:
-                assistant_message = streamed_assistant_message
-                assistant_message["content"] = assistant_content
-            else:
-                assistant_message = _build_channel_assistant_message(
-                    ChatResponse(
-                        final_content=assistant_content,
-                        tool_trace=current_round_tool_trace
-                        if "current_round_tool_trace" in locals()
-                        else [],
-                    ),
-                    session_id=session_id,
-                    adapter=adapter,
-                )
-
-            # 使用流式发送
-            _log.info("[Stream] _trigger_ai_response 准备发送流式响应")
-            if streamed_assistant_message is not None:
-                pass
-            elif channel_capabilities.supports_stream:
-                server._stream_send_response(session_id, assistant_message)
-            else:
+            # 保存流式消息
+            if ctx.streamed_message is not None:
+                streamed = ctx.streamed_message
+                streamed["id"] = streamed.get("id", str(uuid.uuid4()))
+                streamed["content"] = result.final_content
+                session_store.append_message(session_id, streamed)
                 server.socketio.emit(
-                    "ai_response",
-                    {"session_id": session_id, "message": assistant_message},
+                    "ai_stream_end",
+                    {
+                        "session_id": session_id,
+                        "message_id": streamed.get("id", ""),
+                        "is_end": True,
+                    },
                     room=session_id,
                 )
 
-            session_store.append_message(session_id, assistant_message)
-            try:
-                from nbot.web.routes.push import send_web_push
+            # 更新 token 统计
+            _update_web_token_stats(server, result.usage, session_id)
 
-                send_web_push(
-                    server,
-                    title="NekoBot",
-                    body=assistant_content[:160],
-                    url=f"/?session_id={session_id}",
-                    session_id=session_id,
-                    tag=f"nekobot-session-{session_id}",
-                )
-            except Exception as push_error:
-                _log.warning("Failed to send Web Push notification: %s", push_error)
-            _emit_change_card(
-                server,
-                session_store,
-                session_id=session_id,
-                parent_message_id=parent_message_id,
-                file_changes=round_file_changes,
-            )
-
-            # 更新 Token 统计
-            estimated_tokens = len(chat_request.content) + len(assistant_content)
-            input_tokens = len(chat_request.content)
-            output_tokens = len(assistant_content)
-            server.token_stats["today"] = (
-                server.token_stats.get("today", 0) + estimated_tokens
-            )
-            server.token_stats["month"] = (
-                server.token_stats.get("month", 0) + estimated_tokens
-            )
-
-            # 更新历史记录
-            today_str = datetime.now().strftime("%Y-%m-%d")
-            history = server.token_stats.get("history", [])
-            if not history or history[-1].get("date") != today_str:
-                history.append(
-                    {
-                        "date": today_str,
-                        "input": input_tokens,
-                        "output": output_tokens,
-                        "total": estimated_tokens,
-                        "cost": 0.0,
-                        "message_count": 1,
-                    }
-                )
-            else:
-                history[-1]["input"] = history[-1].get("input", 0) + input_tokens
-                history[-1]["output"] = history[-1].get("output", 0) + output_tokens
-                history[-1]["total"] = (
-                    history[-1].get("total", 0) + estimated_tokens
-                )
-                history[-1]["message_count"] = (
-                    history[-1].get("message_count", 0) + 1
-                )
-            server.token_stats["history"] = history[-30:]
-
-            # 更新会话统计
-            if session_id:
-                sessions_stats = server.token_stats.get("sessions", {})
-                if session_id not in sessions_stats:
-                    sessions_stats[session_id] = {
-                        "input": 0,
-                        "output": 0,
-                        "total": 0,
-                        "message_count": 0,
-                    }
-                sessions_stats[session_id]["input"] = (
-                    sessions_stats[session_id].get("input", 0) + input_tokens
-                )
-                sessions_stats[session_id]["output"] = (
-                    sessions_stats[session_id].get("output", 0) + output_tokens
-                )
-                sessions_stats[session_id]["total"] = (
-                    sessions_stats[session_id].get("total", 0) + estimated_tokens
-                )
-                sessions_stats[session_id]["message_count"] = (
-                    sessions_stats[session_id].get("message_count", 0) + 2
-                )  # 用户消息 + AI回复
-                server.token_stats["sessions"] = sessions_stats
-
-            # 注意：ai_response 现在通过 _stream_send_response 流式发送了，不再单独发送
-
-            # 记录日志
-            server.log_message(
-                "info",
-                f"AI回复完成 for session {session_id[:8]}, tokens: {estimated_tokens}",
-            )
-
-            # 保存会话和 Token 统计到磁盘
-            server._save_data("token_stats")
-
-            # 自动重命名会话（如果是默认名称且对话轮数达到一定数量）
-            try:
-                current_name = session.get("name", "")
-                message_count = len(session.get("messages", []))
-                _log.info(
-                    f"[SessionRename] 检查重命名条件: name='{current_name}', count={message_count}"
-                )
-                # 如果是默认名称（以"会话"开头或是空名称），且已有至少4条消息（2轮对话）
-                if (
-                    current_name.startswith("会话")
-                    or not current_name
-                    or current_name.startswith("Web 会话")
-                ) and message_count >= 4:
-                    _log.info("[SessionRename] 条件满足，开始生成新名称...")
-                    new_name = server._generate_session_name(
-                        session["messages"],
-                        session_id=session_id,
-                        parent_message_id=assistant_message["id"],
-                    )
-                    if new_name:
-                        session["name"] = new_name
-                        server._save_data("sessions")
-                        # 通知前端会话名称已更新
-                        server.socketio.emit(
-                            "session_renamed",
-                            {"session_id": session_id, "name": new_name},
-                            room=session_id,
-                        )
-                        _log.info(
-                            f"[SessionRename] 会话 {session_id[:8]}... 已重命名为: {new_name}"
-                        )
-                    else:
-                        _log.warning("[SessionRename] 生成名称失败，返回 None")
-                else:
-                    _log.info(
-                        f"[SessionRename] 条件不满足: startswith={current_name.startswith('会话')}, empty={not current_name}, count={message_count}"
-                    )
-            except Exception as e:
-                _log.error(f"[SessionRename] 自动重命名失败: {e}", exc_info=True)
-
-        except Exception as e:
-            _log.error(f"Error in AI response: {e}")
-            error_message = _build_channel_assistant_message(
-                ChatResponse(error=f"抱歉，处理消息时出错: {str(e)}"),
-                session_id=session_id,
-                adapter=adapter,
-            )
-            session_store.append_message(session_id, error_message)
-            server.socketio.emit(
-                "ai_response",
-                {"session_id": session_id, "message": error_message},
-                room=session_id,
-            )
+            return result
         finally:
-            # 清理停止事件
-            if session_id in server.stop_events:
-                del server.stop_events[session_id]
-                _log.info(f"[Stop] 清理停止事件: {session_id}")
+            server.stop_events.pop(session_id, None)
+            if progress_reporter:
+                progress_reporter.dispose()
 
-    # 使用 Flask-SocketIO 的后台任务机制
-    server.socketio.start_background_task(get_response)
+    # 使用后台任务执行管道
+    server.socketio.start_background_task(run_pipeline)
     return ChatResponse(metadata={"scheduled": True, "session_id": session_id})
+
+
+def _update_web_token_stats(server, usage: dict, session_id: str):
+    """更新 Web 频道的 token 统计。"""
+    try:
+        if not usage:
+            return
+        stats = getattr(server, "token_stats", None)
+        if not stats:
+            return
+        total = usage.get("total_tokens", 0)
+        if not total:
+            return
+        stats["today"] = stats.get("today", 0) + total
+        stats["month"] = stats.get("month", 0) + total
+        if session_id not in stats.get("sessions", {}):
+            stats.setdefault("sessions", {})[session_id] = {
+                "input": 0, "output": 0, "total": 0,
+                "type": "web", "message_count": 0,
+            }
+        sess_stats = stats["sessions"][session_id]
+        sess_stats["input"] += usage.get("prompt_tokens", 0)
+        sess_stats["output"] += usage.get("completion_tokens", 0)
+        sess_stats["total"] += total
+        sess_stats["message_count"] += 2
+    except Exception:
+        pass
 
 
 def get_ai_response(self, messages: List[Dict]) -> str:

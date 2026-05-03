@@ -99,10 +99,20 @@ def register_configured_channel(channel_config: dict) -> None:
     if channel_config.get("enabled") is False:
         channel_registry.unregister_adapter(channel_id)
         return
-    if str(channel_config.get("type") or "").strip().lower() == "telegram":
+    channel_type = str(channel_config.get("type") or "").strip().lower()
+    if channel_type == "telegram":
         from nbot.channels.telegram import TelegramChannelAdapter
 
         channel_registry.register_adapter(channel_id, TelegramChannelAdapter)
+        return
+    if channel_type == "feishu":
+        from nbot.channels.feishu import FeishuChannelAdapter
+
+        channel_registry.register_adapter(channel_id, FeishuChannelAdapter)
+        return
+    if channel_type == "feishu_ws":
+        # 飞书长连接模式使用 WebSocket，不需要注册适配器
+        # 由 feishu_ws_service 直接处理
         return
     channel_registry.register_adapter(
         channel_id,

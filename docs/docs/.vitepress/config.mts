@@ -124,10 +124,11 @@ export default defineConfig({
                 { text: 'workflow - 工作流', link: '/guide/nbot/core/workflow.md' },
               ]
             },
-            { 
+            {
               text: 'channels - 频道层',
               collapsed: true,
               items: [
+                { text: 'add-channel - 新增频道', link: '/guide/nbot/channels/add-channel.md' },
                 { text: 'base - 频道基类', link: '/guide/nbot/channels/base.md' },
                 { text: 'registry - 频道注册', link: '/guide/nbot/channels/registry.md' },
                 { text: 'qq - QQ适配器', link: '/guide/nbot/channels/qq.md' },

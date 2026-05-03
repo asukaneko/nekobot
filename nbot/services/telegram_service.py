@@ -4,6 +4,13 @@ from typing import Any, Dict, Optional
 import requests
 
 from nbot.channels.telegram import TelegramChannelAdapter
+from nbot.core.ai_pipeline import (
+    AIPipeline,
+    PipelineContext,
+    PipelineCallbacks,
+    PipelineResult,
+    handle_tool_confirmation,
+)
 
 TELEGRAM_API_BASE = "https://api.telegram.org"
 
@@ -76,23 +83,52 @@ def set_telegram_webhook(config: Dict[str, Any], webhook_url: str) -> Dict[str, 
     return response.json()
 
 
-def _extract_ai_text(response: Any) -> str:
-    try:
-        return str(response.choices[0].message.content or "").strip()
-    except Exception:
-        return ""
+# ============================================================================
+# Telegram 管道回调
+# ============================================================================
 
 
-def _build_messages(server: Any, parsed: Dict[str, Any]) -> list:
-    messages = []
-    system_prompt = str(getattr(server, "personality", {}).get("systemPrompt") or "").strip()
-    if system_prompt:
-        messages.append({"role": "system", "content": system_prompt})
-    messages.append({"role": "user", "content": parsed["content"]})
-    return messages
+class TelegramCallbacks(PipelineCallbacks):
+    """Telegram 频道的管道回调实现。"""
+
+    def __init__(
+        self,
+        server: Any,
+        token: str,
+        parsed: Dict[str, Any],
+    ):
+        self.server = server
+        self.token = token
+        self.parsed = parsed
+
+    def get_system_prompt(self, ctx: PipelineContext) -> str:
+        return str(
+            getattr(self.server, "personality", {}).get("systemPrompt") or ""
+        ).strip()
+
+    def get_workspace_context(self, ctx: PipelineContext) -> Dict[str, Any]:
+        return {
+            "session_id": f"telegram:{self.parsed['chat_id']}",
+            "session_type": "telegram",
+        }
+
+    def send_response(self, ctx: PipelineContext, message: Dict[str, Any]) -> None:
+        send_telegram_message(
+            self.token,
+            self.parsed["chat_id"],
+            message.get("content", ""),
+            reply_to_message_id=self.parsed.get("message_id"),
+        )
 
 
-def answer_telegram_update(server: Any, channel: Dict[str, Any], update: Dict[str, Any]) -> Dict[str, Any]:
+# ============================================================================
+# 入口函数
+# ============================================================================
+
+
+def answer_telegram_update(
+    server: Any, channel: Dict[str, Any], update: Dict[str, Any]
+) -> Dict[str, Any]:
     adapter = TelegramChannelAdapter()
     parsed = adapter.parse_update(update or {})
     if not parsed:
@@ -103,18 +139,26 @@ def answer_telegram_update(server: Any, channel: Dict[str, Any], update: Dict[st
     if not token:
         raise ValueError("未配置 Telegram bot token，请设置 TELEGRAM_BOT_TOKEN")
 
-    try:
-        from nbot.services.ai import ai_client, refresh_runtime_ai_config
-
-        refresh_runtime_ai_config()
-        response = ai_client.chat_completion(_build_messages(server, parsed), stream=False)
-        reply_text = _extract_ai_text(response) or "我暂时没有生成可发送的回复。"
-    except Exception as exc:
-        reply_text = f"处理消息失败：{exc}"
-
-    return send_telegram_message(
-        token,
-        parsed["chat_id"],
-        reply_text,
-        reply_to_message_id=parsed.get("message_id"),
+    # 确认/拒绝待执行命令
+    content = handle_tool_confirmation(
+        parsed["content"],
+        f"telegram:{parsed['chat_id']}",
+        log_prefix="Telegram",
     )
+
+    chat_request = adapter.build_chat_request(
+        conversation_id=f"telegram:{parsed['chat_id']}",
+        user_id=parsed.get("user_id", ""),
+        content=content,
+        sender=parsed.get("sender", "telegram_user"),
+        metadata=parsed.get("metadata", {}),
+    )
+
+    ctx = PipelineContext(chat_request=chat_request, adapter=adapter)
+    callbacks = TelegramCallbacks(server, token, parsed)
+
+    pipeline = AIPipeline()
+    result = pipeline.process(ctx, callbacks)
+
+    # 返回飞书格式兼容的结果（调用方期望 Dict）
+    return {"ok": True, "result": result.final_content}

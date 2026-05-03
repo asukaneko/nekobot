@@ -26,22 +26,35 @@ def _derive_session_name(session_id, session):
 def is_cli_session(session_id, session):
     """Return True when a persisted record belongs to the CLI channel."""
     session = session or {}
+    
+    # 检查 session_id
     if str(session_id or "").startswith("cli_"):
+        _log.debug(f"[is_cli_session] {session_id} is CLI because id starts with cli_")
         return True
 
+    # 检查 type
     session_type = str(session.get("type") or "").strip().lower()
     if session_type == "cli":
+        _log.debug(f"[is_cli_session] {session_id} is CLI because type is cli")
         return True
+    
+    # 记录 type 用于调试
+    _log.debug(f"[is_cli_session] {session_id} type={session_type}")
 
+    # 检查消息 source
     messages = session.get("messages") or []
     if not isinstance(messages, list):
         return False
 
-    return any(
-        isinstance(message, dict)
-        and str(message.get("source") or "").strip().lower() == "cli"
-        for message in messages
-    )
+    for message in messages:
+        msg_source = str(message.get("source") or "").strip().lower()
+        if msg_source == "cli":
+            _log.debug(f"[is_cli_session] {session_id} is CLI because message source is cli")
+            return True
+        if msg_source:
+            _log.debug(f"[is_cli_session] {session_id} message source={msg_source}")
+
+    return False
 
 
 def is_web_visible_session(session_id, session):

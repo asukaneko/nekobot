@@ -64,6 +64,7 @@ def register_session_routes(app, server):
                     "type": session.get("type", "web"),
                     "user_id": session.get("user_id"),
                     "qq_id": session.get("qq_id"),
+                    "channel_id": session.get("channel_id"),
                     "created_at": session.get("created_at"),
                     "archived": archived,
                     "archived_at": session.get("archived_at") if archived else None,
@@ -181,6 +182,36 @@ def register_session_routes(app, server):
         session["message_count"] = len(session.get("messages", []))
         return jsonify(session)
 
+    @app.route("/api/sessions/<session_id>/debug")
+    def debug_session(session_id):
+        """调试 API：查看会话详细信息"""
+        raw_session = session_store.get_session(session_id)
+        db_session = get_session_from_db(server.data_dir, session_id)
+        
+        result = {
+            "session_id": session_id,
+            "in_memory": raw_session is not None,
+            "in_db": db_session is not None,
+            "is_visible": False,
+        }
+        
+        if raw_session:
+            result["memory_session"] = {
+                "type": raw_session.get("type"),
+                "channel_id": raw_session.get("channel_id"),
+                "message_count": len(raw_session.get("messages", [])),
+                "first_message_source": raw_session.get("messages", [{}])[0].get("source") if raw_session.get("messages") else None,
+            }
+            result["is_visible"] = is_web_visible_session(session_id, raw_session)
+        
+        if db_session:
+            result["db_session"] = {
+                "type": db_session.get("type"),
+                "channel_id": db_session.get("channel_id"),
+            }
+        
+        return jsonify(result)
+
     @app.route("/api/sessions/<session_id>", methods=["PUT"])
     def update_session(session_id):
         session = _get_web_session(session_id)
@@ -225,13 +256,19 @@ def register_session_routes(app, server):
 
     @app.route("/api/sessions/<session_id>", methods=["DELETE"])
     def delete_session(session_id):
+        _log.info(f"[DeleteSession] 尝试删除会话: {session_id}")
+        _log.info(f"[DeleteSession] 删除前会话列表: {list(server.sessions.keys())}")
         if not _get_web_session(session_id):
+            _log.warning(f"[DeleteSession] 会话不存在或不可见: {session_id}")
             return jsonify({"error": "Session not found"}), 404
         if session_store.delete_session(session_id):
+            _log.info(f"[DeleteSession] 会话已删除: {session_id}")
+            _log.info(f"[DeleteSession] 删除后会话列表: {list(server.sessions.keys())}")
             if server.WORKSPACE_AVAILABLE and server.workspace_manager:
                 server.workspace_manager.delete_workspace(session_id)
             server.log_message("info", f"删除了会话 {session_id[:8]}...", important=True)
             return jsonify({"success": True})
+        _log.warning(f"[DeleteSession] 删除会话失败: {session_id}")
         return jsonify({"error": "Session not found"}), 404
 
     def _export_session_payload(sessions):

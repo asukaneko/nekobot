@@ -536,6 +536,17 @@ class WebChatServer:
         self._load_personality()
         self._start_background_initialization()
 
+    def _auto_start_feishu_ws_channels(self):
+        """自动启动所有已启用的飞书长连接频道"""
+        try:
+            from nbot.web.routes.channels import auto_start_feishu_ws_clients
+            from nbot.services.feishu_ws_service import feishu_ws_service
+            # 设置服务器实例
+            feishu_ws_service.set_server(self)
+            auto_start_feishu_ws_clients(self)
+        except Exception as e:
+            _log.error(f"自动启动飞书长连接频道失败: {e}")
+
     def _start_background_initialization(self):
         """Load heavier startup data after the server begins accepting requests."""
 
@@ -550,6 +561,8 @@ class WebChatServer:
                 self._init_custom_task_scheduler()
                 # 检查并重建知识库索引（如有需要）
                 self._check_knowledge_index()
+                # 自动启动飞书长连接频道
+                self._auto_start_feishu_ws_channels()
                 self.startup_ready = True
                 _log.info("Web server background initialization completed")
             except Exception as e:

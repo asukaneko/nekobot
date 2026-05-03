@@ -448,6 +448,131 @@ const NbotMethods = {
                     this.isMobileChatPickerOpen = false;
                 },
 
+                // 频道下拉菜单方法
+                toggleChannelDropdown() {
+                    this.showChannelDropdown = !this.showChannelDropdown;
+                },
+
+                openChannelDropdown() {
+                    this.showChannelDropdown = true;
+                },
+
+                closeChannelDropdown() {
+                    this.showChannelDropdown = false;
+                },
+
+                // 频道抽屉方法（用于移动端）
+                openChannelDrawer() {
+                    this.showChannelDrawer = true;
+                },
+
+                closeChannelDrawer() {
+                    this.showChannelDrawer = false;
+                },
+
+                // 获取当前频道的渐变颜色
+                getCurrentChannelGradient() {
+                    const tab = this.chatTab || 'web';
+                    // 如果是自定义频道
+                    if (tab.startsWith('channel_')) {
+                        const channelId = tab.replace('channel_', '');
+                        const channel = this.channels.find(ch => ch.id === channelId);
+                        if (channel) {
+                            return this.getChannelGradient(channel);
+                        }
+                    }
+                    const gradients = {
+                        web: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                        cli: 'linear-gradient(135deg, #f093fb 0%, #f5576c 100%)',
+                        qq_private: 'linear-gradient(135deg, #4facfe 0%, #00f2fe 100%)',
+                        qq_group: 'linear-gradient(135deg, #43e97b 0%, #38f9d7 100%)'
+                    };
+                    return gradients[tab] || 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)';
+                },
+
+                // 获取当前频道的图标
+                getCurrentChannelIcon() {
+                    const tab = this.chatTab || 'web';
+                    // 如果是自定义频道
+                    if (tab.startsWith('channel_')) {
+                        const channelId = tab.replace('channel_', '');
+                        const channel = this.channels.find(ch => ch.id === channelId);
+                        if (channel) {
+                            return this.getChannelIcon(channel);
+                        }
+                    }
+                    const icons = {
+                        web: 'fas fa-globe',
+                        cli: 'fas fa-terminal',
+                        qq_private: 'fab fa-qq',
+                        qq_group: 'fas fa-users'
+                    };
+                    return icons[tab] || 'fas fa-globe';
+                },
+
+                // 获取当前频道名称
+                getCurrentChannelName() {
+                    const tab = this.chatTab || 'web';
+                    // 如果是自定义频道
+                    if (tab.startsWith('channel_')) {
+                        const channelId = tab.replace('channel_', '');
+                        const channel = this.channels.find(ch => ch.id === channelId);
+                        if (channel) {
+                            return channel.name;
+                        }
+                    }
+                    const names = {
+                        web: 'Web',
+                        cli: 'CLI 终端',
+                        qq_private: 'QQ 私聊',
+                        qq_group: 'QQ 群聊'
+                    };
+                    return names[tab] || 'Web';
+                },
+
+                // 获取频道的渐变颜色
+                getChannelGradient(channel) {
+                    const gradients = {
+                        telegram: 'linear-gradient(135deg, #0088cc 0%, #00a8e6 100%)',
+                        feishu: 'linear-gradient(135deg, #3370ff 0%, #5b8aff 100%)',
+                        feishu_ws: 'linear-gradient(135deg, #00d6b9 0%, #00f5d4 100%)',
+                        custom: 'linear-gradient(135deg, #ff6b6b 0%, #feca57 100%)'
+                    };
+                    return gradients[channel.type] || gradients.custom;
+                },
+
+                // 获取频道的图标
+                getChannelIcon(channel) {
+                    const icons = {
+                        telegram: 'fab fa-telegram',
+                        feishu: 'fas fa-paper-plane',
+                        feishu_ws: 'fas fa-bolt',
+                        custom: 'fas fa-plug'
+                    };
+                    return icons[channel.type] || icons.custom;
+                },
+
+                // 切换到注册频道标签
+                switchToChannelTab(channel) {
+                    this.chatTab = 'channel_' + channel.id;
+                    this.currentChannelTab = channel;
+                    this.currentSession = null;
+                    this.currentQqId = null;
+                    // 加载该频道的会话列表
+                    this.loadChannelSessions(channel.id);
+                },
+
+                // 加载频道的会话列表
+                async loadChannelSessions(channelId) {
+                    try {
+                        // 过滤出属于该频道的会话
+                        const res = await api.get('/api/sessions');
+                        this.sessions = res.data.sessions || [];
+                    } catch (e) {
+                        console.error('Failed to load channel sessions:', e);
+                    }
+                },
+
                 getMobileChatTitle() {
                     if (this.currentSession) return this.currentSession.name || '当前会话';
                     if (this.currentQqId) {

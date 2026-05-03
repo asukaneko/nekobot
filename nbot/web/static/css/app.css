@@ -2485,7 +2485,361 @@
 
         .search-box input::placeholder { color: var(--text-muted); }
 
-        /* 聊天标签页 */
+        /* 频道选择器 - 精致下拉菜单 */
+        .chat-channel-selector {
+            padding: 12px 16px;
+            border-bottom: 1px solid var(--border-color);
+            position: relative;
+            z-index: 100;
+        }
+        .channel-selector-btn {
+            width: 100%;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 10px 14px;
+            border: 1px solid transparent;
+            border-radius: 10px;
+            background: var(--bg-tertiary);
+            color: var(--text-primary);
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        .channel-selector-btn:hover {
+            background: var(--bg-hover);
+            border-color: var(--border-color);
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+        }
+        .current-channel-icon {
+            width: 36px;
+            height: 36px;
+            border-radius: 9px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 16px;
+            flex-shrink: 0;
+            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
+        }
+        .current-channel-info {
+            flex: 1;
+            text-align: left;
+        }
+        .current-channel-name {
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+        .current-channel-desc {
+            font-size: 11px;
+            color: var(--text-muted);
+            margin-top: 1px;
+        }
+        .channel-selector-btn > .fa-chevron-down {
+            color: var(--text-muted);
+            font-size: 12px;
+            transition: transform 0.2s ease;
+        }
+        .channel-selector-btn.active > .fa-chevron-down {
+            transform: rotate(180deg);
+        }
+
+        /* 频道下拉菜单 */
+        .channel-dropdown {
+            position: absolute;
+            top: calc(100% + 8px);
+            left: 0;
+            right: 0;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+            z-index: 9999;
+            opacity: 0;
+            visibility: hidden;
+            transform: translateY(-8px) scale(0.96);
+            transform-origin: top center;
+            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+            max-height: 400px;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            pointer-events: none;
+        }
+        .channel-dropdown.open {
+            opacity: 1;
+            visibility: visible;
+            transform: translateY(0) scale(1);
+            pointer-events: auto;
+        }
+        .channel-dropdown.open {
+            opacity: 1;
+            visibility: visible;
+            transform: translateY(4px) scale(1);
+        }
+        .channel-dropdown-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 12px 16px;
+            border-bottom: 1px solid var(--border-color);
+            flex-shrink: 0;
+        }
+        .channel-dropdown-title {
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .channel-dropdown-close {
+            width: 24px;
+            height: 24px;
+            border: none;
+            background: transparent;
+            color: var(--text-muted);
+            cursor: pointer;
+            border-radius: 6px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s;
+        }
+        .channel-dropdown-close:hover {
+            background: var(--bg-tertiary);
+            color: var(--text-primary);
+        }
+        .channel-dropdown-content {
+            overflow-y: auto;
+            padding: 8px;
+            flex: 1;
+        }
+        .channel-dropdown-group {
+            margin-bottom: 8px;
+        }
+        .channel-dropdown-group:last-child {
+            margin-bottom: 0;
+        }
+        .channel-dropdown-group-title {
+            font-size: 10px;
+            font-weight: 600;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            padding: 8px 12px 6px;
+        }
+        .channel-dropdown-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 8px 12px;
+            border: none;
+            border-radius: 8px;
+            background: transparent;
+            color: var(--text-primary);
+            cursor: pointer;
+            transition: all 0.15s ease;
+            text-align: left;
+            width: 100%;
+            margin-bottom: 2px;
+        }
+        .channel-dropdown-item:hover {
+            background: var(--bg-tertiary);
+        }
+        .channel-dropdown-item.active {
+            background: var(--accent-primary);
+            color: white;
+        }
+        .channel-dropdown-item.active .channel-dropdown-desc {
+            color: rgba(255, 255, 255, 0.7);
+        }
+        .channel-dropdown-icon {
+            width: 28px;
+            height: 28px;
+            border-radius: 7px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 12px;
+            flex-shrink: 0;
+        }
+        .channel-dropdown-info {
+            flex: 1;
+            min-width: 0;
+        }
+        .channel-dropdown-name {
+            font-size: 13px;
+            font-weight: 500;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .channel-dropdown-desc {
+            font-size: 10px;
+            color: var(--text-muted);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .channel-dropdown-status {
+            flex-shrink: 0;
+        }
+        .channel-dropdown-status i {
+            font-size: 7px;
+            color: var(--text-muted);
+        }
+        .channel-dropdown-status.connected i {
+            color: #43e97b;
+        }
+
+        /* 频道抽屉 - 保留用于移动端 */
+        .channel-drawer {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 1000;
+            visibility: hidden;
+            opacity: 0;
+            transition: all 0.3s ease;
+        }
+        .channel-drawer.open {
+            visibility: visible;
+            opacity: 1;
+        }
+        .channel-drawer-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.5);
+            backdrop-filter: blur(4px);
+        }
+        .channel-drawer-content {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 280px;
+            height: 100%;
+            background: var(--bg-secondary);
+            transform: translateX(-100%);
+            transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            display: flex;
+            flex-direction: column;
+            box-shadow: 4px 0 24px rgba(0, 0, 0, 0.3);
+        }
+        .channel-drawer.open .channel-drawer-content {
+            transform: translateX(0);
+        }
+        .channel-drawer-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 16px 20px;
+            border-bottom: 1px solid var(--border-color);
+        }
+        .channel-drawer-title {
+            font-size: 16px;
+            font-weight: 600;
+            color: var(--text-primary);
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .channel-drawer-title i {
+            color: var(--accent-primary);
+        }
+        .channel-drawer-group {
+            padding: 12px;
+            border-bottom: 1px solid var(--border-color);
+        }
+        .channel-drawer-group:last-child {
+            border-bottom: none;
+            flex: 1;
+            overflow-y: auto;
+        }
+        .channel-drawer-group-title {
+            font-size: 11px;
+            font-weight: 600;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            padding: 0 8px 8px;
+        }
+        .channel-drawer-list {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+        }
+        .channel-drawer-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 8px;
+            border: none;
+            border-radius: 8px;
+            background: transparent;
+            color: var(--text-primary);
+            cursor: pointer;
+            transition: all 0.15s ease;
+            text-align: left;
+            width: 100%;
+        }
+        .channel-drawer-item:hover {
+            background: var(--bg-tertiary);
+        }
+        .channel-drawer-item.active {
+            background: var(--accent-primary);
+            color: white;
+        }
+        .channel-drawer-item.active .channel-drawer-desc {
+            color: rgba(255, 255, 255, 0.7);
+        }
+        .channel-drawer-icon {
+            width: 32px;
+            height: 32px;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 13px;
+            flex-shrink: 0;
+        }
+        .channel-drawer-info {
+            flex: 1;
+            min-width: 0;
+        }
+        .channel-drawer-name {
+            font-size: 13px;
+            font-weight: 500;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .channel-drawer-desc {
+            font-size: 11px;
+            color: var(--text-muted);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .channel-drawer-status {
+            flex-shrink: 0;
+        }
+        .channel-drawer-status i {
+            font-size: 7px;
+            color: var(--text-muted);
+        }
+        .channel-drawer-status.connected i {
+            color: #43e97b;
+        }
+
+        /* 聊天标签页 - 保留用于兼容 */
         .chat-tabs {
             display: flex;
             gap: 4px;

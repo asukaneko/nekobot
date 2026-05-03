@@ -58,6 +58,17 @@ from nbot.core.chat_models import (
     ChatResponse,
 )
 
+from nbot.core.ai_pipeline import (
+    AIPipeline,
+    PipelineContext,
+    PipelineResult,
+    PipelineCallbacks,
+    ProgressReporter,
+    NoOpProgressReporter,
+    ai_pipeline,
+    handle_tool_confirmation,
+)
+
 from nbot.core.model_adapter import (
     ProviderProfile,
     NormalizedModelResponse,
@@ -148,4 +159,13 @@ __all__ = [
     'build_qq_history_key',
     'build_qq_session_id',
     'dump_json',
+
+    # ai_pipeline 模块
+    'AIPipeline',
+    'PipelineContext',
+    'PipelineResult',
+    'PipelineCallbacks',
+    'ProgressReporter',
+    'NoOpProgressReporter',
+    'ai_pipeline',
 ]
