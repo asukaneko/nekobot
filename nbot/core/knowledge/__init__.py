@@ -405,7 +405,12 @@ class ChromaKnowledgeStore:
 
             return formatted
         except Exception as e:
-            _log.error(f"[Chroma] Search failed: {e}")
+            err_msg = str(e)
+            # 维度不匹配是 embedding 模型切换导致的已知问题，静默处理
+            if "dimension" in err_msg.lower() or "embedding" in err_msg.lower():
+                _log.debug(f"[Chroma] Search skipped (dimension mismatch): {e}")
+            else:
+                _log.error(f"[Chroma] Search failed: {e}")
             return []
 
     def delete_document_chunks(self, base_id: str, doc_id: str):

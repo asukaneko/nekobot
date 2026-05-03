@@ -112,10 +112,11 @@ export default defineConfig({
           text: 'nbot 核心模块',
           collapsed: true,
           items: [
-            { 
+            {
               text: 'core - AI核心',
               collapsed: true,
               items: [
+                { text: 'ai_pipeline - 管道中间件', link: '/guide/nbot/core/ai_pipeline.md' },
                 { text: 'chat_models - 聊天模型', link: '/guide/nbot/core/chat_models.md' },
                 { text: 'agent_service - AI服务', link: '/guide/nbot/core/agent_service.md' },
                 { text: 'session_store - 会话存储', link: '/guide/nbot/core/session_store.md' },

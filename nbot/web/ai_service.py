@@ -295,7 +295,9 @@ class WebProgressReporter:
         pass
 
     def on_done(self, ctx) -> None:
-        pass
+        if self.progress_card:
+            from nbot.core.progress_card import StepType
+            self.progress_card.complete("✅ 处理完成")
 
     def on_waiting_confirmation(self, ctx, command: str, request_id: str) -> None:
         pass
@@ -584,7 +586,7 @@ def _call_web_ai(server, messages: List[Dict], tools: list, stop_event=None) -> 
 
 
 def _stream_to_web(server, messages: List[Dict], tools: list, session_id: str, stop_event=None):
-    """Web 频道的 provider 级流式实现。"""
+    """Web 频道的 provider 级流式实现，含 chunk 去重。"""
     import requests
     from nbot.services.ai import refresh_runtime_ai_config
 
@@ -609,6 +611,26 @@ def _stream_to_web(server, messages: List[Dict], tools: list, session_id: str, s
     resp = requests.post(url, json=payload, headers=headers, stream=True, timeout=120)
     resp.raise_for_status()
 
+    # chunk 去重：部分提供商返回累积文本而非增量
+    content_parts: List[str] = []
+
+    def normalize_chunk(raw: str) -> str:
+        """从累积文本中提取新增部分。"""
+        if not raw:
+            return ""
+        existing = "".join(content_parts)
+        if not existing:
+            return raw
+        if raw.startswith(existing):
+            return raw[len(existing):]
+        if existing.endswith(raw):
+            return ""
+        max_overlap = min(len(existing), len(raw), 32)
+        for overlap in range(max_overlap, 2, -1):
+            if existing.endswith(raw[:overlap]):
+                return raw[overlap:]
+        return raw
+
     for line in resp.iter_lines(decode_unicode=True):
         if stop_event and stop_event.is_set():
             break
@@ -620,9 +642,12 @@ def _stream_to_web(server, messages: List[Dict], tools: list, session_id: str, s
                 data = json.loads(data_str)
                 choices = data.get("choices", [{}])
                 delta = choices[0].get("delta", {})
-                content = delta.get("content", "")
-                if content:
-                    yield {"content": content}
+                raw = delta.get("content", "")
+                if raw:
+                    chunk = normalize_chunk(raw)
+                    if chunk:
+                        content_parts.append(chunk)
+                        yield {"content": chunk}
             except json.JSONDecodeError:
                 continue
 
@@ -769,22 +794,6 @@ def trigger_ai_response_for_request(server, chat_request: ChatRequest, adapter=N
                 tools=tools,
                 max_context_chars=context_char_budget,
             )
-
-            # 保存流式消息
-            if ctx.streamed_message is not None:
-                streamed = ctx.streamed_message
-                streamed["id"] = streamed.get("id", str(uuid.uuid4()))
-                streamed["content"] = result.final_content
-                session_store.append_message(session_id, streamed)
-                server.socketio.emit(
-                    "ai_stream_end",
-                    {
-                        "session_id": session_id,
-                        "message_id": streamed.get("id", ""),
-                        "is_end": True,
-                    },
-                    room=session_id,
-                )
 
             # 更新 token 统计
             _update_web_token_stats(server, result.usage, session_id)

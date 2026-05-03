@@ -555,15 +555,18 @@ class AIPipeline:
             streamer = callbacks.build_model_call_streaming(ctx, tools or [])
             if streamer is not None:
                 self._run_streaming(ctx, callbacks, streamer, progress)
+                progress.on_done(ctx)
                 return
 
         # 尝试工具循环
         if tools:
             self._run_tool_loop(ctx, callbacks, tools, max_tool_iterations, progress)
+            progress.on_done(ctx)
             return
 
         # 简单路径：单次模型调用
         self._run_simple(ctx, callbacks)
+        progress.on_done(ctx)
 
     def _run_simple(
         self,
@@ -704,7 +707,8 @@ class AIPipeline:
         progress: ProgressReporter,
     ) -> None:
         """运行流式模型调用。"""
-        message_id = ""
+        import uuid
+        message_id = str(uuid.uuid4())
         full_content = ""
 
         try:
@@ -720,6 +724,7 @@ class AIPipeline:
                     # 首块
                     msg = {"role": "assistant", "content": "", "id": message_id}
                     callbacks.on_stream_start(ctx, msg)
+                    ctx.streamed_message = msg
 
                 full_content += chunk
                 callbacks.on_stream_chunk(ctx, chunk, message_id)
@@ -751,7 +756,24 @@ class AIPipeline:
             )
             return result
 
-        # 构建 assistant_message
+        # 流式消息已通过 streamed_message 跟踪，直接用它
+        if ctx.metadata.get("streamed") and ctx.streamed_message:
+            ctx.streamed_message["content"] = ctx.final_content
+            callbacks.save_assistant_message(ctx, ctx.streamed_message)
+            result = PipelineResult(
+                final_content=ctx.final_content,
+                assistant_message=ctx.streamed_message,
+                tool_trace=ctx.tool_trace,
+                can_continue=bool(ctx.tool_trace),
+                stopped_prematurely=ctx.stopped_prematurely,
+                usage=ctx.usage,
+                error=ctx.error,
+                metadata=ctx.metadata,
+            )
+            callbacks.on_response_complete(ctx, result)
+            return result
+
+        # 非流式：通过适配器构建 assistant_message
         if ctx.adapter and hasattr(ctx.adapter, "build_assistant_message"):
             temp_response = ChatResponse(
                 final_content=ctx.final_content,
