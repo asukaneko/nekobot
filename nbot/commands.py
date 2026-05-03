@@ -1984,7 +1984,7 @@ async def handle_df(msg, is_group=True):
 
 #---------------------------------------------
 
-@register_command("/music","/m",help_text = "/music <音乐名/id> -> 发送音乐",category = "3")
+@register_command("/music",help_text = "/music <音乐名/id> -> 发送音乐",category = "3")
 async def handle_music(msg, is_group=True):
     music_name = msg.raw_message[len("/music"):].strip()
     if not music_name:
@@ -4667,6 +4667,179 @@ def _save_incoming_files_to_workspace(msg, is_group: bool):
                     _log.warning(f"[文件保存] 无法获取文件下载链接: {file_name}")
         else:
             _log.debug("[文件保存] raw_message 中没有 CQ:file 码")
+
+
+@register_command("/new", help_text="/new -> 创建新的对话会话 (清空当前对话历史)", category="2")
+async def handle_new_session(msg, is_group=True):
+    """创建新的对话会话"""
+    if is_group:
+        group_id = getattr(msg, 'group_id', None)
+        chat_id = getattr(msg, 'chat_id', None)
+        if group_id:
+            # QQ 群聊
+            gid = str(group_id)
+            if gid in group_messages:
+                del group_messages[gid]
+            try:
+                with open("saved_message/group_messages.json", "w", encoding="utf-8") as f:
+                    json.dump(group_messages, f, ensure_ascii=False, indent=4)
+            except Exception:
+                pass
+            delete_session_workspace(group_id=gid, group_user_id=str(msg.user_id))
+        elif chat_id:
+            # 飞书等频道适配器
+            session_id = getattr(msg, 'session_id', None)
+            server = getattr(msg, 'server', None)
+            if session_id and server and hasattr(server, 'sessions'):
+                from nbot.core.session_store import WebSessionStore
+                session_store = WebSessionStore(
+                    server.sessions,
+                    save_callback=lambda: server._save_data("sessions")
+                )
+                session = session_store.get_session(session_id)
+                if session:
+                    # 保留系统消息，清除对话历史
+                    system_msg = None
+                    for m in session.get("messages", []):
+                        if m.get("role") == "system":
+                            system_msg = m
+                            break
+                    session_store.replace_messages(session_id, [system_msg] if system_msg else [])
+                    session["updated_at"] = datetime.now().isoformat()
+                # 清理工作区
+                delete_session_workspace(user_id=str(msg.user_id))
+            else:
+                await msg.reply(text="当前平台不支持会话重置喵~")
+                return
+        else:
+            await msg.reply(text="当前平台不支持会话重置喵~")
+            return
+        await msg.reply(text="已创建新会话喵~ 之前的对话历史已清空")
+    else:
+        user_id = str(msg.user_id)
+        if user_id in user_messages:
+            del user_messages[user_id]
+        try:
+            with open("saved_message/user_messages.json", "w", encoding="utf-8") as f:
+                json.dump(user_messages, f, ensure_ascii=False, indent=4)
+        except Exception:
+            pass
+        delete_session_workspace(user_id=user_id)
+        await bot.api.post_private_msg(msg.user_id, text="已创建新会话喵~ 之前的对话历史已清空")
+
+
+@register_command("/model", help_text="/model -> 查看当前模型\n/model <编号> -> 切换到指定模型\n/model list -> 列出所有可用模型", category="2")
+async def handle_model_switch(msg, is_group=True):
+    """查看和切换 AI 模型"""
+    data_dir = os.path.join("data", "web")
+    models_file = os.path.join(data_dir, "ai_models.json")
+
+    if not os.path.exists(models_file):
+        reply = "暂无可用模型配置，请先在 Web 控制台添加模型喵~"
+        if is_group:
+            await msg.reply(text=reply)
+        else:
+            await bot.api.post_private_msg(msg.user_id, text=reply)
+        return
+
+    try:
+        with open(models_file, "r", encoding="utf-8") as f:
+            models_data = json.load(f)
+    except Exception:
+        reply = "读取模型配置失败喵~"
+        if is_group:
+            await msg.reply(text=reply)
+        else:
+            await bot.api.post_private_msg(msg.user_id, text=reply)
+        return
+
+    all_models = models_data.get("models", [])
+    active_id = models_data.get("active_model_id")
+
+    # 只显示已启用的对话模型
+    chat_models = []
+    for m in all_models:
+        purpose = m.get("purpose", "chat")
+        if purpose == "chat" and m.get("enabled", True):
+            chat_models.append(m)
+
+    if not chat_models:
+        reply = "暂无启用的对话模型，请先在 Web 控制台启用一个对话模型喵~"
+        if is_group:
+            await msg.reply(text=reply)
+        else:
+            await bot.api.post_private_msg(msg.user_id, text=reply)
+        return
+
+    # 提取参数
+    raw = msg.raw_message.strip()
+    parts = raw.split(maxsplit=1)
+    arg = parts[1].strip() if len(parts) > 1 else ""
+
+    if arg == "" or arg == "list":
+        # 列出所有可用模型
+        lines = ["📋 **可用对话模型**"]
+        for i, m in enumerate(chat_models, 1):
+            marker = " ✅ (当前)" if m.get("id") == active_id else ""
+            name = m.get("name", "未命名")
+            model_name = m.get("model", "?")
+            lines.append(f"{i}. {name} — `{model_name}`{marker}")
+        reply = "\n".join(lines) + "\n\n输入 `/model <编号>` 切换模型\n输入 `/model` 查看当前模型"
+        if is_group:
+            await msg.reply(text=reply)
+        else:
+            await bot.api.post_private_msg(msg.user_id, text=reply)
+        return
+
+    # 尝试按编号切换
+    try:
+        idx = int(arg)
+        if 1 <= idx <= len(chat_models):
+            target = chat_models[idx - 1]
+            target_id = target.get("id")
+            models_data["active_model_id"] = target_id
+            with open(models_file, "w", encoding="utf-8") as f:
+                json.dump(models_data, f, ensure_ascii=False, indent=2)
+            # 刷新运行时配置
+            from nbot.services.ai import refresh_runtime_ai_config
+            refresh_runtime_ai_config()
+            reply = f"已切换到模型: **{target.get('name', '未命名')}** (`{target.get('model', '?')}`)"
+            if is_group:
+                await msg.reply(text=reply)
+            else:
+                await bot.api.post_private_msg(msg.user_id, text=reply)
+        else:
+            reply = f"编号超出范围喵~ (1-{len(chat_models)})"
+            if is_group:
+                await msg.reply(text=reply)
+            else:
+                await bot.api.post_private_msg(msg.user_id, text=reply)
+        return
+    except ValueError:
+        pass
+
+    # 当前模型信息
+    current = None
+    for m in chat_models:
+        if m.get("id") == active_id:
+            current = m
+            break
+
+    if current:
+        reply = (
+            f"当前模型: **{current.get('name', '未命名')}**\n"
+            f"模型: `{current.get('model', '?')}`\n"
+            f"厂商: {current.get('provider', '?')}\n"
+            f"上下文: {current.get('max_context_length', 100000):,} tokens\n\n"
+            f"输入 `/model list` 查看所有可用模型"
+        )
+    else:
+        reply = "未找到当前模型信息喵~"
+
+    if is_group:
+        await msg.reply(text=reply)
+    else:
+        await bot.api.post_private_msg(msg.user_id, text=reply)
 
 
 async def dispatch_message(msg, is_group: bool):

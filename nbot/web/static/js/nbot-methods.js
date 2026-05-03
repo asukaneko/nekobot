@@ -6840,12 +6840,11 @@ def main(params):
                     try {
                         await api.post(`/api/ai-models/${model.id}/apply`);
                         this.activeModelId = model.id;
-                        // 更新当前AI配置
+                        // 更新当前AI配置（以模型数据为准）
                         this.aiConfig = { ...this.aiConfig, ...model };
                         this.syncProviderMetadata(this.aiConfig);
+                        this.updateContextStats();
                         this.showToast(`已应用模型配置: ${model.name}`, 'success');
-                        // 刷新AI配置
-                        await this.loadAIConfig();
                     } catch (e) {
                         this.showToast('应用失败: ' + (e.response?.data?.error || e.message), 'error');
                     } finally {

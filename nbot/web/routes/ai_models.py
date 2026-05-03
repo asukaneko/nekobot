@@ -108,7 +108,7 @@ def register_ai_model_routes(app, server):
             "image_model": data.get("image_model", ""),
             "search_api_key": data.get("search_api_key", ""),
             "embedding_model": data.get("embedding_model", default_config.get("model", "") if purpose == "embedding" else ""),
-            "max_context_length": data.get("max_context_length", 8000),
+            "max_context_length": data.get("max_context_length", 100000),
             # TTS/STT特有配置
             "voice": data.get("voice", default_config.get("voice", "default")),
             "speed": data.get("speed", default_config.get("speed", 1.0)),

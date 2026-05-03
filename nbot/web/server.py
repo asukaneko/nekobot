@@ -1258,52 +1258,57 @@ class WebChatServer:
                 self.ai_base_url = model.get("base_url", "")
                 self.ai_model = model.get("model", "")
 
-                if self.ai_api_key and self.ai_base_url and self._initialize_ai_client(
-                    provider_type=model_provider_type,
-                    supports_tools=model.get("supports_tools", True),
-                    supports_reasoning=model.get("supports_reasoning", True),
-                    supports_stream=model.get("supports_stream", True),
-                ):
-                    self.ai_config.update(
-                        {
-                            "provider": model.get("provider", "custom"),
-                            "provider_type": model.get(
-                                "provider_type", model.get("provider", "openai_compatible")
-                            ),
-                            "api_key": self.ai_api_key,
-                            "base_url": self.ai_base_url,
-                            "model": self.ai_model,
-                            "temperature": model.get("temperature", 0.7),
-                            "max_tokens": model.get("max_tokens", 2000),
-                            "top_p": model.get("top_p", 0.9),
-                            "frequency_penalty": model.get("frequency_penalty", 0),
-                            "presence_penalty": model.get("presence_penalty", 0),
-                            "system_prompt": model.get("system_prompt", ""),
-                            "timeout": model.get("timeout", 60),
-                            "retry_count": model.get("retry_count", 3),
-                            "stream": model.get("stream", True),
-                            "enable_memory": model.get("enable_memory", True),
-                            "image_model": model.get("image_model", ""),
-                            "search_api_key": model.get("search_api_key", ""),
-                            "embedding_model": model.get("embedding_model", ""),
-                            "max_context_length": model.get("max_context_length", 30000),
-                            "supports_tools": model.get("supports_tools", True),
-                            "supports_reasoning": model.get("supports_reasoning", True),
-                            "supports_stream": model.get("supports_stream", True),
-                        }
+                # 始终更新 ai_config（无论 AI 客户端是否初始化成功）
+                self.ai_config.update(
+                    {
+                        "provider": model.get("provider", "custom"),
+                        "provider_type": model.get(
+                            "provider_type", model.get("provider", "openai_compatible")
+                        ),
+                        "api_key": self.ai_api_key,
+                        "base_url": self.ai_base_url,
+                        "model": self.ai_model,
+                        "temperature": model.get("temperature", 0.7),
+                        "max_tokens": model.get("max_tokens", 2000),
+                        "top_p": model.get("top_p", 0.9),
+                        "frequency_penalty": model.get("frequency_penalty", 0),
+                        "presence_penalty": model.get("presence_penalty", 0),
+                        "system_prompt": model.get("system_prompt", ""),
+                        "timeout": model.get("timeout", 60),
+                        "retry_count": model.get("retry_count", 3),
+                        "stream": model.get("stream", True),
+                        "enable_memory": model.get("enable_memory", True),
+                        "image_model": model.get("image_model", ""),
+                        "search_api_key": model.get("search_api_key", ""),
+                        "embedding_model": model.get("embedding_model", ""),
+                        "max_context_length": model.get("max_context_length", 100000),
+                        "supports_tools": model.get("supports_tools", True),
+                        "supports_reasoning": model.get("supports_reasoning", True),
+                        "supports_stream": model.get("supports_stream", True),
+                    }
+                )
+                self._save_data("ai_config")
+
+                if self.ai_api_key and self.ai_base_url:
+                    self._initialize_ai_client(
+                        provider_type=model_provider_type,
+                        supports_tools=model.get("supports_tools", True),
+                        supports_reasoning=model.get("supports_reasoning", True),
+                        supports_stream=model.get("supports_stream", True),
                     )
-                    # 配置知识库 embedding 服务
-                    embedding_model = model.get("embedding_model", "")
-                    if configure_knowledge_embedding and embedding_model:
-                        try:
-                            configure_knowledge_embedding(
-                                api_key=self.ai_api_key,
-                                base_url=self.ai_base_url,
-                                model=embedding_model
-                            )
-                        except Exception as e:
-                            _log.warning(f"Failed to configure knowledge embedding: {e}")
-            
+
+                # 配置知识库 embedding 服务
+                embedding_model = model.get("embedding_model", "")
+                if configure_knowledge_embedding and embedding_model:
+                    try:
+                        configure_knowledge_embedding(
+                            api_key=self.ai_api_key,
+                            base_url=self.ai_base_url,
+                            model=embedding_model
+                        )
+                    except Exception as e:
+                        _log.warning(f"Failed to configure knowledge embedding: {e}")
+
             # 保存配置
             self._save_data("ai_models")
             _log.info(f"Applied model {model_id} for purpose {model_purpose}")

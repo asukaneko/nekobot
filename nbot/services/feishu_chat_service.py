@@ -295,7 +295,7 @@ class FeishuChatService:
 
         # 创建消息适配器
         msg_adapter = FeishuMessageAdapter(
-            content, user_id, chat_id, credentials, self.server
+            content, user_id, chat_id, credentials, self.server, session_id
         )
 
         def run_command():
@@ -433,7 +433,8 @@ class FeishuMessageAdapter:
         user_id: str,
         chat_id: str,
         credentials: Dict[str, str],
-        server: Any
+        server: Any,
+        session_id: str = None
     ):
         self.content = content
         self.raw_message = content  # 兼容命令系统
@@ -441,6 +442,7 @@ class FeishuMessageAdapter:
         self.chat_id = chat_id
         self.credentials = credentials
         self.server = server
+        self.session_id = session_id
         self.bot = FeishuBotMock(self)
 
     async def reply(self, text: str, **kwargs):

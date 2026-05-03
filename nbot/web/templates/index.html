@@ -2792,6 +2792,12 @@
                                     </div>
 
                                     <div class="form-group">
+                                        <label class="form-label">最大上下文长度 (token)</label>
+                                        <input v-model.number="modelForm.max_context_length" type="number" min="8000" max="2000000" step="1000" class="form-input">
+                                        <div class="form-hint">模型支持的最大上下文窗口大小，例如 GPT-4o 为 128000，Claude 为 200000</div>
+                                    </div>
+
+                                    <div class="form-group">
                                         <div class="switch-field">
                                             <div class="switch-copy">
                                                 <span class="switch-label">启用此配置</span>
