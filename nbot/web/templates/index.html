@@ -216,7 +216,7 @@
                                         </div>
                                     </div>
                                     <div class="dashboard-quick-actions">
-                                        <button class="dashboard-action" @click="navigateTo('chat')"><i class="fas fa-comments"></i> {{ $t('dashboard.open_chat') }}</button>
+                                        <button class="dashboard-action" @click="openLatestChat()"><i class="fas fa-comments"></i> {{ $t('dashboard.open_chat') }}</button>
                                         <button class="dashboard-action" @click="navigateTo('ai-config')"><i class="fas fa-sliders-h"></i> {{ $t('dashboard.ai_config') }}</button>
                                         <button class="dashboard-action" @click="refreshData()"><i class="fas fa-rotate-right"></i> {{ $t('dashboard.refresh_status') }}</button>
                                     </div>

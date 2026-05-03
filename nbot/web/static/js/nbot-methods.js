@@ -431,6 +431,35 @@ const NbotMethods = {
                     }
                 },
 
+                async openLatestChat() {
+                    // 确保会话列表已加载
+                    if (this.sessions.length === 0) {
+                        await this.loadSessions();
+                    }
+                    // 过滤非临时、非归档的 Web/频道会话，取最新创建的
+                    const activeSessions = this.sessions
+                        .filter(s => !s._isTemp && !s.archived)
+                        .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+                    if (activeSessions.length > 0) {
+                        const latest = activeSessions[0];
+                        // 切换到对应的 tab
+                        if (latest.type === 'cli') {
+                            await this.switchChatTab('cli');
+                        } else if (latest.type && latest.type.startsWith('qq')) {
+                            await this.switchChatTab(latest.type === 'qq_group' ? 'qq_group' : 'qq_private');
+                        } else if (latest.channel_id) {
+                            await this.switchChatTab('channel_' + latest.channel_id);
+                        } else {
+                            await this.switchChatTab('web');
+                        }
+                        this.currentPage = 'chat';
+                        this.openSession(latest);
+                    } else {
+                        // 没有会话时直接打开聊天页
+                        this.navigateTo('chat');
+                    }
+                },
+
                 toggleSidebar() {
                     this.isSidebarCollapsed = !this.isSidebarCollapsed;
                 },
