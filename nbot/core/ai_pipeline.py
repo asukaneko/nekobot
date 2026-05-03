@@ -393,6 +393,29 @@ class AIPipeline:
         "application/vnd.openxmlformats-officedocument.presentationml.presentation",
     }
 
+    _middleware_initialized = False
+
+    @classmethod
+    def _ensure_middleware_initialized(cls) -> None:
+        if cls._middleware_initialized:
+            return
+        from nbot.core.message_middleware import MediaDescriber
+        from nbot.services.ai import ai_client as _ai_client
+
+        def _describe_image(url: str):
+            return _ai_client.describe_image(url, "请描述这个图片的内容，仅作描述，不要分析内容")
+
+        def _describe_video(url: str):
+            return _ai_client.describe_video(url)
+
+        def _describe_audio(url: str):
+            return _ai_client.describe_audio(url) if hasattr(_ai_client, 'describe_audio') else None
+
+        MediaDescriber.register("image", _describe_image)
+        MediaDescriber.register("video", _describe_video)
+        MediaDescriber.register("audio", _describe_audio)
+        cls._middleware_initialized = True
+
     def process(
         self,
         ctx: PipelineContext,
@@ -414,6 +437,11 @@ class AIPipeline:
         Returns:
             PipelineResult 可转为 ChatResponse
         """
+        # === 通用消息预处理（附件下载 + 媒体描述） ===
+        self._ensure_middleware_initialized()
+        from nbot.core.message_middleware import MessagePreprocessor
+        MessagePreprocessor.process(ctx.chat_request)
+
         progress = callbacks.get_progress_reporter(ctx)
 
         # Phase 1: 附件解析

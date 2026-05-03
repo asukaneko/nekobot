@@ -278,11 +278,18 @@ def answer_feishu_event(
         log_prefix="Feishu",
     )
 
+    # 注入飞书凭证到附件，供中间件下载使用
+    attachments = parsed.get("attachments", [])
+    for att in attachments:
+        att.setdefault("app_id", credentials["app_id"])
+        att.setdefault("app_secret", credentials["app_secret"])
+
     chat_request = adapter.build_chat_request(
         conversation_id=f"feishu:{parsed['chat_id']}",
         user_id=parsed.get("user_id", ""),
         content=content,
         sender=parsed.get("sender", "feishu_user"),
+        attachments=attachments,
         metadata=parsed.get("metadata", {}),
     )
 

@@ -84,6 +84,7 @@ class AgentService:
         adapter: Optional["BaseChannelAdapter"] = None,
         **kwargs,
     ) -> ChatResponse:
+        # === 路由到频道处理器 ===
         handler = self._handlers.get(chat_request.channel) or get_channel_handler(
             chat_request.channel
         )

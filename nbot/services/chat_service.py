@@ -395,18 +395,21 @@ def judge_reply(content: str) -> float:
 
 
 def chat(content: str = "", user_id=None, group_id=None, group_user_id=None,
-         image: bool = False, url=None, video=None):
+         image: bool = False, url=None, video=None, attachments: list = None):
     adapter = get_channel_adapter("qq") or QQChannelAdapter()
+    atts = list(attachments or [])
+    # 兼容旧版调用方式：image/url → 转为 attachment
+    if image and url:
+        atts.append({"type": "image", "url": url, "source": "qq"})
+    if video:
+        atts.append({"type": "video", "url": video, "source": "qq"})
     chat_request = adapter.build_chat_request(
         content=content,
         user_id=str(user_id) if user_id else None,
-        attachments=[],
+        attachments=atts,
         metadata={
             "group_id": str(group_id) if group_id else None,
             "group_user_id": str(group_user_id) if group_user_id else None,
-            "image": image,
-            "url": url,
-            "video": video,
         },
     )
     return chat_from_request(chat_request, adapter=adapter).final_content
@@ -432,9 +435,6 @@ def _run_qq_chat_request(
     user_id = chat_request.user_id
     group_id = chat_request.metadata.get("group_id")
     group_user_id = chat_request.metadata.get("group_user_id")
-    image = bool(chat_request.metadata.get("image", False))
-    url = chat_request.metadata.get("url")
-    video = chat_request.metadata.get("video")
     now_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     qq_store = _get_qq_store()
 
@@ -444,26 +444,17 @@ def _run_qq_chat_request(
         group_id = str(group_id)
 
     # === 确认/拒绝待执行命令检测 ===
-    if content and not image and not video and TOOLS_AVAILABLE:
+    if content and TOOLS_AVAILABLE:
         session_id_check = get_qq_session_id(user_id, group_id, group_user_id)
         content = handle_tool_confirmation(
             content, session_id_check, log_prefix="QQ Confirm"
         )
         chat_request.content = content
 
-    # === 预处理：图片/视频/URL 描述 ===
+    # === 时间前缀 + 用户信息 ===
     pre_text = f"用户{group_user_id}说：" if group_user_id else ""
-
-    if image:
-        print(f"[图片识别] chat 函数收到图片请求, URL: {url}")
-        response = chat_image(url)
-        print(f"[图片识别] 获取到图片描述: {response[:80] if response else '空'}...")
-        enhanced_content = f"(当前时间：{now_time})\n{pre_text}用户发送了一张图片，这是图片的描述：{response} 这是用户说的话：{content}"
-    elif video:
-        response = chat_video(video)
-        enhanced_content = f"(当前时间：{now_time})\n{pre_text}这是视频的描述：{response}这是用户说的话：{content}"
-    else:
-        enhanced_content = f"(当前时间：{now_time})\n{pre_text}{content}"
+    # 图片/视频描述已由 MessagePreprocessor 中间件注入 content
+    enhanced_content = f"(当前时间：{now_time})\n{pre_text}{content}"
 
     # URL 链接描述
     pattern = r"(?:https?:\/\/)?(?:www\.)?[a-zA-Z0-9-]+(?:\.[a-zA-Z]{2,})+(?:\/[^\s?]*)?(?:\?[^\s]*)?"

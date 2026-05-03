@@ -4900,8 +4900,9 @@ async def dispatch_message(msg, is_group: bool):
             content = raw_msg
             group_id = str(msg.group_id) if hasattr(msg, 'group_id') else None
             user_id = str(msg.user_id) if hasattr(msg, 'user_id') else None
+            atts = [{"type": "image", "url": image_url, "source": "qq"}] if image_url else []
             _log.info(f"Processing group message (at bot) from {user_id} in {group_id}: {content[:50]}..., image: {bool(image_url)}")
-            response = await loop.run_in_executor(None, do_chat, content, None, group_id, user_id, bool(image_url), image_url, None)
+            response = await loop.run_in_executor(None, do_chat, content, None, group_id, user_id, False, None, None, atts)
             if response:
                 _log.info(f"Sending group reply: {response[:50]}...")
                 await msg.reply(text=response)
@@ -4916,8 +4917,9 @@ async def dispatch_message(msg, is_group: bool):
         try:
             content = raw_msg
             user_id = str(msg.user_id) if hasattr(msg, 'user_id') else None
+            atts = [{"type": "image", "url": image_url, "source": "qq"}] if image_url else []
             _log.info(f"Processing private message from {user_id}: {content[:50]}..., image: {bool(image_url)}")
-            response = await loop.run_in_executor(None, do_chat, content, user_id, None, None, bool(image_url), image_url, None)
+            response = await loop.run_in_executor(None, do_chat, content, user_id, None, None, False, None, None, atts)
             if response:
                 _log.info(f"Sending private reply: {response[:50]}...")
                 await msg.reply(text=response)

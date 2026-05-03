@@ -47,16 +47,39 @@ class FeishuWebSocketService:
             message = event_data.message
             sender = event_data.sender
 
+            # 日志：原始消息结构
+            raw_content = getattr(message, 'content', None)
+            message_type = getattr(message, 'message_type', None)
+
             # 解析消息内容
-            content = message.content
-            if isinstance(content, str):
+            text = ""
+            attachments = []
+            if isinstance(raw_content, str):
                 try:
-                    content_obj = json.loads(content)
-                    text = content_obj.get("text", "")
+                    content_obj = json.loads(raw_content)
                 except json.JSONDecodeError:
-                    text = content
+                    content_obj = {}
+            elif isinstance(raw_content, dict):
+                content_obj = raw_content
             else:
-                text = str(content)
+                content_obj = {}
+
+            if message_type == "image":
+                # 图片消息：提取 image_key 和 message_id
+                image_key = content_obj.get("image_key", "")
+                if image_key:
+                    attachments.append({
+                        "type": "image",
+                        "source": "feishu",
+                        "image_key": image_key,
+                        "message_id": getattr(message, 'message_id', ''),
+                    })
+                text = ""
+            else:
+                text = content_obj.get("text", "")
+                if isinstance(raw_content, str) and not text:
+                    # JSON 解析失败等兜底
+                    text = raw_content
 
             # 查找对应的频道配置
             channel_config = None
@@ -82,6 +105,7 @@ class FeishuWebSocketService:
                 "user_id": sender.sender_id.open_id if sender and sender.sender_id else "",
                 "sender": sender.sender_id.open_id if sender and sender.sender_id else "feishu_user",
                 "content": text.strip(),
+                "attachments": attachments,
                 "create_time": message.create_time,
                 "update_time": message.update_time,
                 "metadata": {

@@ -199,8 +199,14 @@ class FeishuChatService:
         user_id = message_data["user_id"]
         content = message_data["content"]
         message_id = message_data["message_id"]
+        attachments = message_data.get("attachments", [])
 
-        print(f"[FeishuChat] 处理消息: {content[:50]}...")
+        # 注入飞书凭证到附件，供中间件下载使用
+        for att in attachments:
+            att.setdefault("app_id", credentials.get("app_id"))
+            att.setdefault("app_secret", credentials.get("app_secret"))
+
+        print(f"[FeishuChat] 处理消息: {content[:50]}..., attachments={len(attachments)}")
 
         # 获取或创建会话
         session_id, session = self._get_or_create_session(
@@ -267,7 +273,7 @@ class FeishuChatService:
                 else:
                     self._trigger_ai_response(
                         session_id, content, user_id, chat_id,
-                        credentials, temp_id
+                        credentials, temp_id, attachments
                     )
 
             except Exception as e:
@@ -327,7 +333,8 @@ class FeishuChatService:
         user_id: str,
         chat_id: str,
         credentials: Dict[str, str],
-        parent_message_id: str
+        parent_message_id: str,
+        attachments: list = None
     ):
         """触发 AI 响应"""
         print(f"[FeishuChat] 触发 AI 响应")
@@ -336,7 +343,7 @@ class FeishuChatService:
             try:
                 self._process_ai_response(
                     session_id, content, user_id, chat_id,
-                    credentials, parent_message_id
+                    credentials, parent_message_id, attachments or []
                 )
             except Exception as e:
                 print(f"[FeishuChat] AI 响应失败: {e}")
@@ -355,7 +362,8 @@ class FeishuChatService:
         user_id: str,
         chat_id: str,
         credentials: Dict[str, str],
-        parent_message_id: str
+        parent_message_id: str,
+        attachments: list = None
     ):
         """通过统一管道处理 AI 响应。"""
         from nbot.channels.feishu import FeishuChannelAdapter
@@ -373,6 +381,7 @@ class FeishuChatService:
             user_id=user_id,
             content=content,
             sender=user_id,
+            attachments=attachments or [],
             metadata={
                 "chat_id": chat_id,
                 "parent_message_id": parent_message_id,

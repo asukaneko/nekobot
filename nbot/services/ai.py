@@ -394,8 +394,8 @@ class AIClient:
         return requests.post(url, json=payload, headers=headers)
 
     def describe_image(self, image_url: str, text: str = None) -> str:
-        print(f"[图片识别] 开始识别图片, URL: {image_url}")
-        
+        print(f"[图片识别] 开始识别图片, URL: {image_url[:80]}{'...(base64已省略)' if image_url.startswith('data:') and len(image_url) > 80 else ''}")
+
         # 获取图片理解模型配置
         vision_config = get_vision_model_config()
         if vision_config and vision_config.get("api_key"):
@@ -644,7 +644,7 @@ class AIClient:
             return ""
 
     def describe_video(self, video_url: str, text: str = None) -> str:
-        print(f"[视频识别] 开始识别视频, URL: {video_url}")
+        print(f"[视频识别] 开始识别视频, URL: {video_url[:80]}{'...(base64已省略)' if video_url.startswith('data:') and len(video_url) > 80 else ''}")
         
         # 获取视频理解模型配置
         video_config = get_video_model_config()

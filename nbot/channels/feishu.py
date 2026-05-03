@@ -35,7 +35,7 @@ class FeishuChannelAdapter(BaseChannelAdapter):
         """解析飞书事件回调数据
 
         支持的消息类型:
-        - im.message.receive_v1: 接收消息事件
+        - im.message.receive_v1: 接收消息事件 (text / image)
         """
         header = event.get("header") or {}
         event_type = header.get("event_type")
@@ -58,19 +58,35 @@ class FeishuChannelAdapter(BaseChannelAdapter):
 
         # 解析消息内容
         text = ""
+        attachments = []
         if isinstance(content, str):
             try:
                 import json
-
                 content_obj = json.loads(content)
-                text = content_obj.get("text", "")
             except Exception:
-                text = content
+                content_obj = {}
         elif isinstance(content, dict):
-            text = content.get("text", "")
+            content_obj = content
+        else:
+            content_obj = {}
+
+        if message_type == "image":
+            # 图片消息：提取 image_key 和 message_id
+            image_key = content_obj.get("image_key", "")
+            msg_id = message.get("message_id", "")
+            if image_key:
+                attachments.append({
+                    "type": "image",
+                    "source": "feishu",
+                    "image_key": image_key,
+                    "message_id": msg_id,
+                })
+        else:
+            # 文本消息
+            text = content_obj.get("text", "")
 
         text = self.normalize_inbound_message(text)
-        if not text:
+        if not text and not attachments:
             return None
 
         # 获取发送者信息
@@ -85,6 +101,7 @@ class FeishuChannelAdapter(BaseChannelAdapter):
             "sender": sender_name,
             "content": text,
             "message_type": message_type,
+            "attachments": attachments,
             "metadata": {
                 "feishu_event_type": event_type,
                 "feishu_chat_id": str(chat_id),
