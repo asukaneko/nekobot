@@ -423,6 +423,17 @@ class WebChatServer:
         self.active_connections: Dict[str, str] = {}
         self.visible_web_sessions: Dict[str, str] = {}
 
+        # 数据存储目录
+        self.data_dir = os.path.join(
+            os.path.dirname(__file__), "..", "..", "data", "web"
+        )
+        os.makedirs(self.data_dir, exist_ok=True)
+
+        # Token 统计管理器（统一持久化，必须最先初始化）
+        from nbot.core.token_stats import init_token_stats_manager
+        self.token_stats_manager = init_token_stats_manager(self.data_dir)
+        self.token_stats: Dict = self.token_stats_manager.data  # 兼容旧引用
+
         # 内存数据存储
         self.workflows: List[Dict] = []
         self.memories: List[Dict] = []
@@ -430,7 +441,6 @@ class WebChatServer:
         self.ai_config: Dict = {}
         self.custom_personality_presets: List[Dict] = []  # 自定义人格预设
         self.personality: Dict = {}
-        self.token_stats: Dict = {}
         self.system_logs: List[Dict] = []
         self.settings: Dict = {}
 
@@ -451,8 +461,8 @@ class WebChatServer:
             "enabled": False,
             "interval_minutes": 60,
             "content_file": "heartbeat.md",
-            "target_session_id": "",  # 追加到指定会话，不填则创建新会话
-            "targets": [],  # 发送目标 ['qq_group:123456', 'qq_user:123456']
+            "target_session_id": "",
+            "targets": [],
             "last_run": None,
             "next_run": None,
         }
@@ -474,15 +484,9 @@ class WebChatServer:
         self.ai_base_url = None
 
         # 多模型配置管理
-        self.ai_models: List[Dict] = []  # 存储多个AI模型配置
-        self.active_model_id: str = None  # 当前激活的模型配置ID（兼容旧版本）
-        self.active_models_by_purpose: Dict[str, str] = {}  # 各用途的活跃模型ID {purpose: model_id}
-
-        # 数据存储目录
-        self.data_dir = os.path.join(
-            os.path.dirname(__file__), "..", "..", "data", "web"
-        )
-        os.makedirs(self.data_dir, exist_ok=True)
+        self.ai_models: List[Dict] = []
+        self.active_model_id: str = None
+        self.active_models_by_purpose: Dict[str, str] = {}
 
         # 工作流调度器
         self.scheduler = None

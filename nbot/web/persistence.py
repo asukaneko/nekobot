@@ -271,15 +271,15 @@ def init_default_data(server):
     }
     server.scheduled_tasks = []
 
-    # 默认 Token 统计
-    server.token_stats = {
-        "today": 0,
-        "month": 0,
-        "avg_per_chat": 0,
-        "estimated_cost": "0.00",
-        "history": [],
-        "sessions": {},
-    }
+    # Token 统计由 TokenStatsManager 管理，此处仅保留兼容占位
+    from nbot.core.token_stats import get_token_stats_manager
+    try:
+        server.token_stats = get_token_stats_manager().data
+    except RuntimeError:
+        server.token_stats = {
+            "today": 0, "month": 0, "total": 0,
+            "estimated_cost": "0.00", "history": [], "sessions": {}, "models": {},
+        }
 
     # 默认系统日志
     server.system_logs = [
@@ -577,32 +577,13 @@ def load_all_data(server):
                 saved_config = json.load(f)
                 server.ai_config.update(saved_config)
 
-        # 加载 Token 统计
-        token_stats_file = os.path.join(server.data_dir, "token_stats.json")
-        if os.path.exists(token_stats_file):
-            with open(token_stats_file, "r", encoding="utf-8") as f:
-                saved_stats = json.load(f)
-                # 检查是否是今天的数据
-                today_str = datetime.now().strftime("%Y-%m-%d")
-                history = saved_stats.get("history", [])
-                if history:
-                    last_date = history[-1].get("date", "")
-                    if last_date != today_str:
-                        # 新的一天，将昨天的数据保存到历史，重置 today
-                        yesterday_total = saved_stats.get("today", 0)
-                        if yesterday_total > 0 and last_date:
-                            saved_stats["history"].append(
-                                {
-                                    "date": last_date,
-                                    "input": yesterday_total // 2,
-                                    "output": yesterday_total // 2,
-                                    "total": yesterday_total,
-                                    "cost": 0.0,
-                                    "message_count": 0,
-                                }
-                            )
-                        saved_stats["today"] = 0
-                server.token_stats = saved_stats
+        # 加载 Token 统计——委托给 TokenStatsManager（自动合并重复条目）
+        from nbot.core.token_stats import get_token_stats_manager
+
+        try:
+            get_token_stats_manager()
+        except Exception:
+            pass
 
         # 加载设置
         settings_file = os.path.join(server.data_dir, "settings.json")
@@ -750,12 +731,12 @@ def save_data(server, data_type: str):
             ) as f:
                 json.dump(server.ai_config, f, ensure_ascii=False, indent=2)
         elif data_type == "token_stats":
-            with open(
-                os.path.join(server.data_dir, "token_stats.json"),
-                "w",
-                encoding="utf-8",
-            ) as f:
-                json.dump(server.token_stats, f, ensure_ascii=False, indent=2)
+            # TokenStatsManager 自行管理持久化，此处仅同步 in-memory 引用
+            from nbot.core.token_stats import get_token_stats_manager
+            try:
+                server.token_stats = get_token_stats_manager().data
+            except RuntimeError:
+                pass
         elif data_type == "settings":
             with open(
                 os.path.join(server.data_dir, "settings.json"), "w", encoding="utf-8"

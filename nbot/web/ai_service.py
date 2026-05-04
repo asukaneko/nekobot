@@ -810,28 +810,24 @@ def trigger_ai_response_for_request(server, chat_request: ChatRequest, adapter=N
 
 
 def _update_web_token_stats(server, usage: dict, session_id: str):
-    """更新 Web 频道的 token 统计。"""
+    """更新 Web 频道的 token 统计（统一持久化到磁盘）。"""
     try:
         if not usage:
-            return
-        stats = getattr(server, "token_stats", None)
-        if not stats:
             return
         total = usage.get("total_tokens", 0)
         if not total:
             return
-        stats["today"] = stats.get("today", 0) + total
-        stats["month"] = stats.get("month", 0) + total
-        if session_id not in stats.get("sessions", {}):
-            stats.setdefault("sessions", {})[session_id] = {
-                "input": 0, "output": 0, "total": 0,
-                "type": "web", "message_count": 0,
-            }
-        sess_stats = stats["sessions"][session_id]
-        sess_stats["input"] += usage.get("prompt_tokens", 0)
-        sess_stats["output"] += usage.get("completion_tokens", 0)
-        sess_stats["total"] += total
-        sess_stats["message_count"] += 2
+
+        from nbot.core.token_stats import get_token_stats_manager
+
+        get_token_stats_manager().record_usage(
+            usage.get("prompt_tokens", 0),
+            usage.get("completion_tokens", 0),
+            model=getattr(server, "ai_model", "") or "",
+            session_id=session_id,
+            channel_type="web",
+            user_id=session_id,
+        )
     except Exception:
         pass
 

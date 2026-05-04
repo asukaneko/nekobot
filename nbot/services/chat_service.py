@@ -118,7 +118,6 @@ class QQCallbacks(PipelineCallbacks):
         self.user_id = str(user_id) if user_id else None
         self.group_id = str(group_id) if group_id else None
         self.group_user_id = str(group_user_id) if group_user_id else None
-        self._token_stats = None  # (prompt_tokens, completion_tokens, total_tokens)
 
     def load_messages(self, ctx: PipelineContext) -> List[Dict[str, Any]]:
         """从 QQSessionStore 加载历史消息。"""
@@ -143,15 +142,7 @@ class QQCallbacks(PipelineCallbacks):
     def save_assistant_message(
         self, ctx: PipelineContext, message: Dict[str, Any]
     ) -> None:
-        """QQ 消息通过 BotAPI 补丁自动保存，此处记录 token 用量。"""
-        content = message.get("content", "")
-        prompt_chars = len(json.dumps(ctx.messages, ensure_ascii=False))
-        completion_chars = len(content or "")
-        self._token_stats = (
-            prompt_chars,
-            completion_chars,
-            prompt_chars + completion_chars,
-        )
+        """QQ 消息通过 BotAPI 补丁自动保存，Token 统计由 on_response_complete 处理。"""
         self.qq_store.save()
 
     def get_workspace_context(self, ctx: PipelineContext) -> Dict[str, Any]:
@@ -191,13 +182,28 @@ class QQCallbacks(PipelineCallbacks):
     def on_response_complete(
         self, ctx: PipelineContext, result: PipelineResult
     ) -> None:
-        """更新 token 统计。"""
-        if self._token_stats:
-            _update_token_stats(
-                self.user_id,
-                self.group_id,
-                *self._token_stats,
-            )
+        """使用管道返回的真实 token 用量更新统计。"""
+        usage = result.usage
+        if not usage:
+            return
+        prompt_tokens = usage.get("prompt_tokens", 0)
+        completion_tokens = usage.get("completion_tokens", 0)
+        if not prompt_tokens and not completion_tokens:
+            return
+
+        from nbot.core.token_stats import get_token_stats_manager
+
+        model = _get_active_model_name()
+        session_id = str(self.user_id) if self.user_id else str(self.group_id)
+        channel_type = "private" if self.user_id else "group"
+        get_token_stats_manager().record_usage(
+            prompt_tokens,
+            completion_tokens,
+            model=model,
+            session_id=session_id,
+            channel_type=channel_type,
+            user_id=session_id,
+        )
 
     def send_response(
         self, ctx: PipelineContext, message: Dict[str, Any]
@@ -510,87 +516,10 @@ def _run_qq_chat_request(
     return chat_response
 
 
-def _update_token_stats(user_id, group_id, prompt_tokens, completion_tokens, total_tokens):
-    """更新 Token 统计（使用真实数据）"""
-    try:
-        import os
-        import json
-        from datetime import datetime
-
-        data_dir = os.path.join(os.path.dirname(__file__), '..', '..', 'data', 'web')
-        os.makedirs(data_dir, exist_ok=True)
-        stats_file = os.path.join(data_dir, 'token_stats.json')
-
-        # 加载现有统计
-        stats = {}
-        if os.path.exists(stats_file):
-            try:
-                with open(stats_file, 'r', encoding='utf-8') as f:
-                    stats = json.load(f)
-            except:
-                stats = {}
-
-        # 初始化默认值
-        if 'today' not in stats:
-            stats['today'] = 0
-        if 'month' not in stats:
-            stats['month'] = 0
-        if 'history' not in stats:
-            stats['history'] = []
-        if 'sessions' not in stats:
-            stats['sessions'] = {}
-        if 'models' not in stats:
-            stats['models'] = {}
-
-        # 更新今日和本月统计
-        stats['today'] += total_tokens
-        stats['month'] += total_tokens
-
-        # 更新历史记录（按天）
-        today_str = datetime.now().strftime('%Y-%m-%d')
-        today_entry = None
-        for entry in stats['history']:
-            if entry.get('date') == today_str:
-                today_entry = entry
-                break
-
-        if today_entry:
-            today_entry['input'] += prompt_tokens
-            today_entry['output'] += completion_tokens
-            today_entry['total'] += total_tokens
-        else:
-            stats['history'].append({
-                'date': today_str,
-                'input': prompt_tokens,
-                'output': completion_tokens,
-                'total': total_tokens
-            })
-
-        # 限制历史记录数量（保留最近30天）
-        if len(stats['history']) > 30:
-            stats['history'] = sorted(stats['history'], key=lambda x: x['date'])[-30:]
-
-        # 更新会话统计
-        session_id = str(user_id) if user_id else str(group_id)
-        if session_id not in stats['sessions']:
-            stats['sessions'][session_id] = {
-                'input': 0,
-                'output': 0,
-                'total': 0,
-                'type': 'private' if user_id else 'group',
-                'message_count': 0
-            }
-        stats['sessions'][session_id]['input'] += prompt_tokens
-        stats['sessions'][session_id]['output'] += completion_tokens
-        stats['sessions'][session_id]['total'] += total_tokens
-        stats['sessions'][session_id]['message_count'] = stats['sessions'][session_id].get('message_count', 0) + 2  # 用户消息 + AI回复
-
-        # 保存统计
-        with open(stats_file, 'w', encoding='utf-8') as f:
-            json.dump(stats, f, ensure_ascii=False, indent=2)
-
-    except Exception as e:
-        print(f"更新 Token 统计失败: {e}")
+def _get_active_model_name() -> str:
+    """获取当前活跃的模型名称。"""
+    runtime_ai = refresh_runtime_ai_config()
+    return runtime_ai.get("model", "") or ""
 
 
 def _sync_to_web_session(role, content, user_id=None, group_id=None, group_user_id=None):

@@ -13,6 +13,15 @@ from flask import jsonify, request
 _log = logging.getLogger(__name__)
 
 
+def _get_token_today(server) -> int:
+    """安全读取今日 token 用量。"""
+    try:
+        from nbot.core.token_stats import get_token_stats_manager
+        return get_token_stats_manager().data.get("today", 0)
+    except RuntimeError:
+        return 0
+
+
 def register_admin_misc_routes(app, server):
     @app.route("/api/commands")
     def get_commands_catalog():
@@ -74,51 +83,34 @@ def register_admin_misc_routes(app, server):
     def get_token_stats():
         date_range = request.args.get("dateRange", "today")
 
-        token_stats_file = os.path.join(server.data_dir, "token_stats.json")
-        real_stats = {}
-        if os.path.exists(token_stats_file):
-            try:
-                with open(token_stats_file, "r", encoding="utf-8") as f:
-                    real_stats = json.load(f)
-            except Exception:
-                real_stats = {}
+        try:
+            from nbot.core.token_stats import get_token_stats_manager
 
-        stats_data = {**server.token_stats, **real_stats}
-        history = stats_data.get("history", [])
-        today_str = datetime.now().strftime("%Y-%m-%d")
+            manager = get_token_stats_manager()
+            return jsonify(manager.get_stats(date_range))
+        except RuntimeError:
+            # TokenStatsManager 未初始化，返回空数据
+            return jsonify({
+                "today": 0, "month": 0, "total": 0,
+                "total_tokens": 0, "today_input": 0, "today_output": 0,
+                "message_count": 0, "avg_tokens_per_msg": 0,
+                "estimated_cost": "0.00", "active_sessions": 0,
+                "avg_response_time": "0", "history": [],
+                "sessions": {}, "models": {},
+            })
 
-        if date_range == "today":
-            history = [h for h in history if h.get("date") == today_str]
-        elif date_range == "7d":
-            cutoff = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d")
-            history = [h for h in history if h.get("date", "") >= cutoff]
-        elif date_range == "30d":
-            cutoff = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
-            history = [h for h in history if h.get("date", "") >= cutoff]
+    @app.route("/api/tokens/rankings")
+    def get_token_rankings():
+        try:
+            from nbot.core.token_stats import get_token_stats_manager
 
-        today_input = 0
-        today_output = 0
-        for entry in history:
-            today_input += entry.get("input", 0)
-            today_output += entry.get("output", 0)
-
-        return jsonify(
-            {
-                "today": stats_data.get("today", 0),
-                "month": stats_data.get("month", 0),
-                "total": stats_data.get("total", 0),
-                "today_input": today_input,
-                "today_output": today_output,
-                "history": history,
-            }
-        )
+            return jsonify(get_token_stats_manager().get_rankings())
+        except RuntimeError:
+            return jsonify({"sessions": [], "models": [], "users": []})
 
     @app.route("/api/tokens/record", methods=["POST"])
     def record_token_usage():
-        data = request.json or {}
-        tokens = data.get("tokens", 0)
-        server.token_stats["today"] += tokens
-        server.token_stats["month"] += tokens
+        """已废弃：token 用量由各频道的回调统一管理。"""
         return jsonify({"success": True})
 
     @app.route("/api/logs")
@@ -234,7 +226,7 @@ def register_admin_misc_routes(app, server):
             "today_messages": today_messages,
             "total_messages": total_messages,
             "active_sessions": len(server.sessions),
-            "token_usage": server.token_stats.get("today", 0),
+            "token_usage": _get_token_today(server),
             "qq_connected": bool(getattr(server, "qq_bot", None)),
             "ai_service_status": "normal" if server.ai_client else "not_configured",
             "platform_count": 1,
