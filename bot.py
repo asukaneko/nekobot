@@ -166,6 +166,29 @@ def run_cli_and_web(host="0.0.0.0", port=5000):
     run_cli()
 
 
+def _has_qq_bot_config():
+    """检查是否配置了QQ机器人（ncatbot/napcat）"""
+    bot_uin = os.getenv("BOT_UIN", "").strip()
+    ws_uri = os.getenv("WS_URI", "").strip()
+    
+    # 如果环境变量没有配置，尝试从config.ini读取
+    if not bot_uin or not ws_uri:
+        try:
+            import configparser
+            config_parser = configparser.ConfigParser()
+            config_parser.read("config.ini", encoding="utf-8")
+            bot_uin = config_parser.get("BotConfig", "bot_uin", fallback="").strip()
+            ws_uri = config_parser.get("BotConfig", "ws_uri", fallback="").strip()
+        except Exception:
+            pass
+    
+    # 检查配置是否有效（bot_uin是QQ号，ws_uri是websocket地址）
+    has_bot_uin = bool(bot_uin and bot_uin not in ["", "0"])
+    has_ws_uri = bool(ws_uri and ws_uri not in ["", "ws://", "ws://localhost"])
+    
+    return has_bot_uin and has_ws_uri
+
+
 if __name__ == "__main__":
     import sys
 
@@ -196,12 +219,19 @@ if __name__ == "__main__":
         prepared = _prepare_web_server(bot=None)
         start_web_server(host=web_host, port=web_port, bot=None, prepared=prepared)
     else:
-        _log.info("Starting NekoBot with Web Dashboard...")
-        prepared = _prepare_web_server(bot=None)
-        bot_thread = threading.Thread(
-            target=run_bot,
-            name="qq-bot-main",
-            daemon=True,
-        )
-        bot_thread.start()
-        start_web_server(host=web_host, port=web_port, bot=None, prepared=prepared)
+        # 检查是否配置了QQ机器人
+        if _has_qq_bot_config():
+            _log.info("Starting NekoBot with Web Dashboard...")
+            prepared = _prepare_web_server(bot=None)
+            bot_thread = threading.Thread(
+                target=run_bot,
+                name="qq-bot-main",
+                daemon=True,
+            )
+            bot_thread.start()
+            start_web_server(host=web_host, port=web_port, bot=None, prepared=prepared)
+        else:
+            _log.info("No QQ bot config found, starting Web Dashboard only...")
+            _log.info("To enable QQ bot, set BOT_UIN and WS_URI in .env or config.ini")
+            prepared = _prepare_web_server(bot=None)
+            start_web_server(host=web_host, port=web_port, bot=None, prepared=prepared)
