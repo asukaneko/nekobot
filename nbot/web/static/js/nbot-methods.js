@@ -5453,7 +5453,10 @@ def main(params):
                 async savePersonality() {
                     this.isLoading = true;
                     try {
-                        await api.put('/api/personality', this.personality);
+                        await api.put('/api/personality', {
+                            ...this.personality,
+                            _manualSystemPrompt: this._manualSystemPrompt || false
+                        });
                         this.personalityHasUnsavedChanges = false;
                         this.showToast('人格设置已保存', 'success');
                     } catch (e) {
@@ -5484,6 +5487,7 @@ def main(params):
                                 state: preset.state || { affection: 50, mood: '开心' }
                             };
                             this.personalityTagsInput = (this.personality.tags || []).join(' ');
+                            this._manualSystemPrompt = false;
                             this.personalityHasUnsavedChanges = true;
                             this.showToast('已加载预设人格，请保存以应用', 'success');
                         }
@@ -5506,7 +5510,15 @@ def main(params):
                         });
                     }
                     if (p.exampleDialogues) prompt += `【示例对话】\n${p.exampleDialogues}\n`;
-                    
+
+                    // 角色状态
+                    const state = p.state || {};
+                    if (Object.keys(state).length > 0) {
+                        prompt += '\n【角色当前状态】\n';
+                        if ('affection' in state) prompt += `好感度: ${state.affection}/100\n`;
+                        if ('mood' in state) prompt += `心情: ${state.mood}\n`;
+                    }
+
                     if (prompt) {
                         prompt = `你是角色 "${p.name || '未命名'}"。\n\n` + prompt;
                     } else {
@@ -5537,10 +5549,19 @@ def main(params):
                         });
                     }
                     if (p.exampleDialogues) prompt += `【示例对话】\n${p.exampleDialogues}\n`;
-                    
+
+                    // 角色状态
+                    const state = p.state || {};
+                    if (Object.keys(state).length > 0) {
+                        prompt += '\n【角色当前状态】\n';
+                        if ('affection' in state) prompt += `好感度: ${state.affection}/100\n`;
+                        if ('mood' in state) prompt += `心情: ${state.mood}\n`;
+                    }
+
                     if (prompt) {
                         prompt = `你是角色 "${p.name || '未命名'}"。\n\n` + prompt;
                         this.personality.systemPrompt = prompt;
+                        this._manualSystemPrompt = false;
                         this.personalityHasUnsavedChanges = true;
                         this.showToast('已重新生成系统提示词', 'success');
                     } else {
@@ -5626,6 +5647,7 @@ def main(params):
                         state: { affection: 50, mood: '开心' }
                     };
                     this.personalityTagsInput = '';
+                    this._manualSystemPrompt = false;
                     this.personalityHasUnsavedChanges = false;
                     this.showToast('请在左侧编辑器中填写角色信息，然后点击保存', 'info');
                 },
@@ -5723,6 +5745,43 @@ def main(params):
                         this.customPersonalityPresets = res.data;
                     } catch (e) {
                         console.error('加载自定义人格预设失败:', e);
+                    }
+                },
+
+                // 用指定角色预设开启新会话（不切换当前角色）
+                async startSessionWithPreset(preset) {
+                    if (this.isLoading) return;
+                    this.isLoading = true;
+                    try {
+                        // 直接用预设的 systemPrompt 创建会话，不修改当前角色
+                        const res = await api.post('/api/sessions', {
+                            name: '新会话',
+                            type: 'web',
+                            user_id: this.username,
+                            system_prompt: preset.systemPrompt || preset.prompt || '',
+                            first_message: preset.firstMessage || '',
+                            sender_name: preset.name || ''
+                        });
+                        const newSession = { ...res.data.session, _isNew: true };
+                        this.sessions = [
+                            ...this.sessions.filter(session => session.id !== newSession.id),
+                            newSession
+                        ];
+                        this.currentPage = 'chat';
+                        this.chatTab = 'web';
+                        await this.selectSession(newSession);
+                        setTimeout(() => {
+                            const session = this.sessions.find(s => s.id === newSession.id);
+                            if (session) {
+                                session._isNew = false;
+                            }
+                        }, 1500);
+                        this.showToast(`已用「${preset.name}」开启新对话`, 'success');
+                    } catch (e) {
+                        console.error('用预设开启会话失败:', e);
+                        this.showToast('操作失败: ' + (e.response?.data?.error || e.message), 'error');
+                    } finally {
+                        this.isLoading = false;
                     }
                 },
 

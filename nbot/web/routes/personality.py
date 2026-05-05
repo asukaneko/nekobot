@@ -99,7 +99,10 @@ def register_personality_routes(app, server):
         server.personality["state"] = data.get("state", server.personality.get("state", {"affection": 50, "mood": "开心"}))
         server.personality["greeting"] = data.get("greeting", server.personality.get("greeting", ""))
 
-        if not server.personality.get("systemPrompt"):
+        # 如果用户没有手动编辑过 systemPrompt（前端传的是自动生成的），
+        # 则根据最新字段重新编译，确保状态等字段反映到提示词中
+        manual_prompt = data.get("_manualSystemPrompt", False)
+        if not manual_prompt or not server.personality.get("systemPrompt"):
             server.personality["systemPrompt"] = compile_personality_prompt(server.personality)
 
         try:

@@ -1673,7 +1673,7 @@
                                             </button>
                                         </div>
                                         <div class="form-group">
-                                            <textarea v-model="personality.systemPrompt" class="form-textarea" rows="8" placeholder="这是最终发送给AI的系统提示词。如果不填写，会自动根据上面的设定生成。" @change="personalityHasUnsavedChanges = true"></textarea>
+                                            <textarea v-model="personality.systemPrompt" class="form-textarea" rows="8" placeholder="这是最终发送给AI的系统提示词。如果不填写，会自动根据上面的设定生成。" @change="personalityHasUnsavedChanges = true" @input="_manualSystemPrompt = true"></textarea>
                                             <div class="form-hint">高级用户可以直接编辑，覆盖自动生成的提示词</div>
                                         </div>
                                     </div>
@@ -1773,6 +1773,9 @@
                                                     <div class="character-card-name">{{ preset.name }}</div>
                                                     <div class="character-card-desc">{{ preset.description || '自定义角色卡' }}</div>
                                                 </div>
+                                                <button class="btn btn-sm" @click.stop="startSessionWithPreset(preset)" title="用此角色开始新对话" style="color: var(--accent-primary);">
+                                                    <i class="fas fa-comment-dots"></i>
+                                                </button>
                                                 <button class="btn btn-sm" @click.stop="deleteCustomPersonalityPreset(preset, index)" style="color: var(--danger);">
                                                     <i class="fas fa-trash"></i>
                                                 </button>
@@ -5860,6 +5863,7 @@
                     personalityPresets: [],
                     customPersonalityPresets: [], // 用户自定义人格预设
                     personalityHasUnsavedChanges: false, // 是否有未保存的修改
+                    _manualSystemPrompt: false, // 用户是否手动编辑了系统提示词
                     personalityTagsInput: '', // 标签输入框的临时值
                     showAvatarPicker: false, // 头像选择器
                     customAvatarInput: '', // 自定义头像输入
