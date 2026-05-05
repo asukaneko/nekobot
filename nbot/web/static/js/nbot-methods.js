@@ -5483,6 +5483,7 @@ def main(params):
                                 rules: preset.rules || [],
                                 state: preset.state || { affection: 50, mood: '开心' }
                             };
+                            this.personalityTagsInput = (this.personality.tags || []).join(' ');
                             this.personalityHasUnsavedChanges = true;
                             this.showToast('已加载预设人格，请保存以应用', 'success');
                         }
