@@ -1533,15 +1533,21 @@
                             <div class="card" style="height: fit-content;">
                                 <div class="card-header">
                                     <span class="card-title">角色卡编辑器</span>
-                                    <div style="display: flex; gap: 8px;">
+                                    <div style="display: flex; gap: 8px; flex-wrap: wrap;">
                                         <button class="btn btn-secondary btn-sm" @click="previewCompiledPrompt">
-                                            <i class="fas fa-eye"></i> 预览Prompt
+                                            <i class="fas fa-eye"></i> 预览
                                         </button>
                                         <button class="btn btn-primary" @click="savePersonality" :disabled="isLoading">
                                             <i class="fas fa-save"></i> 应用
                                         </button>
                                         <button class="btn btn-success" @click="savePersonalityAsPreset" :disabled="isLoading || !personality.name">
                                             <i class="fas fa-plus-circle"></i> 保存到角色库
+                                        </button>
+                                        <button class="btn btn-secondary btn-sm" @click="exportPersonality" :disabled="!personality.name">
+                                            <i class="fas fa-download"></i> 导出
+                                        </button>
+                                        <button class="btn btn-secondary btn-sm" @click="triggerImportPersonality">
+                                            <i class="fas fa-upload"></i> 导入
                                         </button>
                                     </div>
                                 </div>
@@ -1733,9 +1739,17 @@
                                 <div class="card">
                                     <div class="card-header">
                                         <span class="card-title">我的角色卡</span>
-                                        <button class="btn btn-primary btn-sm" @click="createNewPersonality">
-                                            <i class="fas fa-plus"></i> 新建
-                                        </button>
+                                        <div style="display: flex; gap: 8px;">
+                                            <button class="btn btn-secondary btn-sm" @click="loadCustomPersonalityPresets" title="刷新列表">
+                                                <i class="fas fa-sync-alt"></i>
+                                            </button>
+                                            <button class="btn btn-accent btn-sm" @click="showAiCreateModal = true" style="background: linear-gradient(135deg, #8b5cf6, #6366f1); color: white; border: none;">
+                                                <i class="fas fa-magic"></i> AI创建
+                                            </button>
+                                            <button class="btn btn-primary btn-sm" @click="createNewPersonality">
+                                                <i class="fas fa-plus"></i> 新建
+                                            </button>
+                                        </div>
                                     </div>
                                     <div class="card-body" style="padding: 12px;">
                                         <div v-if="customPersonalityPresets.length === 0" class="empty-state" style="padding: 30px;">
@@ -3923,6 +3937,54 @@
             </div>
         </div>
 
+        <!-- AI创建角色卡模态框 -->
+        <div v-if="showAiCreateModal" class="modal-overlay" @click.self="cancelAiCreate">
+            <div class="modal" style="max-width: 560px;">
+                <div class="modal-header">
+                    <span class="modal-title"><i class="fas fa-magic"></i> AI 创建角色卡</span>
+                    <button class="modal-close" @click="cancelAiCreate">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <div class="form-group">
+                        <label class="form-label">描述你想要的AI角色</label>
+                        <textarea v-model="aiCreateDescription" class="form-textarea" rows="6" placeholder="例如：一个来自异世界的精灵弓箭手，外表高冷但内心温柔，擅长吐槽，喜欢在夜晚独自看星星...&#10;&#10;描述越详细，AI生成的角色卡越精准。"></textarea>
+                        <div class="form-hint">描述角色的外貌、性格、背景、说话风格等，AI 将自动生成完整的角色卡</div>
+                    </div>
+                    <div v-if="aiGeneratedCharacter" class="form-section" style="margin-top: 16px;">
+                        <div class="section-title">
+                            <i class="fas fa-check-circle" style="color: var(--success);"></i> 生成结果预览
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 12px; padding: 12px; background: var(--bg-tertiary); border-radius: 8px;">
+                            <div style="width: 48px; height: 48px; background: linear-gradient(135deg, #8b5cf6, #6366f1); border-radius: 12px; display: flex; align-items: center; justify-content: center;">
+                                <i :class="aiGeneratedCharacter.avatar || 'fas fa-user-circle'" style="font-size: 24px; color: white;"></i>
+                            </div>
+                            <div style="flex: 1;">
+                                <div style="font-weight: 600;">{{ aiGeneratedCharacter.name }}</div>
+                                <div style="font-size: 13px; color: var(--text-muted);">{{ aiGeneratedCharacter.description }}</div>
+                                <div v-if="aiGeneratedCharacter.tags && aiGeneratedCharacter.tags.length" style="display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px;">
+                                    <span v-for="tag in aiGeneratedCharacter.tags" :key="tag" class="badge badge-secondary" style="font-size: 11px;">{{ tag }}</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary" @click="cancelAiCreate">
+                        {{ aiGeneratedCharacter ? '关闭' : '取消' }}
+                    </button>
+                    <button v-if="!aiGeneratedCharacter" class="btn btn-primary" @click="aiGenerateCharacter" :disabled="isLoading || !aiCreateDescription.trim()" style="background: linear-gradient(135deg, #8b5cf6, #6366f1); border: none;">
+                        <i class="fas fa-magic"></i> {{ isLoading ? '生成中...' : '生成角色卡' }}
+                    </button>
+                    <button v-if="aiGeneratedCharacter" class="btn btn-success" @click="applyAiGeneratedCharacter">
+                        <i class="fas fa-check"></i> 应用到编辑器
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 隐藏的文件导入input -->
+        <input type="file" ref="importPersonalityFile" accept=".json" style="display: none;" @change="importPersonality"></input>
+
         <!-- 添加自定义人格预设模态框 -->
         <div v-if="showAddPersonalityPresetModal" class="modal-overlay" @click.self="closeAddPersonalityPresetModal">
             <div class="modal" style="max-width: 500px; max-height: 90vh;">
@@ -5796,6 +5858,9 @@
                     personalityTagsInput: '', // 标签输入框的临时值
                     showAvatarPicker: false, // 头像选择器
                     customAvatarInput: '', // 自定义头像输入
+                    showAiCreateModal: false, // AI创建角色模态框
+                    aiCreateDescription: '', // AI创建角色的用户描述
+                    aiGeneratedCharacter: null, // AI生成的角色卡结果
                     avatarPresets: [ // 预设头像图标
                         'fas fa-cat', 'fas fa-dog', 'fas fa-dragon', 'fas fa-robot',
                         'fas fa-ghost', 'fas fa-otter', 'fas fa-paw', 'fas fa-feather',
@@ -6634,6 +6699,8 @@
                                 this.loadSessions(),
                                 this.loadSettings(),
                                 this.loadPersonality(),
+                                this.loadPersonalityPresets(),
+                                this.loadCustomPersonalityPresets(),
                                 this.loadCommandCatalog(),
                                 this.loadChannels()
                             ]);

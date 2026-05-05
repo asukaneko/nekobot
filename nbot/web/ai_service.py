@@ -343,6 +343,7 @@ class WebCallbacks(PipelineCallbacks):
 
     def save_assistant_message(self, ctx: PipelineContext, message: Dict) -> None:
         self.session_store.append_message(self.session_id, message)
+        self._try_auto_name_session()
 
     # ---- AI 模型交互 ----
 
@@ -448,6 +449,74 @@ class WebCallbacks(PipelineCallbacks):
 
     def get_workspace_context(self, ctx: PipelineContext) -> Dict:
         return {"session_id": self.session_id, "session_type": "web"}
+
+    # ---- 响应完成 ----
+
+    def on_response_complete(self, ctx: PipelineContext, result) -> None:
+        """AI 响应完成后的回调，兜底触发自动命名"""
+        self._try_auto_name_session()
+
+    def _try_auto_name_session(self):
+        """会话名称自动更新：首次命名 + 每隔一段对话更新"""
+        try:
+            session = self.session_store.get_session(self.session_id)
+            if not session:
+                return
+
+            messages = session.get("messages", [])
+            user_assistant_msgs = [m for m in messages if m.get("role") in ("user", "assistant")]
+            total_count = len(user_assistant_msgs)
+            if total_count < 2:
+                return
+
+            name = session.get("name", "")
+            is_default_name = (
+                not name
+                or name.startswith("Web 会话")
+                or name.startswith("新会话")
+                or name.startswith("新对话")
+            )
+
+            # 首次命名：默认名称 + 至少一轮对话
+            # 后续更新：每 10 条消息（约 5 轮对话）更新一次
+            last_rename_count = session.get("_last_rename_count", 0)
+            should_rename = is_default_name or (total_count - last_rename_count >= 10)
+
+            if not should_rename:
+                return
+
+            # 防止并发重复生成
+            if getattr(self, "_naming_in_progress", False):
+                return
+            self._naming_in_progress = True
+
+            _log.info(f"开始为会话 {self.session_id[:8]} 自动生成名称 (当前: {name}, 消息数: {total_count})")
+
+            import copy
+            # 取最近对话作为上下文
+            recent_msgs = copy.deepcopy(user_assistant_msgs[-10:])
+
+            def generate_and_update():
+                try:
+                    new_name = self.server._generate_session_name(recent_msgs)
+                    if new_name:
+                        session["name"] = new_name
+                        session["_last_rename_count"] = total_count
+                        self.session_store.set_session(self.session_id, session)
+                        self.server.socketio.emit(
+                            "session_renamed",
+                            {"session_id": self.session_id, "name": new_name},
+                            room=self.session_id,
+                        )
+                        _log.info(f"会话自动命名成功: {self.session_id[:8]} -> {new_name}")
+                except Exception as e:
+                    _log.error(f"自动命名失败: {e}")
+                finally:
+                    self._naming_in_progress = False
+
+            threading.Thread(target=generate_and_update, daemon=True).start()
+        except Exception as e:
+            _log.error(f"自动命名检查失败: {e}")
 
     # ---- 附件解析 ----
 

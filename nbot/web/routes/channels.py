@@ -207,7 +207,6 @@ def auto_start_feishu_ws_clients(server):
 
     在服务器启动时调用，自动连接所有配置好的飞书长连接频道
     """
-    print("[FeishuWS] 检查并启动飞书长连接频道...")
     started_count = 0
 
     for channel in server.channels_config:
@@ -217,12 +216,10 @@ def auto_start_feishu_ws_clients(server):
             credentials = resolve_feishu_ws_credentials(config)
 
             if not credentials["app_id"] or not credentials["app_secret"]:
-                print(f"[FeishuWS] 频道 {channel_id} 未配置 App ID 或 App Secret，跳过")
                 continue
 
             # 检查是否已经在运行
             if feishu_ws_service.is_running(channel_id):
-                print(f"[FeishuWS] 频道 {channel_id} 已在运行")
                 continue
 
             # 启动客户端
@@ -236,14 +233,6 @@ def auto_start_feishu_ws_clients(server):
 
             if success:
                 started_count += 1
-                print(f"[FeishuWS] 频道 {channel_id} 自动启动成功")
-            else:
-                print(f"[FeishuWS] 频道 {channel_id} 自动启动失败")
-
-    if started_count > 0:
-        print(f"[FeishuWS] 已自动启动 {started_count} 个飞书长连接频道")
-    else:
-        print("[FeishuWS] 没有需要自动启动的飞书长连接频道")
 
 
 def _public_preset(preset):

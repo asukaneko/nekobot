@@ -2575,8 +2575,7 @@ def main(params):
                     if (this.isLoading) return;
                     this.isLoading = true;
                     try {
-                        const now = new Date();
-                        const defaultName = `新对话 ${now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+                        const defaultName = '新会话';
                         const res = await api.post('/api/sessions', {
                             name: defaultName,
                             type: 'web',
@@ -5723,6 +5722,103 @@ def main(params):
                         this.customPersonalityPresets = res.data;
                     } catch (e) {
                         console.error('加载自定义人格预设失败:', e);
+                    }
+                },
+
+                // AI 生成角色卡
+                async aiGenerateCharacter() {
+                    if (!this.aiCreateDescription.trim()) {
+                        this.showToast('请输入角色描述', 'error');
+                        return;
+                    }
+                    this.isLoading = true;
+                    this.aiGeneratedCharacter = null;
+                    try {
+                        const res = await api.post('/api/personality/ai-generate', {
+                            description: this.aiCreateDescription
+                        });
+                        if (res.data.success) {
+                            this.aiGeneratedCharacter = res.data.character;
+                            this.showToast('角色卡生成成功！', 'success');
+                        } else {
+                            this.showToast(res.data.error || '生成失败', 'error');
+                        }
+                    } catch (e) {
+                        console.error('AI生成角色卡失败:', e);
+                        this.showToast('生成失败: ' + (e.response?.data?.error || e.message), 'error');
+                    } finally {
+                        this.isLoading = false;
+                    }
+                },
+
+                // 应用AI生成的角色卡到编辑器
+                applyAiGeneratedCharacter() {
+                    if (!this.aiGeneratedCharacter) return;
+                    this.personality = { ...this.aiGeneratedCharacter };
+                    this.personalityTagsInput = (this.personality.tags || []).join(' ');
+                    this.personalityHasUnsavedChanges = true;
+                    this.showAiCreateModal = false;
+                    this.aiCreateDescription = '';
+                    this.aiGeneratedCharacter = null;
+                    this.showToast('角色卡已加载到编辑器，请点击"应用"保存', 'success');
+                },
+
+                // 取消AI创建
+                cancelAiCreate() {
+                    this.showAiCreateModal = false;
+                    this.aiCreateDescription = '';
+                    this.aiGeneratedCharacter = null;
+                },
+
+                // 导出当前角色卡
+                exportPersonality() {
+                    if (!this.personality.name) {
+                        this.showToast('请先创建角色卡', 'error');
+                        return;
+                    }
+                    const exportData = { ...this.personality };
+                    const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `${this.personality.name}_角色卡_${new Date().toISOString().split('T')[0]}.json`;
+                    a.click();
+                    URL.revokeObjectURL(url);
+                    this.showToast('角色卡已导出', 'success');
+                },
+
+                // 触发导入文件选择
+                triggerImportPersonality() {
+                    this.$refs.importPersonalityFile.click();
+                },
+
+                // 导入角色卡
+                async importPersonality(event) {
+                    const file = event.target.files[0];
+                    if (!file) return;
+
+                    this.isLoading = true;
+                    try {
+                        const formData = new FormData();
+                        formData.append('file', file);
+                        const res = await api.post('/api/personality/import', formData, {
+                            headers: { 'Content-Type': 'multipart/form-data' }
+                        });
+                        if (res.data.success) {
+                            this.personality = { ...res.data.character };
+                            this.personalityTagsInput = (this.personality.tags || []).join(' ');
+                            this.personalityHasUnsavedChanges = true;
+                            this.showToast('角色卡已导入，请点击"应用"保存', 'success');
+                        } else {
+                            this.showToast(res.data.error || '导入失败', 'error');
+                        }
+                    } catch (e) {
+                        console.error('导入角色卡失败:', e);
+                        this.showToast('导入失败: ' + (e.response?.data?.error || e.message), 'error');
+                    } finally {
+                        this.isLoading = false;
+                        // 清除文件选择以便重新选择同一文件
+                        event.target.value = '';
                     }
                 },
                 

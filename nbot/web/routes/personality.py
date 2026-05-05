@@ -1,5 +1,7 @@
+import json
 import logging
 import os
+import re
 import uuid
 from datetime import datetime
 
@@ -178,6 +180,16 @@ def register_personality_routes(app, server):
 
     @app.route("/api/personality/custom-presets", methods=["GET"])
     def get_custom_personality_presets():
+        # 每次请求时从文件重新加载，确保和磁盘同步
+        presets_file = os.path.join(server.data_dir, "custom_personality_presets.json")
+        if os.path.exists(presets_file):
+            try:
+                with open(presets_file, "r", encoding="utf-8") as f:
+                    server.custom_personality_presets = json.load(f)
+            except Exception as e:
+                _log.error(f"加载自定义角色卡预设文件失败: {e}")
+        else:
+            server.custom_personality_presets = []
         return jsonify(server.custom_personality_presets)
 
     @app.route("/api/personality/custom-presets", methods=["POST"])
@@ -211,3 +223,131 @@ def register_personality_routes(app, server):
         ]
         server._save_data("custom_personality_presets")
         return jsonify({"success": True})
+
+    @app.route("/api/personality/ai-generate", methods=["POST"])
+    def ai_generate_personality():
+        """AI 根据用户描述生成角色卡"""
+        data = request.json or {}
+        description = (data.get("description") or "").strip()
+
+        if not description:
+            return jsonify({"success": False, "error": "请提供角色描述"}), 400
+
+        if not server.ai_client:
+            return jsonify({"success": False, "error": "AI 客户端未初始化"}), 503
+
+        system_prompt = """你是一个角色卡生成专家。用户会描述一个角色，你需要根据描述生成一个完整的角色卡JSON。
+
+你必须严格按照以下JSON格式返回（不要包含任何额外的文字说明，只返回JSON）：
+
+{
+    "name": "角色名称",
+    "description": "简短角色描述（用于卡片显示，20字以内）",
+    "avatar": "fas fa-star（FontAwesome图标类名，从以下选择最合适的：fas fa-cat, fas fa-dragon, fas fa-hat-wizard, fas fa-skull, fas fa-robot, fas fa-user-secret, fas fa-user-ninja, fas fa-user-astronaut, fas fa-user-graduate, fas fa-user-tie, fas fa-user, fas fa-crown, fas fa-heart, fas fa-star, fas fa-moon, fas fa-sun, fas fa-fire, fas fa-ghost, fas fa-magic, fas fa-shield-haltered, fas fa-wand-sparkles）",
+    "tags": ["标签1", "标签2", "标签3"],
+    "basicInfo": "角色的基本资料（身高、年龄、职业、外貌、喜好等），每行一项",
+    "personality": "性格特点的详细描述",
+    "scenario": "角色的背景故事和世界观设定",
+    "firstMessage": "新会话中AI自动发送的第一条消息（要符合角色风格）",
+    "exampleDialogues": "<user>用户消息示例\\n<assistant>角色回复示例（要符合角色风格和语气）",
+    "responseFormat": "期望的回复格式描述，如：（动作描写）对话内容【心情/附加信息】",
+    "rules": ["行为规则1", "行为规则2", "行为规则3"],
+    "state": {"affection": 50, "mood": "开心"}
+}
+
+要求：
+1. name 必须有创意且贴合描述
+2. tags 至少3个，最多5个
+3. basicInfo 要具体详细，包含形象特征
+4. personality 要生动、有层次
+5. scenario 要有沉浸感
+6. firstMessage 要符合角色性格，自然不做作
+7. exampleDialogues 至少包含2轮对话示例
+8. rules 要覆盖角色行为约束和特色
+9. 所有字段都用中文填写"""
+
+        try:
+            response = server.ai_client.chat_completion(
+                model=server.ai_model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": f"请根据以下描述创建角色卡：\n\n{description}"},
+                ],
+                stream=False,
+            )
+
+            content = response.choices[0].message.content.strip()
+
+            # 提取 JSON（可能被 markdown 代码块包裹）
+            json_match = re.search(r"```(?:json)?\s*([\s\S]*?)\s*```", content)
+            if json_match:
+                content = json_match.group(1)
+
+            character = json.loads(content)
+
+            # 填充缺失字段的默认值
+            character.setdefault("name", "未命名角色")
+            character.setdefault("description", "")
+            character.setdefault("avatar", "fas fa-user-circle")
+            character.setdefault("tags", [])
+            character.setdefault("basicInfo", "")
+            character.setdefault("personality", "")
+            character.setdefault("scenario", "")
+            character.setdefault("firstMessage", "")
+            character.setdefault("exampleDialogues", "")
+            character.setdefault("responseFormat", "")
+            character.setdefault("rules", [])
+            character.setdefault("state", {"affection": 50, "mood": "开心"})
+            character["systemPrompt"] = compile_personality_prompt(character)
+
+            return jsonify({"success": True, "character": character})
+
+        except json.JSONDecodeError as e:
+            _log.error(f"AI 生成角色卡 JSON 解析失败: {e}, content: {content[:500] if 'content' in dir() else 'N/A'}")
+            return jsonify({"success": False, "error": "AI 生成的角色卡格式有误，请重试"}), 500
+        except Exception as e:
+            _log.error(f"AI 生成角色卡失败: {e}")
+            return jsonify({"success": False, "error": f"生成失败: {str(e)}"}), 500
+
+    @app.route("/api/personality/import", methods=["POST"])
+    def import_personality():
+        """导入角色卡 JSON 文件"""
+        if "file" not in request.files:
+            return jsonify({"success": False, "error": "请上传文件"}), 400
+
+        file = request.files["file"]
+        if file.filename == "":
+            return jsonify({"success": False, "error": "文件名为空"}), 400
+
+        try:
+            content = file.read().decode("utf-8")
+            character = json.loads(content)
+
+            # 验证基本字段
+            if not character.get("name"):
+                return jsonify({"success": False, "error": "角色卡缺少 name 字段"}), 400
+
+            # 填充缺失字段
+            character.setdefault("description", "")
+            character.setdefault("avatar", "fas fa-user-circle")
+            character.setdefault("tags", [])
+            character.setdefault("basicInfo", "")
+            character.setdefault("personality", "")
+            character.setdefault("scenario", "")
+            character.setdefault("firstMessage", "")
+            character.setdefault("exampleDialogues", "")
+            character.setdefault("responseFormat", "")
+            character.setdefault("rules", [])
+            character.setdefault("state", {"affection": 50, "mood": "开心"})
+            if not character.get("systemPrompt"):
+                character["systemPrompt"] = compile_personality_prompt(character)
+
+            return jsonify({"success": True, "character": character})
+
+        except json.JSONDecodeError:
+            return jsonify({"success": False, "error": "文件不是有效的 JSON 格式"}), 400
+        except UnicodeDecodeError:
+            return jsonify({"success": False, "error": "文件编码不支持，请使用 UTF-8"}), 400
+        except Exception as e:
+            _log.error(f"导入角色卡失败: {e}")
+            return jsonify({"success": False, "error": f"导入失败: {str(e)}"}), 500

@@ -538,6 +538,7 @@ class WebChatServer:
         self._init_default_data()
         # 立即加载 personality，确保创建会话时可用
         self._load_personality()
+        self._load_custom_personality_presets()
         self._start_background_initialization()
 
     def _auto_start_feishu_ws_channels(self):
@@ -1014,6 +1015,20 @@ class WebChatServer:
 
     def _init_default_tools(self):
         return init_default_tools(self)
+
+    def _load_custom_personality_presets(self):
+        """同步加载自定义人格预设（必须在请求处理前完成）"""
+        try:
+            custom_presets_file = os.path.join(
+                self.data_dir, "custom_personality_presets.json"
+            )
+            if os.path.exists(custom_presets_file):
+                with open(custom_presets_file, "r", encoding="utf-8") as f:
+                    self.custom_personality_presets = json.load(f)
+                _log.info(f"已加载 {len(self.custom_personality_presets)} 个自定义角色卡预设")
+        except Exception as e:
+            _log.error(f"加载自定义角色卡预设失败: {e}")
+            self.custom_personality_presets = []
 
     def _load_personality(self):
         """加载人格提示词"""
@@ -2184,14 +2199,44 @@ class WebChatServer:
                     progress_card.update(StepType.THINKING, "📝 正在生成会话名称...")
 
             # 构建提示词
+            personality_name = self.personality.get("name", "")
+            personality_desc = self.personality.get("description", "")
+
+            # 提取最近对话作为上下文
+            conversation_text = ""
+            for msg in messages[-12:]:
+                role = "用户" if msg.get("role") == "user" else "角色"
+                content = str(msg.get("content", ""))[:200]
+                conversation_text += f"{role}: {content}\n"
+
+            msg_count = len(messages)
+            is_update = msg_count > 6
+
+            role_context = ""
+            if personality_name:
+                role_context = f"当前角色是'{personality_name}'（{personality_desc}）。"
+
+            update_hint = ""
+            if is_update:
+                update_hint = "对话已经进行了较长时间，请根据最新的主要话题重新命名，忽略早期已结束的话题。\n"
+
             prompt_messages = [
                 {
                     "role": "system",
-                    "content": "你是一个会话命名助手。请根据用户的对话内容，生成一个简短、贴切的会话名称（不超过10个字）。只返回名称，不要有任何解释。",
+                    "content": (
+                        f"你是一个会话命名助手。{role_context}请根据对话内容生成一个简短、有辨识度、贴合当前话题的标题。\n\n"
+                        f"{update_hint}"
+                        "要求：\n"
+                        "- 2-15个字\n"
+                        "- 概括当前主要话题或最新亮点\n"
+                        "- 自然口语化，像聊天记录名称\n"
+                        "- 有趣或有诗意更好\n"
+                        "- 直接返回标题，不要引号、标点或解释"
+                    ),
                 },
                 {
                     "role": "user",
-                    "content": f"请为以下对话生成一个简短的会话名称（不超过10个字）：\n\n用户: {messages[-2]['content'] if len(messages) >= 2 else messages[-1]['content']}\n\nAI: {messages[-1]['content'] if messages[-1]['role'] == 'assistant' else '...'}",
+                    "content": f"请为以下对话生成标题：\n\n{conversation_text.strip()}",
                 },
             ]
 
