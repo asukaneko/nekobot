@@ -6334,25 +6334,33 @@ def main(params):
                         };
                         const res = await api.post('/api/personality/custom-presets', presetData);
                         this.customPersonalityPresets.push(res.data);
+                        // 添加后跳转到最后一页
+                        const totalPages = Math.ceil(this.customPersonalityPresets.length / this.customPersonalityPageSize);
+                        this.customPersonalityPage = totalPages;
                         this.showToast('自定义角色卡已添加', 'success');
                         this.closeAddPersonalityPresetModal();
                     } catch (e) {
-                        console.error('添加自定义人格预设失败:', e);
+                        console.error('添加自定义角色预设失败:', e);
                         this.showToast('添加失败: ' + (e.response?.data?.error || e.message), 'error');
                     }
                 },
 
                 async deleteCustomPersonalityPreset(preset, index) {
                     this.showConfirmDialogFn({
-                        title: '删除人格预设',
-                        message: `确定要删除自定义人格预设 "${preset.name}" 吗？`,
+                        title: '删除角色预设',
+                        message: `确定要删除自定义角色预设 "${preset.name}" 吗？`,
                         onConfirm: async () => {
                             try {
                                 await api.delete(`/api/personality/custom-presets/${preset.id}`);
                                 this.customPersonalityPresets.splice(index, 1);
-                                this.showToast('自定义人格预设已删除', 'success');
+                                // 删除后检查页码是否超出范围
+                                const totalPages = Math.ceil(this.customPersonalityPresets.length / this.customPersonalityPageSize);
+                                if (this.customPersonalityPage > totalPages && totalPages > 0) {
+                                    this.customPersonalityPage = totalPages;
+                                }
+                                this.showToast('自定义角色预设已删除', 'success');
                             } catch (e) {
-                                console.error('删除自定义人格预设失败:', e);
+                                console.error('删除自定义角色预设失败:', e);
                                 this.showToast('删除失败: ' + (e.response?.data?.error || e.message), 'error');
                             }
                         }
@@ -6363,8 +6371,15 @@ def main(params):
                     try {
                         const res = await api.get('/api/personality/custom-presets');
                         this.customPersonalityPresets = res.data;
+                        // 加载后检查页码是否超出范围
+                        const totalPages = Math.ceil(this.customPersonalityPresets.length / this.customPersonalityPageSize);
+                        if (this.customPersonalityPage > totalPages && totalPages > 0) {
+                            this.customPersonalityPage = totalPages;
+                        } else if (totalPages === 0) {
+                            this.customPersonalityPage = 1;
+                        }
                     } catch (e) {
-                        console.error('加载自定义人格预设失败:', e);
+                        console.error('加载自定义角色预设失败:', e);
                     }
                 },
 

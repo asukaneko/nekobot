@@ -2132,7 +2132,7 @@
                                             <div class="empty-state-desc">点击上方按钮创建你的角色卡</div>
                                         </div>
                                         <div v-else style="display: flex; flex-direction: column; gap: 10px;">
-                                            <div v-for="(preset, index) in customPersonalityPresets" :key="preset.id"
+                                            <div v-for="(preset, index) in paginatedCustomPersonalityPresets" :key="preset.id"
                                                  class="character-card"
                                                  @click="loadPersonalityPreset(preset)">
                                                 <!-- 立绘或头像 -->
@@ -2150,6 +2150,31 @@
                                                 <button class="btn btn-sm" @click.stop="deleteCustomPersonalityPreset(preset, index)" style="color: var(--danger);">
                                                     <i class="fas fa-trash"></i>
                                                 </button>
+                                            </div>
+                                            <!-- 分页控件 -->
+                                            <div v-if="customPersonalityTotalPages > 1" class="pagination-controls" style="display: flex; justify-content: center; align-items: center; gap: 8px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border-color);">
+                                                <button 
+                                                    class="btn btn-sm btn-secondary" 
+                                                    :disabled="customPersonalityPage <= 1"
+                                                    @click="customPersonalityPage--"
+                                                    style="padding: 4px 12px;"
+                                                >
+                                                    <i class="fas fa-chevron-left"></i> 上一页
+                                                </button>
+                                                <span style="color: var(--text-secondary); font-size: 13px; min-width: 80px; text-align: center;">
+                                                    {{ customPersonalityPage }} / {{ customPersonalityTotalPages }}
+                                                </span>
+                                                <button 
+                                                    class="btn btn-sm btn-secondary" 
+                                                    :disabled="customPersonalityPage >= customPersonalityTotalPages"
+                                                    @click="customPersonalityPage++"
+                                                    style="padding: 4px 12px;"
+                                                >
+                                                    下一页 <i class="fas fa-chevron-right"></i>
+                                                </button>
+                                            </div>
+                                            <div v-if="customPersonalityTotalPages > 1" style="text-align: center; color: var(--text-muted); font-size: 12px; margin-top: 4px;">
+                                                共 {{ customPersonalityPresets.length }} 个角色
                                             </div>
                                         </div>
                                     </div>
@@ -6294,6 +6319,8 @@
                     },
                     personalityPresets: [],
                     customPersonalityPresets: [], // 用户自定义人格预设
+                    customPersonalityPage: 1, // 角色卡当前页码
+                    customPersonalityPageSize: 10, // 角色卡每页数量
                     personalityHasUnsavedChanges: false, // 是否有未保存的修改
                     _manualSystemPrompt: false, // 用户是否手动编辑了系统提示词
                     activePersonality: {}, // 服务器端当前实际应用的角色
@@ -7076,6 +7103,18 @@
                     return this.sessions.filter(s => {
                         return s.channel_id === channelId || s.metadata?.channel_id === channelId;
                     }).filter(s => !s.archived);
+                },
+
+                // 分页后的角色卡列表
+                paginatedCustomPersonalityPresets() {
+                    const start = (this.customPersonalityPage - 1) * this.customPersonalityPageSize;
+                    const end = start + this.customPersonalityPageSize;
+                    return this.customPersonalityPresets.slice(start, end);
+                },
+
+                // 角色卡总页数
+                customPersonalityTotalPages() {
+                    return Math.ceil(this.customPersonalityPresets.length / this.customPersonalityPageSize);
                 },
 
                 commandQuery() {
