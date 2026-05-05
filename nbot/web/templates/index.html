@@ -490,6 +490,9 @@
                                         <div class="session-name">{{ session.name }}</div>
                                         <div class="session-meta">
                                             {{ session.message_count }} 条消息 · {{ formatTime(session.created_at) }}
+                                            <span v-if="session.sender_name" style="margin-left: 6px; color: var(--accent-primary);">
+                                                <i class="fas fa-user-circle" style="font-size: 10px;"></i> {{ session.sender_name }}
+                                            </span>
                                         </div>
                                     </div>
                                     <div class="session-actions" @click.stop>
@@ -739,13 +742,20 @@
                                         <button class="mobile-menu-btn" @click="toggleMobileMenu" @touchstart.prevent="toggleMobileMenu">
                                             <i class="fas fa-bars"></i>
                                         </button>
-                                        <div class="session-icon" :style="{ background: currentSession.type?.startsWith('qq') ? 'var(--info)' : (currentSession.type === 'cli' ? 'var(--warning)' : 'var(--accent-primary)') }">
+                                        <!-- 角色立绘或默认图标 -->
+                                        <div v-if="currentSession.sender_portrait" style="width: 40px; height: 54px; border-radius: 8px; overflow: hidden; flex-shrink: 0; margin-right: 4px;">
+                                            <img :src="currentSession.sender_portrait" style="width: 100%; height: 100%; object-fit: cover;">
+                                        </div>
+                                        <div v-else class="session-icon" :style="{ background: currentSession.type?.startsWith('qq') ? 'var(--info)' : (currentSession.type === 'cli' ? 'var(--warning)' : 'var(--accent-primary)') }">
                                             <i :class="currentSession.type?.startsWith('qq') ? 'fab fa-qq' : (currentSession.type === 'cli' ? 'fas fa-terminal' : 'fas fa-comment')" style="color: white;"></i>
                                         </div>
                                         <div>
                                             <div class="chat-header-title">{{ currentSession.name }}</div>
                                             <div class="chat-header-subtitle">
                                                 {{ currentSession.type?.startsWith('qq') ? 'QQ 同步会话' : (currentSession.type === 'cli' ? 'CLI 终端' : 'Web 会话') }} · {{ currentMessages.length }} 条消息
+                                                <span v-if="currentSession.sender_name" style="margin-left: 8px; color: var(--accent-primary);">
+                                                    <i :class="currentSession.sender_avatar || 'fas fa-user-circle'"></i> {{ currentSession.sender_name }}
+                                                </span>
                                             </div>
                                         </div>
                                     </div>
@@ -809,7 +819,12 @@
                                         <!-- 消息主体 -->
                                         <div class="message" :class="[msg.role, { 'is-progress': isProgressMessage(msg), 'dragon-bone-message': isStreamAwaiting(msg) }]">
                                             <div class="message-avatar">
-                                                <i :class="msg.role === 'user' ? 'fas fa-user' : (personality.avatar || 'fas fa-robot')"></i>
+                                                <!-- AI消息显示立绘或头像 -->
+                                                <template v-if="msg.role === 'assistant'">
+                                                    <img v-if="currentSession.sender_portrait" :src="currentSession.sender_portrait" style="width: 100%; height: 100%; object-fit: cover; border-radius: 50%;">
+                                                    <i v-else :class="currentSession.sender_avatar || 'fas fa-robot'"></i>
+                                                </template>
+                                                <i v-else class="fas fa-user"></i>
                                             </div>
                                             <div class="message-content">
                                                 <div v-if="isStreamAwaiting(msg)" class="stream-waiting-body dragon-bone-loading">
@@ -984,7 +999,10 @@
                                     
                                     <!-- 机器人正在输入动画（仅在无进度卡片或进度卡片关闭时显示） -->
                                     <div v-if="isTyping && (!showThinkingCard || !currentMessages.some(m => m.thinking_cards && m.thinking_cards.length > 0))" class="message assistant dragon-bone-message">
-                                        <div class="message-avatar"><i :class="personality.avatar || 'fas fa-robot'"></i></div>
+                                        <div class="message-avatar">
+                                            <img v-if="personality.portrait" :src="personality.portrait" style="width: 100%; height: 100%; object-fit: cover; border-radius: 50%;">
+                                            <i v-else :class="personality.avatar || 'fas fa-robot'"></i>
+                                        </div>
                                         <div class="message-content">
                                             <div class="dragon-bone-loading">
                                                 <div class="bone-row">
@@ -1715,6 +1733,33 @@
                                                 <input v-model="personalityTagsInput" type="text" class="form-input" placeholder="用空格分隔标签，如：猫娘 陪伴 可爱" @change="updatePersonalityTags">
                                             </div>
                                         </div>
+
+                                        <!-- 角色立绘 -->
+                                        <div class="form-group" style="margin-top: 16px;">
+                                            <label class="form-label">角色立绘</label>
+                                            <div style="display: flex; gap: 12px; align-items: flex-start;">
+                                                <!-- 立绘预览 -->
+                                                <div style="position: relative; width: 120px; height: 160px; background: var(--bg-tertiary); border-radius: 12px; overflow: hidden; border: 2px dashed var(--border-color); display: flex; align-items: center; justify-content: center;">
+                                                    <img v-if="personality.portrait" :src="personality.portrait" style="width: 100%; height: 100%; object-fit: cover;">
+                                                    <div v-else style="text-align: center; color: var(--text-muted);">
+                                                        <i class="fas fa-image" style="font-size: 32px; margin-bottom: 8px;"></i>
+                                                        <div style="font-size: 12px;">暂无立绘</div>
+                                                    </div>
+                                                    <!-- 删除按钮 -->
+                                                    <button v-if="personality.portrait" @click="removePortrait" style="position: absolute; top: 4px; right: 4px; width: 24px; height: 24px; background: rgba(239, 68, 68, 0.9); border: none; border-radius: 50%; color: white; cursor: pointer; display: flex; align-items: center; justify-content: center;">
+                                                        <i class="fas fa-times" style="font-size: 12px;"></i>
+                                                    </button>
+                                                </div>
+                                                <!-- 上传按钮 -->
+                                                <div style="flex: 1;">
+                                                    <input type="file" ref="portraitInput" accept="image/*" style="display: none;" @change="handlePortraitUpload">
+                                                    <button class="btn btn-secondary btn-sm" @click="$refs.portraitInput.click()" style="margin-bottom: 8px;">
+                                                        <i class="fas fa-upload"></i> 上传立绘
+                                                    </button>
+                                                    <div class="form-hint">支持 JPG、PNG、GIF 格式<br>建议尺寸 3:4 比例</div>
+                                                </div>
+                                            </div>
+                                        </div>
                                     </div>
 
                                     <!-- 角色设定 -->
@@ -1737,7 +1782,7 @@
                                         </div>
                                         <div class="form-group">
                                             <label class="form-label" style="display: flex; align-items: center; gap: 8px;">
-                                                开场白 (First Message)
+                                                开场白 (开始场景)
                                                 <button class="btn btn-sm" @click="aiGenerateFirstMessage" :disabled="isLoading || !personality.name" style="font-size: 11px; padding: 2px 8px; background: linear-gradient(135deg, #8b5cf6, #6366f1); color: white; border: none; border-radius: 4px;">
                                                     <i class="fas fa-dice"></i> 随机生成
                                                 </button>
@@ -1824,21 +1869,29 @@
                                         <span class="card-title">当前角色卡</span>
                                     </div>
                                     <div class="card-body" style="padding: 16px;">
-                                        <div style="display: flex; align-items: center; gap: 16px; margin-bottom: 16px;">
-                                            <div style="width: 64px; height: 64px; background: linear-gradient(135deg, var(--primary), var(--accent)); border-radius: 16px; display: flex; align-items: center; justify-content: center;">
-                                                <i :class="activePersonality.avatar || 'fas fa-user-circle'" style="font-size: 36px; color: white;"></i>
+                                        <!-- 左右排布：左侧立绘，右侧信息 -->
+                                        <div style="display: flex; gap: 16px; align-items: flex-start;">
+                                            <!-- 左侧：立绘或头像 -->
+                                            <div style="flex-shrink: 0;">
+                                                <div v-if="activePersonality.portrait" style="width: 100px; height: 133px; border-radius: 12px; overflow: hidden; background: var(--bg-tertiary);">
+                                                    <img :src="activePersonality.portrait" style="width: 100%; height: 100%; object-fit: cover;">
+                                                </div>
+                                                <div v-else style="width: 64px; height: 64px; background: linear-gradient(135deg, var(--primary), var(--accent)); border-radius: 16px; display: flex; align-items: center; justify-content: center;">
+                                                    <i :class="activePersonality.avatar || 'fas fa-user-circle'" style="font-size: 36px; color: white;"></i>
+                                                </div>
                                             </div>
-                                            <div style="flex: 1;">
+                                            <!-- 右侧：角色信息 -->
+                                            <div style="flex: 1; min-width: 0;">
                                                 <div style="font-weight: 600; font-size: 18px; margin-bottom: 4px;">{{ activePersonality.name }}</div>
-                                                <div style="font-size: 13px; color: var(--text-muted); line-height: 1.4;">{{ activePersonality.description || '暂无描述' }}</div>
+                                                <div style="font-size: 13px; color: var(--text-muted); line-height: 1.4; margin-bottom: 8px;">{{ activePersonality.description || '暂无描述' }}</div>
+                                                <div v-if="activePersonality.tags && activePersonality.tags.length > 0" style="display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 8px;">
+                                                    <span v-for="tag in activePersonality.tags.slice(0, 5)" :key="tag" class="badge badge-secondary" style="font-size: 11px;">{{ tag }}</span>
+                                                </div>
+                                                <div style="display: flex; gap: 12px; font-size: 12px; color: var(--text-muted);">
+                                                    <span><i class="fas fa-heart" style="color: var(--danger);"></i> 好感度: {{ activePersonality.state.affection }}</span>
+                                                    <span><i class="fas fa-smile" style="color: var(--warning);"></i> 心情: {{ activePersonality.state.mood }}</span>
+                                                </div>
                                             </div>
-                                        </div>
-                                        <div v-if="activePersonality.tags && activePersonality.tags.length > 0" style="display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px;">
-                                            <span v-for="tag in activePersonality.tags" :key="tag" class="badge badge-secondary">{{ tag }}</span>
-                                        </div>
-                                        <div style="display: flex; gap: 12px; font-size: 12px; color: var(--text-muted);">
-                                            <span><i class="fas fa-heart" style="color: var(--danger);"></i> 好感度: {{ activePersonality.state.affection }}</span>
-                                            <span><i class="fas fa-smile" style="color: var(--warning);"></i> 心情: {{ activePersonality.state.mood }}</span>
                                         </div>
                                     </div>
                                 </div>
@@ -1854,11 +1907,13 @@
                                             <div class="empty-state-title">加载中...</div>
                                         </div>
                                         <div style="display: flex; flex-direction: column; gap: 10px;">
-                                            <div v-for="preset in personalityPresets" :key="preset.id" 
+                                            <div v-for="preset in personalityPresets" :key="preset.id"
                                                  class="character-card"
                                                  @click="loadPersonalityPreset(preset)">
-                                                <div class="character-card-avatar">
-                                                    <i :class="preset.avatar || preset.icon || 'fas fa-user-circle'"></i>
+                                                <!-- 立绘或头像 -->
+                                                <div class="character-card-avatar" style="width: 60px; height: 80px; border-radius: 8px; overflow: hidden; background: var(--bg-tertiary); display: flex; align-items: center; justify-content: center;">
+                                                    <img v-if="preset.portrait" :src="preset.portrait" style="width: 100%; height: 100%; object-fit: cover;">
+                                                    <i v-else :class="preset.avatar || preset.icon || 'fas fa-user-circle'" style="font-size: 28px;"></i>
                                                 </div>
                                                 <div class="character-card-info">
                                                     <div class="character-card-name">{{ preset.name }}</div>
@@ -1902,8 +1957,10 @@
                                             <div v-for="(preset, index) in customPersonalityPresets" :key="preset.id"
                                                  class="character-card"
                                                  @click="loadPersonalityPreset(preset)">
-                                                <div class="character-card-avatar">
-                                                    <i :class="preset.avatar || 'fas fa-user-circle'"></i>
+                                                <!-- 立绘或头像 -->
+                                                <div class="character-card-avatar" style="width: 60px; height: 80px; border-radius: 8px; overflow: hidden; background: var(--bg-tertiary); display: flex; align-items: center; justify-content: center;">
+                                                    <img v-if="preset.portrait" :src="preset.portrait" style="width: 100%; height: 100%; object-fit: cover;">
+                                                    <i v-else :class="preset.avatar || 'fas fa-user-circle'" style="font-size: 28px;"></i>
                                                 </div>
                                                 <div class="character-card-info">
                                                     <div class="character-card-name">{{ preset.name }}</div>

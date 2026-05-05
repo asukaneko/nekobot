@@ -869,7 +869,9 @@ const NbotMethods = {
                             user_id: this.username,
                             system_prompt: this.personality.systemPrompt || this.personality.prompt || '',
                             first_message: this.personality.firstMessage || '',
-                            sender_name: this.personality.name || 'NekoBot'
+                            sender_name: this.personality.name || 'NekoBot',
+                            sender_avatar: this.personality.avatar || '',
+                            sender_portrait: this.personality.portrait || ''
                         });
                         const session = res.data.session;
                         this.sessions = [
@@ -2840,7 +2842,9 @@ def main(params):
                             user_id: this.username,
                             system_prompt: this.personality.systemPrompt || this.personality.prompt,
                             first_message: this.personality.firstMessage || '',
-                            sender_name: this.personality.name || 'NekoBot'
+                            sender_name: this.personality.name || 'NekoBot',
+                            sender_avatar: this.personality.avatar || '',
+                            sender_portrait: this.personality.portrait || ''
                         });
                         const newSession = { ...res.data.session, _isNew: true };
                         this.sessions = [
@@ -5822,6 +5826,7 @@ def main(params):
                                 name: preset.name || '',
                                 description: preset.description || '',
                                 avatar: preset.avatar || preset.icon || '',
+                                portrait: preset.portrait || '',
                                 tags: preset.tags || [],
                                 systemPrompt: preset.systemPrompt || preset.prompt || '',
                                 basicInfo: preset.basicInfo || '',
@@ -6025,6 +6030,7 @@ def main(params):
                             name: this.personality.name,
                             description: this.personality.description || '',
                             avatar: this.personality.avatar || '',
+                            portrait: this.personality.portrait || '',
                             tags: this.personality.tags || [],
                             basicInfo: this.personality.basicInfo || '',
                             personality: this.personality.personality || '',
@@ -6112,7 +6118,9 @@ def main(params):
                             user_id: this.username,
                             system_prompt: preset.systemPrompt || preset.prompt || '',
                             first_message: preset.firstMessage || '',
-                            sender_name: preset.name || ''
+                            sender_name: preset.name || '',
+                            sender_avatar: preset.avatar || '',
+                            sender_portrait: preset.portrait || ''
                         });
                         const newSession = { ...res.data.session, _isNew: true };
                         this.sessions = [
@@ -6188,7 +6196,8 @@ def main(params):
                         this.showToast('请先创建角色卡', 'error');
                         return;
                     }
-                    const exportData = { ...this.personality };
+                    // 导出时排除立绘原始数据，只保留其他字段
+                    const { portrait, ...exportData } = this.personality;
                     const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
                     const url = URL.createObjectURL(blob);
                     const a = document.createElement('a');
@@ -6197,6 +6206,69 @@ def main(params):
                     a.click();
                     URL.revokeObjectURL(url);
                     this.showToast('角色卡已导出', 'success');
+                },
+
+                // 处理立绘上传
+                async handlePortraitUpload(event) {
+                    const file = event.target.files[0];
+                    if (!file) return;
+
+                    // 验证文件类型
+                    if (!file.type.startsWith('image/')) {
+                        this.showToast('请上传图片文件', 'error');
+                        return;
+                    }
+
+                    // 验证文件大小（最大 5MB）
+                    if (file.size > 5 * 1024 * 1024) {
+                        this.showToast('图片大小不能超过 5MB', 'error');
+                        return;
+                    }
+
+                    this.isLoading = true;
+                    try {
+                        // 使用 FormData 上传文件到服务器
+                        const formData = new FormData();
+                        formData.append('file', file);
+
+                        const res = await api.post('/api/personality/portrait', formData, {
+                            headers: { 'Content-Type': 'multipart/form-data' }
+                        });
+
+                        if (res.data.success) {
+                            // 保存返回的图片 URL
+                            this.personality.portrait = res.data.url;
+                            this.personalityHasUnsavedChanges = true;
+                            this.showToast('立绘上传成功，请点击"应用"保存', 'success');
+                        } else {
+                            this.showToast(res.data.error || '上传失败', 'error');
+                        }
+                    } catch (e) {
+                        console.error('上传立绘失败:', e);
+                        this.showToast('上传失败: ' + (e.response?.data?.error || e.message), 'error');
+                    } finally {
+                        this.isLoading = false;
+                        // 清空 input 以便可以重复选择同一文件
+                        event.target.value = '';
+                    }
+                },
+
+                // 删除立绘
+                async removePortrait() {
+                    if (!this.personality.portrait) return;
+
+                    try {
+                        // 调用后端删除接口
+                        await api.delete('/api/personality/portrait', {
+                            data: { url: this.personality.portrait }
+                        });
+                    } catch (e) {
+                        console.error('删除服务器立绘文件失败:', e);
+                    }
+
+                    this.personality.portrait = '';
+                    this.personalityHasUnsavedChanges = true;
+                    this.showToast('立绘已删除，请点击"应用"保存', 'info');
                 },
 
                 // 触发导入文件选择

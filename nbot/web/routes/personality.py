@@ -5,9 +5,16 @@ import re
 import uuid
 from datetime import datetime
 
-from flask import jsonify, request
+from flask import jsonify, request, send_from_directory
+from werkzeug.utils import secure_filename
 
 _log = logging.getLogger(__name__)
+
+# 允许的图片扩展名
+ALLOWED_IMAGE_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'webp'}
+
+def allowed_image_file(filename):
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_IMAGE_EXTENSIONS
 
 
 def compile_personality_prompt(personality_data, session_context=None, user_name=None):
@@ -84,22 +91,25 @@ def register_personality_routes(app, server):
     @app.route("/api/personality", methods=["PUT"])
     def update_personality():
         data = request.json or {}
-        
+
         server.personality["name"] = data.get("name", server.personality.get("name", ""))
         server.personality["description"] = data.get("description", server.personality.get("description", ""))
         server.personality["avatar"] = data.get("avatar", server.personality.get("avatar", "🎭"))
         server.personality["tags"] = data.get("tags", server.personality.get("tags", []))
-        
+
+        # 立绘图字段 - 存储图片的URL或路径，不包含原始图片数据
+        server.personality["portrait"] = data.get("portrait", server.personality.get("portrait", ""))
+
         server.personality["systemPrompt"] = data.get("systemPrompt", server.personality.get("systemPrompt", ""))
         server.personality["basicInfo"] = data.get("basicInfo", server.personality.get("basicInfo", ""))
         server.personality["personality"] = data.get("personality", server.personality.get("personality", ""))
         server.personality["scenario"] = data.get("scenario", server.personality.get("scenario", ""))
         server.personality["firstMessage"] = data.get("firstMessage", server.personality.get("firstMessage", ""))
         server.personality["exampleDialogues"] = data.get("exampleDialogues", server.personality.get("exampleDialogues", ""))
-        
+
         server.personality["responseFormat"] = data.get("responseFormat", server.personality.get("responseFormat", ""))
         server.personality["rules"] = data.get("rules", server.personality.get("rules", []))
-        
+
         server.personality["state"] = data.get("state", server.personality.get("state", {"affection": 50, "mood": "开心"}))
         server.personality["greeting"] = data.get("greeting", server.personality.get("greeting", ""))
 
@@ -218,6 +228,9 @@ def register_personality_routes(app, server):
             "state": data.get("state", {"affection": 50, "mood": "开心"}),
             "created_at": datetime.now().isoformat(),
         }
+        # 立绘图字段 - 存储图片的URL或路径，不包含原始图片数据
+        if data.get("portrait"):
+            preset["portrait"] = data.get("portrait")
         preset["systemPrompt"] = compile_personality_prompt(preset)
         server.custom_personality_presets.append(preset)
         server._save_data("custom_personality_presets")
@@ -305,6 +318,8 @@ def register_personality_routes(app, server):
             character.setdefault("responseFormat", "")
             character.setdefault("rules", [])
             character.setdefault("state", {"affection": 50, "mood": "开心"})
+            # 立绘图字段 - 由用户后续上传
+            character.setdefault("portrait", "")
             character["systemPrompt"] = compile_personality_prompt(character)
 
             return jsonify({"success": True, "character": character})
@@ -346,6 +361,8 @@ def register_personality_routes(app, server):
             character.setdefault("responseFormat", "")
             character.setdefault("rules", [])
             character.setdefault("state", {"affection": 50, "mood": "开心"})
+            # 立绘图字段 - 导入时不包含原始图片数据
+            character.setdefault("portrait", "")
             if not character.get("systemPrompt"):
                 character["systemPrompt"] = compile_personality_prompt(character)
 
@@ -416,3 +433,64 @@ def register_personality_routes(app, server):
         except Exception as e:
             _log.error(f"AI 生成开场白失败: {e}")
             return jsonify({"success": False, "error": f"生成失败: {str(e)}"}), 500
+
+    @app.route("/api/personality/portrait", methods=["POST"])
+    def upload_personality_portrait():
+        """上传角色立绘图片，返回图片URL"""
+        if "file" not in request.files:
+            return jsonify({"success": False, "error": "请上传文件"}), 400
+
+        file = request.files["file"]
+        if file.filename == "":
+            return jsonify({"success": False, "error": "文件名为空"}), 400
+
+        if not allowed_image_file(file.filename):
+            return jsonify({"success": False, "error": "不支持的文件格式，请上传图片文件"}), 400
+
+        try:
+            # 创建上传目录
+            upload_dir = os.path.join(server.base_dir, "nbot", "web", "static", "uploads", "portraits")
+            os.makedirs(upload_dir, exist_ok=True)
+
+            # 生成唯一文件名
+            ext = file.filename.rsplit(".", 1)[1].lower()
+            filename = f"portrait_{uuid.uuid4().hex[:16]}.{ext}"
+            filepath = os.path.join(upload_dir, filename)
+
+            # 保存文件
+            file.save(filepath)
+
+            # 返回图片URL
+            image_url = f"/static/uploads/portraits/{filename}"
+            _log.info(f"立绘上传成功: {filepath}")
+
+            return jsonify({"success": True, "url": image_url})
+
+        except Exception as e:
+            _log.error(f"上传立绘失败: {e}")
+            return jsonify({"success": False, "error": f"上传失败: {str(e)}"}), 500
+
+    @app.route("/api/personality/portrait", methods=["DELETE"])
+    def delete_personality_portrait():
+        """删除角色立绘图片"""
+        data = request.json or {}
+        portrait_url = data.get("url", "")
+
+        if not portrait_url:
+            return jsonify({"success": False, "error": "未提供图片URL"}), 400
+
+        try:
+            # 从URL中提取文件名
+            if portrait_url.startswith("/static/uploads/portraits/"):
+                filename = os.path.basename(portrait_url)
+                filepath = os.path.join(server.base_dir, "nbot", "web", "static", "uploads", "portraits", filename)
+
+                if os.path.exists(filepath):
+                    os.remove(filepath)
+                    _log.info(f"立绘删除成功: {filepath}")
+
+            return jsonify({"success": True})
+
+        except Exception as e:
+            _log.error(f"删除立绘失败: {e}")
+            return jsonify({"success": False, "error": f"删除失败: {str(e)}"}), 500

@@ -70,6 +70,9 @@ def register_session_routes(app, server):
                     "archived_at": session.get("archived_at") if archived else None,
                     "message_count": len(session.get("messages", [])),
                     "system_prompt": session.get("system_prompt", ""),
+                    "sender_name": session.get("sender_name", ""),
+                    "sender_avatar": session.get("sender_avatar", ""),
+                    "sender_portrait": session.get("sender_portrait", ""),
                 }
             )
 
@@ -146,6 +149,11 @@ def register_session_routes(app, server):
         system_prompt += format_skills_prompt(server.skills_config)
         _log.info(f"已添加 {len(enabled_skills)} 个技能到会话 {session_id[:8]}")
     
+        # 获取角色信息
+        sender_name = data.get("sender_name") or server.personality.get("name", "AI")
+        sender_avatar = data.get("sender_avatar") or server.personality.get("avatar", "")
+        sender_portrait = data.get("sender_portrait") or server.personality.get("portrait", "")
+
         session = {
             "id": session_id,
             "name": data.get("name", f"新会话 {session_id[:8]}"),
@@ -156,6 +164,9 @@ def register_session_routes(app, server):
             "archived_at": None,
             "messages": [{"role": "system", "content": system_prompt}],
             "system_prompt": system_prompt,
+            "sender_name": sender_name,
+            "sender_avatar": sender_avatar,
+            "sender_portrait": sender_portrait,
         }
 
         # 如果有开场白，添加为第一条 assistant 消息
@@ -167,7 +178,7 @@ def register_session_routes(app, server):
             session["messages"].append({
                 "role": "assistant",
                 "content": first_message,
-                "sender": data.get("sender_name") or server.personality.get("name", "AI")
+                "sender": sender_name
             })
         if not is_web_visible_session(session_id, session):
             return jsonify({"error": "Invalid session type"}), 400

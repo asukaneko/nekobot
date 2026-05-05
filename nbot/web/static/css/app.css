@@ -3730,14 +3730,21 @@
         .message.user { flex-direction: row-reverse; }
 
         .message-avatar {
-            width: 36px;
-            height: 36px;
+            width: 48px;
+            height: 48px;
             border-radius: 50%;
             display: flex;
             align-items: center;
             justify-content: center;
-            font-size: 14px;
+            font-size: 16px;
             flex-shrink: 0;
+            overflow: hidden;
+        }
+
+        .message-avatar img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
         }
 
         .message.assistant .message-avatar { background: var(--accent-primary); }
@@ -4191,9 +4198,9 @@
             }
 
             .message-avatar {
-                width: 32px;
-                height: 32px;
-                font-size: 12px;
+                width: 42px;
+                height: 42px;
+                font-size: 14px;
             }
 
             /* 输入区域优化 */
@@ -4390,9 +4397,9 @@
             }
 
             .message-avatar {
-                width: 28px;
-                height: 28px;
-                font-size: 11px;
+                width: 38px;
+                height: 38px;
+                font-size: 13px;
             }
 
             .chat-input {
@@ -9677,9 +9684,9 @@
             }
 
             .message-avatar {
-                width: 28px;
-                height: 28px;
-                font-size: 11px;
+                width: 36px;
+                height: 36px;
+                font-size: 12px;
             }
 
             .message-content,
