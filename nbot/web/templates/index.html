@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>NekoBot Dashboard</title>
+    <title>NekoBot Chat</title>
     <link rel="icon" type="image/png" href="/static/neko.png">
     <link rel="manifest" href="/manifest.webmanifest">
     <meta name="theme-color" content="#111827">
@@ -31,7 +31,7 @@
             <div class="boot-row">
                 <img class="boot-logo" src="/static/neko.png" alt="NekoBot">
                 <div>
-                    <h1 class="boot-title">NekoBot Dashboard</h1>
+                    <h1 class="boot-title">NekoBot Chat</h1>
                     <p class="boot-subtitle">Loading core assets and session data</p>
                 </div>
             </div>
@@ -48,7 +48,7 @@
                 <div class="login-logo">
                     <img src="/static/neko.png" alt="NekoBot" style="width: 80px; height: 80px; object-fit: cover; border-radius: 16px;">
                 </div>
-                <h1 class="login-title">NekoBot Dashboard</h1>
+                <h1 class="login-title">NekoBot Chat</h1>
                 <p class="login-subtitle">{{ $t('login.subtitle') }}</p>
                 <div class="form-group">
                     <input 
@@ -76,12 +76,74 @@
         </div>
 
         <!-- Main App -->
-        <div v-else class="app-container">
+        <div v-else class="app-container" :class="{ 'chat-only-app': isChatOnlyMode }">
+            <div v-if="showOnboarding" class="onboarding-overlay">
+                <div class="onboarding-card">
+                    <div class="onboarding-header">
+                        <img src="/static/neko.png" alt="NekoBot">
+                        <div>
+                            <div class="onboarding-kicker">{{ $t('onboarding.kicker') }}</div>
+                            <h2>{{ $t('onboarding.title') }}</h2>
+                            <p>{{ $t('onboarding.subtitle') }}</p>
+                        </div>
+                    </div>
+                    <div class="onboarding-steps">
+                        <div
+                            v-for="step in onboardingSteps"
+                            :key="step.id"
+                            class="onboarding-step"
+                            :class="{ active: onboardingStep === step.id, done: onboardingStep > step.id }"
+                        >
+                            <span>{{ step.id }}</span>
+                            <div>{{ $t(step.labelKey) }}</div>
+                        </div>
+                    </div>
+                    <div v-if="onboardingStep === 1" class="onboarding-body">
+                        <h3>{{ $t('onboarding.step1_title') }}</h3>
+                        <p>{{ $t('onboarding.step1_desc') }}</p>
+                    </div>
+                    <div v-else-if="onboardingStep === 2" class="onboarding-body">
+                        <h3>{{ $t('onboarding.step2_title') }}</h3>
+                        <p>{{ $t('onboarding.step2_desc') }}</p>
+                        <div class="onboarding-grid">
+                            <input v-model="onboardingAI.provider" class="form-input" :placeholder="$t('onboarding.provider')" required>
+                            <input v-model="onboardingAI.api_key" class="form-input" type="password" :placeholder="$t('onboarding.api_key')" required>
+                            <input v-model="onboardingAI.base_url" class="form-input" :placeholder="$t('onboarding.base_url')" required>
+                            <input v-model="onboardingAI.model" class="form-input" :placeholder="$t('onboarding.model')" required>
+                        </div>
+                        <div v-if="aiModelsLoaded && !hasChatModelConfigured" class="ai-unconfigured-banner">
+                            <i class="fas fa-triangle-exclamation"></i>
+                            {{ $t('onboarding.ai_unconfigured') }}
+                        </div>
+                    </div>
+                    <div v-else-if="onboardingStep === 3" class="onboarding-body">
+                        <h3>{{ $t('onboarding.step3_title') }}</h3>
+                        <p>{{ $t('onboarding.step3_desc') }}</p>
+                        <div class="onboarding-grid">
+                            <input v-model="onboardingPersonality.name" class="form-input" :placeholder="$t('onboarding.personality_name')" required>
+                            <input v-model="onboardingPersonality.firstMessage" class="form-input" :placeholder="$t('onboarding.first_message')" required>
+                        </div>
+                        <textarea v-model="onboardingPersonality.systemPrompt" class="form-textarea" rows="5" :placeholder="$t('onboarding.system_prompt')" required></textarea>
+                    </div>
+                    <div v-else class="onboarding-body">
+                        <h3>{{ $t('onboarding.step4_title') }}</h3>
+                        <p>{{ $t('onboarding.step4_desc') }}</p>
+                    </div>
+                    <div class="onboarding-actions">
+                        <button class="btn btn-secondary" @click="skipOnboarding" :disabled="isLoading">{{ $t('onboarding.skip') }}</button>
+                        <button v-if="onboardingStep > 1" class="btn btn-secondary" @click="onboardingStep--" :disabled="isLoading">{{ $t('onboarding.back') }}</button>
+                        <button v-if="onboardingStep < 4" class="btn btn-primary" @click="advanceOnboarding" :disabled="isLoading">{{ $t('onboarding.next') }}</button>
+                        <button v-else class="btn btn-primary" @click="finishOnboarding" :disabled="isLoading">
+                            <i class="fas fa-comments"></i> {{ $t('onboarding.enter_chat') }}
+                        </button>
+                    </div>
+                </div>
+            </div>
             <!-- Sidebar Overlay (Mobile) -->
-            <div class="sidebar-overlay" :class="{ active: isMobileMenuOpen }" @click="isMobileMenuOpen = false"></div>
+            <div v-if="!isChatOnlyMode" class="sidebar-overlay" :class="{ active: isMobileMenuOpen }" @click="isMobileMenuOpen = false"></div>
 
             <!-- Sidebar -->
-            <aside class="sidebar" :class="{ collapsed: isSidebarCollapsed, 'mobile-open': isMobileMenuOpen }">
+            <aside v-if="!isChatOnlyMode" class="sidebar" :class="{ collapsed: isSidebarCollapsed, 'mobile-open': isMobileMenuOpen }">
                 <!-- Sidebar Toggle Button (Desktop) -->
                 <button class="sidebar-toggle" @click="toggleSidebar" :title="$t('nav.collapse')">
                     <i class="fas fa-chevron-left"></i>
@@ -177,7 +239,7 @@
             <!-- Main Content -->
             <main class="main-content" :class="{ 'chat-page-active': currentPage === 'chat' }">
                 <!-- Top Bar -->
-                <header class="top-bar">
+                <header v-if="!isChatOnlyMode" class="top-bar">
                     <h1 class="page-title mobile-clickable" @click="toggleMobileMenu">{{ pageTitle }}</h1>
                     <div class="top-actions">
                         <button class="btn-icon" @click="refreshData" :title="$t('app.refresh')" :disabled="isLoading">
@@ -188,8 +250,16 @@
 
                 <!-- Content Area -->
                 <div class="content-area">
+                    <div v-if="currentPage === 'chat' && aiModelsLoaded && !hasChatModelConfigured" class="ai-unconfigured-banner">
+                        <i class="fas fa-triangle-exclamation"></i>
+                        {{ $t('chat.ai_unconfigured') }}
+                        <button class="admin-entry-button" @click="goDashboard('ai-config')">
+                            <i class="fas fa-sliders-h"></i> {{ $t('chat.configure') }}
+                        </button>
+                    </div>
+
                     <!-- Dashboard -->
-                    <div v-if="currentPage === 'dashboard'" class="fade-in dashboard-shell">
+                    <div v-if="!isChatOnlyMode && currentPage === 'dashboard'" class="fade-in dashboard-shell">
                         <div class="dashboard-hero">
                             <div class="dashboard-hero-grid">
                                 <div>
@@ -264,7 +334,10 @@
                     </div>
 
                     <!-- Chat -->
-                    <div v-if="currentPage === 'chat'" class="chat-layout fade-in">
+                    <div v-if="currentPage === 'chat'" class="chat-layout fade-in" :class="{ 'chat-list-collapsed': isChatListCollapsed }">
+                        <button class="chat-list-toggle" @click="toggleChatList" :title="$t(isChatListCollapsed ? 'chat.show_sessions' : 'chat.hide_sessions')">
+                            <i :class="isChatListCollapsed ? 'fas fa-chevron-right' : 'fas fa-chevron-left'"></i>
+                        </button>
                         <div class="mobile-chat-picker-overlay" :class="{ active: isMobileChatPickerOpen }" @click="closeMobileChatPicker"></div>
                         
                         <div class="chat-sidebar" :class="{ 'mobile-chat-picker-open': isMobileChatPickerOpen, 'has-channel-dropdown-open': showChannelDropdown }">
@@ -526,7 +599,21 @@
                             </div>
                         </div>
 
-                        <div class="chat-main">
+                        <div class="chat-main" :class="{ 'chat-header-hidden': isChatHeaderHidden }" :style="chatLayoutStyle" v-click-outside="closeChatViewMenu">
+                            <button v-if="isChatHeaderHidden" class="chat-header-restore" @click="toggleChatHeader" :title="$t('chat.show_topbar')">
+                                <i class="fas fa-window-maximize"></i>
+                            </button>
+                            <div v-if="showChatViewMenu" class="chat-view-popover" @pointerdown.stop @click.stop>
+                                <label class="chat-margin-control">
+                                    <span class="chat-margin-label">{{ $t('chat.margin') }}</span>
+                                    <input type="range" v-model.number="chatHorizontalMargin" min="0" max="300" step="4" @input="updateChatHorizontalMargin">
+                                    <span class="chat-margin-value">{{ chatHorizontalMargin }}px</span>
+                                </label>
+                                <button class="chat-view-action" @click.prevent="toggleChatHeader">
+                                    <i class="fas fa-window-minimize"></i>
+                                    {{ $t('chat.hide_topbar') }}
+                                </button>
+                            </div>
                             <div class="mobile-chat-bar">
                                 <button class="mobile-chat-nav-btn" @click="toggleMobileMenu" title="菜单">
                                     <i class="fas fa-bars"></i>
@@ -546,7 +633,20 @@
                                 </button>
                             </div>
                             <!-- Web 会话为空 -->
-                            <div v-if="(chatTab === 'web' || chatTab === 'cli') && !currentSession" class="empty-state">
+                            <div v-if="(chatTab === 'web' || chatTab === 'cli') && !currentSession" class="empty-state chat-empty-state">
+                                <div class="chat-empty-state-title">{{ $t('chat.empty_title') }}</div>
+                                <div class="chat-empty-state-desc">{{ $t('chat.empty_desc') }}</div>
+                                <div class="chat-home-toolbar">
+                                    <button class="btn btn-primary" @click="createNewSession" :disabled="isLoading">
+                                        <i class="fas fa-plus"></i> {{ $t('chat.new_session') }}
+                                    </button>
+                                    <button class="btn btn-secondary" @click="openLatestChat" :disabled="isLoading">
+                                        <i class="fas fa-clock-rotate-left"></i> {{ $t('chat.latest') }}
+                                    </button>
+                                    <button class="admin-entry-button" @click="goDashboard()">
+                                        <i class="fas fa-chart-line"></i> {{ $t('nav.dashboard') }}
+                                    </button>
+                                </div>
                                 <div class="empty-state-icon">💬</div>
                                 <div class="empty-state-title">选择一个会话开始聊天</div>
                                 <div class="empty-state-desc">或创建一个新的会话</div>
@@ -562,7 +662,7 @@
                             
                             <!-- QQ 消息视图 -->
                             <template v-if="currentQqId && (chatTab === 'qq_private' || chatTab === 'qq_group')">
-                                <div class="chat-header">
+                                <div v-if="!isChatHeaderHidden" class="chat-header">
                                     <div class="chat-header-info">
                                         <button class="mobile-menu-btn" @click="toggleMobileMenu" @touchstart.prevent="toggleMobileMenu">
                                             <i class="fas fa-bars"></i>
@@ -582,6 +682,11 @@
                                             </div>
                                         </div>
                                         <div class="chat-header-actions">
+                                            <div class="chat-view-menu" :class="{ open: showChatViewMenu }">
+                                                <button class="chat-view-menu-button" @click.stop="toggleChatViewMenu" :title="$t('chat.layout_settings')">
+                                                    <i class="fas fa-sliders-h"></i>
+                                                </button>
+                                            </div>
                                             <button class="btn btn-secondary" @click="viewQqSessionDetails('current')" title="会话详情">
                                                 <i class="fas fa-info-circle"></i>
                                             </button>
@@ -622,7 +727,7 @@
                             
                             <!-- Web 会话视图 -->
                             <template v-else-if="currentSession">
-                                <div class="chat-header">
+                                <div v-if="!isChatHeaderHidden" class="chat-header">
                                     <div class="chat-header-info">
                                         <!-- Mobile Menu Button -->
                                         <button class="mobile-menu-btn" @click="toggleMobileMenu" @touchstart.prevent="toggleMobileMenu">
@@ -639,6 +744,11 @@
                                         </div>
                                     </div>
                                     <div class="chat-actions">
+                                        <div class="chat-view-menu" :class="{ open: showChatViewMenu }">
+                                            <button class="chat-view-menu-button" @click.stop="toggleChatViewMenu" :title="$t('chat.layout_settings')">
+                                                <i class="fas fa-sliders-h"></i>
+                                            </button>
+                                        </div>
                                         <button class="btn-icon" @click="togglePushNotifications" :title="pushButtonTitle" :disabled="pushBusy">
                                             <i :class="pushSubscribed ? 'fas fa-bell' : 'far fa-bell'"></i>
                                         </button>
@@ -5660,7 +5770,10 @@
                     isMobileChatPickerOpen: false,
                     username: sessionStorage.getItem('username') || '',
                     password: '',
-                    currentPage: 'dashboard',
+                    appMode: window.location.pathname === '/dashboard' ? 'dashboard' : 'chat',
+                    currentPage: window.location.pathname === '/dashboard'
+                        ? (localStorage.getItem('nbot_dashboard_page') || 'dashboard')
+                        : 'chat',
                     currentLanguage: localStorage.getItem('nbot-language') || 'zh',
                     
                     navItems: {
@@ -5710,6 +5823,27 @@
                         avg_response_time: '1.2'
                     },
 
+                    showOnboarding: false,
+                    onboardingStep: 1,
+                    onboardingSteps: [
+                        { id: 1, labelKey: 'onboarding.step1' },
+                        { id: 2, labelKey: 'onboarding.step2' },
+                        { id: 3, labelKey: 'onboarding.step3' },
+                        { id: 4, labelKey: 'onboarding.step4' }
+                    ],
+                    onboardingAI: {
+                        provider: 'openai',
+                        provider_type: 'openai_compatible',
+                        api_key: '',
+                        base_url: '',
+                        model: ''
+                    },
+                    onboardingPersonality: {
+                        name: '',
+                        systemPrompt: '',
+                        firstMessage: ''
+                    },
+
                     // 最近活动
                     recentActivities: [],
 
@@ -5751,6 +5885,10 @@
                     orphanCards: {},  // 找不到父消息的孤儿卡片（按 parentMsgId 分组）
                     isUserScrolling: false,
                     showScrollToBottom: false,
+                    isChatListCollapsed: localStorage.getItem('nbot_chat_list_collapsed') === 'true',
+                    isChatHeaderHidden: localStorage.getItem('nbot_chat_header_hidden') === 'true',
+                    showChatViewMenu: false,
+                    chatHorizontalMargin: Math.min(300, Math.max(0, parseInt(localStorage.getItem('nbot_chat_horizontal_margin') || '0', 10) || 0)),
                     sessionSwitching: false,
                     sessionSearch: '',
                     sessionArchiveFilter: 'all',
@@ -6021,6 +6159,7 @@
 
                     // 多模型配置管理
                     aiModels: [],
+                    aiModelsLoaded: false,
                     activeModelId: null,
                     showModelManager: false,
                     showModelEditModal: false,
@@ -6211,6 +6350,12 @@
                             workflow: true,
                             web: true,
                             live2d: true
+                        },
+                        onboarding: {
+                            completed: false,
+                            skipped: false,
+                            completed_at: null,
+                            skipped_at: null
                         }
                     },
                     
@@ -6407,6 +6552,33 @@
                         debug: '调试台'
                     };
                     return titles[this.currentPage] || 'NekoBot';
+                },
+
+                isChatOnlyMode() {
+                    return this.appMode === 'chat';
+                },
+
+                chatLayoutStyle() {
+                    return {
+                        '--chat-horizontal-margin': `${this.chatHorizontalMargin}px`
+                    };
+                },
+
+                hasChatModelConfigured() {
+                    if (!this.aiModelsLoaded) {
+                        return true;
+                    }
+                    const activeChatModel = this.activeModelsByPurpose?.chat;
+                    if (activeChatModel?.has_config && activeChatModel.model?.enabled !== false) {
+                        return true;
+                    }
+                    if (this.activeModelId) {
+                        const activeModel = this.aiModels.find(model => model.id === this.activeModelId);
+                        if (activeModel && (activeModel.purpose || 'chat') === 'chat' && activeModel.enabled !== false) {
+                            return true;
+                        }
+                    }
+                    return this.aiModels.some(model => (model.purpose || 'chat') === 'chat' && model.enabled !== false);
                 },
 
                 pushButtonTitle() {
@@ -6682,6 +6854,7 @@
             },
             
             async mounted() {
+                document.title = this.isChatOnlyMode ? 'NekoBot Chat' : 'NekoBot Dashboard';
                 // 初始化主题
                 this.initTheme();
 
@@ -6717,16 +6890,7 @@
                             connectSocketWithAuth();
                             
                             // 只加载首页（仪表盘）需要的数据
-                            await Promise.all([
-                                this.loadStats(),
-                                this.loadSessions(),
-                                this.loadSettings(),
-                                this.loadPersonality(),
-                                this.loadPersonalityPresets(),
-                                this.loadCustomPersonalityPresets(),
-                                this.loadCommandCatalog(),
-                                this.loadChannels()
-                            ]);
+                            await this.loadHomeData();
                             // 延迟初始化图表
                             setTimeout(() => this.initCharts(), 100);
                         } else {
@@ -6743,14 +6907,7 @@
                     // 兼容旧版本：使用 sessionStorage 的情况
                     this.isLoggedIn = true;
                     connectSocketWithAuth();
-                    await Promise.all([
-                        this.loadStats(),
-                        this.loadSessions(),
-                        this.loadSettings(),
-                        this.loadPersonality(),
-                        this.loadCommandCatalog(),
-                        this.loadChannels()
-                    ]);
+                    await this.loadHomeData();
                     setTimeout(() => this.initCharts(), 100);
                 }
                 

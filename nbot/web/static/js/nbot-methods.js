@@ -370,7 +370,7 @@ const NbotMethods = {
                             this.isLoggedIn = true;
                             connectSocketWithAuth();
                             this.password = ''; // 清空密码
-                            await this.loadAllData();
+                            await this.loadHomeData();
                             this.showToast('登录成功', 'success');
                         } else {
                             this.showToast(res.data.message || '密码错误', 'error');
@@ -410,6 +410,10 @@ const NbotMethods = {
                 },
                 
                 navigateTo(page, event) {
+                    if (this.isChatOnlyMode && page !== 'chat') {
+                        this.goDashboard(page);
+                        return;
+                    }
                     // 添加点击动画效果
                     if (event && event.currentTarget) {
                         const navItem = event.currentTarget;
@@ -420,6 +424,11 @@ const NbotMethods = {
                     }
 
                     this.currentPage = page;
+                    if (this.isChatOnlyMode) {
+                        localStorage.setItem('nbot_home_page', 'chat');
+                    } else {
+                        localStorage.setItem('nbot_dashboard_page', page);
+                    }
                     this.isMobileMenuOpen = false;
                     this.isMobileChatPickerOpen = false;
                     this.loadPageData(page);
@@ -462,6 +471,36 @@ const NbotMethods = {
 
                 toggleSidebar() {
                     this.isSidebarCollapsed = !this.isSidebarCollapsed;
+                },
+
+                goDashboard(page = 'dashboard') {
+                    localStorage.setItem('nbot_dashboard_page', page);
+                    window.location.href = '/dashboard';
+                },
+
+                toggleChatList() {
+                    this.isChatListCollapsed = !this.isChatListCollapsed;
+                    localStorage.setItem('nbot_chat_list_collapsed', this.isChatListCollapsed ? 'true' : 'false');
+                },
+
+                toggleChatHeader() {
+                    this.isChatHeaderHidden = !this.isChatHeaderHidden;
+                    this.showChatViewMenu = false;
+                    localStorage.setItem('nbot_chat_header_hidden', this.isChatHeaderHidden ? 'true' : 'false');
+                },
+
+                toggleChatViewMenu() {
+                    this.showChatViewMenu = !this.showChatViewMenu;
+                },
+
+                closeChatViewMenu() {
+                    this.showChatViewMenu = false;
+                },
+
+                updateChatHorizontalMargin() {
+                    const margin = Math.min(300, Math.max(0, Number(this.chatHorizontalMargin) || 0));
+                    this.chatHorizontalMargin = margin;
+                    localStorage.setItem('nbot_chat_horizontal_margin', String(margin));
                 },
 
                 toggleMobileMenu() {
@@ -637,6 +676,209 @@ const NbotMethods = {
                         await this.selectQqChat(this.chatTab === 'qq_private' ? 'private' : 'group', this.currentQqId);
                     } else {
                         await this.loadPageData('chat');
+                    }
+                },
+
+                async loadHomeData() {
+                    await Promise.all([
+                        this.loadSessions(),
+                        this.loadSettings(),
+                        this.loadPersonality(),
+                        this.loadPersonalityPresets(),
+                        this.loadCustomPersonalityPresets(),
+                        this.loadCommandCatalog(),
+                        this.loadChannels(),
+                        this.loadAIModels()
+                    ]);
+                    this.showOnboarding = this.isChatOnlyMode && this.shouldShowOnboarding();
+                    if (this.currentPage === 'chat') {
+                        await this.enterChatHome();
+                    } else {
+                        await this.loadPageData(this.currentPage);
+                    }
+                },
+
+                async enterChatHome() {
+                    this.currentPage = 'chat';
+                    localStorage.setItem('nbot_home_page', 'chat');
+                    await Promise.all([
+                        this.loadSessions(),
+                        this.loadCommandCatalog()
+                    ]);
+                },
+
+                shouldShowOnboarding() {
+                    const onboarding = this.settings?.onboarding || {};
+                    return !onboarding.completed && !onboarding.skipped;
+                },
+
+                async updateOnboardingSettings(patch) {
+                    const onboarding = {
+                        ...(this.settings?.onboarding || {}),
+                        ...patch
+                    };
+                    this.settings = {
+                        ...this.settings,
+                        onboarding
+                    };
+                    await api.put('/api/settings', { onboarding });
+                },
+
+                async skipOnboarding() {
+                    this.isLoading = true;
+                    try {
+                        await this.updateOnboardingSettings({
+                            completed: false,
+                            skipped: true,
+                            skipped_at: new Date().toISOString()
+                        });
+                        this.showOnboarding = false;
+                        await this.enterChatHome();
+                    } catch (e) {
+                        this.showToast('Failed to skip onboarding: ' + (e.response?.data?.error || e.message), 'error');
+                    } finally {
+                        this.isLoading = false;
+                    }
+                },
+
+                async advanceOnboarding() {
+                    if (this.onboardingStep === 2) {
+                        const saved = await this.saveOnboardingAIModel();
+                        if (!saved) return;
+                    } else if (this.onboardingStep === 3) {
+                        const saved = await this.saveOnboardingPersonality();
+                        if (!saved) return;
+                    }
+                    if (this.onboardingStep < 4) {
+                        this.onboardingStep += 1;
+                    }
+                },
+
+                requireOnboardingFields(form, fields) {
+                    const missing = fields.filter(field => !String(form[field.key] || '').trim());
+                    if (!missing.length) {
+                        return true;
+                    }
+                    this.showToast(this.$t('onboarding.validation_required', {
+                        fields: missing.map(field => this.$t(field.labelKey)).join(this.currentLanguage === 'en' ? ', ' : '、')
+                    }), 'error');
+                    return false;
+                },
+
+                async saveOnboardingAIModel() {
+                    const form = this.onboardingAI || {};
+                    const hasInput = ['api_key', 'base_url', 'model'].some(key => String(form[key] || '').trim());
+                    if (!hasInput && this.hasChatModelConfigured) {
+                        return true;
+                    }
+                    if (!this.requireOnboardingFields(form, [
+                        { key: 'provider', labelKey: 'onboarding.provider' },
+                        { key: 'api_key', labelKey: 'onboarding.api_key' },
+                        { key: 'base_url', labelKey: 'onboarding.base_url' },
+                        { key: 'model', labelKey: 'onboarding.model' }
+                    ])) {
+                        return false;
+                    }
+                    this.isLoading = true;
+                    try {
+                        const res = await api.post('/api/ai-models', {
+                            name: form.model ? `Chat - ${form.model}` : 'Chat Model',
+                            purpose: 'chat',
+                            provider: form.provider || 'openai',
+                            provider_type: form.provider_type || 'openai_compatible',
+                            api_key: form.api_key || '',
+                            base_url: form.base_url || '',
+                            model: form.model || '',
+                            enabled: true,
+                            supports_tools: true,
+                            supports_reasoning: true,
+                            supports_stream: true,
+                            temperature: 0.7,
+                            max_tokens: 2000,
+                            max_context_length: 100000
+                        });
+                        const modelId = res.data?.model?.id || res.data?.id;
+                        if (modelId) {
+                            await api.post(`/api/ai-models/${modelId}/apply`, { purpose: 'chat' });
+                        }
+                        await this.loadAIModels();
+                        this.showToast('Chat model saved', 'success');
+                        return true;
+                    } catch (e) {
+                        this.showToast('Failed to save AI model: ' + (e.response?.data?.error || e.message), 'error');
+                        return false;
+                    } finally {
+                        this.isLoading = false;
+                    }
+                },
+
+                async saveOnboardingPersonality() {
+                    const form = this.onboardingPersonality || {};
+                    if (!this.requireOnboardingFields(form, [
+                        { key: 'name', labelKey: 'onboarding.personality_name' },
+                        { key: 'systemPrompt', labelKey: 'onboarding.system_prompt' },
+                        { key: 'firstMessage', labelKey: 'onboarding.first_message' }
+                    ])) {
+                        return false;
+                    }
+                    this.isLoading = true;
+                    try {
+                        this.personality = {
+                            ...this.personality,
+                            name: form.name || this.personality.name || 'NekoBot',
+                            systemPrompt: form.systemPrompt || this.personality.systemPrompt || '',
+                            firstMessage: form.firstMessage || this.personality.firstMessage || '',
+                            state: this.personality.state || { affection: 50, mood: 'happy' }
+                        };
+                        await api.put('/api/personality', {
+                            ...this.personality,
+                            _manualSystemPrompt: true
+                        });
+                        this.activePersonality = { ...this.personality };
+                        this.personalityHasUnsavedChanges = false;
+                        this.showToast('Personality saved', 'success');
+                        return true;
+                    } catch (e) {
+                        this.showToast('Failed to save personality: ' + (e.response?.data?.error || e.message), 'error');
+                        return false;
+                    } finally {
+                        this.isLoading = false;
+                    }
+                },
+
+                async finishOnboarding() {
+                    this.isLoading = true;
+                    try {
+                        const savedPersonality = await this.saveOnboardingPersonality();
+                        if (!savedPersonality) return;
+                        const res = await api.post('/api/sessions', {
+                            name: 'First chat',
+                            type: 'web',
+                            user_id: this.username,
+                            system_prompt: this.personality.systemPrompt || this.personality.prompt || '',
+                            first_message: this.personality.firstMessage || '',
+                            sender_name: this.personality.name || 'NekoBot'
+                        });
+                        const session = res.data.session;
+                        this.sessions = [
+                            session,
+                            ...this.sessions.filter(item => item.id !== session.id)
+                        ];
+                        await this.updateOnboardingSettings({
+                            completed: true,
+                            skipped: false,
+                            completed_at: new Date().toISOString()
+                        });
+                        this.showOnboarding = false;
+                        this.chatTab = 'web';
+                        await this.selectSession(session);
+                        this.currentPage = 'chat';
+                        localStorage.setItem('nbot_home_page', 'chat');
+                        localStorage.setItem('nbot_home_page', 'chat');
+                    } catch (e) {
+                        this.showToast('Failed to finish onboarding: ' + (e.response?.data?.error || e.message), 'error');
+                    } finally {
+                        this.isLoading = false;
                     }
                 },
 
@@ -2180,6 +2422,7 @@ def main(params):
                 },
 
                 async loadAIModels() {
+                    this.aiModelsLoaded = false;
                     try {
                         const res = await api.get('/api/ai-models');
                         this.aiModels = res.data.models || [];
@@ -2188,6 +2431,8 @@ def main(params):
                         await this.loadActiveModelsByPurpose();
                     } catch (e) {
                         console.error('Failed to load AI models:', e);
+                    } finally {
+                        this.aiModelsLoaded = true;
                     }
                 },
 
@@ -2581,7 +2826,9 @@ def main(params):
                             name: defaultName,
                             type: 'web',
                             user_id: this.username,
-                            system_prompt: this.personality.systemPrompt || this.personality.prompt
+                            system_prompt: this.personality.systemPrompt || this.personality.prompt,
+                            first_message: this.personality.firstMessage || '',
+                            sender_name: this.personality.name || 'NekoBot'
                         });
                         const newSession = { ...res.data.session, _isNew: true };
                         this.sessions = [

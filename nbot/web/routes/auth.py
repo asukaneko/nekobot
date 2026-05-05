@@ -27,6 +27,7 @@ def register_auth_routes(app, server):
         return str(payload.get("token", "")).strip()
 
     @app.route("/")
+    @app.route("/dashboard")
     def index():
         template_path = os.path.join(
             os.path.dirname(os.path.dirname(__file__)), "templates", "index.html"

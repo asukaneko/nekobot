@@ -141,6 +141,8 @@ const live2dModels = [
             '.nbot-live2d-hitbox.is-dragging { cursor: grabbing; }',
             '#oml2d-menus, #oml2d-statusBar { display: none !important; }',
             '#oml2d-tips { top: -68px !important; left: 0 !important; right: 0 !important; margin-left: auto !important; margin-right: auto !important; }',
+            /* 登录页面隐藏看板娘 */
+            'body:has(.login-container) #oml2d-canvas, body:has(.login-container) #nbot-live2d-hitbox { display: none !important; }',
             '#nbot-live2d-menu { position: fixed; z-index: 10000; display: none; width: 184px; padding: 8px; border: 1px solid rgba(148,163,184,0.18); border-radius: 10px; background: rgba(15,23,42,0.94); box-shadow: 0 18px 48px rgba(0,0,0,0.36), inset 0 1px 0 rgba(255,255,255,0.06); backdrop-filter: blur(14px); color: #e6edf3; }',
             '#nbot-live2d-menu.is-visible { display: block; animation: nbot-live2d-menu-in 120ms ease-out; }',
             '#nbot-live2d-menu::after { content: ""; position: absolute; right: -6px; top: 30px; width: 10px; height: 10px; transform: rotate(45deg); background: rgba(15,23,42,0.94); border-top: 1px solid rgba(148,163,184,0.18); border-right: 1px solid rgba(148,163,184,0.18); }',
