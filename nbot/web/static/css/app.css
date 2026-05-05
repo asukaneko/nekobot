@@ -1683,6 +1683,7 @@
             color: var(--text-secondary);
             background: var(--bg-secondary);
             cursor: pointer;
+            transition: left 0.3s cubic-bezier(0.4, 0, 0.2, 1);
         }
 
         .chat-list-toggle:hover {
@@ -2792,11 +2793,17 @@
 
         .chat-sidebar {
             width: 280px;
+            min-width: 280px;
             background: var(--bg-secondary);
             border: 1px solid var(--border-color);
             border-radius: 12px;
             display: flex;
             flex-direction: column;
+            transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+                        min-width 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+                        opacity 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+                        padding 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+                        border-width 0.3s cubic-bezier(0.4, 0, 0.2, 1);
         }
 
         .chat-sidebar-header {

@@ -5871,7 +5871,12 @@ def main(params):
                     } else {
                         prompt = '请定义你的角色设定。';
                     }
-                    
+
+                    // 替换模板变量 {{user}} -> 当前登录用户名
+                    if (this.username) {
+                        prompt = prompt.replace(/\{\{user\}\}/g, this.username);
+                    }
+
                     this.infoModalConfig = {
                         title: 'Prompt 预览',
                         message: `<pre style="white-space: pre-wrap; word-break: break-word; font-size: 13px; line-height: 1.6;">${this.escapeHtml(prompt)}</pre>`,

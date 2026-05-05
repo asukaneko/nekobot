@@ -621,8 +621,8 @@
                                 </button>
                             </div>
                             <div class="mobile-chat-bar">
-                                <button class="mobile-chat-nav-btn" @click="toggleMobileMenu" title="菜单">
-                                    <i class="fas fa-bars"></i>
+                                <button class="mobile-chat-nav-btn" @click="goDashboard()" title="控制台">
+                                    <i class="fas fa-chart-line"></i>
                                 </button>
                                 <button class="mobile-chat-current" @click="openMobileChatPicker" title="选择会话">
                                     <span class="mobile-chat-current-icon">
@@ -1684,6 +1684,10 @@
                                     </div>
                                 </div>
                                 <div class="card-body">
+                                    <div v-if="username" style="background: linear-gradient(135deg, rgba(99,102,241,0.08), rgba(139,92,246,0.06)); border: 1px solid var(--border-color); border-radius: 8px; padding: 10px 14px; margin-bottom: 16px; font-size: 13px; color: var(--text-secondary); display: flex; align-items: flex-start; gap: 8px; line-height: 1.5;">
+                                        <i class="fas fa-info-circle" style="color: var(--accent-primary); margin-top: 1px; flex-shrink: 0;"></i>
+                                        <span>在任意文本字段中使用 <code v-pre style="background: var(--bg-tertiary); padding: 1px 5px; border-radius: 3px; font-size: 12px; color: var(--accent-primary);">{{user}}</code>，聊天时会自动替换为当前登录用户 <strong>{{ username }}</strong></span>
+                                    </div>
                                     <!-- 基础信息 -->
                                     <div class="form-section">
                                         <div class="section-title">

@@ -2455,8 +2455,11 @@ class WebChatServer:
         system_prompt = self.personality.get("systemPrompt", "")
         if not system_prompt:
             _log.warning("systemPrompt is empty, compiling from personality data")
-            system_prompt = compile_personality_prompt(self.personality)
+            system_prompt = compile_personality_prompt(self.personality, user_name=user_id)
             _log.info(f"Compiled system_prompt length: {len(system_prompt)}")
+        else:
+            # 替换模板变量 {{user}} -> 当前用户名
+            system_prompt = system_prompt.replace('{{user}}', user_id or '')
 
         # 获取所有记忆（标题+摘要）并加入系统提示词
         memory_items = []
@@ -2512,6 +2515,7 @@ class WebChatServer:
         # 如果有开场白，添加为第一条 assistant 消息
         first_message = self.personality.get("firstMessage", "")
         if first_message:
+            first_message = first_message.replace('{{user}}', user_id or '')
             messages.append({
                 "role": "assistant", 
                 "content": first_message,

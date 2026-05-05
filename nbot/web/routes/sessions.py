@@ -87,6 +87,11 @@ def register_session_routes(app, server):
         system_prompt = data.get(
             "system_prompt", server.personality.get("systemPrompt", "")
         )
+
+        # 替换模板变量 {{user}} -> 当前用户名
+        user_id = data.get("user_id", "")
+        if user_id:
+            system_prompt = system_prompt.replace('{{user}}', user_id)
     
         # 获取所有记忆（标题+摘要）并加入系统提示词
         memory_items = []
@@ -157,6 +162,8 @@ def register_session_routes(app, server):
         # 优先使用请求中指定的 first_message，否则使用当前角色的开场白
         first_message = data.get("first_message") or server.personality.get("firstMessage", "")
         if first_message:
+            if user_id:
+                first_message = first_message.replace('{{user}}', user_id)
             session["messages"].append({
                 "role": "assistant",
                 "content": first_message,
