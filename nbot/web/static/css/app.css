@@ -9048,6 +9048,11 @@
                 box-shadow: 0 -18px 48px rgba(0, 0, 0, 0.45);
             }
 
+            /* 频道下拉菜单打开时允许溢出 */
+            .chat-sidebar.has-channel-dropdown-open {
+                overflow: visible;
+            }
+
             .chat-sidebar.mobile-chat-picker-open {
                 transform: translateY(0);
             }
@@ -9099,6 +9104,17 @@
                 overflow-x: auto;
                 border-bottom: 1px solid var(--border-color);
                 scrollbar-width: none;
+            }
+
+            .channel-dropdown {
+                top: auto;
+                bottom: calc(100% + 8px);
+                transform-origin: bottom center;
+                max-height: 320px;
+                transform: translateY(8px) scale(0.96);
+            }
+            .channel-dropdown.open {
+                transform: translateY(0) scale(1);
             }
 
             .chat-tabs::-webkit-scrollbar,

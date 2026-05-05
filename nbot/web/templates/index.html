@@ -267,7 +267,7 @@
                     <div v-if="currentPage === 'chat'" class="chat-layout fade-in">
                         <div class="mobile-chat-picker-overlay" :class="{ active: isMobileChatPickerOpen }" @click="closeMobileChatPicker"></div>
                         
-                        <div class="chat-sidebar" :class="{ 'mobile-chat-picker-open': isMobileChatPickerOpen }">
+                        <div class="chat-sidebar" :class="{ 'mobile-chat-picker-open': isMobileChatPickerOpen, 'has-channel-dropdown-open': showChannelDropdown }">
                             <div class="mobile-chat-picker-head">
                                 <div>
                                     <div class="mobile-chat-picker-title">选择会话</div>
@@ -413,6 +413,14 @@
                                             {{ session.message_count }} 条消息 · {{ formatTime(session.created_at) }}
                                         </div>
                                     </div>
+                                    <div class="session-actions" @click.stop>
+                                        <button class="btn-icon-small" @click="viewWebSessionDetails(session)" title="查看详情">
+                                            <i class="fas fa-info-circle"></i>
+                                        </button>
+                                        <button class="btn-icon-small" @click="deleteWebSession(session)" title="删除" style="color: var(--danger);">
+                                            <i class="fas fa-trash"></i>
+                                        </button>
+                                    </div>
                                 </div>
                                 <div v-if="filteredSessions.length === 0" class="empty-hint">
                                     暂无会话，点击上方按钮创建
@@ -502,6 +510,14 @@
                                         <div class="session-meta">
                                             {{ session.message_count || 0 }} 条消息 · {{ formatTime(session.created_at) }}
                                         </div>
+                                    </div>
+                                    <div class="session-actions" @click.stop>
+                                        <button class="btn-icon-small" @click="viewWebSessionDetails(session)" title="查看详情">
+                                            <i class="fas fa-info-circle"></i>
+                                        </button>
+                                        <button class="btn-icon-small" @click="deleteWebSession(session)" title="删除" style="color: var(--danger);">
+                                            <i class="fas fa-trash"></i>
+                                        </button>
                                     </div>
                                 </div>
                                 <div v-if="filteredChannelSessions.length === 0" class="empty-hint">
@@ -1160,8 +1176,8 @@
                                                 </div>
                                             </td>
                                             <td>
-                                                <span class="badge" :class="session.type === 'qq' ? 'badge-info' : 'badge-success'">
-                                                    {{ session.type === 'qq' ? 'QQ' : 'Web' }}
+                                                <span class="badge" :class="session.type === 'qq' ? 'badge-info' : session.type === 'cli' ? 'badge-warning' : 'badge-success'">
+                                                    {{ session.type === 'qq' ? 'QQ' : session.type === 'cli' ? 'CLI' : session.type === 'web' ? 'Web' : (session.type || '未知') }}
                                                 </span>
                                             </td>
                                             <td>{{ session.message_count }}</td>
@@ -1683,26 +1699,26 @@
                             <!-- 右侧：角色卡列表 -->
                             <div style="display: flex; flex-direction: column; gap: 20px;">
                                 <!-- 当前角色卡预览 -->
-                                <div class="card" v-if="personality.name">
+                                <div class="card" v-if="activePersonality.name">
                                     <div class="card-header">
                                         <span class="card-title">当前角色卡</span>
                                     </div>
                                     <div class="card-body" style="padding: 16px;">
                                         <div style="display: flex; align-items: center; gap: 16px; margin-bottom: 16px;">
                                             <div style="width: 64px; height: 64px; background: linear-gradient(135deg, var(--primary), var(--accent)); border-radius: 16px; display: flex; align-items: center; justify-content: center;">
-                                                <i :class="personality.avatar || 'fas fa-user-circle'" style="font-size: 36px; color: white;"></i>
+                                                <i :class="activePersonality.avatar || 'fas fa-user-circle'" style="font-size: 36px; color: white;"></i>
                                             </div>
                                             <div style="flex: 1;">
-                                                <div style="font-weight: 600; font-size: 18px; margin-bottom: 4px;">{{ personality.name }}</div>
-                                                <div style="font-size: 13px; color: var(--text-muted); line-height: 1.4;">{{ personality.description || '暂无描述' }}</div>
+                                                <div style="font-weight: 600; font-size: 18px; margin-bottom: 4px;">{{ activePersonality.name }}</div>
+                                                <div style="font-size: 13px; color: var(--text-muted); line-height: 1.4;">{{ activePersonality.description || '暂无描述' }}</div>
                                             </div>
                                         </div>
-                                        <div v-if="personality.tags && personality.tags.length > 0" style="display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px;">
-                                            <span v-for="tag in personality.tags" :key="tag" class="badge badge-secondary">{{ tag }}</span>
+                                        <div v-if="activePersonality.tags && activePersonality.tags.length > 0" style="display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px;">
+                                            <span v-for="tag in activePersonality.tags" :key="tag" class="badge badge-secondary">{{ tag }}</span>
                                         </div>
                                         <div style="display: flex; gap: 12px; font-size: 12px; color: var(--text-muted);">
-                                            <span><i class="fas fa-heart" style="color: var(--danger);"></i> 好感度: {{ personality.state.affection }}</span>
-                                            <span><i class="fas fa-smile" style="color: var(--warning);"></i> 心情: {{ personality.state.mood }}</span>
+                                            <span><i class="fas fa-heart" style="color: var(--danger);"></i> 好感度: {{ activePersonality.state.affection }}</span>
+                                            <span><i class="fas fa-smile" style="color: var(--warning);"></i> 心情: {{ activePersonality.state.mood }}</span>
                                         </div>
                                     </div>
                                 </div>
@@ -5864,6 +5880,7 @@
                     customPersonalityPresets: [], // 用户自定义人格预设
                     personalityHasUnsavedChanges: false, // 是否有未保存的修改
                     _manualSystemPrompt: false, // 用户是否手动编辑了系统提示词
+                    activePersonality: {}, // 服务器端当前实际应用的角色
                     personalityTagsInput: '', // 标签输入框的临时值
                     showAvatarPicker: false, // 头像选择器
                     customAvatarInput: '', // 自定义头像输入
@@ -6495,11 +6512,8 @@
                 },
 
                 managedSessions() {
-                    let sessionPool = this.sessions.filter(s => {
-                        if (this.chatTab === 'cli') return s.type === 'cli';
-                        if (this.chatTab === 'web') return s.type === 'web';
-                        return false;
-                    });
+                    // 会话管理页面显示所有会话（CLI 除外）
+                    let sessionPool = this.sessions.filter(s => s.type !== 'cli');
                     if (this.sessionArchiveFilter === 'active') {
                         sessionPool = sessionPool.filter(s => !s.archived);
                     } else if (this.sessionArchiveFilter === 'archived') {

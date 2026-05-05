@@ -1337,6 +1337,7 @@ const NbotMethods = {
                     try {
                         const res = await api.get('/api/personality');
                         this.personality = res.data;
+                        this.activePersonality = { ...res.data };
                         this.personalityTagsInput = (this.personality.tags || []).join(' ');
                     } catch (e) {
                         console.error('Failed to load personality:', e);
@@ -3653,7 +3654,61 @@ def main(params):
                         }
                     });
                 },
-                
+
+                // Web 会话详情
+                async viewWebSessionDetails(session) {
+                    try {
+                        const res = await api.get('/api/sessions/' + session.id);
+                        const fullSession = res.data;
+                        if (fullSession.error) {
+                            this.showToast('会话不存在或已被删除', 'error');
+                            return;
+                        }
+                        this.viewingSession = {
+                            id: fullSession.id || session.id,
+                            name: fullSession.name || session.name,
+                            type: fullSession.type || session.type,
+                            user_id: fullSession.user_id || session.user_id || '',
+                            created_at: fullSession.created_at || session.created_at,
+                            message_count: fullSession.message_count || session.message_count || 0,
+                            system_prompt: fullSession.system_prompt || session.system_prompt || '',
+                            archived: fullSession.archived || false,
+                            channel_id: fullSession.channel_id || '',
+                            messages: fullSession.messages || []
+                        };
+                        this.showSessionDetailsModal = true;
+                    } catch (e) {
+                        console.error('获取会话详情失败:', e);
+                        this.showToast('获取详情失败', 'error');
+                    }
+                },
+
+                // Web 会话删除
+                deleteWebSession(session) {
+                    this.showConfirm({
+                        title: '删除会话',
+                        message: '确定要删除会话 "' + session.name + '" 吗？此操作不可恢复。',
+                        confirmText: '删除',
+                        icon: 'fa-trash',
+                        iconColor: 'var(--error)',
+                        danger: true,
+                        action: async () => {
+                            try {
+                                await api.delete('/api/sessions/' + session.id);
+                                this.sessions = this.sessions.filter(s => s.id !== session.id);
+                                if (this.currentSession && this.currentSession.id === session.id) {
+                                    this.currentSession = null;
+                                    this.currentMessages = [];
+                                }
+                                this.showToast('会话已删除', 'success');
+                            } catch (e) {
+                                console.error('删除会话失败:', e);
+                                this.showToast('删除失败: ' + (e.response?.data?.error || e.message), 'error');
+                            }
+                        }
+                    });
+                },
+
                 handleQqMessagesScroll() {
                     const container = this.$refs.qqMessagesContainer;
                     if (!container) return;
@@ -3734,6 +3789,19 @@ def main(params):
                 },
                 
                 openSession(session) {
+                    // 根据会话类型和频道自动切换 chatTab
+                    const channelId = session.channel_id || session.metadata?.channel_id;
+                    if (channelId) {
+                        const channelExists = this.registeredChannels.some(ch => ch.id === channelId);
+                        if (channelExists) {
+                            this.chatTab = 'channel_' + channelId;
+                        } else {
+                            // 频道已删除，回退到会话原始类型
+                            this.chatTab = session.type || 'web';
+                        }
+                    } else {
+                        this.chatTab = session.type || 'web';
+                    }
                     this.currentPage = 'chat';
                     this.isMobileChatPickerOpen = false;
                     this.selectSession(session);
@@ -5457,6 +5525,7 @@ def main(params):
                             ...this.personality,
                             _manualSystemPrompt: this._manualSystemPrompt || false
                         });
+                        this.activePersonality = { ...this.personality };
                         this.personalityHasUnsavedChanges = false;
                         this.showToast('人格设置已保存', 'success');
                     } catch (e) {
