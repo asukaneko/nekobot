@@ -351,3 +351,61 @@ def register_personality_routes(app, server):
         except Exception as e:
             _log.error(f"导入角色卡失败: {e}")
             return jsonify({"success": False, "error": f"导入失败: {str(e)}"}), 500
+
+    @app.route("/api/personality/ai-generate-first-message", methods=["POST"])
+    def ai_generate_first_message():
+        """AI 根据角色设定随机生成开场白"""
+        data = request.json or {}
+
+        if not server.ai_client:
+            return jsonify({"success": False, "error": "AI 客户端未初始化"}), 503
+
+        name = data.get("name", "")
+        basic_info = data.get("basicInfo", "")
+        personality = data.get("personality", "")
+        scenario = data.get("scenario", "")
+
+        if not name:
+            return jsonify({"success": False, "error": "请先填写角色名称"}), 400
+
+        char_context = f"角色名称：{name}"
+        if basic_info:
+            char_context += f"\n基本信息：{basic_info}"
+        if personality:
+            char_context += f"\n性格特点：{personality}"
+        if scenario:
+            char_context += f"\n背景设定：{scenario}"
+
+        try:
+            response = server.ai_client.chat_completion(
+                model=server.ai_model,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": (
+                            "你是一个角色扮演游戏的开场白设计师。根据角色设定，生成一个生动、自然、有画面感的开场白。\n\n"
+                            "要求：\n"
+                            "- 用括号描写角色的动作、神态（如：（微微一笑）（推了推眼镜））\n"
+                            "- 语气要符合角色性格\n"
+                            "- 自然口语化，不要朗诵腔\n"
+                            "- 30-80字\n"
+                            "- 不同风格各不同，不要每次都生成类似的\n"
+                            "- 直接返回开场白，不要引号或解释"
+                        ),
+                    },
+                    {
+                        "role": "user",
+                        "content": f"请为以下角色随机生成一个开场白：\n\n{char_context}",
+                    },
+                ],
+                stream=False,
+            )
+
+            result = response.choices[0].message.content.strip()
+            result = result.strip("\"'「」『』【】()（）")
+
+            return jsonify({"success": True, "firstMessage": result})
+
+        except Exception as e:
+            _log.error(f"AI 生成开场白失败: {e}")
+            return jsonify({"success": False, "error": f"生成失败: {str(e)}"}), 500

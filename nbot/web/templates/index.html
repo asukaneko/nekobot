@@ -1600,7 +1600,12 @@
                                             <textarea v-model="personality.scenario" class="form-textarea" rows="3" placeholder="描述角色的背景故事、世界观..." @change="personalityHasUnsavedChanges = true"></textarea>
                                         </div>
                                         <div class="form-group">
-                                            <label class="form-label">开场白 (First Message)</label>
+                                            <label class="form-label" style="display: flex; align-items: center; gap: 8px;">
+                                                开场白 (First Message)
+                                                <button class="btn btn-sm" @click="aiGenerateFirstMessage" :disabled="isLoading || !personality.name" style="font-size: 11px; padding: 2px 8px; background: linear-gradient(135deg, #8b5cf6, #6366f1); color: white; border: none; border-radius: 4px;">
+                                                    <i class="fas fa-dice"></i> 随机生成
+                                                </button>
+                                            </label>
                                             <textarea v-model="personality.firstMessage" class="form-textarea" rows="4" placeholder="新建会话时 AI 会自动发送的第一次消息..." @change="personalityHasUnsavedChanges = true"></textarea>
                                             <div class="form-hint">留空则不自动发送开场消息</div>
                                         </div>

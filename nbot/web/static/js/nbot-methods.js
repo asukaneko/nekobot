@@ -5822,6 +5822,35 @@ def main(params):
                         event.target.value = '';
                     }
                 },
+
+                // AI随机生成开场白
+                async aiGenerateFirstMessage() {
+                    if (!this.personality.name) {
+                        this.showToast('请先填写角色名称', 'error');
+                        return;
+                    }
+                    this.isLoading = true;
+                    try {
+                        const res = await api.post('/api/personality/ai-generate-first-message', {
+                            name: this.personality.name,
+                            basicInfo: this.personality.basicInfo || '',
+                            personality: this.personality.personality || '',
+                            scenario: this.personality.scenario || '',
+                        });
+                        if (res.data.success) {
+                            this.personality.firstMessage = res.data.firstMessage;
+                            this.personalityHasUnsavedChanges = true;
+                            this.showToast('开场白已生成', 'success');
+                        } else {
+                            this.showToast(res.data.error || '生成失败', 'error');
+                        }
+                    } catch (e) {
+                        console.error('生成开场白失败:', e);
+                        this.showToast('生成失败: ' + (e.response?.data?.error || e.message), 'error');
+                    } finally {
+                        this.isLoading = false;
+                    }
+                },
                 
                 // Memory Functions
                 async exportMemory() {
