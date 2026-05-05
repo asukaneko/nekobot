@@ -763,6 +763,10 @@ const NbotMethods = {
 
                 // 获取当前频道的渐变颜色
                 getCurrentChannelGradient() {
+                    // 如果选择了角色筛选，使用角色主题色
+                    if (this.selectedSenderFilter) {
+                        return 'linear-gradient(135deg, #f093fb 0%, #f5576c 100%)';
+                    }
                     const tab = this.chatTab || 'web';
                     // 如果是自定义频道
                     if (tab.startsWith('channel_')) {
@@ -783,6 +787,10 @@ const NbotMethods = {
 
                 // 获取当前频道的图标
                 getCurrentChannelIcon() {
+                    // 如果选择了角色筛选，使用角色图标
+                    if (this.selectedSenderFilter) {
+                        return 'fas fa-user-circle';
+                    }
                     const tab = this.chatTab || 'web';
                     // 如果是自定义频道
                     if (tab.startsWith('channel_')) {
@@ -803,6 +811,13 @@ const NbotMethods = {
 
                 // 获取当前频道名称
                 getCurrentChannelName() {
+                    // 如果选择了角色筛选，显示角色名
+                    if (this.selectedSenderFilter) {
+                        if (this.selectedSenderFilter === '*') {
+                            return '全部角色';
+                        }
+                        return this.selectedSenderFilter;
+                    }
                     const tab = this.chatTab || 'web';
                     // 如果是自定义频道
                     if (tab.startsWith('channel_')) {

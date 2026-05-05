@@ -363,116 +363,170 @@
                                         <i :class="getCurrentChannelIcon()"></i>
                                     </div>
                                     <div class="current-channel-info">
-                                        <div class="current-channel-name">{{ getCurrentChannelName() }}</div>
-                                        <div class="current-channel-desc">点击切换频道</div>
+                                        <div class="current-channel-name" :class="{ 'has-role-filter': selectedSenderFilter }">{{ getCurrentChannelName() }}</div>
+                                        <div class="current-channel-desc">{{ selectedSenderFilter ? (selectedSenderFilter === '*' ? '显示所有有角色的会话' : '角色筛选中') : '点击切换频道' }}</div>
                                     </div>
                                     <i class="fas fa-chevron-down"></i>
                                 </button>
                                 
-                                <!-- 频道下拉菜单 -->
+                                <!-- 频道/角色下拉菜单 -->
                                 <div class="channel-dropdown" :class="{ open: showChannelDropdown }" v-click-outside="closeChannelDropdown">
                                     <div class="channel-dropdown-header">
-                                        <div class="channel-dropdown-title">选择频道</div>
+                                        <div class="channel-dropdown-tabs">
+                                            <button 
+                                                class="channel-dropdown-tab" 
+                                                :class="{ active: dropdownTab === 'channel' }"
+                                                @click="dropdownTab = 'channel'"
+                                            >
+                                                <i class="fas fa-broadcast-tower"></i> 频道
+                                            </button>
+                                            <button 
+                                                class="channel-dropdown-tab" 
+                                                :class="{ active: dropdownTab === 'role' }"
+                                                @click="dropdownTab = 'role'"
+                                                v-if="uniqueSessionSenders.length > 0"
+                                            >
+                                                <i class="fas fa-user-tag"></i> 角色
+                                            </button>
+                                        </div>
                                         <button class="channel-dropdown-close" @click="closeChannelDropdown">
                                             <i class="fas fa-times"></i>
                                         </button>
                                     </div>
                                     <div class="channel-dropdown-content">
-                                        <!-- 内置频道组 -->
-                                        <div class="channel-dropdown-group">
-                                            <div class="channel-dropdown-group-title">内置频道</div>
-                                            <button 
-                                                class="channel-dropdown-item" 
-                                                :class="{ active: chatTab === 'web' }"
-                                                @click="switchChatTab('web'); closeChannelDropdown()"
-                                            >
-                                                <div class="channel-dropdown-icon" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);">
-                                                    <i class="fas fa-globe"></i>
-                                                </div>
-                                                <div class="channel-dropdown-info">
-                                                    <div class="channel-dropdown-name">Web</div>
-                                                    <div class="channel-dropdown-desc">网页会话</div>
-                                                </div>
-                                            </button>
-                                            <button 
-                                                class="channel-dropdown-item" 
-                                                :class="{ active: chatTab === 'cli' }"
-                                                @click="switchChatTab('cli'); closeChannelDropdown()"
-                                            >
-                                                <div class="channel-dropdown-icon" style="background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);">
-                                                    <i class="fas fa-terminal"></i>
-                                                </div>
-                                                <div class="channel-dropdown-info">
-                                                    <div class="channel-dropdown-name">CLI 终端</div>
-                                                    <div class="channel-dropdown-desc">命令行会话</div>
-                                                </div>
-                                            </button>
-                                            <button 
-                                                class="channel-dropdown-item" 
-                                                :class="{ active: chatTab === 'qq_private' }"
-                                                @click="switchChatTab('qq_private'); closeChannelDropdown()"
-                                            >
-                                                <div class="channel-dropdown-icon" style="background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);">
-                                                    <i class="fab fa-qq"></i>
-                                                </div>
-                                                <div class="channel-dropdown-info">
-                                                    <div class="channel-dropdown-name">QQ 私聊</div>
-                                                    <div class="channel-dropdown-desc">QQ 私人消息</div>
-                                                </div>
-                                            </button>
-                                            <button 
-                                                class="channel-dropdown-item" 
-                                                :class="{ active: chatTab === 'qq_group' }"
-                                                @click="switchChatTab('qq_group'); closeChannelDropdown()"
-                                            >
-                                                <div class="channel-dropdown-icon" style="background: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%);">
-                                                    <i class="fas fa-users"></i>
-                                                </div>
-                                                <div class="channel-dropdown-info">
-                                                    <div class="channel-dropdown-name">QQ 群聊</div>
-                                                    <div class="channel-dropdown-desc">QQ 群组消息</div>
-                                                </div>
-                                            </button>
+                                        <!-- 频道列表 -->
+                                        <div v-if="dropdownTab === 'channel'" class="dropdown-tab-panel">
+                                            <!-- 内置频道组 -->
+                                            <div class="channel-dropdown-group">
+                                                <div class="channel-dropdown-group-title">内置频道</div>
+                                                <button 
+                                                    class="channel-dropdown-item" 
+                                                    :class="{ active: chatTab === 'web' && !selectedSenderFilter }"
+                                                    @click="switchChatTab('web'); selectedSenderFilter = ''; closeChannelDropdown()"
+                                                >
+                                                    <div class="channel-dropdown-icon" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);">
+                                                        <i class="fas fa-globe"></i>
+                                                    </div>
+                                                    <div class="channel-dropdown-info">
+                                                        <div class="channel-dropdown-name">Web</div>
+                                                        <div class="channel-dropdown-desc">网页会话</div>
+                                                    </div>
+                                                </button>
+                                                <button 
+                                                    class="channel-dropdown-item" 
+                                                    :class="{ active: chatTab === 'cli' }"
+                                                    @click="switchChatTab('cli'); selectedSenderFilter = ''; closeChannelDropdown()"
+                                                >
+                                                    <div class="channel-dropdown-icon" style="background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);">
+                                                        <i class="fas fa-terminal"></i>
+                                                    </div>
+                                                    <div class="channel-dropdown-info">
+                                                        <div class="channel-dropdown-name">CLI 终端</div>
+                                                        <div class="channel-dropdown-desc">命令行会话</div>
+                                                    </div>
+                                                </button>
+                                                <button 
+                                                    class="channel-dropdown-item" 
+                                                    :class="{ active: chatTab === 'qq_private' }"
+                                                    @click="switchChatTab('qq_private'); selectedSenderFilter = ''; closeChannelDropdown()"
+                                                >
+                                                    <div class="channel-dropdown-icon" style="background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);">
+                                                        <i class="fab fa-qq"></i>
+                                                    </div>
+                                                    <div class="channel-dropdown-info">
+                                                        <div class="channel-dropdown-name">QQ 私聊</div>
+                                                        <div class="channel-dropdown-desc">QQ 私人消息</div>
+                                                    </div>
+                                                </button>
+                                                <button 
+                                                    class="channel-dropdown-item" 
+                                                    :class="{ active: chatTab === 'qq_group' }"
+                                                    @click="switchChatTab('qq_group'); selectedSenderFilter = ''; closeChannelDropdown()"
+                                                >
+                                                    <div class="channel-dropdown-icon" style="background: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%);">
+                                                        <i class="fas fa-users"></i>
+                                                    </div>
+                                                    <div class="channel-dropdown-info">
+                                                        <div class="channel-dropdown-name">QQ 群聊</div>
+                                                        <div class="channel-dropdown-desc">QQ 群组消息</div>
+                                                    </div>
+                                                </button>
+                                            </div>
+                                            
+                                            <!-- 注册频道组 -->
+                                            <div class="channel-dropdown-group" v-if="registeredChannels.length > 0">
+                                                <div class="channel-dropdown-group-title">扩展频道</div>
+                                                <button 
+                                                    v-for="channel in registeredChannels" 
+                                                    :key="channel.id"
+                                                    class="channel-dropdown-item" 
+                                                    :class="{ active: chatTab === 'channel_' + channel.id }"
+                                                    @click="switchToChannelTab(channel); selectedSenderFilter = ''; closeChannelDropdown()"
+                                                >
+                                                    <div class="channel-dropdown-icon" :style="{ background: getChannelGradient(channel) }">
+                                                        <i :class="getChannelIcon(channel)"></i>
+                                                    </div>
+                                                    <div class="channel-dropdown-info">
+                                                        <div class="channel-dropdown-name">{{ channel.name }}</div>
+                                                        <div class="channel-dropdown-desc">{{ channel.description || channel.type }}</div>
+                                                    </div>
+                                                    <div class="channel-dropdown-status" :class="{ connected: channel.ws_connected || channel.enabled }">
+                                                        <i class="fas fa-circle"></i>
+                                                    </div>
+                                                </button>
+                                            </div>
                                         </div>
                                         
-                                        <!-- 注册频道组 -->
-                                        <div class="channel-dropdown-group" v-if="registeredChannels.length > 0">
-                                            <div class="channel-dropdown-group-title">扩展频道</div>
-                                            <button 
-                                                v-for="channel in registeredChannels" 
-                                                :key="channel.id"
-                                                class="channel-dropdown-item" 
-                                                :class="{ active: chatTab === 'channel_' + channel.id }"
-                                                @click="switchToChannelTab(channel); closeChannelDropdown()"
-                                            >
-                                                <div class="channel-dropdown-icon" :style="{ background: getChannelGradient(channel) }">
-                                                    <i :class="getChannelIcon(channel)"></i>
-                                                </div>
-                                                <div class="channel-dropdown-info">
-                                                    <div class="channel-dropdown-name">{{ channel.name }}</div>
-                                                    <div class="channel-dropdown-desc">{{ channel.description || channel.type }}</div>
-                                                </div>
-                                                <div class="channel-dropdown-status" :class="{ connected: channel.ws_connected || channel.enabled }">
-                                                    <i class="fas fa-circle"></i>
-                                                </div>
-                                            </button>
+                                        <!-- 角色列表 -->
+                                        <div v-if="dropdownTab === 'role'" class="dropdown-tab-panel">
+                                            <div class="channel-dropdown-group">
+                                                <div class="channel-dropdown-group-title">按角色筛选</div>
+                                                <button 
+                                                    class="channel-dropdown-item" 
+                                                    :class="{ active: selectedSenderFilter === '*' }"
+                                                    @click="selectedSenderFilter = '*'; closeChannelDropdown()"
+                                                >
+                                                    <div class="channel-dropdown-icon" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);">
+                                                        <i class="fas fa-layer-group"></i>
+                                                    </div>
+                                                    <div class="channel-dropdown-info">
+                                                        <div class="channel-dropdown-name">全部角色</div>
+                                                        <div class="channel-dropdown-desc">显示所有有角色的会话</div>
+                                                    </div>
+                                                </button>
+                                                <button 
+                                                    v-for="sender in uniqueSessionSenders" 
+                                                    :key="sender"
+                                                    class="channel-dropdown-item"
+                                                    :class="{ active: selectedSenderFilter === sender }"
+                                                    @click="selectedSenderFilter = sender; closeChannelDropdown()"
+                                                >
+                                                    <div class="channel-dropdown-icon" style="background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);">
+                                                        <i class="fas fa-user-circle"></i>
+                                                    </div>
+                                                    <div class="channel-dropdown-info">
+                                                        <div class="channel-dropdown-name">{{ sender }}</div>
+                                                        <div class="channel-dropdown-desc">该角色的会话</div>
+                                                    </div>
+                                                </button>
+                                            </div>
                                         </div>
                                     </div>
                                 </div>
                             </div>
                             
-                            <div class="chat-sidebar-header" v-if="chatTab === 'web' || chatTab === 'cli'">
-                                <button v-if="chatTab === 'web'" class="btn btn-primary" style="width: 100%;" @click="createNewSession" :disabled="isLoading">
+                            <div class="chat-sidebar-header" v-if="chatTab === 'web' || chatTab === 'cli' || selectedSenderFilter">
+                                <button v-if="chatTab === 'web' && !selectedSenderFilter" class="btn btn-primary" style="width: 100%;" @click="createNewSession" :disabled="isLoading">
                                     <i class="fas fa-plus"></i> {{ $t('chat.new_session') }}
                                 </button>
-                                <div class="search-box" :style="{ marginTop: chatTab === 'web' ? '12px' : '0' }">
+                                <div class="search-box" :style="{ marginTop: (chatTab === 'web' && !selectedSenderFilter) ? '12px' : '0' }">
                                     <i class="fas fa-search" style="color: var(--text-muted);"></i>
                                     <input v-model="sessionSearch" type="text" :placeholder="$t('session.search')">
                                 </div>
                             </div>
                             
                             <!-- Web 会话列表 -->
-                            <div class="session-list" v-if="chatTab === 'web' || chatTab === 'cli'">
+                            <div class="session-list" v-if="chatTab === 'web' || chatTab === 'cli' || selectedSenderFilter">
                                 <div
                                     v-for="session in filteredSessions"
                                     :key="session.id"
@@ -510,7 +564,7 @@
                             </div>
                             
                             <!-- QQ 私聊列表 -->
-                            <div class="session-list qq-list" v-if="chatTab === 'qq_private'">
+                            <div class="session-list qq-list" v-if="chatTab === 'qq_private' && !selectedSenderFilter">
                                 <div 
                                     v-for="user in qqPrivateUsers" 
                                     :key="user.user_id"
@@ -543,7 +597,7 @@
                             </div>
                             
                             <!-- QQ 群聊列表 -->
-                            <div class="session-list qq-list" v-if="chatTab === 'qq_group'">
+                            <div class="session-list qq-list" v-if="chatTab === 'qq_group' && !selectedSenderFilter">
                                 <div 
                                     v-for="group in qqGroups" 
                                     :key="group.group_id"
@@ -576,7 +630,7 @@
                             </div>
                             
                             <!-- 自定义频道会话列表 -->
-                            <div class="session-list" v-if="chatTab.startsWith('channel_')">
+                            <div class="session-list" v-if="chatTab.startsWith('channel_') && !selectedSenderFilter">
                                 <div 
                                     v-for="session in filteredChannelSessions" 
                                     :key="session.id"
@@ -6096,6 +6150,9 @@
                     sessionArchiveFilter: 'all',
                     selectedSessions: [],  // 批量选择的会话
                     showFileMenu: false,  // 文件上传菜单显示状态
+                    selectedSenderFilter: '',  // 按角色筛选会话
+                    
+                    // 角色筛选
                     
                     // 消息样式设置
                     messageStyle: {
@@ -6135,6 +6192,7 @@
                     
                     // 频道下拉菜单
                     showChannelDropdown: false,
+                    dropdownTab: 'channel',  // 'channel' 或 'role'
                     currentChannelTab: null,  // 当前选中的注册频道
 
                     // Context Indicator
@@ -6954,14 +7012,48 @@
                 },
                 
                 filteredSessions() {
-                    const sessionPool = this.sessions.filter(s => {
-                        if (this.chatTab === 'cli') return s.type === 'cli';
-                        if (this.chatTab === 'web') return s.type === 'web';
-                        return false;
-                    }).filter(s => !s.archived);
-                    if (!this.sessionSearch) return sessionPool;
-                    const search = this.sessionSearch.toLowerCase();
-                    return sessionPool.filter(s => (s.name || '').toLowerCase().includes(search));
+                    let sessionPool;
+                    
+                    // 如果按角色筛选，显示所有该角色的会话（不受频道限制）
+                    if (this.selectedSenderFilter) {
+                        if (this.selectedSenderFilter === '*') {
+                            // 全部角色：显示所有有角色的会话
+                            sessionPool = this.sessions.filter(s => {
+                                return s.type === 'web' && s.sender_name;
+                            }).filter(s => !s.archived);
+                        } else {
+                            // 特定角色
+                            sessionPool = this.sessions.filter(s => {
+                                return s.type === 'web' && s.sender_name === this.selectedSenderFilter;
+                            }).filter(s => !s.archived);
+                        }
+                    } else {
+                        // 正常按频道筛选
+                        sessionPool = this.sessions.filter(s => {
+                            if (this.chatTab === 'cli') return s.type === 'cli';
+                            if (this.chatTab === 'web') return s.type === 'web';
+                            return false;
+                        }).filter(s => !s.archived);
+                    }
+                    
+                    // 按搜索词筛选
+                    if (this.sessionSearch) {
+                        const search = this.sessionSearch.toLowerCase();
+                        sessionPool = sessionPool.filter(s => (s.name || '').toLowerCase().includes(search));
+                    }
+                    
+                    return sessionPool;
+                },
+                
+                // 获取所有唯一的会话角色名称
+                uniqueSessionSenders() {
+                    const senders = new Set();
+                    this.sessions.forEach(s => {
+                        if (s.type === 'web' && s.sender_name) {
+                            senders.add(s.sender_name);
+                        }
+                    });
+                    return Array.from(senders).sort();
                 },
 
                 managedSessions() {
