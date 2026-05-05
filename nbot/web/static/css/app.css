@@ -1623,6 +1623,26 @@
             overflow: hidden;
         }
 
+        .app-loading-state {
+            min-height: 100vh;
+            min-height: 100dvh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 14px;
+            background: var(--bg-primary);
+            color: var(--text-secondary);
+        }
+
+        .app-loading-state img {
+            width: 72px;
+            height: 72px;
+            border-radius: 16px;
+            object-fit: cover;
+            box-shadow: var(--shadow-md);
+        }
+
         .chat-only-app .content-area {
             display: flex;
             flex-direction: column;

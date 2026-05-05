@@ -680,21 +680,33 @@ const NbotMethods = {
                 },
 
                 async loadHomeData() {
-                    await Promise.all([
-                        this.loadSessions(),
-                        this.loadSettings(),
-                        this.loadPersonality(),
-                        this.loadPersonalityPresets(),
-                        this.loadCustomPersonalityPresets(),
-                        this.loadCommandCatalog(),
-                        this.loadChannels(),
-                        this.loadAIModels()
-                    ]);
-                    this.showOnboarding = this.isChatOnlyMode && this.shouldShowOnboarding();
-                    if (this.currentPage === 'chat') {
-                        await this.enterChatHome();
-                    } else {
-                        await this.loadPageData(this.currentPage);
+                    this.appDataReady = false;
+                    try {
+                        await Promise.all([
+                            this.loadSessions(),
+                            this.loadSettings(),
+                            this.loadPersonality(),
+                            this.loadPersonalityPresets(),
+                            this.loadCustomPersonalityPresets(),
+                            this.loadCommandCatalog(),
+                            this.loadChannels(),
+                            this.loadAIModels()
+                        ]);
+                        this.showOnboarding = this.isChatOnlyMode && this.shouldShowOnboarding();
+                        if (this.showOnboarding && this.personality) {
+                            this.onboardingPersonality = {
+                                name: this.personality.name || '',
+                                systemPrompt: this.personality.systemPrompt || '',
+                                firstMessage: this.personality.firstMessage || ''
+                            };
+                        }
+                        if (this.currentPage === 'chat') {
+                            await this.enterChatHome();
+                        } else {
+                            await this.loadPageData(this.currentPage);
+                        }
+                    } finally {
+                        this.appDataReady = true;
                     }
                 },
 

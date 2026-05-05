@@ -76,6 +76,12 @@
         </div>
 
         <!-- Main App -->
+        <div v-else-if="!appDataReady" class="app-loading-state">
+            <img src="/static/neko.png" alt="NekoBot">
+            <div class="spinner"></div>
+            <div>{{ $t('app.loading_data') }}</div>
+        </div>
+
         <div v-else class="app-container" :class="{ 'chat-only-app': isChatOnlyMode }">
             <div v-if="showOnboarding" class="onboarding-overlay">
                 <div class="onboarding-card">
@@ -5761,6 +5767,7 @@
             data() {
                 return {
                     isLoggedIn: false,
+                    appDataReady: false,
                     isLoading: false,
                     loadingSessionId: localStorage.getItem('nbot_loading_session_id') || null,  // 追踪哪个会话正在加载，从localStorage恢复
                     loadingStartTime: localStorage.getItem('nbot_loading_start_time') ? parseInt(localStorage.getItem('nbot_loading_start_time')) : null,  // 记录加载开始时间，用于超时检测
@@ -5881,7 +5888,7 @@
                     uploadedFiles: [],
                     isTyping: false,
                     thinkingCards: [],  // 进度卡片列表
-                    showThinkingCard: localStorage.getItem('showThinkingCard') !== 'false',  // 是否显示进度卡片
+                    showThinkingCard: localStorage.getItem('showThinkingCard') === 'true',  // 是否显示进度卡片（默认关闭）
                     orphanCards: {},  // 找不到父消息的孤儿卡片（按 parentMsgId 分组）
                     isUserScrolling: false,
                     showScrollToBottom: false,
