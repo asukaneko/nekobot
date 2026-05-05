@@ -10159,6 +10159,26 @@
             }
         }
 
+        /* 移动端背景设定卡片适配 */
+        @media (max-width: 768px) {
+            .scenario-card {
+                margin-bottom: 16px;
+                margin-left: 10px;
+                margin-right: 10px;
+            }
+
+            .scenario-header {
+                padding: 10px 12px;
+                font-size: 13px;
+            }
+
+            .scenario-content {
+                padding: 12px;
+                font-size: 12px;
+                line-height: 1.6;
+            }
+        }
+
         /* 立绘查看器样式 */
         .portrait-viewer-overlay {
             background: rgba(0, 0, 0, 0.85);

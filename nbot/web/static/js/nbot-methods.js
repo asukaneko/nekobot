@@ -6358,6 +6358,13 @@ def main(params):
                     if (this.isLoading) return;
                     this.isLoading = true;
                     try {
+                        // 处理背景故事中的模板变量
+                        let scenario = preset.scenario || '';
+                        if (scenario) {
+                            scenario = scenario.replace(/\{\{user\}\}/g, this.username);
+                            scenario = scenario.replace(/\{\{char\}\}/g, preset.name || '');
+                        }
+
                         // 直接用预设的 systemPrompt 创建会话，不修改当前角色
                         const res = await api.post('/api/sessions', {
                             name: '新会话',
@@ -6367,7 +6374,8 @@ def main(params):
                             first_message: preset.firstMessage || '',
                             sender_name: preset.name || '',
                             sender_avatar: preset.avatar || '',
-                            sender_portrait: preset.portrait || ''
+                            sender_portrait: preset.portrait || '',
+                            scenario: scenario
                         });
                         const newSession = { ...res.data.session, _isNew: true };
                         this.sessions = [

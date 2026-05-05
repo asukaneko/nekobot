@@ -73,6 +73,7 @@ def register_session_routes(app, server):
                     "sender_name": session.get("sender_name", ""),
                     "sender_avatar": session.get("sender_avatar", ""),
                     "sender_portrait": session.get("sender_portrait", ""),
+                    "scenario": session.get("scenario", ""),
                 }
             )
 
@@ -93,7 +94,8 @@ def register_session_routes(app, server):
 
         # 替换模板变量 {{user}} -> 当前用户名, {{char}} -> 角色名称
         user_id = data.get("user_id", "")
-        char_name = server.personality.get("name", "")
+        # 优先使用请求中传入的角色名称（从角色卡创建时），否则使用当前角色的名称
+        char_name = data.get("sender_name") or server.personality.get("name", "")
         if user_id:
             system_prompt = system_prompt.replace('{{user}}', user_id)
         if char_name:
@@ -187,8 +189,14 @@ def register_session_routes(app, server):
             })
         
         # 获取背景设定，存储在会话中用于前端展示
-        scenario = server.personality.get("scenario", "")
+        # 优先使用请求中传入的 scenario（从角色卡创建时），否则使用当前角色的 scenario
+        scenario = data.get("scenario") or server.personality.get("scenario", "")
         if scenario:
+            # 替换模板变量 {{user}} -> 当前用户名, {{char}} -> 角色名称
+            if user_id:
+                scenario = scenario.replace('{{user}}', user_id)
+            if char_name:
+                scenario = scenario.replace('{{char}}', char_name)
             session["scenario"] = scenario
         if not is_web_visible_session(session_id, session):
             return jsonify({"error": "Invalid session type"}), 400
