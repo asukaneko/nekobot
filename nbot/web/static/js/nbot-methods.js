@@ -3788,7 +3788,7 @@ def main(params):
                     });
                 },
                 
-                openSession(session) {
+                async openSession(session) {
                     // 根据会话类型和频道自动切换 chatTab
                     const channelId = session.channel_id || session.metadata?.channel_id;
                     if (channelId) {
@@ -3804,7 +3804,7 @@ def main(params):
                     }
                     this.currentPage = 'chat';
                     this.isMobileChatPickerOpen = false;
-                    this.selectSession(session);
+                    await this.selectSession(session);
                 },
                 
                 editSession(session) {
@@ -3847,16 +3847,35 @@ def main(params):
                 },
                 
                 async viewSessionDetails(session) {
+                    // 先直接展示已有数据，再后台加载完整详情
+                    this.viewingSession = {
+                        id: session.id,
+                        name: session.name,
+                        type: session.type,
+                        user_id: session.user_id || '',
+                        created_at: session.created_at,
+                        message_count: session.message_count || 0,
+                        system_prompt: session.system_prompt || '',
+                        archived: session.archived || false,
+                        channel_id: session.channel_id || '',
+                    };
+                    this.showSessionDetailsModal = true;
+
+                    // 后台加载完整数据（含消息列表）
                     try {
                         const res = await api.get(`/api/sessions/${session.id}`);
-                        this.viewingSession = res.data;
-                        this.showSessionDetailsModal = true;
+                        if (res.data && !res.data.error) {
+                            this.viewingSession = {
+                                ...this.viewingSession,
+                                ...res.data,
+                                message_count: res.data.message_count || this.viewingSession.message_count,
+                            };
+                        }
                     } catch (e) {
-                        console.error('获取会话详情失败:', e);
-                        this.showToast('获取会话详情失败', 'error');
+                        console.error('加载会话完整详情失败:', e);
                     }
                 },
-                
+               
                 copySessionRawData() {
                     if (!this.viewingSession) return;
                     

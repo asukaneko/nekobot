@@ -214,16 +214,11 @@ def register_live2d_routes(app, server):
                 message = _clean_line(result.get("message") or result.get("error") or "")
                 if not message:
                     message = "已经执行完成。"
-                server.live2d_messages.append({"role": "user", "content": topic})
-                server.live2d_messages.append({"role": "assistant", "content": message})
-                if len(server.live2d_messages) > 60:
-                    server.live2d_messages = server.live2d_messages[-40:]
                 return jsonify({
                     "success": bool(result.get("success")),
                     "message": message,
                     "agent": {"used_tool": True, "tool": pending_tool.get("tool"), "tool_result": result},
                     "status": status,
-                    "history_length": len(server.live2d_messages),
                 })
 
         if topic:
@@ -237,10 +232,6 @@ def register_live2d_routes(app, server):
                         "tool": agent_result.get("tool"),
                         "arguments": agent_result.get("arguments") or {},
                     }
-                server.live2d_messages.append({"role": "user", "content": topic})
-                server.live2d_messages.append({"role": "assistant", "content": message})
-                if len(server.live2d_messages) > 60:
-                    server.live2d_messages = server.live2d_messages[-40:]
                 return jsonify({
                     "success": True,
                     "message": message,
@@ -256,12 +247,9 @@ def register_live2d_routes(app, server):
             "如果用户提出了具体话题就回应那个话题，否则请说一句自然的随机闲聊。",
         )
 
-        # Build messages: system + history + current user message
+        # Build messages: system + current user message
+        # 不携带历史记录，每次交互独立，避免跨会话上下文污染
         messages = [{"role": "system", "content": system_prompt}]
-
-        # Include recent conversation history (last 20 exchanges = 40 messages)
-        history = list(getattr(server, "live2d_messages", [])[-40:])
-        messages.extend(history)
 
         if topic:
             user_content = topic
@@ -281,18 +269,10 @@ def register_live2d_routes(app, server):
             if not message:
                 message = "我看了一下状态，现在一切都在运行。"
 
-            # Persist to invisible conversation history
-            server.live2d_messages.append({"role": "user", "content": user_content})
-            server.live2d_messages.append({"role": "assistant", "content": message})
-            # Keep memory bounded
-            if len(server.live2d_messages) > 60:
-                server.live2d_messages = server.live2d_messages[-40:]
-
             return jsonify({
                 "success": True,
                 "message": message,
                 "status": status,
-                "history_length": len(server.live2d_messages),
             })
         except Exception as exc:
             _log.warning("[Live2D] random talk failed: %s", exc)
@@ -436,10 +416,6 @@ def register_live2d_routes(app, server):
 
         messages = [{"role": "system", "content": system_prompt}]
 
-        # Include recent Live2D conversation history
-        history = list(getattr(server, "live2d_messages", [])[-10:])
-        messages.extend(history)
-
         context = (
             f"最近对话记录：\n{conversation_log}\n\n"
             "请对 AI 最后的回复发表一句简短评论（不是回答问题本身，而是评论 AI 的表现）。"
@@ -459,16 +435,8 @@ def register_live2d_routes(app, server):
             _log.warning("[Live2D] comment failed, using fallback: %s", exc)
             message = None
 
-        # Only append to history if we got a real response
-        if message:
-            server.live2d_messages.append({"role": "user", "content": context})
-            server.live2d_messages.append({"role": "assistant", "content": message})
-            if len(server.live2d_messages) > 60:
-                server.live2d_messages = server.live2d_messages[-40:]
-
         return jsonify({
             "success": True,
             "message": message,
-            "history_length": len(server.live2d_messages),
         })
 
