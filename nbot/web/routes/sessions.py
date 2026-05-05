@@ -91,10 +91,13 @@ def register_session_routes(app, server):
             "system_prompt", server.personality.get("systemPrompt", "")
         )
 
-        # 替换模板变量 {{user}} -> 当前用户名
+        # 替换模板变量 {{user}} -> 当前用户名, {{char}} -> 角色名称
         user_id = data.get("user_id", "")
+        char_name = server.personality.get("name", "")
         if user_id:
             system_prompt = system_prompt.replace('{{user}}', user_id)
+        if char_name:
+            system_prompt = system_prompt.replace('{{char}}', char_name)
     
         # 获取所有记忆（标题+摘要）并加入系统提示词
         memory_items = []
@@ -175,11 +178,18 @@ def register_session_routes(app, server):
         if first_message:
             if user_id:
                 first_message = first_message.replace('{{user}}', user_id)
+            if char_name:
+                first_message = first_message.replace('{{char}}', char_name)
             session["messages"].append({
                 "role": "assistant",
                 "content": first_message,
                 "sender": sender_name
             })
+        
+        # 获取背景设定，存储在会话中用于前端展示
+        scenario = server.personality.get("scenario", "")
+        if scenario:
+            session["scenario"] = scenario
         if not is_web_visible_session(session_id, session):
             return jsonify({"error": "Invalid session type"}), 400
     

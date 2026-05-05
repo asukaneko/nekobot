@@ -6113,9 +6113,12 @@ def main(params):
                         prompt = '请定义你的角色设定。';
                     }
 
-                    // 替换模板变量 {{user}} -> 当前登录用户名
+                    // 替换模板变量 {{user}} -> 当前登录用户名, {{char}} -> 角色名称
                     if (this.username) {
                         prompt = prompt.replace(/\{\{user\}\}/g, this.username);
+                    }
+                    if (p.name) {
+                        prompt = prompt.replace(/\{\{char\}\}/g, p.name);
                     }
 
                     this.infoModalConfig = {
@@ -6434,22 +6437,38 @@ def main(params):
                     this.aiGeneratedCharacter = null;
                 },
 
-                // 导出当前角色卡
-                exportPersonality() {
+                // 导出当前角色卡（ZIP 格式，包含 JSON 和立绘图片）
+                async exportPersonality() {
                     if (!this.personality.name) {
                         this.showToast('请先创建角色卡', 'error');
                         return;
                     }
-                    // 导出时排除立绘原始数据，只保留其他字段
-                    const { portrait, ...exportData } = this.personality;
-                    const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
-                    const url = URL.createObjectURL(blob);
-                    const a = document.createElement('a');
-                    a.href = url;
-                    a.download = `${this.personality.name}_角色卡_${new Date().toISOString().split('T')[0]}.json`;
-                    a.click();
-                    URL.revokeObjectURL(url);
-                    this.showToast('角色卡已导出', 'success');
+
+                    this.isLoading = true;
+                    try {
+                        // 调用后端 API 导出 ZIP
+                        const res = await api.post('/api/personality/export', {
+                            character: this.personality
+                        }, {
+                            responseType: 'blob'
+                        });
+
+                        // 创建下载链接
+                        const blob = new Blob([res.data], { type: 'application/zip' });
+                        const url = URL.createObjectURL(blob);
+                        const a = document.createElement('a');
+                        a.href = url;
+                        a.download = `${this.personality.name}_角色卡.zip`;
+                        a.click();
+                        URL.revokeObjectURL(url);
+
+                        this.showToast('角色卡已导出（包含立绘）', 'success');
+                    } catch (e) {
+                        console.error('导出角色卡失败:', e);
+                        this.showToast('导出失败: ' + (e.response?.data?.error || e.message), 'error');
+                    } finally {
+                        this.isLoading = false;
+                    }
                 },
 
                 // 处理立绘上传

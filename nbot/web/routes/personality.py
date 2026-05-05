@@ -1,11 +1,13 @@
+import io
 import json
 import logging
 import os
 import re
 import uuid
+import zipfile
 from datetime import datetime
 
-from flask import jsonify, request, send_from_directory
+from flask import jsonify, request, send_from_directory, send_file
 from werkzeug.utils import secure_filename
 
 _log = logging.getLogger(__name__)
@@ -76,9 +78,11 @@ def compile_personality_prompt(personality_data, session_context=None, user_name
     else:
         prompt = '请定义你的角色设定。'
 
-    # 替换模板变量 {{user}} -> 当前用户名
+    # 替换模板变量 {{user}} -> 当前用户名, {{char}} -> 角色名称
     if user_name:
         prompt = prompt.replace('{{user}}', user_name)
+    if name:
+        prompt = prompt.replace('{{char}}', name)
 
     return prompt
 
@@ -333,7 +337,7 @@ def register_personality_routes(app, server):
 
     @app.route("/api/personality/import", methods=["POST"])
     def import_personality():
-        """导入角色卡 JSON 文件"""
+        """导入角色卡，支持 ZIP 和 JSON 格式"""
         if "file" not in request.files:
             return jsonify({"success": False, "error": "请上传文件"}), 400
 
@@ -342,12 +346,68 @@ def register_personality_routes(app, server):
             return jsonify({"success": False, "error": "文件名为空"}), 400
 
         try:
-            content = file.read().decode("utf-8")
-            character = json.loads(content)
+            filename = file.filename.lower()
+            character = None
+            portrait_file = None
+
+            # 判断文件类型
+            if filename.endswith('.zip'):
+                # 处理 ZIP 文件
+                zip_data = io.BytesIO(file.read())
+                with zipfile.ZipFile(zip_data, 'r') as zf:
+                    # 查找 character.json
+                    json_file = None
+                    for name in zf.namelist():
+                        if name.lower() == 'character.json':
+                            json_file = name
+                            break
+
+                    if not json_file:
+                        return jsonify({"success": False, "error": "ZIP 文件中未找到 character.json"}), 400
+
+                    # 读取 JSON
+                    character = json.loads(zf.read(json_file).decode('utf-8'))
+
+                    # 查找立绘图片
+                    for name in zf.namelist():
+                        if name.lower().startswith('portrait.'):
+                            portrait_file = zf.read(name)
+                            portrait_ext = os.path.splitext(name)[1]
+                            break
+
+            elif filename.endswith('.json'):
+                # 处理 JSON 文件
+                content = file.read().decode("utf-8")
+                character = json.loads(content)
+            else:
+                return jsonify({"success": False, "error": "不支持的文件格式，请上传 .json 或 .zip 文件"}), 400
 
             # 验证基本字段
             if not character.get("name"):
                 return jsonify({"success": False, "error": "角色卡缺少 name 字段"}), 400
+
+            # 如果有立绘图片，上传到服务器
+            if portrait_file:
+                try:
+                    # 创建上传目录
+                    upload_dir = os.path.join(server.base_dir, "nbot", "web", "static", "uploads", "portraits")
+                    os.makedirs(upload_dir, exist_ok=True)
+
+                    # 生成唯一文件名
+                    filename = f"portrait_{uuid.uuid4().hex[:16]}{portrait_ext}"
+                    filepath = os.path.join(upload_dir, filename)
+
+                    # 保存文件
+                    with open(filepath, 'wb') as f:
+                        f.write(portrait_file)
+
+                    # 设置立绘 URL
+                    character['portrait'] = f"/static/uploads/portraits/{filename}"
+                    _log.info(f"立绘导入成功: {filepath}")
+                except Exception as e:
+                    _log.error(f"立绘导入失败: {e}")
+                    # 立绘导入失败不影响整体导入
+                    character.setdefault('portrait', '')
 
             # 填充缺失字段
             character.setdefault("description", "")
@@ -361,8 +421,6 @@ def register_personality_routes(app, server):
             character.setdefault("responseFormat", "")
             character.setdefault("rules", [])
             character.setdefault("state", {"affection": 50, "mood": "开心"})
-            # 立绘图字段 - 导入时不包含原始图片数据
-            character.setdefault("portrait", "")
             if not character.get("systemPrompt"):
                 character["systemPrompt"] = compile_personality_prompt(character)
 
@@ -372,6 +430,8 @@ def register_personality_routes(app, server):
             return jsonify({"success": False, "error": "文件不是有效的 JSON 格式"}), 400
         except UnicodeDecodeError:
             return jsonify({"success": False, "error": "文件编码不支持，请使用 UTF-8"}), 400
+        except zipfile.BadZipFile:
+            return jsonify({"success": False, "error": "ZIP 文件损坏或格式不正确"}), 400
         except Exception as e:
             _log.error(f"导入角色卡失败: {e}")
             return jsonify({"success": False, "error": f"导入失败: {str(e)}"}), 500
@@ -494,3 +554,50 @@ def register_personality_routes(app, server):
         except Exception as e:
             _log.error(f"删除立绘失败: {e}")
             return jsonify({"success": False, "error": f"删除失败: {str(e)}"}), 500
+
+    @app.route("/api/personality/export", methods=["POST"])
+    def export_personality():
+        """导出角色卡为 ZIP 文件，包含 JSON 和立绘图片"""
+        data = request.json or {}
+        character = data.get("character", {})
+
+        if not character.get("name"):
+            return jsonify({"success": False, "error": "角色卡缺少名称"}), 400
+
+        try:
+            # 创建内存中的 ZIP 文件
+            memory_file = io.BytesIO()
+
+            with zipfile.ZipFile(memory_file, 'w', zipfile.ZIP_DEFLATED) as zf:
+                # 1. 添加 JSON 文件（不包含立绘原始数据，只保留 URL）
+                character_json = json.dumps(character, ensure_ascii=False, indent=2)
+                zf.writestr('character.json', character_json)
+
+                # 2. 如果有立绘图片，添加到 ZIP
+                portrait_url = character.get('portrait', '')
+                if portrait_url and portrait_url.startswith('/static/'):
+                    # 从 URL 获取本地文件路径
+                    portrait_path = portrait_url.replace('/static/', '')
+                    full_path = os.path.join(server.base_dir, 'nbot', 'web', 'static', portrait_path.replace('static/', ''))
+
+                    if os.path.exists(full_path):
+                        # 获取文件扩展名
+                        _, ext = os.path.splitext(full_path)
+                        # 添加到 ZIP，使用固定名称
+                        zf.write(full_path, f'portrait{ext}')
+
+            # 准备响应
+            memory_file.seek(0)
+            character_name = character.get('name', 'character')
+            safe_name = re.sub(r'[^\w\s-]', '', character_name).strip()
+
+            return send_file(
+                memory_file,
+                mimetype='application/zip',
+                as_attachment=True,
+                download_name=f'{safe_name}_角色卡.zip'
+            )
+
+        except Exception as e:
+            _log.error(f"导出角色卡失败: {e}")
+            return jsonify({"success": False, "error": f"导出失败: {str(e)}"}), 500
