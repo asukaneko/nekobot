@@ -167,8 +167,231 @@ const NbotMethods = {
                     `;
                 },
 
+                // 聊天背景设置方法
+                openChatBackgroundEditor() {
+                    this.showChatBackgroundModal = true;
+                },
 
-                
+                saveChatBackground() {
+                    // 保存到 localStorage
+                    localStorage.setItem('chatBackgroundType', this.chatBackground.type);
+                    localStorage.setItem('chatBackgroundColor', this.chatBackground.color);
+                    localStorage.setItem('chatBackgroundImage', this.chatBackground.image);
+                    localStorage.setItem('chatBackgroundOpacity', this.chatBackground.opacity);
+                    localStorage.setItem('chatBackgroundBlur', this.chatBackground.blur);
+                    localStorage.setItem('chatBackgroundUsePortrait', this.chatBackground.usePortrait);
+                    localStorage.setItem('chatBackgroundPosX', this.chatBackground.posX);
+                    localStorage.setItem('chatBackgroundPosY', this.chatBackground.posY);
+
+                    this.showChatBackgroundModal = false;
+                    this.showToast('聊天背景已保存', 'success');
+
+                    // 应用背景
+                    this.applyChatBackground();
+                },
+
+                // 开始拖动背景
+                startBackgroundDrag(e) {
+                    if (this.chatBackground.type !== 'image' && this.chatBackground.type !== 'portrait') return;
+                    
+                    this.isDraggingBackground = true;
+                    const clientX = e.type.includes('touch') ? e.touches[0].clientX : e.clientX;
+                    const clientY = e.type.includes('touch') ? e.touches[0].clientY : e.clientY;
+                    
+                    this.backgroundDragStart = { x: clientX, y: clientY };
+                    this.backgroundDragStartPos = { 
+                        x: this.chatBackground.posX, 
+                        y: this.chatBackground.posY 
+                    };
+                },
+
+                // 拖动背景
+                onBackgroundDrag(e) {
+                    if (!this.isDraggingBackground) return;
+                    e.preventDefault();
+                    
+                    const clientX = e.type.includes('touch') ? e.touches[0].clientX : e.clientX;
+                    const clientY = e.type.includes('touch') ? e.touches[0].clientY : e.clientY;
+                    
+                    // 计算拖动距离（转换为百分比）
+                    const deltaX = (clientX - this.backgroundDragStart.x) / 3; // 调整灵敏度
+                    const deltaY = (clientY - this.backgroundDragStart.y) / 3;
+                    
+                    // 更新位置（限制在 0-100 范围内）
+                    this.chatBackground.posX = Math.max(0, Math.min(100, this.backgroundDragStartPos.x + deltaX));
+                    this.chatBackground.posY = Math.max(0, Math.min(100, this.backgroundDragStartPos.y + deltaY));
+                },
+
+                // 停止拖动背景
+                stopBackgroundDrag() {
+                    this.isDraggingBackground = false;
+                },
+
+                resetChatBackground() {
+                    this.chatBackground = {
+                        type: 'none',
+                        color: '#1a1a2e',
+                        image: '',
+                        posX: 50,
+                        posY: 50,
+                        opacity: 20,
+                        blur: 0,
+                        usePortrait: false
+                    };
+                },
+
+                // 清除聊天背景
+                clearChatBackground() {
+                    // 移除背景元素
+                    const oldBg = document.getElementById('chat-background-layer');
+                    if (oldBg) {
+                        oldBg.remove();
+                    }
+                    // 清除样式
+                    const styleEl = document.getElementById('chat-background-styles');
+                    if (styleEl) {
+                        styleEl.textContent = '';
+                    }
+                },
+
+                applyChatBackground() {
+                    const opacity = this.chatBackground.opacity / 100;
+                    const blur = this.chatBackground.blur;
+
+                    // 获取或创建样式标签
+                    let styleEl = document.getElementById('chat-background-styles');
+                    if (!styleEl) {
+                        styleEl = document.createElement('style');
+                        styleEl.id = 'chat-background-styles';
+                        document.head.appendChild(styleEl);
+                    }
+
+                    // 移除旧的背景元素
+                    const oldBg = document.getElementById('chat-background-layer');
+                    if (oldBg) {
+                        oldBg.remove();
+                    }
+
+                    if (this.chatBackground.type === 'none') {
+                        styleEl.textContent = '';
+                        return;
+                    }
+
+                    let bgUrl = '';
+                    let bgSize = 'cover';
+                    let bgRepeat = 'no-repeat';
+
+                    if (this.chatBackground.type === 'color') {
+                        // 纯色背景
+                        styleEl.textContent = `
+                            .messages-container {
+                                background-image: none !important;
+                                background-color: ${this.chatBackground.color} !important;
+                            }
+                        `;
+                        return;
+                    } else if (this.chatBackground.type === 'image' && this.chatBackground.image) {
+                        bgUrl = this.chatBackground.image;
+                        bgSize = 'cover';
+                    } else if (this.chatBackground.type === 'portrait') {
+                        const portraitUrl = this.currentSession?.sender_portrait || this.personality?.portrait || '';
+                        if (portraitUrl) {
+                            bgUrl = portraitUrl;
+                            bgSize = 'contain';
+                        } else {
+                            styleEl.textContent = '';
+                            return;
+                        }
+                    }
+
+                    if (!bgUrl) {
+                        styleEl.textContent = '';
+                        return;
+                    }
+
+                    // 获取背景位置
+                    const posX = this.chatBackground.posX || 50;
+                    const posY = this.chatBackground.posY || 50;
+
+                    // 找到聊天主区域
+                    const chatMain = document.querySelector('.chat-main');
+                    if (!chatMain) return;
+
+                    // 确保 chat-main 是相对定位
+                    chatMain.style.position = 'relative';
+
+                    // 创建背景层 - 使用 absolute 定位覆盖整个 chat-main
+                    const bgLayer = document.createElement('div');
+                    bgLayer.id = 'chat-background-layer';
+                    bgLayer.style.cssText = `
+                        position: absolute;
+                        top: 0;
+                        left: 0;
+                        width: 100%;
+                        height: 100%;
+                        background-image: url('${bgUrl}');
+                        background-size: ${bgSize};
+                        background-position: ${posX}% ${posY}%;
+                        background-repeat: ${bgRepeat};
+                        opacity: ${opacity};
+                        ${blur > 0 ? `filter: blur(${blur}px);` : ''}
+                        pointer-events: none;
+                        z-index: 0;
+                    `;
+
+                    // 插入到 chat-main 的开头
+                    chatMain.insertBefore(bgLayer, chatMain.firstChild);
+
+                    // 设置样式确保其他元素在背景层之上
+                    styleEl.textContent = `
+                        .chat-main {
+                            position: relative;
+                        }
+                        
+                        .chat-header {
+                            position: relative;
+                            z-index: 1;
+                        }
+                        
+                        .messages-container {
+                            position: relative;
+                            z-index: 1;
+                            background: transparent !important;
+                        }
+                        
+                        .chat-input-area {
+                            position: relative;
+                            z-index: 1;
+                        }
+                        
+                        /* 给消息内容添加半透明背景，确保文字可读 */
+                        .message.assistant .message-content {
+                            background: color-mix(in srgb, var(--bg-tertiary) 92%, transparent) !important;
+                            backdrop-filter: blur(8px);
+                            -webkit-backdrop-filter: blur(8px);
+                        }
+                        
+                        /* 用户消息保持原有颜色 */
+                        .message.user .message-content {
+                            background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%) !important;
+                            backdrop-filter: none;
+                            -webkit-backdrop-filter: none;
+                        }
+                    `;
+                },
+
+                handleChatBackgroundImageUpload(event) {
+                    const file = event.target.files[0];
+                    if (!file) return;
+
+                    const reader = new FileReader();
+                    reader.onload = (e) => {
+                        this.chatBackground.image = e.target.result;
+                        this.chatBackground.type = 'image';
+                    };
+                    reader.readAsDataURL(file);
+                },
+
                 // 文件上传菜单方法
                 toggleFileMenu() {
                     this.showFileMenu = !this.showFileMenu;
@@ -705,6 +928,12 @@ const NbotMethods = {
                         } else {
                             await this.loadPageData(this.currentPage);
                         }
+                        // 应用聊天背景（只在有当前会话时）
+                        this.$nextTick(() => {
+                            if (this.currentSession) {
+                                this.applyChatBackground();
+                            }
+                        });
                     } finally {
                         this.appDataReady = true;
                     }
@@ -713,6 +942,9 @@ const NbotMethods = {
                 async enterChatHome() {
                     this.currentPage = 'chat';
                     localStorage.setItem('nbot_home_page', 'chat');
+                    // 清除当前会话和聊天背景
+                    this.currentSession = null;
+                    this.clearChatBackground();
                     await Promise.all([
                         this.loadSessions(),
                         this.loadCommandCatalog()
@@ -1595,6 +1827,8 @@ const NbotMethods = {
                         this.personality = res.data;
                         this.activePersonality = { ...res.data };
                         this.personalityTagsInput = (this.personality.tags || []).join(' ');
+                        // 重新应用聊天背景（personality.portrait 可能已更新）
+                        this.applyChatBackground();
                     } catch (e) {
                         console.error('Failed to load personality:', e);
                     }
@@ -2707,6 +2941,8 @@ def main(params):
                     this.isLoading = (this.loadingSessionId === session.id);
                     // 恢复打字状态，确保龙骨加载动画在切换回正在生成的会话时正确显示
                     this.isTyping = (this.loadingSessionId === session.id);
+                    // 重新应用聊天背景（切换会话后 sender_portrait 可能不同）
+                    this.applyChatBackground();
                 },
                 
                 async switchChatTab(tab) {
@@ -6015,6 +6251,14 @@ def main(params):
                         this.personality.avatar = icon;
                         this.personalityHasUnsavedChanges = true;
                         this.showToast('头像已选择', 'success');
+                    }
+                },
+
+                // 查看立绘大图
+                viewPortrait(portraitUrl) {
+                    if (portraitUrl) {
+                        this.portraitViewerUrl = portraitUrl;
+                        this.showPortraitViewer = true;
                     }
                 },
 

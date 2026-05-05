@@ -3750,6 +3750,17 @@
         .message.assistant .message-avatar { background: var(--accent-primary); }
         .message.user .message-avatar { background: var(--info); }
 
+        /* 有立绘的头像可点击 */
+        .message-avatar.has-portrait {
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+
+        .message-avatar.has-portrait:hover {
+            transform: scale(1.05);
+            box-shadow: 0 0 0 3px var(--accent-primary-transparent, rgba(88, 166, 255, 0.4));
+        }
+
         .message-content {
             max-width: 70%;
             min-width: 0;
@@ -7937,6 +7948,38 @@
             gap: 16px;
             overflow-y: auto;
             min-height: 300px;
+            position: relative;
+            cursor: default;
+            user-select: none;
+        }
+
+        /* 背景拖动提示 */
+        .background-drag-hint {
+            position: absolute;
+            top: 8px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0, 0, 0, 0.6);
+            color: white;
+            padding: 6px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            z-index: 10;
+            pointer-events: none;
+            opacity: 0.8;
+            transition: opacity 0.2s;
+        }
+
+        .background-drag-hint.dragging {
+            opacity: 1;
+            background: rgba(88, 166, 255, 0.8);
+        }
+
+        .style-preview-container:active .background-drag-hint:not(.dragging) {
+            opacity: 0.4;
         }
 
         .preview-message {
@@ -10078,5 +10121,70 @@
                 min-width: 0;
                 opacity: 1;
                 pointer-events: auto;
+            }
+        }
+
+        /* 立绘查看器样式 */
+        .portrait-viewer-overlay {
+            background: rgba(0, 0, 0, 0.85);
+            backdrop-filter: blur(8px);
+            -webkit-backdrop-filter: blur(8px);
+        }
+
+        .portrait-viewer-container {
+            position: relative;
+            max-width: 90vw;
+            max-height: 90vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .portrait-viewer-image {
+            max-width: 100%;
+            max-height: 90vh;
+            object-fit: contain;
+            border-radius: 12px;
+            box-shadow: 0 24px 64px rgba(0, 0, 0, 0.5);
+        }
+
+        .portrait-viewer-close {
+            position: absolute;
+            top: -48px;
+            right: 0;
+            width: 40px;
+            height: 40px;
+            border: none;
+            border-radius: 50%;
+            background: rgba(255, 255, 255, 0.15);
+            color: white;
+            font-size: 18px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s;
+        }
+
+        .portrait-viewer-close:hover {
+            background: rgba(255, 255, 255, 0.25);
+            transform: scale(1.1);
+        }
+
+        @media (max-width: 768px) {
+            .portrait-viewer-container {
+                max-width: 95vw;
+                max-height: 85vh;
+            }
+
+            .portrait-viewer-image {
+                max-height: 85vh;
+            }
+
+            .portrait-viewer-close {
+                top: -44px;
+                width: 36px;
+                height: 36px;
+                font-size: 16px;
             }
         }

@@ -818,7 +818,7 @@
                                     <template v-for="msg in currentMessages.filter(m => !m.hide_in_web)" :key="msg.id">
                                         <!-- 消息主体 -->
                                         <div class="message" :class="[msg.role, { 'is-progress': isProgressMessage(msg), 'dragon-bone-message': isStreamAwaiting(msg) }]">
-                                            <div class="message-avatar">
+                                            <div class="message-avatar" :class="{ 'has-portrait': msg.role === 'assistant' && currentSession.sender_portrait }" @click="msg.role === 'assistant' && currentSession.sender_portrait ? viewPortrait(currentSession.sender_portrait) : null">
                                                 <!-- AI消息显示立绘或头像 -->
                                                 <template v-if="msg.role === 'assistant'">
                                                     <img v-if="currentSession.sender_portrait" :src="currentSession.sender_portrait" style="width: 100%; height: 100%; object-fit: cover; border-radius: 50%;">
@@ -999,7 +999,7 @@
                                     
                                     <!-- 机器人正在输入动画（仅在无进度卡片或进度卡片关闭时显示） -->
                                     <div v-if="isTyping && (!showThinkingCard || !currentMessages.some(m => m.thinking_cards && m.thinking_cards.length > 0))" class="message assistant dragon-bone-message">
-                                        <div class="message-avatar">
+                                        <div class="message-avatar" :class="{ 'has-portrait': personality.portrait }" @click="personality.portrait ? viewPortrait(personality.portrait) : null">
                                             <img v-if="personality.portrait" :src="personality.portrait" style="width: 100%; height: 100%; object-fit: cover; border-radius: 50%;">
                                             <i v-else :class="personality.avatar || 'fas fa-robot'"></i>
                                         </div>
@@ -1514,6 +1514,122 @@
 
                     <!-- Message Style Editor Page -->
                     <div v-if="currentPage === 'message-style'" class="fade-in">
+                        <!-- 聊天背景设置卡片 -->
+                        <div class="card" style="margin-bottom: 20px;">
+                            <div class="card-header">
+                                <span class="card-title"><i class="fas fa-image"></i> 聊天背景</span>
+                                <div style="display: flex; gap: 12px;">
+                                    <button class="btn" @click="resetChatBackground">
+                                        <i class="fas fa-undo"></i> 恢复默认
+                                    </button>
+                                    <button class="btn btn-primary" @click="saveChatBackground">
+                                        <i class="fas fa-save"></i> 保存设置
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="card-body">
+                                <div class="style-editor-page-content">
+                                    <!-- 左侧：背景设置面板 -->
+                                    <div class="style-settings-panel">
+                                        <div class="style-section">
+                                            <h4><i class="fas fa-image"></i> 背景类型</h4>
+                                            <div class="form-group">
+                                                <label class="form-label">选择背景类型</label>
+                                                <select v-model="chatBackground.type" class="form-select" @change="applyChatBackground">
+                                                    <option value="none">无背景（默认）</option>
+                                                    <option value="color">纯色背景</option>
+                                                    <option value="image">图片背景</option>
+                                                    <option value="portrait">角色立绘背景</option>
+                                                </select>
+                                            </div>
+
+                                            <!-- 纯色背景设置 -->
+                                            <div v-if="chatBackground.type === 'color'" class="form-group">
+                                                <label class="form-label">背景颜色</label>
+                                                <div class="color-picker-row">
+                                                    <input type="color" v-model="chatBackground.color" class="form-color-picker" @input="applyChatBackground">
+                                                    <input type="text" v-model="chatBackground.color" class="form-input" placeholder="#1a1a2e" style="flex: 1;">
+                                                </div>
+                                            </div>
+
+                                            <!-- 图片背景设置 -->
+                                            <div v-if="chatBackground.type === 'image'" class="form-group">
+                                                <label class="form-label">背景图片</label>
+                                                <div style="display: flex; gap: 8px; flex-direction: column;">
+                                                    <input type="file" ref="chatBgImageInput" accept="image/*" @change="handleChatBackgroundImageUpload" style="display: none;">
+                                                    <button class="btn btn-secondary" @click="$refs.chatBgImageInput.click()">
+                                                        <i class="fas fa-upload"></i> 选择图片
+                                                    </button>
+                                                    <div v-if="chatBackground.image" style="margin-top: 8px;">
+                                                        <img :src="chatBackground.image" style="max-width: 200px; max-height: 120px; border-radius: 8px; border: 1px solid var(--border-color);">
+                                                    </div>
+                                                </div>
+                                            </div>
+
+                                            <!-- 角色立绘背景提示 -->
+                                            <div v-if="chatBackground.type === 'portrait'" class="form-group">
+                                                <div class="form-hint" style="padding: 12px; background: var(--bg-tertiary); border-radius: 8px;">
+                                                    <i class="fas fa-info-circle"></i> 将使用当前会话的角色立绘作为聊天背景。如果会话没有立绘，则显示默认背景。
+                                                </div>
+                                            </div>
+
+                                            <!-- 透明度和模糊度设置 -->
+                                            <div v-if="chatBackground.type !== 'none'" class="form-group">
+                                                <label class="form-label">透明度: {{ chatBackground.opacity }}%</label>
+                                                <input type="range" v-model.number="chatBackground.opacity" min="10" max="100" class="form-range" @input="applyChatBackground">
+                                            </div>
+                                            <div v-if="chatBackground.type !== 'none' && chatBackground.type !== 'color'" class="form-group">
+                                                <label class="form-label">模糊度: {{ chatBackground.blur }}px</label>
+                                                <input type="range" v-model.number="chatBackground.blur" min="0" max="20" class="form-range" @input="applyChatBackground">
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <!-- 右侧：预览 -->
+                                    <div class="style-preview-panel">
+                                        <h4><i class="fas fa-eye"></i> 背景预览</h4>
+                                        <div class="style-preview-container" 
+                                             :style="chatBackgroundPreviewStyle"
+                                             @mousedown="startBackgroundDrag"
+                                             @mousemove="onBackgroundDrag"
+                                             @mouseup="stopBackgroundDrag"
+                                             @mouseleave="stopBackgroundDrag"
+                                             @touchstart="startBackgroundDrag"
+                                             @touchmove="onBackgroundDrag"
+                                             @touchend="stopBackgroundDrag">
+                                            <!-- 拖动提示 -->
+                                            <div v-if="chatBackground.type === 'image' || chatBackground.type === 'portrait'" 
+                                                 class="background-drag-hint"
+                                                 :class="{ 'dragging': isDraggingBackground }">
+                                                <i class="fas fa-hand-paper"></i> 拖动调整位置
+                                            </div>
+                                            <!-- 背景图层 -->
+                                            <div v-if="chatBackground.type === 'image' || chatBackground.type === 'portrait'" 
+                                                 style="position: absolute; top: 0; left: 0; right: 0; bottom: 0; pointer-events: none; z-index: 0;"
+                                                 :style="chatBackgroundPreviewPseudoStyle">
+                                            </div>
+                                            <!-- 内容层 -->
+                                            <div style="position: relative; z-index: 1; pointer-events: none;">
+                                                <div class="preview-message assistant">
+                                                    <div class="preview-avatar"><i class="fas fa-robot"></i></div>
+                                                    <div class="preview-bubble">
+                                                        <p>这是聊天背景预览效果。</p>
+                                                        <p>你可以看到背景图片或颜色的实际显示效果。</p>
+                                                    </div>
+                                                </div>
+                                                <div class="preview-message user">
+                                                    <div class="preview-avatar"><i class="fas fa-user"></i></div>
+                                                    <div class="preview-bubble">
+                                                        <p>用户消息也会显示在背景上。</p>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
                         <div class="card">
                             <div class="card-header">
                                 <span class="card-title"><i class="fas fa-paint-brush"></i> {{ $t('page.message_style') }}</span>
@@ -4138,6 +4254,16 @@
             </div>
         </div>
 
+        <!-- 立绘查看模态框 -->
+        <div v-if="showPortraitViewer" class="modal-overlay portrait-viewer-overlay" @click.self="showPortraitViewer = false">
+            <div class="portrait-viewer-container">
+                <button class="portrait-viewer-close" @click="showPortraitViewer = false">
+                    <i class="fas fa-times"></i>
+                </button>
+                <img :src="portraitViewerUrl" class="portrait-viewer-image" @click.stop alt="角色立绘">
+            </div>
+        </div>
+
         <!-- AI创建角色卡模态框 -->
         <div v-if="showAiCreateModal" class="modal-overlay" @click.self="cancelAiCreate">
             <div class="modal" style="max-width: 560px;">
@@ -5975,6 +6101,23 @@
                     },
                     showMessageStyleModal: false,
 
+                    // 聊天背景设置
+                    chatBackground: {
+                        type: localStorage.getItem('chatBackgroundType') || 'none', // 'none', 'color', 'image', 'portrait'
+                        color: localStorage.getItem('chatBackgroundColor') || '#1a1a2e',
+                        image: localStorage.getItem('chatBackgroundImage') || '',
+                        opacity: parseInt(localStorage.getItem('chatBackgroundOpacity')) || 20,
+                        blur: parseInt(localStorage.getItem('chatBackgroundBlur')) || 0,
+                        usePortrait: localStorage.getItem('chatBackgroundUsePortrait') === 'true',
+                        posX: parseInt(localStorage.getItem('chatBackgroundPosX')) || 50, // 背景位置X (百分比)
+                        posY: parseInt(localStorage.getItem('chatBackgroundPosY')) || 50  // 背景位置Y (百分比)
+                    },
+                    showChatBackgroundModal: false,
+                    // 背景拖动状态
+                    isDraggingBackground: false,
+                    backgroundDragStart: { x: 0, y: 0 },
+                    backgroundDragStartPos: { x: 50, y: 50 },
+
                     // QQ Chat
                     chatTab: 'web',  // web, cli, qq_private, qq_group, channel_<id>
                     qqPrivateUsers: [],
@@ -6062,6 +6205,7 @@
                         name: '',
                         description: '',
                         avatar: '',
+                        portrait: '',
                         tags: [],
 
                         // 角色设定层
@@ -6090,6 +6234,8 @@
                     personalityTagsInput: '', // 标签输入框的临时值
                     showAvatarPicker: false, // 头像选择器
                     customAvatarInput: '', // 自定义头像输入
+                    showPortraitViewer: false, // 立绘查看器
+                    portraitViewerUrl: '', // 当前查看的立绘URL
                     showAiCreateModal: false, // AI创建角色模态框
                     aiCreateDescription: '', // AI创建角色的用户描述
                     aiGeneratedCharacter: null, // AI生成的角色卡结果
@@ -6696,6 +6842,65 @@
                     return style;
                 },
 
+                // 聊天背景预览计算属性
+                chatBackgroundPreviewStyle() {
+                    const style = {};
+                    const opacity = this.chatBackground.opacity / 100;
+
+                    if (this.chatBackground.type === 'none') {
+                        style.background = 'var(--bg-primary)';
+                    } else if (this.chatBackground.type === 'color') {
+                        style.background = this.chatBackground.color;
+                    } else if (this.chatBackground.type === 'image' && this.chatBackground.image) {
+                        // 使用伪元素方式实现背景，避免影响内容透明度
+                        style.background = 'var(--bg-primary)';
+                        style.position = 'relative';
+                    } else if (this.chatBackground.type === 'portrait') {
+                        // 预览时使用当前角色的立绘
+                        const portraitUrl = this.personality?.portrait || '';
+                        if (portraitUrl) {
+                            style.background = 'var(--bg-primary)';
+                            style.position = 'relative';
+                        } else {
+                            style.background = 'var(--bg-primary)';
+                        }
+                    }
+
+                    return style;
+                },
+
+                // 聊天背景预览伪元素样式
+                chatBackgroundPreviewPseudoStyle() {
+                    const style = {};
+                    const opacity = this.chatBackground.opacity / 100;
+                    const posX = this.chatBackground.posX;
+                    const posY = this.chatBackground.posY;
+
+                    if (this.chatBackground.type === 'image' && this.chatBackground.image) {
+                        style.backgroundImage = `url('${this.chatBackground.image}')`;
+                        style.backgroundSize = 'cover';
+                        style.backgroundPosition = `${posX}% ${posY}%`;
+                        style.opacity = opacity;
+                        if (this.chatBackground.blur > 0) {
+                            style.filter = `blur(${this.chatBackground.blur}px)`;
+                        }
+                    } else if (this.chatBackground.type === 'portrait') {
+                        const portraitUrl = this.personality?.portrait || '';
+                        if (portraitUrl) {
+                            style.backgroundImage = `url('${portraitUrl}')`;
+                            style.backgroundSize = 'contain';
+                            style.backgroundPosition = `${posX}% ${posY}%`;
+                            style.backgroundRepeat = 'no-repeat';
+                            style.opacity = opacity;
+                            if (this.chatBackground.blur > 0) {
+                                style.filter = `blur(${this.chatBackground.blur}px)`;
+                            }
+                        }
+                    }
+
+                    return style;
+                },
+
                 filteredApiDocs() {
                     return this.apiDocData[this.currentApiCategory] || [];
                 },
@@ -6929,6 +7134,9 @@
                 // 应用已保存的消息样式
                 this.applyMessageStyles();
 
+                // 应用已保存的聊天背景
+                this.applyChatBackground();
+
                 // 检查并清理过期的加载状态（超过2分钟）
                 const savedLoadingStartTime = localStorage.getItem('nbot_loading_start_time');
                 if (savedLoadingStartTime) {
@@ -6959,6 +7167,8 @@
                             
                             // 只加载首页（仪表盘）需要的数据
                             await this.loadHomeData();
+                            // 重新应用聊天背景（此时 session 和 personality 数据已就绪）
+                            this.applyChatBackground();
                             // 延迟初始化图表
                             setTimeout(() => this.initCharts(), 100);
                         } else {
