@@ -8,12 +8,20 @@
 import json
 import logging
 import os
+import random
+import re
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
 from nbot.character.models import WorldBook, WorldBookEntry
 
 _log = logging.getLogger(__name__)
+
+# 正则 / 整词模式编译缓存：{(pattern, case_sensitive): compiled or None}
+_REGEX_CACHE: Dict[tuple, Optional["re.Pattern[str]"]] = {}
+
+# 可作为「整词」处理的关键词：以 ASCII 字母数字开头，避免对中文强行加词边界
+_WORD_LIKE_RE = re.compile(r"^[0-9A-Za-z][0-9A-Za-z_'\- ]*$")
 
 # 项目根目录（本文件位于 nbot/character/）
 _BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
@@ -214,17 +222,136 @@ def _extract_scene_text(scene: Dict[str, Any]) -> str:
     return " ".join(parts)
 
 
+def _compile_keyword_pattern(pattern: str, case_sensitive: bool) -> Optional["re.Pattern[str]"]:
+    """编译关键词正则（带缓存），非法正则返回 None 而不是抛错。"""
+    key = (pattern, bool(case_sensitive))
+    if key in _REGEX_CACHE:
+        return _REGEX_CACHE[key]
+    flags = 0 if case_sensitive else re.IGNORECASE
+    try:
+        compiled: Optional["re.Pattern[str]"] = re.compile(pattern, flags)
+    except re.error as exc:
+        _log.debug("[WorldBook] invalid regex keyword %r: %s", pattern, exc)
+        compiled = None
+    _REGEX_CACHE[key] = compiled
+    return compiled
+
+
+def _keyword_hit(text: str, keyword: str, entry: WorldBookEntry) -> bool:
+    """单关键词命中判定，支持子串（默认）/ 正则 / 整词三种模式。"""
+    if not text or not keyword:
+        return False
+
+    if getattr(entry, "use_regex", False):
+        compiled = _compile_keyword_pattern(str(keyword), bool(entry.case_sensitive))
+        return bool(compiled and compiled.search(text))
+
+    if getattr(entry, "match_whole_words", False) and _WORD_LIKE_RE.match(str(keyword)):
+        flags = 0 if entry.case_sensitive else re.IGNORECASE
+        boundary = (
+            r"(?<![0-9A-Za-z_])" + re.escape(str(keyword)) + r"(?![0-9A-Za-z_])"
+        )
+        return bool(re.search(boundary, text, flags))
+
+    check_text = text if entry.case_sensitive else text.lower()
+    check_kw = keyword if entry.case_sensitive else keyword.lower()
+    return check_kw in check_text
+
+
 def _check_match_keywords(text: str, entry: WorldBookEntry) -> List[str]:
     """检查文本中命中的关键词，返回命中的关键词列表"""
-    check_text = text if entry.case_sensitive else text.lower()
     matched = []
     for keyword in entry.keywords:
-        if not keyword:
-            continue
-        check_kw = keyword if entry.case_sensitive else keyword.lower()
-        if check_kw in check_text:
+        if _keyword_hit(text, keyword, entry):
             matched.append(keyword)
     return matched
+
+
+def _entry_probability(entry: WorldBookEntry) -> int:
+    """条目触发概率（0-100），缺字段时视为 100。"""
+    try:
+        value = int(getattr(entry, "probability", 100))
+    except (TypeError, ValueError):
+        return 100
+    return max(0, min(100, value))
+
+
+def _probability_passes(entry: WorldBookEntry, rng: Optional[random.Random] = None) -> bool:
+    """按 probability 掷骰判定本回合是否允许触发该条目。"""
+    probability = _entry_probability(entry)
+    if probability >= 100:
+        return True
+    if probability <= 0:
+        return False
+    roll = rng.random() if rng is not None else random.random()
+    return roll * 100 < probability
+
+
+def _resolve_scene_field(scene: Dict[str, Any], field_name: str) -> Any:
+    """解析场景字段，支持点号路径（如 relationship.affection）。"""
+    if not isinstance(scene, dict):
+        return None
+    if field_name in scene:
+        return scene[field_name]
+    current: Any = scene
+    for part in str(field_name).split("."):
+        if not isinstance(current, dict) or part not in current:
+            return None
+        current = current[part]
+    return current
+
+
+def _match_trigger_value(actual: Any, expected: Any) -> bool:
+    """判断单个状态值与触发表达式是否匹配。
+
+    支持：精确值、'*' 通配、字符串取反 '!value'、
+    数值比较（>= <= == != > <）与区间（a..b）。
+    """
+    if expected == "*":
+        return actual not in (None, "", [], {})
+
+    if isinstance(actual, str):
+        text = str(expected)
+        if text.startswith("!") and len(text) > 1:
+            return actual != text[1:]
+        return actual == text
+
+    if isinstance(actual, bool):
+        return bool(expected) == actual if isinstance(expected, bool) else str(actual).lower() == str(expected).lower()
+
+    if isinstance(actual, (int, float)):
+        if isinstance(expected, (int, float)) and not isinstance(expected, bool):
+            return float(actual) == float(expected)
+        text = str(expected).strip()
+        if ".." in text:
+            try:
+                low, high = text.split("..", 1)
+                return float(low) <= float(actual) <= float(high)
+            except ValueError:
+                return False
+        for op in (">=", "<=", "==", "!=", ">", "<"):
+            if text.startswith(op):
+                try:
+                    value = float(text[len(op):].strip())
+                except ValueError:
+                    return False
+                if op == ">=":
+                    return actual >= value
+                if op == "<=":
+                    return actual <= value
+                if op == "==":
+                    return actual == value
+                if op == "!=":
+                    return actual != value
+                if op == ">":
+                    return actual > value
+                return actual < value
+        try:
+            return float(actual) == float(text)
+        except ValueError:
+            return False
+
+    return False
 
 
 def _check_state_triggers(scene: Dict[str, Any], entry: WorldBookEntry) -> bool:
@@ -232,15 +359,22 @@ def _check_state_triggers(scene: Dict[str, Any], entry: WorldBookEntry) -> bool:
     if not entry.state_triggers or not scene:
         return False
     for field_name, trigger_values in entry.state_triggers.items():
-        scene_value = scene.get(field_name)
+        if not isinstance(trigger_values, list):
+            trigger_values = [trigger_values]
+        if not trigger_values:
+            continue
+        scene_value = _resolve_scene_field(scene, field_name)
         if scene_value is None:
             continue
-        if isinstance(scene_value, str):
-            if scene_value in trigger_values:
+        if isinstance(scene_value, list):
+            if any(
+                _match_trigger_value(item, expected)
+                for item in scene_value
+                for expected in trigger_values
+            ):
                 return True
-        elif isinstance(scene_value, list):
-            if any(v in trigger_values for v in scene_value):
-                return True
+        elif any(_match_trigger_value(scene_value, expected) for expected in trigger_values):
+            return True
     return False
 
 
@@ -269,6 +403,7 @@ def match_entries_v2(
     world_books: List[WorldBook],
     character_id: Optional[str] = None,
     config: Optional[WorldBookRecallConfig] = None,
+    rng: Optional[random.Random] = None,
 ) -> List[WorldBookMatchResult]:
     """多源上下文召回匹配
 
@@ -277,6 +412,7 @@ def match_entries_v2(
         world_books: 已加载的世界书列表
         character_id: 当前角色 ID
         config: 召回配置
+        rng: 触发概率掷骰用的随机源（测试可注入固定种子）
 
     Returns:
         按 score 降序排列的匹配结果列表
@@ -372,6 +508,9 @@ def match_entries_v2(
 
             # 只有至少命中一个源才加入结果
             if trigger_sources:
+                # 命中后再按条目概率决定本回合是否真的触发
+                if not _probability_passes(entry, rng):
+                    continue
                 score += entry.priority + entry.weight
                 # 去重关键词
                 unique_keywords = list(dict.fromkeys(all_matched_keywords))
@@ -390,9 +529,18 @@ def match_entries_v2(
         len(r.entry.content),
     ))
 
-    # 裁剪：max_entries
-    if len(results) > config.max_entries:
-        results = results[:config.max_entries]
+    # 裁剪：max_entries + 总字符预算（至少保留一条，单条超长由注入器截断）
+    trimmed: List[WorldBookMatchResult] = []
+    total_chars = 0
+    for result in results:
+        if len(trimmed) >= config.max_entries:
+            break
+        content_len = len(result.entry.content or "")
+        if trimmed and total_chars + content_len > config.max_total_chars:
+            continue
+        trimmed.append(result)
+        total_chars += content_len
+    results = trimmed
 
     if results:
         _log.debug(
@@ -405,6 +553,198 @@ def match_entries_v2(
 
 
 # ---------- V2 测试匹配 ----------
+
+def debug_match_entries(
+    context: "WorldBookRecallContext",
+    world_books: List[WorldBook],
+    character_id: Optional[str] = None,
+    config: Optional[WorldBookRecallConfig] = None,
+    rng: Optional[random.Random] = None,
+) -> List[dict]:
+    """逐条目诊断世界书匹配结果（调试面板用）
+
+    返回所有条目（含未命中者）的诊断信息，解释每一条为何命中/未命中。
+    """
+    if config is None:
+        config = WorldBookRecallConfig()
+
+    user_text = context.latest_user_message
+    assistant_text = context.assistant_recent_text or _extract_assistant_recent_text(
+        context.recent_messages, limit=config.recent_message_limit
+    )
+    history_text = context.history_text or _extract_history_text(
+        context.recent_messages, max_chars=config.max_history_chars
+    )
+
+    diagnostics: List[dict] = []
+    assistant_triggered_count = 0
+
+    for book in world_books:
+        book_enabled = book.enabled
+        for entry in book.entries:
+            item = {
+                "world_book_id": book.id,
+                "world_book_name": book.name,
+                "entry_id": entry.id,
+                "entry_name": entry.name,
+                "enabled": entry.enabled,
+                "always_on": entry.always_on,
+                "entry_type": entry.entry_type,
+                "priority": entry.priority,
+                "position": getattr(entry, "position", "") or "",
+                "depth": getattr(entry, "depth", 4),
+                "probability": _entry_probability(entry),
+                "use_regex": bool(getattr(entry, "use_regex", False)),
+                "match_whole_words": bool(getattr(entry, "match_whole_words", False)),
+                "matched": False,
+                "injected": False,
+                "matched_keywords": [],
+                "missed_keywords": [],
+                "trigger_sources": [],
+                "score": 0,
+                "reason": "",
+                "content_preview": (entry.content or "")[:200],
+            }
+
+            if not book_enabled:
+                item["reason"] = "世界书已禁用"
+                diagnostics.append(item)
+                continue
+            if character_id and book.character_ids and not _character_matches(
+                character_id, book.character_ids, _BASE_DIR
+            ):
+                item["reason"] = "世界书未绑定当前角色"
+                diagnostics.append(item)
+                continue
+            if not entry.enabled:
+                item["reason"] = "条目已禁用"
+                diagnostics.append(item)
+                continue
+
+            if entry.always_on:
+                item["matched"] = True
+                item["injected"] = True
+                item["trigger_sources"] = ["always"]
+                item["score"] = SOURCE_WEIGHTS["always"] + entry.priority + entry.weight
+                diagnostics.append(item)
+                continue
+
+            if not entry.keywords and not entry.state_triggers:
+                item["reason"] = "无关键词且非常驻条目"
+                diagnostics.append(item)
+                continue
+
+            trigger_sources: List[str] = []
+            all_matched: List[str] = []
+            score = 0
+            notes: List[str] = []
+
+            if "user" in entry.trigger_sources and user_text:
+                user_matched = _check_match_keywords(user_text, entry)
+                if _satisfies_match_mode(user_matched, entry):
+                    trigger_sources.append("user")
+                    all_matched.extend(user_matched)
+                    score += SOURCE_WEIGHTS["user"]
+                elif entry.match_mode == "all" and user_matched:
+                    notes.append("全匹配只命中部分关键词")
+
+            if (
+                config.enable_assistant_trigger
+                and "assistant_recent" in entry.trigger_sources
+                and assistant_text
+            ):
+                if entry.priority < config.min_assistant_priority:
+                    notes.append(
+                        f"assistant 源优先级低于阈值({config.min_assistant_priority})"
+                    )
+                elif assistant_triggered_count >= config.max_assistant_triggered_entries:
+                    notes.append("assistant 源触发条目数已达上限")
+                else:
+                    asst_matched = _check_match_keywords(assistant_text, entry)
+                    if _satisfies_match_mode(asst_matched, entry):
+                        if entry.entry_type != "secret":
+                            trigger_sources.append("assistant_recent")
+                            all_matched.extend(asst_matched)
+                            score += SOURCE_WEIGHTS["assistant_recent"]
+                            assistant_triggered_count += 1
+                        else:
+                            notes.append("secret 条目不允许 assistant 源触发")
+
+            if (
+                config.enable_history_trigger
+                and "history" in entry.trigger_sources
+                and history_text
+            ):
+                hist_matched = _check_match_keywords(history_text, entry)
+                if _satisfies_match_mode(hist_matched, entry):
+                    trigger_sources.append("history")
+                    all_matched.extend(hist_matched)
+                    score += SOURCE_WEIGHTS["history"]
+
+            if (
+                config.enable_scene_trigger
+                and "scene_state" in entry.trigger_sources
+            ):
+                if not context.scene:
+                    notes.append("无场景状态数据")
+                elif _check_state_triggers(context.scene, entry):
+                    trigger_sources.append("scene_state")
+                    score += SOURCE_WEIGHTS["scene_state"]
+                else:
+                    notes.append("状态触发条件未满足")
+
+            item["trigger_sources"] = trigger_sources
+            item["matched_keywords"] = list(dict.fromkeys(all_matched))
+            item["score"] = score + entry.priority + entry.weight if trigger_sources else 0
+
+            # 命中后再按条目概率判定本回合是否触发
+            if trigger_sources and not _probability_passes(entry, rng):
+                notes.append(f"命中但未通过触发概率({_entry_probability(entry)}%)")
+                item["probability_skipped"] = True
+                item["trigger_sources"] = []
+                item["matched_keywords"] = []
+                item["score"] = 0
+                trigger_sources = []
+
+            check_text = user_text or ""
+            item["missed_keywords"] = [
+                kw
+                for kw in entry.keywords
+                if kw and not _keyword_hit(check_text, kw, entry)
+            ]
+
+            if trigger_sources:
+                item["matched"] = True
+                item["injected"] = True
+            elif notes:
+                item["reason"] = "；".join(dict.fromkeys(notes))
+            elif not user_text:
+                item["reason"] = "消息为空"
+            else:
+                item["reason"] = "关键词未命中"
+
+            diagnostics.append(item)
+
+    # 按注入预算标记被裁剪的命中条目
+    injected = [d for d in diagnostics if d.get("injected")]
+    injected.sort(key=lambda d: (-d["score"], -d["priority"]))
+    total_chars = 0
+    count = 0
+    for d in injected:
+        content_len = len(d.get("content_preview") or "")
+        if count >= config.max_entries:
+            d["injected"] = False
+            d["reason"] = f"命中但超出条目数上限({config.max_entries})"
+            continue
+        if count > 0 and total_chars + content_len > config.max_total_chars:
+            d["injected"] = False
+            d["reason"] = f"命中但超出总字符预算({config.max_total_chars})"
+            continue
+        count += 1
+        total_chars += content_len
+
+    return diagnostics
+
 
 def test_match_v2(
     context: WorldBookRecallContext,
@@ -465,22 +805,8 @@ def match_entries(
 
 def _check_match(message: str, entry: WorldBookEntry) -> bool:
     """检查消息是否命中条目关键词（V1 兼容）"""
-    check_msg = message if entry.case_sensitive else message.lower()
-
-    results = []
-    for keyword in entry.keywords:
-        if not keyword:
-            continue
-        check_kw = keyword if entry.case_sensitive else keyword.lower()
-        results.append(check_kw in check_msg)
-
-    if not results:
-        return False
-
-    if entry.match_mode == "all":
-        return all(results)
-    else:
-        return any(results)
+    matched = _check_match_keywords(message or "", entry)
+    return _satisfies_match_mode(matched, entry)
 
 
 def test_match(

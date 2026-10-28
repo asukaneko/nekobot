@@ -30,6 +30,11 @@ jobs:
           cache: "pip"
           cache-dependency-path: requirements.txt
 
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
       - name: Install check tools
         run: |
           python -m pip install --upgrade pip
@@ -41,18 +46,22 @@ jobs:
 
       - name: Python syntax compile check
         run: |
-          python -m compileall -q bot.py chat.py commands.py config.py heartbeat.py nbot tools
+          python -m compileall -q bot.py nbot tools tests
+
+      - name: JavaScript checks and regression tests
+        run: |
+          node --check nbot/web/static/js/nbot-methods.js
+          node --check nbot/web/static/js/i18n.js
+          node --check nbot/web/static/sw.js
+          node tests/js/context_stats_harness.js
+          node tests/js/dashboard_charts_harness.js
+          node tests/js/plugin_bridge_harness.js
 
       - name: Install project dependencies if tests exist
         if: ${{ hashFiles('tests/**') != '' }}
         run: |
           python -m pip install -r requirements.txt
 
-      - name: Run tests if tests directory exists
-        shell: bash
+      - name: Run Python regression tests
         run: |
-          if [ -d tests ]; then
-            python -m pytest -q
-          else
-            echo "No tests directory, skip pytest."
-          fi
+          python -m pytest -q

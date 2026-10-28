@@ -239,27 +239,60 @@ def register_review_routes(app, server):
             return jsonify({"error": str(exc)}), 500
 
     # ------------------------------------------------------------------
+    # 复盘模式设置
+    # ------------------------------------------------------------------
+
+    @app.route("/api/review/settings", methods=["GET"])
+    def get_review_settings():
+        from nbot.review.pipeline import get_review_mode
+        mode = get_review_mode(getattr(server, "data_dir", "data/web"))
+        return jsonify({"mode": mode})
+
+    @app.route("/api/review/settings", methods=["POST"])
+    def set_review_settings():
+        data = request.json or {}
+        mode = data.get("mode", "rule")
+        if mode not in ("rule", "llm"):
+            return jsonify({"error": "mode must be 'rule' or 'llm'"}), 400
+        try:
+            if not isinstance(server.settings, dict):
+                server.settings = {}
+            review_cfg = dict(server.settings.get("review") or {})
+            review_cfg["mode"] = mode
+            server.settings["review"] = review_cfg
+            server._save_data("settings")
+            from nbot.review.pipeline import get_review_pipeline
+            get_review_pipeline().set_mode(mode)
+            return jsonify({"ok": True, "mode": mode})
+        except Exception as exc:
+            _log.error("[ReviewRoutes] set review settings failed: %s", exc)
+            return jsonify({"error": str(exc)}), 500
+
+    # ------------------------------------------------------------------
     # 手动触发 Review（调试用）
     # ------------------------------------------------------------------
 
     @app.route("/api/review/run", methods=["POST"])
     def run_review():
-        """手动触发一次规则版 Review，返回结构化输出。"""
+        """手动触发一次 Review（默认规则版，可传 mode=llm 强制 LLM 版）。"""
         data = request.json or {}
         try:
             from nbot.review.models import ReviewInput
-            from nbot.review.pipeline import ReviewPipeline
+            from nbot.review.pipeline import ReviewPipeline, get_review_mode
 
+            mode = data.get("mode") or get_review_mode(getattr(server, "data_dir", "data/web"))
             inp = ReviewInput(
                 conversation_id=data.get("conversation_id", ""),
                 character_id=data.get("character_id", ""),
                 user_id=data.get("user_id", ""),
                 user_message=data.get("user_message", ""),
                 assistant_message=data.get("assistant_message", ""),
+                recent_messages=data.get("recent_messages", []),
                 selected_choice=data.get("selected_choice"),
                 relationship_state=data.get("relationship_state", {}),
+                plot_mode=bool(data.get("plot_mode")),
             )
-            pipeline = ReviewPipeline()
+            pipeline = ReviewPipeline(mode=mode)
             output = pipeline.run(inp)
             return jsonify(output.to_dict())
         except Exception as exc:

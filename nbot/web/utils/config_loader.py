@@ -1,8 +1,9 @@
-﻿import configparser
+import configparser
 import os
 
 from dotenv import load_dotenv
 
+from nbot.core.sampling import default_max_tokens_for
 from nbot.web.secure_store import read_secure_json, write_secure_json
 
 _ENV_PATH = os.path.join(
@@ -259,9 +260,11 @@ def get_model_config_by_purpose(purpose: str) -> dict:
                 "provider": model.get("provider", "custom"),
                 "append_base_url_path": model.get("append_base_url_path", True),
                 "temperature": model.get("temperature", 0.7),
-                "max_tokens": model.get("max_tokens", 2000),
+                "max_tokens": model.get("max_tokens", default_max_tokens_for(purpose)),
                 "max_context_length": model.get("max_context_length", 100000),
                 "top_p": model.get("top_p", 0.9),
+                "token_limit_field": model.get("token_limit_field", ""),
+                "stop": model.get("stop", ""),
                 "system_prompt": model.get("system_prompt", ""),
                 "supports_tools": model.get("supports_tools", True),
                 "supports_reasoning": model.get("supports_reasoning", True),
@@ -344,9 +347,11 @@ def get_model_configs_by_purpose(purpose: str) -> list:
             "provider": model.get("provider", "custom"),
             "append_base_url_path": model.get("append_base_url_path", True),
             "temperature": model.get("temperature", 0.7),
-            "max_tokens": model.get("max_tokens", 2000),
+            "max_tokens": model.get("max_tokens", default_max_tokens_for(purpose)),
             "max_context_length": model.get("max_context_length", 100000),
             "top_p": model.get("top_p", 0.9),
+            "token_limit_field": model.get("token_limit_field", ""),
+            "stop": model.get("stop", ""),
             "system_prompt": model.get("system_prompt", ""),
             "supports_tools": model.get("supports_tools", True),
             "supports_reasoning": model.get("supports_reasoning", True),

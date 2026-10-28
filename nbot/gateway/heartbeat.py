@@ -7,7 +7,9 @@ from typing import Any, Callable, Optional
 _global_session_heartbeat_manager = None
 
 # 二进制指数退避：会话闲置越久，心跳间隔越长（最多 2^MAX_BACKOFF 倍基础间隔）
-MAX_BACKOFF = 4  # 30min 基础间隔 → 最长约 8h
+MAX_BACKOFF = 4
+# life_sim 有效间隔硬上限：8 小时（无论基础间隔多大，退避不超过此值）
+MAX_LIFE_SIM_INTERVAL_MINUTES = 480
 
 
 class SessionHeartbeatManager:
@@ -155,7 +157,7 @@ class SessionHeartbeatManager:
         backoff = 0
         if self._is_life_sim_config(config):
             backoff = min(int(config.get("backoff_count", 0) or 0), MAX_BACKOFF)
-        effective_interval = base * (2 ** backoff)
+        effective_interval = min(base * (2 ** backoff), MAX_LIFE_SIM_INTERVAL_MINUTES)
         due_at = baseline + timedelta(minutes=effective_interval)
         normalized_now = self._parse_dt(now) or now
         return due_at <= normalized_now

@@ -13,6 +13,8 @@ from datetime import datetime
 import requests
 from flask import g, jsonify, request, send_file
 
+from nbot.character import tavern_card
+
 _log = logging.getLogger(__name__)
 
 # 允许的图片扩展名
@@ -20,6 +22,165 @@ ALLOWED_IMAGE_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'webp'}
 
 def allowed_image_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_IMAGE_EXTENSIONS
+
+
+DEFAULT_CARD_STATE = {
+    "affection": 50,
+    "trust": 50,
+    "familiarity": 30,
+    "dependency": 30,
+    "security": 50,
+    "jealousy": 0,
+    "mood": "开心",
+}
+
+
+def _save_portrait_bytes(server, data: bytes, ext: str) -> str:
+    """把立绘字节写入 uploads/portraits，返回可直接访问的 URL。"""
+    if not data:
+        return ""
+    ext = ext if ext.startswith(".") else f".{ext}" if ext else ".png"
+    upload_dir = os.path.join(server.base_dir, "nbot", "web", "static", "uploads", "portraits")
+    os.makedirs(upload_dir, exist_ok=True)
+    filename = f"portrait_{uuid.uuid4().hex[:16]}{ext.lower()}"
+    filepath = os.path.join(upload_dir, filename)
+    with open(filepath, "wb") as f:
+        f.write(data)
+    _log.info("立绘导入成功: %s", filepath)
+    return f"/static/uploads/portraits/{filename}"
+
+
+def _card_state(card: dict) -> dict:
+    """规范化角色卡初始状态：补齐缺省字段并把数值限制在 0-100。"""
+    state = dict(DEFAULT_CARD_STATE)
+    raw_state = card.get("state")
+    if isinstance(raw_state, dict):
+        for key, value in raw_state.items():
+            if key not in state:
+                continue
+            if key == "mood":
+                state[key] = str(value) if isinstance(value, str) and value else state[key]
+                continue
+            try:
+                state[key] = max(0, min(100, int(value)))
+            except (TypeError, ValueError):
+                continue
+    return state
+
+
+def _attach_world_character(character: dict) -> dict:
+    """给角色卡附上世界模拟用的角色条目（失败不影响导入/保存）。"""
+    try:
+        from nbot.world.character_resolver import CharacterResolver
+
+        character["worldCharacter"] = CharacterResolver().from_native_card(
+            character, source_id=str(character.get("id") or "")
+        )
+    except Exception as exc:
+        _log.warning("[World] 生成世界角色条目失败: %s", exc)
+    return character
+
+
+def _finalize_imported_card(character: dict, meta: dict) -> dict:
+    """补齐导入卡片的缺省字段并编译系统提示词。"""
+    character.setdefault("description", "")
+    character.setdefault("avatar", "fas fa-user-circle")
+    character.setdefault("portrait", "")
+    character.setdefault("tags", [])
+    character.setdefault("basicInfo", "")
+    character.setdefault("personality", "")
+    character.setdefault("scenario", "")
+    character.setdefault("firstMessage", "")
+    character.setdefault("exampleDialogues", "")
+    character.setdefault("responseFormat", "")
+    character.setdefault("rules", [])
+    character.setdefault("alternateGreetings", [])
+    character["state"] = _card_state(character)
+
+    book = meta.get("character_book")
+    if isinstance(book, dict):
+        character["characterBook"] = book
+    if meta.get("tavern"):
+        character["tavern"] = meta["tavern"]
+    if not character.get("systemPrompt"):
+        character["systemPrompt"] = compile_personality_prompt(character)
+    return _attach_world_character(character)
+
+
+def _static_file_path(server, url: str) -> str:
+    """把 /static/... URL 换成磁盘路径，非静态地址返回空串。"""
+    url = (url or "").split("?", 1)[0]
+    if not url.startswith("/static/"):
+        return ""
+    rel = url[len("/static/"):].replace("/", os.sep)
+    return os.path.join(server.base_dir, "nbot", "web", "static", rel)
+
+
+def _read_local_portrait_png(server, url: str) -> bytes:
+    """读取本地立绘并确保返回 PNG 字节（JPEG 等用 Pillow 转换）。"""
+    path = _static_file_path(server, url)
+    if not path or not os.path.exists(path):
+        return b""
+    try:
+        with open(path, "rb") as f:
+            blob = f.read()
+    except OSError as e:
+        _log.warning("读取立绘失败 %s: %s", path, e)
+        return b""
+    if tavern_card.is_png(blob):
+        return blob
+    try:
+        from PIL import Image
+
+        with Image.open(io.BytesIO(blob)) as image:
+            out = io.BytesIO()
+            image.convert("RGB").save(out, format="PNG")
+            return out.getvalue()
+    except Exception as e:  # pragma: no cover - Pillow 可选
+        _log.warning("立绘转换为 PNG 失败 %s: %s", path, e)
+        return b""
+
+
+def _load_world_book_payload(server, book_id: str) -> dict:
+    """读取世界书并转成导出用的 character_book 结构。"""
+    from nbot.character.storage.world_book_store import WorldBookStore
+
+    try:
+        book = WorldBookStore(server.base_dir).get(book_id)
+    except Exception as e:
+        _log.error("读取世界书失败 %s: %s", book_id, e)
+        return {}
+    if not book:
+        return {}
+    return {
+        "name": book.name,
+        "description": book.description,
+        "entries": [entry.to_dict() for entry in book.entries],
+    }
+
+
+def _parse_card_zip(blob: bytes):
+    """解析 ZIP 角色卡包，返回 (character, meta, portrait_bytes, portrait_ext)。"""
+    with zipfile.ZipFile(io.BytesIO(blob), "r") as zf:
+        json_names = [n for n in zf.namelist() if n.lower().endswith(".json")]
+        target = next((n for n in json_names if n.lower().endswith("character.json")), None)
+        if target is None and json_names:
+            target = json_names[0]
+        if target is None:
+            raise tavern_card.TavernCardError("ZIP 文件中未找到角色卡 JSON")
+
+        raw = json.loads(zf.read(target).decode("utf-8-sig"))
+        character, meta = tavern_card.normalize_tavern_card(raw)
+
+        portrait_bytes = None
+        portrait_ext = ".png"
+        for name in zf.namelist():
+            if name.lower().split("/")[-1].startswith("portrait."):
+                portrait_bytes = zf.read(name)
+                portrait_ext = os.path.splitext(name)[1] or ".png"
+                break
+
+    return character, meta, portrait_bytes, portrait_ext
 
 
 def _format_first_message_memories(server, character_name="", target_id=""):
@@ -350,8 +511,24 @@ def register_personality_routes(app, server):
         server.personality["state"] = data.get("state", server.personality.get("state", {"affection": 50, "trust": 50, "familiarity": 30, "dependency": 30, "security": 50, "mood": "开心"}))
         server.personality["greeting"] = data.get("greeting", server.personality.get("greeting", ""))
 
+        # 多开场白与酒馆生态字段（导入酒馆卡片时产生）
+        alternate = data.get("alternateGreetings")
+        if isinstance(alternate, list):
+            server.personality["alternateGreetings"] = [
+                str(item) for item in alternate if str(item or "").strip()
+            ]
+        else:
+            server.personality.setdefault("alternateGreetings", [])
+        if isinstance(data.get("tavern"), dict):
+            server.personality["tavern"] = data["tavern"]
+        if data.get("characterBookId"):
+            server.personality["characterBookId"] = str(data["characterBookId"])
+
         # 始终根据最新字段自动编译 systemPrompt，确保与角色设定同步
         server.personality["systemPrompt"] = compile_personality_prompt(server.personality)
+
+        # 世界模拟：同步生成 worldCharacter 条目（失败不影响保存）
+        _attach_world_character(server.personality)
 
         try:
             # 保存完整的 personality 数据到 JSON 文件
@@ -488,12 +665,21 @@ def register_personality_routes(app, server):
             "responseFormat": data.get("responseFormat", ""),
             "rules": data.get("rules", []),
             "state": data.get("state", {"affection": 50, "trust": 50, "familiarity": 30, "dependency": 30, "security": 50, "mood": "开心"}),
+            "alternateGreetings": [
+                str(item) for item in (data.get("alternateGreetings") or [])
+                if str(item or "").strip()
+            ],
             "created_at": datetime.now().isoformat(),
         }
+        if isinstance(data.get("tavern"), dict):
+            preset["tavern"] = data["tavern"]
+        if data.get("characterBookId"):
+            preset["characterBookId"] = str(data["characterBookId"])
         # 立绘图字段 - 存储图片的URL或路径，不包含原始图片数据
         if data.get("portrait"):
             preset["portrait"] = data.get("portrait")
         preset["systemPrompt"] = compile_personality_prompt(preset)
+        _attach_world_character(preset)
         server.custom_personality_presets.append(preset)
         server._save_data("custom_personality_presets")
         return jsonify(preset)
@@ -534,10 +720,23 @@ def register_personality_routes(app, server):
         preset["responseFormat"] = data.get("responseFormat", preset.get("responseFormat", ""))
         preset["rules"] = data.get("rules", preset.get("rules", []))
         preset["state"] = data.get("state", preset.get("state", {"affection": 50, "trust": 50, "familiarity": 30, "dependency": 30, "security": 50, "mood": "开心"}))
+        if isinstance(data.get("alternateGreetings"), list):
+            preset["alternateGreetings"] = [
+                str(item) for item in data["alternateGreetings"] if str(item or "").strip()
+            ]
+        if isinstance(data.get("tavern"), dict):
+            preset["tavern"] = data["tavern"]
+        if "characterBookId" in data:
+            book_id = str(data.get("characterBookId") or "")
+            if book_id:
+                preset["characterBookId"] = book_id
+            else:
+                preset.pop("characterBookId", None)
         preset["updated_at"] = datetime.now().isoformat()
 
         # 重新编译系统提示词
         preset["systemPrompt"] = compile_personality_prompt(preset)
+        _attach_world_character(preset)
 
         server._save_data("custom_personality_presets")
         return jsonify({"success": True, "data": preset})
@@ -951,7 +1150,14 @@ Return only one JSON object, with no Markdown fences or explanation."""
 
     @app.route("/api/personality/import", methods=["POST"])
     def import_personality():
-        """导入角色卡，支持 ZIP 和 JSON 格式"""
+        """导入角色卡
+
+        支持：
+        - 酒馆 PNG 卡片（tEXt 内嵌 chara/ccv3）
+        - 酒馆 chara_card_v1/v2/v3 JSON
+        - 本项目原生角色卡 JSON
+        - ZIP 包（character.json + portrait.*）
+        """
         if "file" not in request.files:
             return jsonify({"success": False, "error": "请上传文件"}), 400
 
@@ -960,86 +1166,50 @@ Return only one JSON object, with no Markdown fences or explanation."""
             return jsonify({"success": False, "error": "文件名为空"}), 400
 
         try:
-            filename = file.filename.lower()
-            character = None
-            portrait_file = None
+            blob = file.read()
+            filename = (file.filename or "").lower()
+            portrait_bytes = None
+            portrait_ext = ".png"
+            meta = {"format": "native", "warnings": []}
 
-            # 判断文件类型
-            if filename.endswith('.zip'):
-                # 处理 ZIP 文件
-                zip_data = io.BytesIO(file.read())
-                with zipfile.ZipFile(zip_data, 'r') as zf:
-                    # 查找 character.json
-                    json_file = None
-                    for name in zf.namelist():
-                        if name.lower() == 'character.json':
-                            json_file = name
-                            break
+            if filename.endswith(".zip"):
+                character, meta, portrait_bytes, portrait_ext = _parse_card_zip(blob)
 
-                    if not json_file:
-                        return jsonify({"success": False, "error": "ZIP 文件中未找到 character.json"}), 400
+            elif tavern_card.is_png(blob) or filename.endswith(".png"):
+                character, meta = tavern_card.parse_card_bytes(file.filename, blob)
+                # 酒馆 PNG 卡片的图片本身就是立绘
+                portrait_bytes = blob
 
-                    # 读取 JSON
-                    character = json.loads(zf.read(json_file).decode('utf-8'))
+            elif filename.endswith(".json"):
+                character, meta = tavern_card.parse_card_bytes(file.filename, blob)
 
-                    # 查找立绘图片
-                    for name in zf.namelist():
-                        if name.lower().startswith('portrait.'):
-                            portrait_file = zf.read(name)
-                            portrait_ext = os.path.splitext(name)[1]
-                            break
-
-            elif filename.endswith('.json'):
-                # 处理 JSON 文件
-                content = file.read().decode("utf-8")
-                character = json.loads(content)
             else:
-                return jsonify({"success": False, "error": "不支持的文件格式，请上传 .json 或 .zip 文件"}), 400
+                return jsonify({
+                    "success": False,
+                    "error": "不支持的文件格式，请上传 .png、.json 或 .zip 文件",
+                }), 400
 
-            # 验证基本字段
-            if not character.get("name"):
-                return jsonify({"success": False, "error": "角色卡缺少 name 字段"}), 400
-
-            # 如果有立绘图片，上传到服务器
-            if portrait_file:
+            if portrait_bytes:
                 try:
-                    # 创建上传目录
-                    upload_dir = os.path.join(server.base_dir, "nbot", "web", "static", "uploads", "portraits")
-                    os.makedirs(upload_dir, exist_ok=True)
-
-                    # 生成唯一文件名
-                    filename = f"portrait_{uuid.uuid4().hex[:16]}{portrait_ext}"
-                    filepath = os.path.join(upload_dir, filename)
-
-                    # 保存文件
-                    with open(filepath, 'wb') as f:
-                        f.write(portrait_file)
-
-                    # 设置立绘 URL
-                    character['portrait'] = f"/static/uploads/portraits/{filename}"
-                    _log.info(f"立绘导入成功: {filepath}")
+                    character["portrait"] = _save_portrait_bytes(server, portrait_bytes, portrait_ext)
                 except Exception as e:
                     _log.error(f"立绘导入失败: {e}")
-                    # 立绘导入失败不影响整体导入
-                    character.setdefault('portrait', '')
 
-            # 填充缺失字段
-            character.setdefault("description", "")
-            character.setdefault("avatar", "fas fa-user-circle")
-            character.setdefault("tags", [])
-            character.setdefault("basicInfo", "")
-            character.setdefault("personality", "")
-            character.setdefault("scenario", "")
-            character.setdefault("firstMessage", "")
-            character.setdefault("exampleDialogues", "")
-            character.setdefault("responseFormat", "")
-            character.setdefault("rules", [])
-            character.setdefault("state", {"affection": 50, "trust": 50, "familiarity": 30, "dependency": 30, "security": 50, "mood": "开心"})
-            if not character.get("systemPrompt"):
-                character["systemPrompt"] = compile_personality_prompt(character)
+            character = _finalize_imported_card(character, meta)
 
-            return jsonify({"success": True, "character": character})
+            return jsonify({
+                "success": True,
+                "character": character,
+                "meta": {
+                    "format": meta.get("format", "native"),
+                    "warnings": meta.get("warnings", []),
+                    "alternate_greetings": character.get("alternateGreetings", []),
+                    "character_book": meta.get("character_book"),
+                },
+            })
 
+        except tavern_card.TavernCardError as e:
+            return jsonify({"success": False, "error": str(e)}), 400
         except json.JSONDecodeError:
             return jsonify({"success": False, "error": "文件不是有效的 JSON 格式"}), 400
         except UnicodeDecodeError:
@@ -1049,6 +1219,79 @@ Return only one JSON object, with no Markdown fences or explanation."""
         except Exception as e:
             _log.error(f"导入角色卡失败: {e}")
             return jsonify({"success": False, "error": f"导入失败: {str(e)}"}), 500
+
+    @app.route("/api/personality/import-character-book", methods=["POST"])
+    def import_character_book():
+        """把角色卡内嵌的世界书（character_book）落地为独立世界书。"""
+        from nbot.character.storage.world_book_store import WorldBookStore
+
+        data = request.json or {}
+        book_data = data.get("book") or data.get("character_book") or {}
+        if not isinstance(book_data, dict):
+            return jsonify({"success": False, "error": "世界书数据格式有误"}), 400
+
+        entries = book_data.get("entries")
+        if not isinstance(entries, list) or not entries:
+            return jsonify({"success": False, "error": "世界书没有可导入的条目"}), 400
+
+        character_name = str(data.get("character_name") or "").strip()
+        character_id = str(data.get("character_id") or "").strip()
+        book_name = str(book_data.get("name") or "").strip()
+        if not book_name:
+            book_name = f"{character_name or '角色'} 设定集"
+
+        try:
+            store = WorldBookStore(server.base_dir)
+            book = store.create(
+                name=book_name,
+                description=str(book_data.get("description") or ""),
+                character_ids=[character_id] if character_id else [],
+            )
+            created = store.batch_add_entries(book.id, entries)
+            _log.info(
+                "[ImportBook] created world book %s (%s) with %d entries",
+                book.id,
+                book_name,
+                len(created),
+            )
+            return jsonify({
+                "success": True,
+                "world_book": {
+                    "id": book.id,
+                    "name": book.name,
+                    "entry_count": len(created),
+                },
+                "entry_count": len(created),
+            })
+        except Exception as e:
+            _log.error(f"导入世界书失败: {e}")
+            return jsonify({"success": False, "error": f"导入世界书失败: {str(e)}"}), 500
+
+    @app.route("/api/personality/greeting", methods=["POST"])
+    def pick_personality_greeting():
+        """从角色卡的开场白库中挑选一条（主开场白 + 备用开场白）。"""
+        data = request.json or {}
+        character = data.get("character") if isinstance(data.get("character"), dict) else data
+        if not isinstance(character, dict):
+            return jsonify({"success": False, "error": "角色卡数据格式有误"}), 400
+
+        index = data.get("index")
+        randomize = bool(data.get("random"))
+        text, picked = tavern_card.pick_greeting(character, index=index, randomize=randomize)
+
+        user_name = str(data.get("user") or "").strip()
+        char_name = str(character.get("name") or "").strip()
+        if user_name:
+            text = text.replace("{{user}}", user_name)
+        if char_name:
+            text = text.replace("{{char}}", char_name)
+
+        return jsonify({
+            "success": True,
+            "index": picked,
+            "text": text,
+            "count": len(tavern_card.extract_greetings(character)),
+        })
 
     @app.route("/api/personality/ai-generate-first-message", methods=["POST"])
     def ai_generate_first_message():
@@ -1205,14 +1448,60 @@ Return only one JSON object, with no Markdown fences or explanation."""
 
     @app.route("/api/personality/export", methods=["POST"])
     def export_personality():
-        """导出角色卡为 ZIP 文件，包含 JSON 和立绘图片"""
+        """导出角色卡
+
+        format:
+        - native（默认）：ZIP，包含本项目 character.json 与立绘
+        - tavern_v2 / tavern_v3：酒馆兼容 JSON（chara_card_v2/v3）
+        - tavern_png：内嵌卡片数据的 PNG（无立绘时使用占位图）
+        """
         data = request.json or {}
         character = data.get("character", {})
 
         if not character.get("name"):
             return jsonify({"success": False, "error": "角色卡缺少名称"}), 400
 
+        fmt = str(data.get("format") or "native").strip().lower()
+        character_name = character.get('name', 'character')
+        safe_name = re.sub(r'[^\w\s-]', '', character_name).strip() or "character"
+
         try:
+            character_book = data.get("character_book")
+            if not isinstance(character_book, dict):
+                character_book = character.get("characterBook")
+            world_book_id = str(data.get("world_book_id") or "").strip()
+            if world_book_id:
+                character_book = _load_world_book_payload(server, world_book_id) or character_book
+
+            if fmt in {"tavern_v2", "tavern_v3", "tavern", "v2", "v3"}:
+                version = "v3" if fmt in {"tavern_v3", "v3"} else "v2"
+                card = tavern_card.to_tavern_card(
+                    character, version, character_book=character_book
+                )
+                payload = json.dumps(card, ensure_ascii=False, indent=2).encode("utf-8")
+                return send_file(
+                    io.BytesIO(payload),
+                    mimetype="application/json",
+                    as_attachment=True,
+                    download_name=f"{safe_name}_{version}.json",
+                )
+
+            if fmt in {"tavern_png", "png", "card_png"}:
+                base_image = _read_local_portrait_png(server, character.get("portrait", ""))
+                if not base_image:
+                    _log.info("[Export] 无 PNG 立绘，使用占位图导出 %s", character_name)
+                png = tavern_card.build_card_png(
+                    {**character,
+                     "characterBook": character_book if isinstance(character_book, dict) else None},
+                    base_image or None,
+                )
+                return send_file(
+                    io.BytesIO(png),
+                    mimetype="image/png",
+                    as_attachment=True,
+                    download_name=f"{safe_name}_角色卡.png",
+                )
+
             # 创建内存中的 ZIP 文件
             memory_file = io.BytesIO()
 
@@ -1236,8 +1525,6 @@ Return only one JSON object, with no Markdown fences or explanation."""
 
             # 准备响应
             memory_file.seek(0)
-            character_name = character.get('name', 'character')
-            safe_name = re.sub(r'[^\w\s-]', '', character_name).strip()
 
             return send_file(
                 memory_file,
@@ -1246,14 +1533,24 @@ Return only one JSON object, with no Markdown fences or explanation."""
                 download_name=f'{safe_name}_角色卡.zip'
             )
 
+        except tavern_card.TavernCardError as e:
+            return jsonify({"success": False, "error": str(e)}), 400
         except Exception as e:
             _log.error(f"导出角色卡失败: {e}")
             return jsonify({"success": False, "error": f"导出失败: {str(e)}"}), 500
 
     @app.route("/api/personality/export-all", methods=["GET"])
     def export_all_personalities():
-        """导出所有自定义角色卡为 ZIP 文件"""
+        """导出所有自定义角色卡为 ZIP 文件
+
+        query:
+        - format=native（默认）｜tavern_v2｜tavern_v3
+        """
         try:
+            export_format = str(request.args.get("format") or "native").strip().lower()
+            tavern_version = ""
+            if export_format in {"tavern_v2", "tavern_v3"}:
+                tavern_version = "v3" if export_format == "tavern_v3" else "v2"
             # 从文件加载自定义角色预设
             presets_file = os.path.join(server.data_dir, "custom_personality_presets.json")
             if os.path.exists(presets_file):
@@ -1288,8 +1585,11 @@ Return only one JSON object, with no Markdown fences or explanation."""
                         "exampleDialogues": preset.get("exampleDialogues", ""),
                         "responseFormat": preset.get("responseFormat", ""),
                         "rules": preset.get("rules", []),
-                        "state": preset.get("state", {"affection": 50, "trust": 50, "familiarity": 30, "dependency": 30, "security": 50, "mood": "开心"})
+                        "state": preset.get("state", {"affection": 50, "trust": 50, "familiarity": 30, "dependency": 30, "security": 50, "mood": "开心"}),
+                        "alternateGreetings": preset.get("alternateGreetings", []),
                     }
+                    if isinstance(preset.get("tavern"), dict):
+                        character["tavern"] = preset["tavern"]
 
                     # 创建角色专属文件夹名称（安全化文件名）
                     preset_id = preset.get("id", str(uuid.uuid4()))
@@ -1297,7 +1597,18 @@ Return only one JSON object, with no Markdown fences or explanation."""
                     folder_name = f"{safe_name}_{preset_id}"
 
                     # 添加 JSON 文件
-                    character_json = json.dumps(character, ensure_ascii=False, indent=2)
+                    if tavern_version:
+                        book_payload = _load_world_book_payload(
+                            server, str(preset.get("characterBookId") or "")
+                        )
+                        payload = tavern_card.to_tavern_card(
+                            character,
+                            tavern_version,
+                            character_book=book_payload or None,
+                        )
+                        character_json = json.dumps(payload, ensure_ascii=False, indent=2)
+                    else:
+                        character_json = json.dumps(character, ensure_ascii=False, indent=2)
                     zf.writestr(f'{folder_name}/character.json', character_json)
 
                     # 如果有立绘图片，添加到 ZIP
@@ -1376,8 +1687,9 @@ Return only one JSON object, with no Markdown fences or explanation."""
 
                 for folder, files in character_folders.items():
                     try:
-                        # 读取 JSON
-                        character = json.loads(zf.read(files['json']).decode('utf-8'))
+                        # 读取 JSON（原生卡或酒馆 v1/v2/v3 卡统一归一化）
+                        raw_character = json.loads(zf.read(files['json']).decode('utf-8'))
+                        character, _card_meta = tavern_card.normalize_tavern_card(raw_character)
 
                         # 验证基本字段
                         if not character.get("name"):
@@ -1431,8 +1743,11 @@ Return only one JSON object, with no Markdown fences or explanation."""
                             "responseFormat": character.get("responseFormat", ""),
                             "rules": character.get("rules", []),
                             "state": character.get("state", {"affection": 50, "trust": 50, "familiarity": 30, "dependency": 30, "security": 50, "mood": "开心"}),
+                            "alternateGreetings": character.get("alternateGreetings", []),
                             "created_at": datetime.now().isoformat(),
                         }
+                        if isinstance(character.get("tavern"), dict) and character["tavern"]:
+                            new_preset_data["tavern"] = character["tavern"]
                         if portrait_url:
                             new_preset_data["portrait"] = portrait_url
                         new_preset_data["systemPrompt"] = compile_personality_prompt(new_preset_data)

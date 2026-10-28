@@ -9,6 +9,7 @@ from flask import jsonify, request
 from werkzeug.utils import secure_filename
 
 from nbot.services.tts_config import get_tts_config_from_server
+from nbot.web.audio_cache import normalize_generated_audio_path
 
 _log = logging.getLogger(__name__)
 
@@ -170,12 +171,13 @@ def register_tts_playground_routes(app, server):
 
             temp_dir = os.path.join(server.data_dir, "tts_cache")
             os.makedirs(temp_dir, exist_ok=True)
-            output_file = os.path.join(temp_dir, f"tts_preview_{int(time.time() * 1000)}.mp3")
+            output_file = os.path.join(temp_dir, f"tts_preview_{time.time_ns()}.mp3")
 
             adapter = get_adapter(provider)
             adapter.synthesize(text, tts_config, output_file)
             if not os.path.exists(output_file) or os.path.getsize(output_file) <= 0:
                 raise RuntimeError("TTS adapter did not produce an audio file")
+            output_file = normalize_generated_audio_path(output_file)
 
             audio_url = f"/api/tts/audio/{os.path.basename(output_file)}"
             return jsonify({

@@ -19,10 +19,13 @@ from nbot.core import (
     dump_json,
     extract_display_text,
     message_manager,
-    prompt_manager,
 )
+# 注意：必须从定义处导入 prompt_manager 实例。`nbot.core` 包里的同名导出会被
+# 子模块 nbot.core.prompt_manager 覆盖，从包里取到的可能是模块而非 PromptManager。
+from nbot.core.prompt import prompt_manager
 from nbot.core.ai_pipeline import (
     AIPipeline,
+    ModePolicy,
     PipelineCallbacks,
     PipelineContext,
     PipelineResult,
@@ -252,6 +255,7 @@ def load_canonical_qq_messages(
                     normalized = _normalize_canonical_qq_messages(
                         session.get("messages", []),
                         session_mode=str(session.get("session_mode") or ""),
+                        inherit_character=ModePolicy.character_features_enabled(session),
                     )
                     if normalized:
                         return normalized
@@ -274,9 +278,11 @@ def _normalize_canonical_qq_messages(
     messages: list[dict[str, Any]],
     *,
     session_mode: str = "",
+    inherit_character: bool = False,
 ) -> list[dict[str, Any]]:
     normalized = []
-    is_agent = session_mode == "agent"
+    # 开了「agent 继承角色能力」时保留 system prompt（角色卡/记忆仍在用）
+    is_agent = session_mode == "agent" and not inherit_character
     for msg in messages:
         role = str(msg.get("role") or "")
         if role not in ("system", "user", "assistant"):
@@ -319,16 +325,93 @@ class QQCallbacks(PipelineCallbacks):
 
     def load_messages(self, ctx: PipelineContext) -> list[dict[str, Any]]:
         """从 QQSessionStore 加载历史消息。"""
-        is_agent = ctx.metadata.get("session_mode") == "agent"
+        # agent 会话默认不注入角色记忆；开了「继承角色能力」则照常加载
         return load_canonical_qq_messages(
             user_id=self.user_id,
             group_id=self.group_id,
             group_user_id=self.group_user_id,
-            include_memories=not is_agent,
+            include_memories=ctx.mode_policy.inherits_character,
         )
 
+    def auto_compress_context(
+        self, ctx: PipelineContext, messages: list, threshold_chars: int
+    ) -> list:
+        """上下文达到 80% 阈值时自动摘要压缩（失败时按未压缩继续）。"""
+        from nbot.core.auto_compression import auto_compress
+        from nbot.core.token_stats import PURPOSE_COMPRESSION, get_token_stats_manager
+
+        try:
+            from nbot.services.ai import ai_client as _ai_client
+        except Exception:
+            _ai_client = None
+        if not _ai_client or not getattr(_ai_client, "base_url", ""):
+            return messages
+
+        live = self.qq_store.ensure_history(
+            user_id=self.user_id,
+            group_id=self.group_id,
+            group_user_id=self.group_user_id,
+        )
+        if not live:
+            return messages
+
+        import time as _time
+
+        ts_key = f"{self.user_id or ''}:{self.group_id or ''}:{self.group_user_id or ''}"
+        ts_map = getattr(self.qq_store, "_auto_compress_ts", None)
+        if ts_map is None:
+            ts_map = {}
+            self.qq_store._auto_compress_ts = ts_map
+        last_ts = float(ts_map.get(ts_key, 0.0))
+
+        def _on_usage(usage, model):
+            if not usage:
+                return
+            try:
+                get_token_stats_manager().record_usage(
+                    prompt_tokens=getattr(usage, "prompt_tokens", 0) or 0,
+                    completion_tokens=getattr(usage, "completion_tokens", 0) or 0,
+                    total_tokens=getattr(usage, "total_tokens", 0) or 0,
+                    model=model or getattr(_ai_client, "model", "") or "",
+                    session_id=ts_key,
+                    channel_type="qq",
+                    source="qq",
+                    purpose=PURPOSE_COMPRESSION,
+                )
+            except Exception:
+                pass
+
+        try:
+            new_messages, info = auto_compress(
+                live,
+                chat_complete=lambda ms: _ai_client.chat_completion(
+                    model=None, messages=ms, stream=False
+                ),
+                max_context_chars=max(threshold_chars, 1),
+                trigger_ratio=1.0,
+                last_compress_ts=last_ts,
+                on_usage=_on_usage,
+                model_label=getattr(_ai_client, "model", "") or "",
+            )
+        except Exception as exc:
+            _log.debug("[AutoCompress] QQ 上下文压缩失败: %s", exc)
+            return messages
+
+        if not info.get("compressed"):
+            return messages
+
+        # 原地替换会话桶内容并持久化
+        live[:] = new_messages
+        self.qq_store.save()
+        ts_map[ts_key] = _time.time()
+        _log.info(
+            "[AutoCompress] QQ 会话 %s 自动压缩 %d 条消息",
+            ts_key, info.get("compressed_count", 0),
+        )
+        return new_messages
+
     def get_system_prompt(self, ctx: PipelineContext) -> str:
-        is_agent = ctx.metadata.get("session_mode") == "agent"
+        include_memories = ctx.mode_policy.inherits_character
 
         # 检查是否启用新的角色运行时
         # 如果启用，返回空字符串，让角色运行时的 prompt stack 处理
@@ -351,11 +434,23 @@ class QQCallbacks(PipelineCallbacks):
             user_id=self.user_id,
             group_id=self.group_id,
             include_skills=True,
-            include_memories=not is_agent,
+            include_memories=include_memories,
         )
 
     def search_knowledge(self, ctx: PipelineContext, query: str) -> str:
-        return search_knowledge_base(query, self.user_id, self.group_id)
+        text, citations = self.search_knowledge_with_citations(ctx, query)
+        return text
+
+    def search_knowledge_with_citations(
+        self, ctx: PipelineContext, query: str
+    ) -> tuple[str, list[dict[str, Any]]]:
+        """知识库检索：命中时把 citations 一并带进上下文元数据。"""
+        text, citations = search_knowledge_base_with_citations(
+            query, self.user_id, self.group_id
+        )
+        if citations:
+            ctx.metadata["knowledge_citations"] = citations
+        return text, citations
 
     def save_assistant_message(
         self, ctx: PipelineContext, message: dict[str, Any]
@@ -407,6 +502,7 @@ class QQCallbacks(PipelineCallbacks):
                 RelationshipRepository,
             )
             from nbot.character.runtime import CharacterRuntime
+            from nbot.character.state_history import StateHistoryStore
             from nbot.character.state_machine import StateMachine
             from nbot.character.storage.world_book_store import WorldBookStore
 
@@ -440,6 +536,7 @@ class QQCallbacks(PipelineCallbacks):
                 state_machine=StateMachine(),
                 world_book_store=WorldBookStore(base_dir),
                 hook_runtime=_hook_rt,
+                history_store=StateHistoryStore(base_dir),
             )
             return _qq_character_runtime
         except Exception as exc:
@@ -618,58 +715,64 @@ class QQCallbacks(PipelineCallbacks):
             _log.error("[ImageGen] QQ 图片发送失败: %s", exc)
 
 
-def search_knowledge_base(query: str, user_id: str = None, group_id: str = None) -> str:
-    """
-    搜索知识库并返回相关内容
-    
-    Args:
-        query: 用户查询内容
-        user_id: 用户ID
-        group_id: 群组ID
-        
-    Returns:
-        知识库相关内容，如果无匹配则返回空字符串
+def search_knowledge_base_with_citations(
+    query: str,
+    user_id: str = None,
+    group_id: str = None,
+) -> tuple[str, list[dict[str, Any]]]:
+    """检索知识库，返回 ``(格式化文本, citations)``。
+
+    citations 字段与 ``KnowledgeManager.retrieve`` 对齐（doc_id/title/source/
+    chunk_index/start_char/end_char/snippet/score/rerank_score/tags）。
+    空知识库、未命中、检索异常都返回 ``("", [])``，不抛异常。
     """
     if not KNOWLEDGE_AVAILABLE or not query:
-        return ""
-    
+        return "", []
+
     try:
         km = get_knowledge_manager()
         if not km:
-            return ""
-        
-        owner_id = user_id or group_id
-        owner_type = "user" if user_id else "group"
-        
-        results = km.search(query, base_id=None, top_k=3)
-        
-        if not results:
-            return ""
-        
-        knowledge_text = "【知识库检索结果】\n"
-        seen_titles = set()
-        
-        for doc, similarity, chunk_content in results:
-            if similarity < 0.1:
-                continue
-            if doc.title in seen_titles:
-                continue
-            seen_titles.add(doc.title)
-            
-            knowledge_text += f"\n📄 {doc.title}\n"
-            knowledge_text += f"{chunk_content[:300]}"
-            if len(chunk_content) > 300:
-                knowledge_text += "..."
-            knowledge_text += "\n"
-        
-        if seen_titles:
-            print(f"[知识库] 检索到 {len(seen_titles)} 条相关内容")
-            return knowledge_text
-        return ""
-        
+            return "", []
+        payload = km.search_with_citations(query, base_id=None, top_k=3)
     except Exception as e:
-        print(f"[知识库] 检索失败: {e}")
-        return ""
+        _log.warning("[知识库] 检索失败: %s", e)
+        return "", []
+
+    results = list(payload.get("results") or [])
+    citations = list(payload.get("citations") or [])
+    if not results or not citations:
+        return "", []
+
+    knowledge_text = "【知识库检索结果】"
+    seen_titles: set[str] = set()
+    kept_citations: list[dict[str, Any]] = []
+    # results 与 citations 一一对应（同一 chosen 顺序），按索引配对
+    for (doc, similarity, chunk_content), citation in zip(results, citations):
+        try:
+            if float(similarity or 0.0) < 0.1:
+                continue
+        except (TypeError, ValueError):
+            continue
+        title = str(getattr(doc, "title", "") or citation.get("title") or "")
+        if title in seen_titles:
+            continue
+        seen_titles.add(title)
+        kept_citations.append(citation)
+        body = chunk_content[:300]
+        if len(chunk_content) > 300:
+            body += "..."
+        knowledge_text += f"\n\n📄 {title}\n{body}"
+
+    if not kept_citations:
+        return "", []
+    _log.info("[知识库] 检索到 %d 条相关内容（含 citations）", len(kept_citations))
+    return knowledge_text, kept_citations
+
+
+def search_knowledge_base(query: str, user_id: str = None, group_id: str = None) -> str:
+    """搜索知识库并返回相关内容（兼容旧调用，丢弃 citations）。"""
+    text, _ = search_knowledge_base_with_citations(query, user_id, group_id)
+    return text
 
 
 def get_qq_session_id(user_id=None, group_id=None, group_user_id=None) -> str:
@@ -1017,9 +1120,21 @@ def _run_qq_chat_request(
             _sess = _wcs.session_store.get_session(_sid) if _sid else {}
             if (_sess or {}).get("session_mode"):
                 ctx.metadata["session_mode"] = _sess["session_mode"]
+            # agent 继承角色能力（P2-8）：会话级开关，默认关闭
+            if (_sess or {}).get("agent_inherit_character") is not None:
+                ctx.metadata["agent_inherit_character"] = _sess["agent_inherit_character"]
             # 注入会话级 auto_state 触发轮次（None 表示用全局默认）
             if (_sess or {}).get("auto_state_interval") is not None:
                 ctx.metadata["auto_state_interval"] = _sess["auto_state_interval"]
+            # Agent 持久目标 / 规格（/goal、/spec 命令设置）
+            if (_sess or {}).get("agent_goal"):
+                ctx.metadata["agent_goal"] = _sess["agent_goal"]
+            if (_sess or {}).get("agent_spec"):
+                ctx.metadata["agent_spec"] = _sess["agent_spec"]
+            # 用户人设（persona）：与 Web 端一致，命中则注入 system prompt 末尾
+            from nbot.core.agent_service import apply_user_persona_metadata
+
+            apply_user_persona_metadata(chat_request, ctx.metadata, _sess or None)
     except Exception:
         pass
 

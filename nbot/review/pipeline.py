@@ -26,24 +26,27 @@ class ReviewPipeline:
 
     def __init__(self, *, mode: str = "rule", event_bus=None):
         """
-        mode: "rule" | "llm"（LLM 版本尚未实现）
+        mode: "rule" | "llm"（LLM 版本通过 run_llm_review 实现）
         event_bus: 可选，发射 review.started / review.finished 事件
         """
-        self._mode = mode
+        self._mode = mode if mode in ("rule", "llm") else "rule"
         self._event_bus = event_bus
 
     def set_event_bus(self, bus) -> None:
         self._event_bus = bus
+
+    def set_mode(self, mode: str) -> None:
+        self._mode = mode if mode in ("rule", "llm") else "rule"
 
     def run(self, inp: ReviewInput) -> ReviewOutput:
         """执行 Review，返回结构化输出。"""
         self._emit_event("review.started", inp)
 
         try:
-            if self._mode == "rule":
-                output = run_rule_review(inp)
+            if self._mode == "llm":
+                from nbot.review.llm_review import run_llm_review
+                output = run_llm_review(inp)
             else:
-                _log.warning("[ReviewPipeline] mode=%s not implemented, falling back to rule", self._mode)
                 output = run_rule_review(inp)
         except Exception as exc:
             _log.error("[ReviewPipeline] review failed: %s", exc, exc_info=True)
@@ -52,6 +55,12 @@ class ReviewPipeline:
         self._emit_event("review.finished", inp, output)
 
         if not output.skipped:
+            # 成就系统：记录复盘次数
+            try:
+                from nbot.achievements.manager import get_achievement_manager
+                get_achievement_manager().record("reviews", 1)
+            except Exception:
+                pass
             _log.debug(
                 "[ReviewPipeline] review done conv=%s choice=%s "
                 "should_write=%s rel_delta=%s scores=%s",
@@ -99,10 +108,29 @@ class ReviewPipeline:
 _review_pipeline: ReviewPipeline | None = None
 
 
+def get_review_mode(data_dir: str = "data/web") -> str:
+    """从 settings.json 读取复盘模式（review.mode: rule / llm）。"""
+    import json
+    import os
+    try:
+        path = os.path.join(data_dir, "settings.json")
+        if os.path.exists(path):
+            with open(path, encoding="utf-8") as f:
+                data = json.load(f)
+            review_cfg = (data.get("review") or {}) if isinstance(data, dict) else {}
+            mode = (review_cfg.get("mode") or "rule") if isinstance(review_cfg, dict) else "rule"
+            return mode if mode in ("rule", "llm") else "rule"
+    except Exception:
+        pass
+    return "rule"
+
+
 def get_review_pipeline(event_bus=None) -> ReviewPipeline:
     global _review_pipeline
     if _review_pipeline is None:
-        _review_pipeline = ReviewPipeline(event_bus=event_bus)
-    elif event_bus and _review_pipeline._event_bus is not event_bus:
-        _review_pipeline.set_event_bus(event_bus)
+        _review_pipeline = ReviewPipeline(mode=get_review_mode(), event_bus=event_bus)
+    else:
+        _review_pipeline.set_mode(get_review_mode())
+        if event_bus and _review_pipeline._event_bus is not event_bus:
+            _review_pipeline.set_event_bus(event_bus)
     return _review_pipeline

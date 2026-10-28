@@ -51,16 +51,22 @@ def transcribe(audio_file_path: str, language: str = None) -> Optional[str]:
     """
     config = _get_stt_config()
     api_key = config.get("api_key", "")
+    provider = (
+        config.get("stt_provider") or config.get("provider_type") or ""
+    ).lower()
+    is_local = provider in ("local", "faster_whisper")
 
-    if not api_key:
+    if not api_key and not is_local:
         _log.warning("[STT] API Key not configured")
         return None
 
     try:
         adapter = _get_adapter_for_config(config)
         result = adapter.transcribe(audio_file_path, config, language)
-        _log.info("[STT] Transcription successful: %s...", result[:100])
-        return result
+        if not result or not str(result).strip():
+            return None
+        _log.info("[STT] Transcription successful: %s...", str(result)[:100])
+        return str(result).strip()
     except Exception as e:
         _log.error("[STT] Transcription failed: %s", e)
         return None

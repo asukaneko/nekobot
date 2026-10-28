@@ -7,6 +7,7 @@
 """
 
 import logging
+import re
 import uuid
 from datetime import datetime
 from typing import Any, Dict, List, Optional
@@ -14,6 +15,28 @@ from typing import Any, Dict, List, Optional
 from nbot.character.models import CharacterMemory, CharacterTurnContext
 
 _log = logging.getLogger(__name__)
+
+_TERM_RE = re.compile(r"[a-zA-Z0-9_]{2,}|[\u3400-\u9fff\uf900-\ufaff]{2,}")
+
+
+def _extract_query_terms(query: str) -> list[str]:
+    """从查询中提取匹配词：拉丁词元 + CJK 二元组（滑动窗口）。"""
+    terms: list[str] = []
+    for token in _TERM_RE.findall(str(query or "")):
+        if token[0].isascii():
+            terms.append(token.lower())
+        elif len(token) == 2:
+            terms.append(token)
+        else:
+            terms.extend(token[i:i + 2] for i in range(len(token) - 1))
+    return terms
+
+
+def _coerce_importance(value: Any) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return 0.0
 
 
 class PromptManagerMemoryAdapter:
@@ -56,6 +79,21 @@ class PromptManagerMemoryAdapter:
                 target_id=target_id or None,
                 character_name=character_id or None,
             )
+
+            # query 非空时按相关性排序（命中词元数），否则保持原序
+            terms = _extract_query_terms(str(query or ""))
+            if terms:
+                def _score(mem: dict) -> int:
+                    text = " ".join(
+                        str(mem.get(k) or "") for k in ("title", "summary", "content")
+                    ).lower()
+                    return sum(1 for term in terms if term in text)
+
+                raw_memories = sorted(
+                    raw_memories,
+                    key=lambda mem: (_score(mem), _coerce_importance(mem.get("importance", 0))),
+                    reverse=True,
+                )
 
             memories = []
             for mem in raw_memories[:limit]:

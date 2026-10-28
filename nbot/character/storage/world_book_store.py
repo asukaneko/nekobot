@@ -60,6 +60,7 @@ class WorldBookStore:
         self,
         name: str,
         description: str = "",
+        cover_url: str = "",
         character_ids: Optional[List[str]] = None,
     ) -> WorldBook:
         """创建世界书"""
@@ -68,6 +69,7 @@ class WorldBookStore:
             id=uuid.uuid4().hex[:12],
             name=name,
             description=description,
+            cover_url=cover_url,
             character_ids=character_ids or [],
             entries=[],
             enabled=True,
@@ -91,7 +93,7 @@ class WorldBookStore:
         if not data or not isinstance(data, dict):
             return None
 
-        for key in ("name", "description", "character_ids", "enabled"):
+        for key in ("name", "description", "cover_url", "character_ids", "enabled"):
             if key in kwargs:
                 data[key] = kwargs[key]
         data["updated_at"] = datetime.now().isoformat()
@@ -151,6 +153,11 @@ class WorldBookStore:
             tags=entry_data.get("tags", []),
             entry_type=entry_data.get("entry_type", "lore"),
             weight=entry_data.get("weight", 0),
+            position=entry_data.get("position", ""),
+            depth=entry_data.get("depth", 4),
+            probability=entry_data.get("probability", 100),
+            use_regex=entry_data.get("use_regex", False),
+            match_whole_words=entry_data.get("match_whole_words", False),
             created_at=now,
             updated_at=now,
         )
@@ -181,7 +188,8 @@ class WorldBookStore:
 
         for key in ("name", "keywords", "content", "enabled", "priority", "case_sensitive", "match_mode",
                     "trigger_sources", "always_on", "state_triggers", "cooldown_turns",
-                    "max_injections_per_session", "tags", "entry_type", "weight"):
+                    "max_injections_per_session", "tags", "entry_type", "weight",
+                    "position", "depth", "probability", "use_regex", "match_whole_words"):
             if key in kwargs:
                 entry_data[key] = kwargs[key]
         entry_data["updated_at"] = datetime.now().isoformat()

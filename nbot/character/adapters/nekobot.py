@@ -355,11 +355,15 @@ def get_character_runtime_from_server(server):
             if not getattr(runtime, '_world_book_store', None):
                 from nbot.character.storage.world_book_store import WorldBookStore
                 runtime._world_book_store = WorldBookStore(base_dir)
+            if not getattr(runtime, "history_store", None):
+                from nbot.character.state_history import StateHistoryStore
+                runtime.history_store = StateHistoryStore(base_dir)
             _log.debug("[CharacterRuntime] refreshed repos for character=%s",
                        getattr(server, "personality", {}).get("name", "unknown"))
             return runtime
 
         from nbot.character.storage.world_book_store import WorldBookStore
+        from nbot.character.state_history import StateHistoryStore
 
         _hook_rt = None
         try:
@@ -377,6 +381,7 @@ def get_character_runtime_from_server(server):
             state_machine=StateMachine(),
             world_book_store=WorldBookStore(base_dir),
             hook_runtime=_hook_rt,
+            history_store=StateHistoryStore(base_dir),
         )
         server.character_runtime = runtime
         _log.info("[CharacterRuntime] initialized lazily from Web adapter")

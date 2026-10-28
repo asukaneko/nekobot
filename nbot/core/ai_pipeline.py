@@ -19,11 +19,12 @@ import os
 import threading
 from abc import ABC
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from nbot.core.background_tasks import submit_background_task
 from nbot.core.chat_models import ChatRequest, ChatResponse
 from nbot.core.model_proxy import model_proxy_request_kwargs
+from nbot.core.sampling import request_extra_body
 
 _log = logging.getLogger(__name__)
 
@@ -130,6 +131,11 @@ def _record_channel_token_stats(ctx: "PipelineContext", result: "PipelineResult"
 
         input_price = ctx.metadata.get("input_price")
         output_price = ctx.metadata.get("output_price")
+        cached_input_price = ctx.metadata.get("cached_input_price")
+        try:
+            cached_tokens = int(usage.get("cached_tokens") or 0)
+        except (TypeError, ValueError):
+            cached_tokens = 0
         # 时间指标：优先从 result.metadata，回退到 ctx.metadata
         duration_ms = meta.get("duration_ms") or ctx.metadata.get("duration_ms")
         ttft_ms = meta.get("ttft_ms") or ctx.metadata.get("ttft_ms")
@@ -147,6 +153,8 @@ def _record_channel_token_stats(ctx: "PipelineContext", result: "PipelineResult"
             ttft_ms=ttft_ms,
             input_price=input_price,
             output_price=output_price,
+            cached_tokens=cached_tokens,
+            cached_input_price=cached_input_price,
         )
         ctx.metadata["token_recorded"] = True
     except Exception as e:
@@ -219,6 +227,20 @@ class PipelineContext:
         return ModePolicy.from_metadata(self.metadata)
 
 
+_TRUE_FLAGS = frozenset({"1", "true", "yes", "on", "y", "t"})
+
+
+def parse_bool_flag(value: Any, default: bool = False) -> bool:
+    """宽松解析会话里的布尔开关（True/1/"true"/"on" 等）。"""
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    return str(value).strip().lower() in _TRUE_FLAGS
+
+
 class ModePolicy:
     """会话模式策略：集中 agent / character / group 模式的差异化决策。
 
@@ -229,61 +251,88 @@ class ModePolicy:
 
     使用方式：
         policy = ctx.mode_policy
-        if policy.inject_character_memories:  # 替代 if ctx.metadata.get("session_mode") != "agent"
+        if policy.inject_character_memories_legacy:  # 替代 if ctx.metadata.get("session_mode") != "agent"
             ...
+
+    agent 继承角色能力（P2-8）：
+        会话级开关 ``agent_inherit_character`` 打开后，agent 会话在保留工具能力的
+        同时加载角色卡 / 记忆 / 世界书 / 关系状态。默认关闭，行为与改动前一致。
 
     兼容性：
         - 向后兼容 ctx.metadata["session_mode"] 字符串判断
         - 所有原 == "agent" / != "agent" 的判断等价迁移到本类的属性
-        - 行为完全等价，无功能变更
+        - 未打开开关时行为完全等价，无功能变更
     """
 
-    __slots__ = ("session_mode",)
+    __slots__ = ("session_mode", "inherit_character")
 
-    def __init__(self, session_mode: str = "character"):
+    def __init__(self, session_mode: str = "character", inherit_character: bool = False):
         self.session_mode = session_mode or "character"
+        self.inherit_character = bool(inherit_character)
 
     @classmethod
     def from_metadata(cls, metadata: Dict[str, Any]) -> "ModePolicy":
         """从 ctx.metadata 派生策略。"""
-        return cls(session_mode=str(metadata.get("session_mode", "character")))
+        metadata = metadata or {}
+        return cls(
+            session_mode=str(metadata.get("session_mode", "character")),
+            inherit_character=parse_bool_flag(metadata.get("agent_inherit_character", False)),
+        )
+
+    @classmethod
+    def character_features_enabled(cls, session: Any) -> bool:
+        """会话是否应加载角色能力（角色模式恒 True；agent 模式看开关）。"""
+        if not isinstance(session, dict):
+            return False
+        if str(session.get("session_mode") or "character") != "agent":
+            return True
+        return parse_bool_flag(session.get("agent_inherit_character", False))
 
     @property
     def is_agent(self) -> bool:
-        """是否为 agent 模式（无角色运行时、无角色记忆、无角色生图）。"""
+        """是否为 agent 模式（默认不跑角色运行时、无角色记忆）。"""
         return self.session_mode == "agent"
+
+    @property
+    def inherits_character(self) -> bool:
+        """是否加载角色能力：角色模式恒真；agent 模式取决于会话开关。"""
+        return (not self.is_agent) or self.inherit_character
 
     # ---- 上下文准备阶段（_phase_prepare_context） ----
     @property
     def inject_character_memories_legacy(self) -> bool:
         """是否注入跨会话角色记忆（character.memories_legacy）。"""
-        return not self.is_agent
+        return self.inherits_character
 
     @property
     def inject_memory_fs(self) -> bool:
         """是否注入 MemoryFS 结构化记忆。"""
-        return not self.is_agent
+        return self.inherits_character
 
     @property
     def inject_image_capability(self) -> bool:
         """是否注入角色生图能力说明。"""
-        return not self.is_agent
+        return self.inherits_character
 
     # ---- 角色运行时 hooks ----
     @property
     def inject_real_time_prompt_fallback(self) -> bool:
         """是否注入实时连续性 prompt（real_time.continuity）。"""
-        return not self.is_agent
+        return self.inherits_character
 
     # ---- 结果后处理阶段（_post_process_result） ----
     @property
     def run_auto_memory(self) -> bool:
         """是否执行 auto_memory 6 轮累积。"""
-        return not self.is_agent
+        return self.inherits_character
 
     @property
     def try_send_image(self) -> bool:
-        """是否尝试解析 [send_image: ...] 标签触发角色生图。"""
+        """是否尝试解析 [send_image: ...] 标签触发角色生图。
+
+        agent 会话即便继承角色能力也不主动发图：生图应走 generate_image 工具，
+        避免自动冒出的图片打断工具型对话。
+        """
         return not self.is_agent
 
 
@@ -430,6 +479,19 @@ class PipelineCallbacks(ABC):
         messages.append({"role": "user", "content": ctx.chat_request.content})
         return messages
 
+    def auto_compress_context(
+        self,
+        ctx: PipelineContext,
+        messages: List[Dict[str, Any]],
+        threshold_chars: int,
+    ) -> List[Dict[str, Any]]:
+        """上下文达到阈值时的自动压缩钩子。
+
+        达到 threshold_chars 时由通道实现执行摘要压缩并持久化；
+        默认不压缩，原样返回。失败时应按未压缩继续（返回原列表）。
+        """
+        return messages
+
     def get_system_prompt(self, ctx: PipelineContext) -> str:
         """返回此会话的系统提示词。"""
         return ""
@@ -495,6 +557,7 @@ class PipelineCallbacks(ABC):
                 stream=False,
                 base_url=base_url,
                 provider_type=provider_type,
+                extra_body=request_extra_body(runtime_ai) or None,
             )
             resp = requests.post(
                 url,
@@ -587,6 +650,12 @@ class PipelineCallbacks(ABC):
     def search_knowledge(self, ctx: PipelineContext, query: str) -> str:
         """搜索知识库并返回格式化文本。默认不检索。"""
         return ""
+
+    def search_knowledge_with_citations(
+        self, ctx: PipelineContext, query: str
+    ) -> Tuple[str, List[Dict[str, Any]]]:
+        """检索知识库并返回 (文本, citations)；默认不支持引用信息。"""
+        return self.search_knowledge(ctx, query), []
 
     # ---- 工作区 ----
 
@@ -730,7 +799,11 @@ class AIPipeline:
         def _describe_audio(url: str):
             return _ai_client.describe_audio(url) if hasattr(_ai_client, 'describe_audio') else None
 
+        def _describe_gif(url: str):
+            return _ai_client.describe_gif_as_video(url)
+
         MediaDescriber.register("image", _describe_image)
+        MediaDescriber.register("gif", _describe_gif)
         MediaDescriber.register("video", _describe_video)
         MediaDescriber.register("audio", _describe_audio)
         cls._middleware_initialized = True
@@ -766,6 +839,19 @@ class AIPipeline:
         # 记录管道起始时间，供 on_response_complete 计算 duration
         import time as _time
         ctx.metadata.setdefault("_pipeline_start_time", _time.perf_counter())
+
+        # ask_user_question 等待恢复：把用户回答转换为带问题上下文的消息
+        try:
+            from nbot.services.ask_user_tools import handle_pending_user_answer
+
+            session_id = str(getattr(ctx.chat_request, "session_id", "") or "")
+            if session_id and ctx.chat_request.content:
+                ctx.chat_request.content = handle_pending_user_answer(
+                    ctx.chat_request.content, session_id
+                )
+        except Exception as exc:
+            _log.debug("[AskUser] 答案恢复失败: %s", exc)
+
         self._emit_hook("conversation.before_receive", ctx)
 
         # Phase 0: 群聊发言角色选择（群聊模式下）
@@ -958,10 +1044,28 @@ class AIPipeline:
         progress: ProgressReporter,
     ) -> None:
         progress.on_knowledge_start(ctx)
-        ctx.knowledge_text = callbacks.search_knowledge(
-            ctx, ctx.chat_request.content
-        )
+        citations: List[Dict[str, Any]] = []
+        # 通道若支持结构化引用，一次取回文本 + citations；否则退回纯文本检索
+        with_citations = getattr(callbacks, "search_knowledge_with_citations", None)
+        if callable(with_citations):
+            try:
+                outcome = with_citations(ctx, ctx.chat_request.content)
+                if isinstance(outcome, tuple) and len(outcome) == 2:
+                    ctx.knowledge_text, citations = outcome[0] or "", list(outcome[1] or [])
+                else:
+                    ctx.knowledge_text = outcome or ""
+            except Exception as exc:  # 引用检索失败不阻断对话
+                _log.debug("[Knowledge] 带引用检索失败，回退纯文本: %s", exc)
+                ctx.knowledge_text = callbacks.search_knowledge(
+                    ctx, ctx.chat_request.content
+                )
+        else:
+            ctx.knowledge_text = callbacks.search_knowledge(
+                ctx, ctx.chat_request.content
+            )
         ctx.knowledge_retrieved = bool(ctx.knowledge_text)
+        if citations:
+            ctx.metadata["knowledge_citations"] = citations
         progress.on_knowledge_done(ctx, ctx.knowledge_retrieved)
 
     # ------------------------------------------------------------------
@@ -978,8 +1082,14 @@ class AIPipeline:
         from nbot.core.agent_service import prepare_chat_context
         from nbot.character.prompt_stack import split_system_prompt
 
-        # 加载消息历史
+        # 加载消息历史（达到上下文阈值时由通道执行自动压缩）
         messages_raw = callbacks.load_messages(ctx)
+        try:
+            messages_raw = callbacks.auto_compress_context(
+                ctx, messages_raw, int(max_context_chars * 0.8)
+            )
+        except Exception as exc:
+            _log.warning("[AutoCompress] 自动压缩失败，按未压缩继续: %s", exc)
         messages_for_ai = copy.deepcopy(messages_raw)
 
         # 追加当前用户消息（如果 load_messages 未包含）
@@ -1013,6 +1123,16 @@ class AIPipeline:
             messages_for_ai = _annotate_group_message_senders(messages_for_ai)
 
         base_prompt, history_messages = split_system_prompt(messages_for_ai)
+
+        # Prompt Manager preset（会话绑定才生效；未绑定返回 None，路径与改动前完全一致）
+        from nbot.core.prompt_manager import apply_preset_base, resolve_session_preset
+
+        prompt_preset = resolve_session_preset(
+            getattr(ctx.chat_request, "conversation_id", "")
+        )
+        if prompt_preset is not None:
+            base_prompt = apply_preset_base(prompt_preset, base_prompt)
+            ctx.metadata["prompt_preset_id"] = prompt_preset.get("id", "")
 
         # 知识库注入 → PromptStack
         if ctx.knowledge_text:
@@ -1076,6 +1196,29 @@ class AIPipeline:
                     scope="session",
                 )
 
+        # Agent 持久目标 / 规格 / 工作区 AGENTS.md 注入（/goal、/spec 命令设置）
+        agent_goal = str(ctx.metadata.get("agent_goal") or "").strip()
+        agent_spec = str(ctx.metadata.get("agent_spec") or "").strip()
+        if agent_goal:
+            ctx.prompt_stack.add(
+                "agent.goal",
+                f"当前会话的持久目标（每轮检查进度并主动推进）：\n{agent_goal[:1000]}",
+                priority=22,
+            )
+        if agent_spec:
+            ctx.prompt_stack.add(
+                "agent.spec",
+                f"会话规格说明（必须遵守，与用户冲突时先确认）：\n{agent_spec[:4000]}",
+                priority=21,
+            )
+        agents_md_text = self._read_workspace_agents_md(ctx, callbacks)
+        if agents_md_text:
+            ctx.prompt_stack.add(
+                "agent.workspace_instructions",
+                agents_md_text,
+                priority=23,
+            )
+
         # 角色生图能力说明（仅在非 agent 模式、且功能开启时注入）
         if ctx.mode_policy.inject_image_capability:
             try:
@@ -1091,14 +1234,30 @@ class AIPipeline:
         self._emit_hook("prompt.before_render", ctx)
         composed_system = ctx.prompt_stack.render(base_prompt)
         self._emit_hook("prompt.after_render", ctx)
+        # 宏展开（{{user}}/{{char}}/{{time}}/{{random}}/{{getvar}} 等）
+        # 只展开送给模型的那份，存储的 composed_system_prompt 保留模板形态，
+        # 避免把 {{time}}/{{user}} 之类冻结成第一轮的值。
+        rendered_system = self._expand_prompt_macros(ctx, composed_system)
         messages_for_ai = [
-            {"role": "system", "content": composed_system},
+            {"role": "system", "content": rendered_system},
             *history_messages,
         ]
 
+        # 调试快照先落库，后面的深度注入（世界书 / Author's Note）再追加
+        ctx.metadata["prompt_stack_debug"] = ctx.prompt_stack.render_debug()
+
+        # 用户人设（persona）：追加到 system prompt 末尾
+        messages_for_ai = self._apply_user_persona(ctx, messages_for_ai)
+
+        # 世界书 depth 类条目按位置插入消息序列
+        messages_for_ai = self._apply_world_book_depth_positions(ctx, messages_for_ai)
+        # Author's Note：按深度插入的会话级附注
+        messages_for_ai = self._apply_authors_note(ctx, messages_for_ai)
+        # Prompt Manager preset：非 system 段落与 depth 段落插入消息序列
+        messages_for_ai = self._apply_prompt_preset(ctx, prompt_preset, messages_for_ai)
+
         # 将合成后的 system prompt 存入 metadata，供 on_response_complete 回写
         ctx.metadata["composed_system_prompt"] = composed_system
-        ctx.metadata["prompt_stack_debug"] = ctx.prompt_stack.render_debug()
 
         # 调试日志
         _log.debug(
@@ -1116,10 +1275,272 @@ class AIPipeline:
         ctx.messages = prepared.messages
         ctx.tool_call_history = prepared.tool_call_history
 
+    def _macro_context(self, ctx):
+        """构造本轮宏上下文（用户名/角色名/会话变量/稳定种子）。"""
+        from nbot.core.macros import get_variable_store
+
+        meta = ctx.metadata or {}
+        request = ctx.chat_request
+        user_name = str(
+            meta.get("macro_user_name")
+            or getattr(request, "user_id", "")
+            or getattr(request, "sender", "")
+            or ""
+        ).strip()
+        turn = ctx.character_turn
+        profile_name = ""
+        if turn is not None:
+            profile_name = str(getattr(getattr(turn, "profile", None), "name", "") or "")
+        char_name = str(
+            meta.get("macro_char_name")
+            or meta.get("group_speaker_name")
+            or profile_name
+            or ""
+        ).strip()
+
+        scope_id = str(getattr(request, "conversation_id", "") or "")
+        variables = meta.get("macro_variables")
+        store = None
+        if not isinstance(variables, dict):
+            try:
+                store = get_variable_store()
+                variables = store.get(scope_id)
+            except Exception as exc:  # pragma: no cover - 存储异常不影响主流程
+                _log.debug("[Macros] 读取会话变量失败: %s", exc)
+                variables = {}
+        seed = f"{scope_id}|{meta.get('group_speaker', '')}|{getattr(request, 'parent_message_id', '') or ''}"
+
+        from nbot.core.macros import MacroContext
+
+        context = MacroContext(
+            user_name=user_name,
+            char_name=char_name,
+            variables=variables,
+            seed=str(seed),
+        )
+        return context, store, scope_id, dict(variables)
+
+    def _expand_prompt_macros(self, ctx, text: str) -> str:
+        """展开提示词宏；变量有变化时回写会话级存储。"""
+        from nbot.core.macros import expand, has_macros
+
+        if not text or not has_macros(text):
+            return text
+        try:
+            context, store, scope_id, before = self._macro_context(ctx)
+            expanded = expand(text, context)
+            if store is not None and context.variables != before:
+                store.save(scope_id, context.variables)
+                ctx.metadata["macro_variables"] = context.variables
+            return expanded
+        except Exception as exc:  # pragma: no cover - 宏异常不阻断对话
+            _log.warning("[Macros] 展开失败，按原文继续: %s", exc)
+            return text
+
+    def _apply_user_persona(self, ctx, messages_for_ai):
+        """用户人设（persona）：把「我是谁」的说明追加到 system prompt 末尾。
+
+        只影响送给模型的副本，不改角色卡，也不回写存储的 system prompt。
+        通道没有显式注入时，这里按会话记录兜底解析（QQ/TG/飞书 与 Web 一致）。
+        """
+        persona = (ctx.metadata or {}).get("user_persona")
+        if not persona:
+            try:
+                persona = self._resolve_user_persona(ctx)
+            except Exception as exc:  # 兜底解析失败只降级，不阻断对话
+                _log.debug("[Persona] 兜底解析异常，跳过注入: %s", exc)
+                persona = None
+        if not persona:
+            return messages_for_ai
+
+        from nbot.core.personas import build_persona_block
+
+        block = build_persona_block(persona)
+        if not block:
+            return messages_for_ai
+        block = self._expand_prompt_macros(ctx, block)
+
+        messages = list(messages_for_ai)
+        if messages and messages[0].get("role") == "system":
+            system_content = str(messages[0].get("content") or "")
+            messages[0] = {
+                **messages[0],
+                "content": f"{system_content}\n\n{block}".strip() if system_content else block,
+            }
+        else:
+            messages.insert(0, {"role": "system", "content": block})
+
+        ctx.metadata.setdefault("prompt_stack_debug", []).append({
+            "key": "user_persona",
+            "role": "system",
+            "depth": 0,
+            "chars": len(block),
+            "preview": block[:120],
+        })
+        return messages
+
+    def _resolve_user_persona(self, ctx):
+        """通道未注入人设时按会话记录兜底解析；失败返回 None（不阻断对话）。"""
+        metadata = ctx.metadata if isinstance(ctx.metadata, dict) else {}
+        try:
+            from nbot.core.agent_service import apply_user_persona_metadata
+
+            if apply_user_persona_metadata(ctx.chat_request, metadata):
+                return metadata.get("user_persona")
+        except Exception as exc:
+            _log.debug("[Persona] 兜底解析失败，跳过注入: %s", exc)
+        return None
+
+    def _apply_authors_note(self, ctx, messages_for_ai):
+        """Author's Note：按配置深度插入会话级附注。"""
+        note = (ctx.metadata or {}).get("authors_note")
+        if not note:
+            return messages_for_ai
+
+        from nbot.core.authors_note import build_insertion, insertion_index
+
+        insertion = build_insertion(
+            note,
+            expander=lambda text: self._expand_prompt_macros(ctx, text),
+        )
+        if not insertion:
+            return messages_for_ai
+
+        depth, role, content = insertion
+        messages = list(messages_for_ai)
+        index = insertion_index(len(messages), depth)
+        messages.insert(index, {"role": role, "content": content})
+        ctx.metadata.setdefault("prompt_stack_debug", []).append({
+            "key": f"authors_note@{depth}",
+            "content": content[:200] + "..." if len(content) > 200 else content,
+            "priority": 66,
+            "role": role,
+            "scope": "session",
+            "enabled": True,
+            "position": f"depth:{depth}",
+        })
+        _log.debug("[AuthorsNote] inserted at depth %s (role=%s, %s chars)", depth, role, len(content))
+        return messages
+
+    def _apply_prompt_preset(self, ctx, preset, messages_for_ai):
+        """Prompt Manager preset：非 system 段落与 depth 段落插入消息序列。
+
+        preset 为 None（会话未绑定）时原样返回，保证旧路径行为不变。
+        """
+        if not preset:
+            return messages_for_ai
+
+        from nbot.core.prompt_manager import (
+            build_preset_injection,
+            insert_preset_messages,
+        )
+
+        injection = build_preset_injection(
+            preset,
+            expander=lambda text: self._expand_prompt_macros(ctx, text),
+            expand_system=False,
+        )
+        if injection.get("empty", True):
+            return messages_for_ai
+
+        messages = insert_preset_messages(injection, messages_for_ai)
+        debug = ctx.metadata.setdefault("prompt_stack_debug", [])
+        for entry in injection.get("debug", []):
+            debug.append({
+                "key": entry["key"],
+                "content": entry.get("preview", ""),
+                "priority": 36,
+                "role": entry.get("role", "system"),
+                "scope": "session",
+                "enabled": True,
+                "position": entry.get("position", "end"),
+            })
+        return messages
+
+    def _apply_world_book_depth_positions(self, ctx, messages_for_ai):
+        """世界书 depth 类条目按位置插入消息序列。
+
+        - at_depth：按 entry.depth 插入距对话末尾第 N 条处
+        - before_an/after_an：锚点深度（默认 4），前/后顺序保持
+        使用 user 角色承载：Anthropic/Gemini 协议会把 system 消息折叠到顶部，
+        破坏深度定位（对齐 SillyTavern 对 Claude 的深度注入方式）。
+        """
+        turn = ctx.character_turn
+        entries = list(getattr(turn, "world_book_entries", []) or []) if turn else []
+        if not entries:
+            return messages_for_ai
+
+        try:
+            from nbot.character.world_book_injector import build_depth_insertions
+
+            insertions = build_depth_insertions(entries)
+        except Exception as exc:
+            _log.debug("[WorldBook] depth insertion build failed: %s", exc)
+            return messages_for_ai
+        if not insertions:
+            return messages_for_ai
+
+        messages = list(messages_for_ai)
+        for depth, content in insertions:
+            # depth=0 → 对话最末尾；depth=N → 距末尾第 N 条之前（不早于 system 之后）
+            index = max(1, len(messages) - depth)
+            content = self._expand_prompt_macros(ctx, content)
+            messages.insert(index, {"role": "user", "content": content})
+            ctx.metadata.setdefault("prompt_stack_debug", []).append({
+                "key": f"world_book.at_depth@{depth}",
+                "content": content[:200] + "..." if len(content) > 200 else content,
+                "priority": 65,
+                "role": "user",
+                "scope": "turn",
+                "enabled": True,
+                "position": f"depth:{depth}",
+            })
+        return messages
+
 
     # ------------------------------------------------------------------
     # Group Chat Phases
     # ------------------------------------------------------------------
+
+    def _read_workspace_agents_md(self, ctx, callbacks) -> str:
+        """读取会话工作区中的 AGENTS.md，存在则注入每轮提示词（上限 4000 字符）。"""
+        try:
+            from nbot.core.workspace import workspace_manager
+
+            ws_ctx = {}
+            if hasattr(callbacks, "get_workspace_context"):
+                ws_ctx = callbacks.get_workspace_context(ctx) or {}
+            session_id = (
+                str(ws_ctx.get("session_id") or "")
+                or str(getattr(ctx.chat_request, "session_id", "") or "")
+            )
+            if not session_id:
+                return ""
+            session_type = str(ws_ctx.get("session_type") or "")
+            try:
+                root = workspace_manager.get_or_create(session_id, session_type)
+            except TypeError:
+                root = workspace_manager.get_or_create(session_id, session_type or "web")
+            if not root:
+                return ""
+            import os as _os
+
+            for name in ("AGENTS.md", "agents.md"):
+                path = _os.path.join(root, name)
+                if _os.path.exists(path):
+                    try:
+                        with open(path, encoding="utf-8") as f:
+                            text = f.read().strip()
+                        if text:
+                            return (
+                                "以下是本会话工作区的 AGENTS.md 工作约定（每轮生效）：\n"
+                                + text[:4000]
+                            )
+                    except OSError:
+                        continue
+        except Exception as exc:
+            _log.debug("[Agent] 读取工作区 AGENTS.md 失败: %s", exc)
+        return ""
 
     def _phase_group_speaker_select(self, ctx, group_context):
         """Select the speaking character for group chat."""
@@ -1785,10 +2206,14 @@ class AIPipeline:
                 plan=turn.plan,
             )
 
-            # 注入世界书
+            # 注入世界书（depth 类条目由消息序列插入阶段处理）
             if turn.world_book_entries:
                 from nbot.character.world_book_injector import inject_world_book
-                inject_world_book(ctx.prompt_stack, turn.world_book_entries)
+                inject_world_book(
+                    ctx.prompt_stack,
+                    turn.world_book_entries,
+                    include_depth_entries=False,
+                )
 
             if hasattr(runtime, "inject_prompt_extras"):
                 runtime.inject_prompt_extras(
@@ -1938,7 +2363,11 @@ class AIPipeline:
             if not char_id:
                 return
 
-            ctx_text = mfs.build_prompt_context(char_id, user_id, conv_id)
+            # 检索化注入：以最近用户消息为查询，按相关性+重要度挑选小节
+            query = str(ctx.chat_request.content or "")
+            ctx_text = mfs.build_prompt_context(
+                char_id, user_id, conv_id, query=query, max_chars=2000
+            )
             if ctx_text:
                 ctx.prompt_stack.add(
                     key="memory_fs.context",
@@ -2025,6 +2454,8 @@ class AIPipeline:
         progress: ProgressReporter,
     ) -> None:
         """运行工具调用循环。"""
+        import time as _time
+
         from nbot.core.agent_service import (
             ToolLoopSession,
             ToolLoopHooks,
@@ -2038,6 +2469,18 @@ class AIPipeline:
 
         model_call = callbacks.build_model_call(ctx, tools)
         ctx.tool_context = callbacks.get_workspace_context(ctx)
+
+        # 工具轨迹实时落库：每完成一步就 append，进程中断也留下已完成步骤
+        from nbot.core import session_store
+
+        trace_key = session_store.tool_trace_key(
+            str((ctx.tool_context or {}).get("session_id", "") or ""),
+            str(getattr(ctx.chat_request, "conversation_id", "") or ""),
+        )
+        trace_turn = _time.strftime("%Y%m%d%H%M%S") + "-" + str(id(ctx))
+        ctx.metadata["_tool_trace_key"] = trace_key
+        ctx.metadata["_tool_trace_turn"] = trace_turn
+        session_store.begin_tool_trace(trace_key)
 
         # 工具执行器
         def tool_executor(tool_call, thinking_content, iteration, tool_messages):
@@ -2068,6 +2511,20 @@ class AIPipeline:
                 progress.on_waiting_confirmation(ctx, command, request_id)
                 raise ToolLoopExit(confirmation_message)
 
+            # 处理向用户提问（ask_user_question）：展示问题并等待回答
+            if result.get("require_user_answer"):
+                request_id = result.get("request_id", "")
+                question = result.get("question", "")
+                options = result.get("options") or []
+                question_message = f"❓ **需要你的输入**\n\n{question}"
+                if options:
+                    question_message += "\n\n可选回答：" + " / ".join(options)
+                ctx.metadata["waiting_user_answer"] = True
+                ctx.metadata["pending_question_id"] = request_id
+                callbacks.on_waiting_confirmation(ctx, question, request_id)
+                progress.on_waiting_confirmation(ctx, question, request_id)
+                raise ToolLoopExit(question_message)
+
             return result
 
         # 工具循环钩子 → 进度报告
@@ -2077,11 +2534,18 @@ class AIPipeline:
         def on_tool_start(tool_call, thinking, iteration, messages):
             name = tool_call.get("name", "")
             args = tool_call.get("arguments", {})
+            ctx.metadata["_tool_start_ts"] = _time.perf_counter()
             self._emit_hook("tool.before_call", ctx, extra_payload={"tool_name": name, "tool_args": args})
             progress.on_tool_start(ctx, name, args, thinking)
 
         def on_tool_result(tool_call, result, thinking, iteration, messages):
             name = tool_call.get("name", "")
+            start_ts = ctx.metadata.pop("_tool_start_ts", None)
+            if start_ts is not None and isinstance(result, dict) and "_duration_ms" not in result:
+                try:
+                    result["_duration_ms"] = round((_time.perf_counter() - start_ts) * 1000.0, 1)
+                except Exception:
+                    pass
             self._emit_hook("tool.after_call", ctx, extra_payload={"tool_name": name, "tool_result": str(result)[:200]})
             progress.on_tool_done(ctx, name, result, thinking)
             # 处理特殊工具结果
@@ -2093,12 +2557,34 @@ class AIPipeline:
                     result.get("_file_path", ""),
                     result.get("_file_name", ""),
                 )
+            if result.get("_send_image"):
+                # 工具触发的图片发送（如 send_sticker）
+                if hasattr(callbacks, "send_image"):
+                    try:
+                        callbacks.send_image(ctx, result["_send_image"])
+                    except Exception as exc:
+                        _log.debug("[Tool] send_image failed: %s", exc)
             return None  # 使用默认 tool message 格式
+
+        def on_tool_trace(trace):
+            """单个工具步骤实时落库（内存 + JSONL），同时同步到 ctx.tool_trace。"""
+            step = {
+                "role": "tool",
+                "tool_call_id": trace.tool_call_id,
+                "name": trace.tool_name,
+                "content": json.dumps(trace.result, ensure_ascii=False, default=str),
+                "turn": trace_turn,
+                "iteration": trace.iteration,
+                "ts": _time.time(),
+            }
+            ctx.tool_trace.append(step)
+            session_store.append_inflight_tool_step(trace_key, step)
 
         hooks = ToolLoopHooks(
             on_iteration_start=on_iteration_start,
             on_tool_start=on_tool_start,
             on_tool_result=on_tool_result,
+            on_tool_trace=on_tool_trace,
         )
 
         session = ToolLoopSession(
@@ -2144,9 +2630,21 @@ class AIPipeline:
         if loop_result.failover_events:
             ctx.metadata["failover_events"] = list(loop_result.failover_events)
 
+        # 工具轨迹：整轮结束后用完整协议消息覆盖「每步追加」的增量记录
+        # （增量记录只用于中断/异常兜底，完整记录才能支撑「继续」）
+        full_trace = extract_tool_call_history(loop_result.tool_messages)
+        if full_trace:
+            ctx.tool_trace = full_trace
+        waiting_followup = bool(
+            ctx.metadata.get("waiting_confirmation")
+            or ctx.metadata.get("waiting_user_answer")
+        )
+        if not loop_result.stopped and not waiting_followup:
+            # 正常收尾才清理暂存；中断/待确认的轨迹留着，供继续或恢复时补全
+            session_store.clear_inflight_tool_steps(trace_key)
+
         if loop_result.stopped:
             ctx.stopped_prematurely = True
-            ctx.tool_trace = extract_tool_call_history(loop_result.tool_messages)
             ctx.final_content = "【生成已停止 - 工具调用记录已保存，回复「继续」可继续执行】"
             return
 
@@ -2162,7 +2660,8 @@ class AIPipeline:
         """运行流式模型调用。"""
         import uuid
         import time as _time
-        message_id = str(uuid.uuid4())
+        # swipes：重新生成时复用目标消息 id，前端流式气泡原地替换旧内容
+        message_id = str(ctx.metadata.get("swipe_target_id") or "") or str(uuid.uuid4())
         full_content = ""
         stream_start = _time.perf_counter()
         ttft_ms = None
@@ -2248,6 +2747,7 @@ class AIPipeline:
         model_configs: list,
         purpose: str = "chat",
         tools: Optional[List[Dict[str, Any]]] = None,
+        session_id: str = "",
     ) -> Callable:
         """Wrap model call with automatic failover across model queue.
 
@@ -2257,6 +2757,7 @@ class AIPipeline:
         Args:
             model_configs: Ordered list of model config dicts (by priority).
             purpose: Model purpose for logging.
+            session_id: 会话 ID（用于智能路由 A/B 分流与决策日志）。
         """
         from nbot.core.failover import (
             classify_http_error,
@@ -2267,8 +2768,26 @@ class AIPipeline:
         from nbot.core.protocols import get_protocol
         from nbot.core.model_adapter import response_json_utf8
         import requests
+        import time as _time
 
         failover = get_failover_state()
+
+        # 智能路由：按成本/质量/速度/上下文打分重排模型队列
+        _router = None
+        _decision_id = None
+        _scored_candidates = []
+        try:
+            from nbot.core.smart_routing import get_smart_router
+            _router = get_smart_router()
+            _router.load_settings()
+            model_configs, _scored_candidates = _router.route_with_scores(
+                model_configs,
+                purpose=purpose,
+                session_id=session_id,
+                has_tools=bool(tools),
+            )
+        except Exception as exc:
+            _log.debug("[SmartRouting] route failed: %s", exc)
 
         def _build_call_for_config(config: dict):
             """Create a single-shot model_call for a specific config."""
@@ -2300,6 +2819,7 @@ class AIPipeline:
                     stream=False,
                     base_url=base_url,
                     provider_type=provider_type,
+                    extra_body=request_extra_body(config) or None,
                 )
                 # 使用模型配置的 failover_timeout，0 表示使用默认 120s
                 request_timeout = config.get("failover_timeout", 0) or 120
@@ -2325,10 +2845,40 @@ class AIPipeline:
 
             return _call
 
+        def _context_chars(msgs) -> int:
+            total = 0
+            for msg in msgs or []:
+                if isinstance(msg, dict):
+                    total += len(str(msg.get("content") or ""))
+            return total
+
+        def _looks_like_refusal(result: dict) -> bool:
+            """拒绝/过滤回复检测：短文本拒绝话术或显式 content_filter。"""
+            if not isinstance(result, dict):
+                return False
+            finish = str(result.get("finish_reason") or "")
+            if finish == "content_filter":
+                return True
+            if result.get("tool_calls"):
+                return False
+            content = str(result.get("content") or "").strip()
+            if not content or len(content) > 200:
+                return False
+            patterns = (
+                "无法回答", "不能提供", "无法提供", "我不能协助", "无法协助",
+                "我不能帮助", "无法帮助", "抱歉，我不能", "对不起，我不能",
+                "违反了", "内容政策", "使用政策",
+                "i can't", "i cannot", "i'm unable", "i am unable",
+                "against my", "content policy", "as an ai",
+            )
+            low = content.lower()
+            return any(p in low for p in patterns)
+
         def failover_model_call(messages, stop_event=None):
             last_error = None
             attempted = set()
             failover_events = []
+            nonlocal _decision_id
 
             for _ in range(len(model_configs)):
                 config = failover.select_model(
@@ -2341,18 +2891,83 @@ class AIPipeline:
                 model_name = config.get("model", "")
                 attempted.add(model_id)
 
+                # 首次选择时记录智能路由决策
+                if _router is not None and _decision_id is None:
+                    try:
+                        from nbot.core.smart_routing import ab_group_for
+                        _decision_id = _router.record_decision(
+                            session_id=session_id,
+                            purpose=purpose,
+                            candidates=_scored_candidates,
+                            selected_id=model_id,
+                            selected_name=model_name,
+                            reason="smart_route",
+                            ab_group=ab_group_for(session_id, (_router.settings_dict().get("ab_test") or {}).get("ratio", 50))
+                            if (_router.settings_dict().get("ab_test") or {}).get("enabled") else "",
+                        )
+                    except Exception as exc:
+                        _log.debug("[SmartRouting] record decision failed: %s", exc)
+
                 # Apply this config to global AIClient
                 apply_model_config(config)
 
+                # 调用前上下文预校验：超过该模型上下文窗口直接换下一个模型
+                model_context_limit = int(config.get("max_context_length") or 0)
+                if model_context_limit > 0 and _context_chars(messages) > model_context_limit:
+                    failover.record_failure(model_id, 400)
+                    last_error = RuntimeError(
+                        f"上下文长度超出模型 {model_name} 限制 ({model_context_limit})"
+                    )
+                    failover_events.append({
+                        "model_id": model_id,
+                        "model_name": model_name,
+                        "status_code": 400,
+                        "category": "context_overflow",
+                    })
+                    _log.warning(
+                        "[Failover] %s model=%s context=%d > limit=%d, trying next model",
+                        purpose, model_id, _context_chars(messages), model_context_limit,
+                    )
+                    continue
+
                 try:
+                    started = _time.time()
                     call = _build_call_for_config(config)
                     result = call(messages, stop_event=stop_event)
+
+                    # 拒绝/过滤回复检测：换下一个模型（最后一个模型仍返回原结果）
+                    if _looks_like_refusal(result) and len(attempted) < len(model_configs):
+                        failover.record_failure(model_id, 451)
+                        last_error = RuntimeError(
+                            f"模型 {model_name} 返回拒绝/被过滤回复"
+                        )
+                        failover_events.append({
+                            "model_id": model_id,
+                            "model_name": model_name,
+                            "status_code": 451,
+                            "category": "refusal",
+                        })
+                        _log.warning(
+                            "[Failover] %s model=%s returned refusal, trying next model",
+                            purpose, model_id,
+                        )
+                        continue
+
                     failover.record_success(model_id)
                     # 注入模型信息和故障转移记录到响应
                     result["_model_id"] = model_id
                     result["_model_name"] = model_name
                     if failover_events:
                         result["_failover_events"] = failover_events
+                    if _router is not None and _decision_id:
+                        try:
+                            _router.backfill_decision(
+                                _decision_id,
+                                success=True,
+                                duration_ms=round((_time.time() - started) * 1000, 2),
+                            )
+                        except Exception:
+                            pass
                     return result
                 except StopIteration:
                     raise
@@ -2374,6 +2989,11 @@ class AIPipeline:
                         "status_code": status,
                         "category": category,
                     })
+                    if _router is not None and _decision_id:
+                        try:
+                            _router.backfill_decision(_decision_id, success=False)
+                        except Exception:
+                            pass
                     _log.warning(
                         "[Failover] %s model=%s failed (%s %d), "
                         "trying next model",
@@ -2411,6 +3031,45 @@ class AIPipeline:
 
         # 角色生图：解析 [send_image: ...] 内联标签，按概率兜底
         self._try_send_image(ctx, callbacks, result)
+
+        # 自定义表情包：QQ 频道解析 [名称] 标签并发送原图（Web 端由前端内联渲染）
+        self._try_send_named_stickers(ctx, callbacks, result)
+
+    def _try_send_named_stickers(
+        self,
+        ctx: PipelineContext,
+        callbacks: PipelineCallbacks,
+        result: PipelineResult,
+    ) -> None:
+        """回复文本中的 [名称] 命中自定义表情库时，QQ 频道发送原图。"""
+        if result.error:
+            return
+        channel = (
+            ctx.metadata.get("source", "")
+            or getattr(ctx.chat_request, "channel", "")
+            or ctx.metadata.get("channel_type", "")
+        )
+        if channel != "qq":
+            return
+        content = str(result.final_content or "")
+        if "[" not in content or "]" not in content:
+            return
+        try:
+            from nbot.services.sticker_library import extract_sticker_tags
+
+            hits = extract_sticker_tags(content)
+        except Exception as exc:
+            _log.debug("[StickerLib] tag extract failed: %s", exc)
+            return
+        for hit in hits:
+            try:
+                callbacks.send_image(
+                    ctx,
+                    {"url": hit["url"], "prompt": hit["name"], "trigger": "sticker_tag"},
+                )
+                _log.info("[StickerLib] 已发送自定义表情: %s", hit["name"])
+            except Exception as exc:
+                _log.warning("[StickerLib] 发送失败: %s", exc)
 
     def _try_send_sticker(
         self,
@@ -2650,6 +3309,9 @@ class AIPipeline:
                     "role": "assistant",
                     "content": error_content,
                 }
+            if ctx.tool_trace:
+                # 工具循环中途失败：已完成的工具步骤随错误消息一起保存，不再整轮丢弃
+                assistant_message["tool_call_history"] = ctx.tool_trace
             callbacks.save_assistant_message(ctx, assistant_message)
             callbacks.send_response(ctx, assistant_message)
             result = PipelineResult(

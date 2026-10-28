@@ -29,12 +29,38 @@ SKILLS_ROOT = os.path.abspath(os.path.join(_current_dir, '..', '..', 'data', 'sk
 os.makedirs(SKILLS_ROOT, exist_ok=True)
 
 
+class SkillPathError(ValueError):
+    """非法的技能或技能内文件路径。"""
+
+
+def sanitize_skill_name(skill_name: str) -> str:
+    """校验技能名，拒绝路径分隔符、上级跳转与绝对路径。"""
+    name = str(skill_name or "").strip()
+    if not name or name in (".", "..") or len(name) > 100:
+        raise SkillPathError(f"invalid skill name: {skill_name!r}")
+    if "/" in name or "\\" in name or os.path.isabs(name):
+        raise SkillPathError(f"invalid skill name: {skill_name!r}")
+    return name
+
+
+def resolve_within(base_dir: str, relative_path: str) -> str:
+    """把相对路径解析到 base_dir 内部，越界或绝对路径直接拒绝。"""
+    rel = str(relative_path or "").replace("\\", "/").lstrip("/")
+    if not rel:
+        raise SkillPathError("empty path")
+    base_abs = os.path.abspath(base_dir)
+    candidate = os.path.abspath(os.path.join(base_abs, rel))
+    if candidate != base_abs and not candidate.startswith(base_abs + os.sep):
+        raise SkillPathError(f"path escapes base dir: {relative_path!r}")
+    return candidate
+
+
 class SkillStorage:
     """Skill 存储类 - 按照新的文件夹结构"""
 
     def __init__(self, skill_name: str):
-        self.skill_name = skill_name
-        self.skill_dir = os.path.join(SKILLS_ROOT, skill_name)
+        self.skill_name = sanitize_skill_name(skill_name)
+        self.skill_dir = resolve_within(SKILLS_ROOT, self.skill_name)
         self.scripts_dir = os.path.join(self.skill_dir, 'scripts')
         self.resources_dir = os.path.join(self.skill_dir, 'resources')
 
@@ -106,10 +132,10 @@ class SkillStorage:
         # script_name 可能是完整路径（如 scripts/main.py）或纯文件名（如 main.py）
         if os.path.sep in script_name or script_name.startswith('scripts/'):
             # 完整路径，直接拼接 skill_dir
-            script_path = os.path.join(self.skill_dir, script_name)
+            script_path = resolve_within(self.skill_dir, script_name)
         else:
             # 纯文件名，拼接 scripts_dir
-            script_path = os.path.join(self.scripts_dir, script_name)
+            script_path = resolve_within(self.scripts_dir, script_name)
 
         if os.path.exists(script_path):
             try:
@@ -124,10 +150,10 @@ class SkillStorage:
         # script_name 可能是完整路径（如 scripts/main.py）或纯文件名（如 main.py）
         if os.path.sep in script_name or script_name.startswith('scripts/'):
             # 完整路径，直接拼接 skill_dir
-            script_path = os.path.join(self.skill_dir, script_name)
+            script_path = resolve_within(self.skill_dir, script_name)
         else:
             # 纯文件名，拼接 scripts_dir
-            script_path = os.path.join(self.scripts_dir, script_name)
+            script_path = resolve_within(self.scripts_dir, script_name)
 
         os.makedirs(os.path.dirname(script_path), exist_ok=True)
         with open(script_path, 'w', encoding='utf-8') as f:
@@ -142,7 +168,7 @@ class SkillStorage:
 
     def delete_script(self, script_name: str) -> bool:
         """删除脚本文件"""
-        script_path = os.path.join(self.scripts_dir, script_name)
+        script_path = resolve_within(self.scripts_dir, script_name)
         if os.path.exists(script_path):
             os.remove(script_path)
             return True
@@ -150,14 +176,15 @@ class SkillStorage:
 
     def save_resource(self, resource_name: str, content: str):
         """保存资源文件到 resources/ 目录"""
-        resource_path = os.path.join(self.resources_dir, resource_name)
+        resource_path = resolve_within(self.resources_dir, resource_name)
+        os.makedirs(os.path.dirname(resource_path), exist_ok=True)
         with open(resource_path, 'w', encoding='utf-8') as f:
             f.write(content)
         return resource_path
 
     def load_resource(self, resource_name: str) -> Optional[str]:
         """加载资源文件"""
-        resource_path = os.path.join(self.resources_dir, resource_name)
+        resource_path = resolve_within(self.resources_dir, resource_name)
         if os.path.exists(resource_path):
             try:
                 with open(resource_path, 'r', encoding='utf-8') as f:
@@ -174,7 +201,7 @@ class SkillStorage:
 
     def delete_resource(self, resource_name: str) -> bool:
         """删除资源文件"""
-        resource_path = os.path.join(self.resources_dir, resource_name)
+        resource_path = resolve_within(self.resources_dir, resource_name)
         if os.path.exists(resource_path):
             os.remove(resource_path)
             return True
@@ -367,7 +394,10 @@ class SkillsStorageManager:
     def delete_skill(self, skill_name: str) -> bool:
         """删除 Skill 存储"""
         import shutil
-        skill_dir = os.path.join(SKILLS_ROOT, skill_name)
+        try:
+            skill_dir = resolve_within(SKILLS_ROOT, sanitize_skill_name(skill_name))
+        except SkillPathError:
+            return False
         if os.path.exists(skill_dir):
             shutil.rmtree(skill_dir)
             return True
@@ -375,7 +405,10 @@ class SkillsStorageManager:
 
     def skill_exists(self, skill_name: str) -> bool:
         """检查 Skill 是否存在"""
-        skill_dir = os.path.join(SKILLS_ROOT, skill_name)
+        try:
+            skill_dir = resolve_within(SKILLS_ROOT, sanitize_skill_name(skill_name))
+        except SkillPathError:
+            return False
         return os.path.exists(skill_dir)
 
     def get_skill_info(self, skill_name: str) -> Optional[Dict[str, Any]]:

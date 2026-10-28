@@ -34,6 +34,8 @@ _DYNAMIC_SECTION_KEYS = (
     "plot.real_time_sync",
     "knowledge.rag",
     "world_book",
+    "world_book.before_char",
+    "world_book.after_char",
     "memory_fs.context",
     "memory_fs_context",
 )
@@ -123,6 +125,8 @@ class PromptInjection:
     role: PromptRole = "system"
     scope: PromptScope = "turn"
     enabled: bool = True
+    # before=渲染在 base_prompt 之前（如世界书 before_char），after=之后
+    position: str = "after"
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -132,6 +136,7 @@ class PromptInjection:
             "role": self.role,
             "scope": self.scope,
             "enabled": self.enabled,
+            "position": self.position,
         }
 
 
@@ -161,6 +166,7 @@ class PromptStack:
         priority: int = 100,
         role: str = "system",
         scope: str = "turn",
+        position: str = "after",
     ) -> None:
         """注册一条提示词注入项
 
@@ -170,6 +176,7 @@ class PromptStack:
             priority: 优先级，数值越小越靠前
             role: 消息角色 (system / developer)
             scope: 作用域 (global / session / turn)
+            position: 相对 base_prompt 的渲染位置 (after / before)
         """
         if not content or not content.strip():
             return
@@ -183,6 +190,7 @@ class PromptStack:
                     priority=priority,
                     role=role,
                     scope=scope,
+                    position=position,
                 )
                 return
 
@@ -192,6 +200,7 @@ class PromptStack:
             priority=priority,
             role=role,
             scope=scope,
+            position=position,
         ))
 
     def remove(self, key: str) -> bool:
@@ -216,15 +225,24 @@ class PromptStack:
         Returns:
             合成后的完整系统提示词
         """
-        parts = []
-
         base_prompt = strip_dynamic_prompt_sections(base_prompt)
+
+        before_items = sorted(
+            (i for i in self.items if i.enabled and i.content.strip() and i.position == "before"),
+            key=lambda x: x.priority,
+        )
+        after_items = sorted(
+            (i for i in self.items if i.enabled and i.content.strip() and i.position != "before"),
+            key=lambda x: x.priority,
+        )
+
+        parts = []
+        for item in before_items:
+            parts.append(f"## {item.key}\n{item.content.strip()}")
         if base_prompt and base_prompt.strip():
             parts.append(base_prompt.strip())
-
-        for item in sorted(self.items, key=lambda x: x.priority):
-            if item.enabled and item.content.strip():
-                parts.append(f"## {item.key}\n{item.content.strip()}")
+        for item in after_items:
+            parts.append(f"## {item.key}\n{item.content.strip()}")
 
         return "\n\n".join(parts).strip()
 

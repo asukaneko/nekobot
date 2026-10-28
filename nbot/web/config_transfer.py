@@ -220,10 +220,12 @@ def build_plain_bundle(server) -> Dict[str, Any]:
     }
 
 
-def encrypt_bundle(server, password: str) -> Dict[str, Any]:
+def encrypt_bundle(
+    server, password: str, *, plain_bundle: dict[str, Any] | None = None
+) -> Dict[str, Any]:
     salt = os.urandom(KDF_SALT_BYTES)
     plaintext = json.dumps(
-        build_plain_bundle(server),
+        build_plain_bundle(server) if plain_bundle is None else plain_bundle,
         ensure_ascii=False,
         separators=(",", ":"),
     ).encode("utf-8")

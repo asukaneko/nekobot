@@ -5,10 +5,16 @@ import uuid
 
 from flask import jsonify, request
 
+from nbot.core.skills_manager import SkillPathError, resolve_within, sanitize_skill_name
+
 _log = logging.getLogger(__name__)
 
 
 def register_skills_storage_routes(app, server):
+    @app.errorhandler(SkillPathError)
+    def _handle_skill_path_error(exc):
+        return jsonify({"error": str(exc)}), 400
+
     @app.route("/api/skills/storage", methods=["GET"])
     def get_skills_storage():
         try:
@@ -85,8 +91,11 @@ def register_skills_storage_routes(app, server):
             from nbot.core.skills_manager import get_skills_storage_manager
 
             storage = get_skills_storage_manager().get_skill_storage(skill_name)
-            file_path = os.path.join(storage.skill_dir, file_name)
-            if not os.path.exists(file_path):
+            try:
+                file_path = resolve_within(storage.skill_dir, file_name)
+            except SkillPathError as exc:
+                return jsonify({"error": str(exc)}), 400
+            if not os.path.isfile(file_path):
                 return jsonify({"error": f"File not found: {file_name}"}), 404
 
             try:
@@ -113,7 +122,10 @@ def register_skills_storage_routes(app, server):
                 return jsonify({"error": "Skill not found"}), 404
 
             storage = manager.get_skill_storage(skill_name)
-            file_path = os.path.join(storage.skill_dir, file_name)
+            try:
+                file_path = resolve_within(storage.skill_dir, file_name)
+            except SkillPathError as exc:
+                return jsonify({"error": str(exc)}), 400
             os.makedirs(os.path.dirname(file_path), exist_ok=True)
             with open(file_path, "w", encoding="utf-8") as f:
                 f.write((request.json or {}).get("content", ""))
@@ -191,6 +203,10 @@ def register_skills_storage_routes(app, server):
             skill_config_str = request.form.get("skill_config", "{}")
             if not folder_name:
                 return jsonify({"error": "Folder name is required"}), 400
+            try:
+                folder_name = sanitize_skill_name(folder_name)
+            except SkillPathError as exc:
+                return jsonify({"error": str(exc)}), 400
 
             try:
                 skill_config = json.loads(skill_config_str)
@@ -203,12 +219,17 @@ def register_skills_storage_routes(app, server):
             if not manager.create_skill(folder_name):
                 return jsonify({"error": "Failed to create skill storage"}), 500
 
+            skill_root = os.path.join(SKILLS_ROOT, folder_name)
             saved_files = []
             for file in request.files.getlist("files"):
                 if not file.filename:
                     continue
-                file_path = file.filename.replace("..", "").lstrip("/\\")
-                full_path = os.path.join(SKILLS_ROOT, folder_name, file_path)
+                try:
+                    full_path = resolve_within(skill_root, file.filename)
+                except SkillPathError:
+                    _log.warning(f"Skipped out-of-bounds upload: {file.filename!r}")
+                    continue
+                file_path = os.path.relpath(full_path, skill_root).replace("\\", "/")
                 os.makedirs(os.path.dirname(full_path), exist_ok=True)
                 file.save(full_path)
                 saved_files.append(file_path)

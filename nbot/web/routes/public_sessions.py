@@ -9,6 +9,7 @@ from datetime import datetime
 
 from flask import jsonify, render_template, request
 
+from nbot.core.session_store import visible_messages
 from nbot.web.secure_store import read_secure_json, write_secure_json
 
 _log = logging.getLogger(__name__)
@@ -99,7 +100,7 @@ def _normalize_public_options(data):
 
 def _build_public_messages(session, options):
     public_messages = []
-    for msg in session.get("messages", []):
+    for msg in visible_messages(session.get("messages", [])):
         role = msg.get("role")
         if role == "system":
             continue

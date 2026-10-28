@@ -3,10 +3,13 @@ Todo 卡片管理模块
 用于在 Web 端显示待办事项列表和完成状态
 """
 
+import logging
 import uuid
 from datetime import datetime
 from typing import Dict, List, Optional, Any
 from enum import Enum
+
+_log = logging.getLogger(__name__)
 
 
 class TodoStatus(Enum):
@@ -303,6 +306,34 @@ class TodoCardManager:
                 return card
         # 不存在则创建新卡片
         return self.create_card(session_id, parent_message_id)
+
+    def update_from_tool_result(self, card: Optional[TodoCard], tool_name: str, result: Dict[str, Any]) -> None:
+        """将 todo_* 工具的执行结果同步到进度卡片。
+
+        由 WebCallbacks.on_tool_done 调用；此前本方法缺失导致
+        卡片链路被上层 try/except 吞掉。
+        """
+        if card is None or not isinstance(result, dict) or not result.get("success"):
+            return
+        tool_name = str(tool_name or "")
+        if not tool_name.startswith("todo_"):
+            return
+        try:
+            if tool_name == "todo_add" and isinstance(result.get("todo"), dict):
+                todo = result["todo"]
+                card.add_todo(
+                    int(todo.get("id")),
+                    str(todo.get("content") or ""),
+                    str(todo.get("priority") or "medium"),
+                )
+            elif tool_name == "todo_complete" and isinstance(result.get("todo"), dict):
+                card.complete_todo(int(result["todo"]["id"]))
+            elif tool_name == "todo_delete" and isinstance(result.get("deleted_todo"), dict):
+                card.delete_todo(int(result["deleted_todo"]["id"]))
+            elif isinstance(result.get("todos"), list):
+                card.update_todos(result["todos"])
+        except Exception as exc:
+            _log.debug("[TodoCard] update_from_tool_result failed: %s", exc)
 
 
 # 全局 Todo 卡片管理器实例

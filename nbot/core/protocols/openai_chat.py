@@ -17,6 +17,12 @@ from nbot.core.model_adapter import (
     sanitize_messages_for_chat_api,
 )
 from nbot.core.protocols.base import ModelProtocol
+from nbot.core.sampling import (
+    is_reasoning_model,
+    normalize_max_tokens,
+    resolve_token_limit,
+    token_limit_field,
+)
 
 
 class OpenAIChatProtocol(ModelProtocol):
@@ -71,7 +77,7 @@ class OpenAIChatProtocol(ModelProtocol):
         tools: Optional[List[Dict[str, Any]]] = None,
         tool_choice: Optional[str] = "auto",
         stream: bool = False,
-        max_tokens: int = 4096,
+        max_tokens: Optional[int] = None,
         extra_body: Optional[Dict[str, Any]] = None,
         base_url: str = "",
         provider_type: str = "",
@@ -94,8 +100,24 @@ class OpenAIChatProtocol(ModelProtocol):
             payload["tools"] = tools
             if tool_choice:
                 payload["tool_choice"] = tool_choice
-        if extra_body:
-            payload.update(extra_body)
+        extra = dict(extra_body) if extra_body else {}
+        # prompt_caching 只是协议内部的缓存断点标记，不能透传给 OpenAI 兼容接口
+        extra.pop("prompt_caching", None)
+        stop = extra.pop("stop", None)
+        token_limit = normalize_max_tokens(max_tokens) or resolve_token_limit(extra)
+        limit_field = token_limit_field(model, extra)
+        extra.pop("max_tokens", None)
+        extra.pop("token_limit_field", None)
+        if is_reasoning_model(model):
+            # 推理系模型只接受默认温度，top_p 同样不生效
+            extra.pop("temperature", None)
+            extra.pop("top_p", None)
+        payload.update(extra)
+        if token_limit:
+            payload[limit_field] = token_limit
+        # 停止字符串：OpenAI 协议直接使用 stop
+        if stop:
+            payload["stop"] = stop
         return payload
 
     def parse_response(

@@ -159,6 +159,10 @@ def get_web_agent_tools():
                     "temperature": {"type": "number"},
                     "max_tokens": {"type": "integer"},
                     "top_p": {"type": "number"},
+                    "token_limit_field": {
+                        "type": "string",
+                        "enum": ["", "max_tokens", "max_completion_tokens"],
+                    },
                     "frequency_penalty": {"type": "number"},
                     "presence_penalty": {"type": "number"},
                     "system_prompt": {"type": "string"},
@@ -338,6 +342,7 @@ def execute_web_agent_tool(server, name, arguments=None, confirm=False):
             "temperature",
             "max_tokens",
             "top_p",
+            "token_limit_field",
             "frequency_penalty",
             "presence_penalty",
             "system_prompt",

@@ -5,13 +5,36 @@ from copy import deepcopy
 from datetime import datetime
 
 from flask import jsonify, request
+from nbot.web.message_pagination import message_page
 
 from nbot.core import WebSessionStore
 from nbot.core.prompt_format import format_skills_prompt
+from nbot.core.session_store import (
+    ensure_message_variants,
+    is_message_deleted,
+    select_message_variant,
+    visible_messages,
+)
 from nbot.web.persistence import is_web_visible_session
 from nbot.web.sessions_db import get_session as get_session_from_db
 
 _log = logging.getLogger(__name__)
+
+
+def _expand_session_macros(text, user_name="", char_name=""):
+    """展开开场白/背景设定中的宏（{{user}}/{{char}}/{{time}}/{{random}} 等）。"""
+    if not text:
+        return text
+    try:
+        from nbot.core.macros import build_context, expand
+
+        return expand(
+            text,
+            build_context(user_name=user_name or "", char_name=char_name or ""),
+        )
+    except Exception as exc:  # pragma: no cover - 宏异常不应阻断建会话
+        _log.warning("展开会话宏失败: %s", exc)
+        return text
 
 
 def _normalize_tags(tags):
@@ -755,7 +778,7 @@ def register_session_routes(app, server):
                     "read_only": bool(session.get("read_only")),
                     "archive_session_id": session.get("archive_session_id"),
                     "source_session_id": session.get("source_session_id"),
-                    "message_count": len(session.get("messages", [])),
+                    "message_count": len(visible_messages(session.get("messages", []))),
                     "system_prompt": session.get("system_prompt", ""),
                     "character_id": session.get("character_id", ""),
                     "sender_name": session.get("sender_name", ""),
@@ -770,6 +793,9 @@ def register_session_routes(app, server):
                     "proactive_chat": _normalize_proactive_chat_config(session.get("proactive_chat")),
                     "tts_config": _normalize_tts_config(session.get("tts_config")),
                     "session_mode": session.get("session_mode", "character"),
+                    "agent_inherit_character": bool(
+                        session.get("agent_inherit_character")
+                    ),
                     "group_id": session.get("group_id", ""),
                     "character_ids": session.get("character_ids", []),
                     "character_runtime_snapshot": session.get("character_runtime_snapshot"),
@@ -927,11 +953,29 @@ def register_session_routes(app, server):
             "tts_config": _normalize_tts_config(data.get("tts_config")),
             "character_runtime_timeline": [],
             "session_mode": data.get("session_mode", "character"),
+            # agent 会话是否继承角色能力（角色卡/记忆/世界书/关系状态），默认关闭
+            "agent_inherit_character": bool(data.get("agent_inherit_character")),
             "plot_mode": bool(data.get("plot_mode")),
             "plot_real_time_sync": bool(data.get("plot_real_time_sync")),
             "plot_choice_style": str(data.get("plot_choice_style") or ""),
             "plot_outline": str(data.get("plot_outline") or ""),
         }
+        # Author's Note（会话级附注，按深度插入消息序列）
+        from nbot.core.authors_note import normalize_authors_note
+
+        authors_note = normalize_authors_note(data.get("authors_note"))
+        if authors_note:
+            session["authors_note"] = authors_note
+
+        from nbot.web.session_model import normalize_model_override
+
+        model_override = normalize_model_override(data.get("model_override"))
+        if model_override:
+            session["model_override"] = model_override
+
+        persona_id = str(data.get("persona_id") or "").strip()[:64]
+        if persona_id:
+            session["persona_id"] = persona_id
 
         # 群聊模式：附加群聊关联字段
         if session_mode == "group" and group_id:
@@ -944,10 +988,7 @@ def register_session_routes(app, server):
         else:
             first_message = data.get("first_message") or server.personality.get("firstMessage", "")
         if first_message:
-            if user_id:
-                first_message = first_message.replace('{{user}}', user_id)
-            if char_name:
-                first_message = first_message.replace('{{char}}', char_name)
+            first_message = _expand_session_macros(first_message, user_id, char_name)
             session["messages"].append({
                 "id": str(uuid.uuid4()),
                 "role": "assistant",
@@ -963,11 +1004,8 @@ def register_session_routes(app, server):
         else:
             scenario = data.get("scenario") or server.personality.get("scenario", "")
         if scenario:
-            # 替换模板变量 {{user}} -> 当前用户名, {{char}} -> 角色名称
-            if user_id:
-                scenario = scenario.replace('{{user}}', user_id)
-            if char_name:
-                scenario = scenario.replace('{{char}}', char_name)
+            # 替换模板变量 {{user}} / {{char}} / {{time}} 等
+            scenario = _expand_session_macros(scenario, user_id, char_name)
             session["scenario"] = scenario
         if not is_web_visible_session(session_id, session):
             return jsonify({"error": "Invalid session type"}), 400
@@ -999,18 +1037,26 @@ def register_session_routes(app, server):
         if not session:
             return jsonify({"error": "Session not found"}), 404
 
-        session["message_count"] = len(session.get("messages", []))
+        payload = dict(session)
+        visible = visible_messages(session.get("messages", []))
+        payload["messages"] = visible
+        payload["message_count"] = len(visible)
+        if request.args.get("include_messages", "true").lower() in {"false", "0"}:
+            payload.pop("messages", None)
         session["proactive_chat"] = _normalize_proactive_chat_config(
             session.get("proactive_chat")
         )
+        payload["proactive_chat"] = session["proactive_chat"]
         session["tts_config"] = _normalize_tts_config(session.get("tts_config"))
+        payload["tts_config"] = session["tts_config"]
         if not isinstance(session.get("message_favorites"), list):
             session["message_favorites"] = []
         else:
             session["message_favorites"] = _normalize_message_favorite_collections(
                 session.get("message_favorites", [])
             )
-        return jsonify(session)
+        payload["message_favorites"] = session["message_favorites"]
+        return jsonify(payload)
 
     @app.route("/api/sessions/<session_id>/debug")
     def debug_session(session_id):
@@ -1094,8 +1140,55 @@ def register_session_routes(app, server):
                     session["auto_state_interval"] = max(0, min(50, val))
                 except (TypeError, ValueError):
                     session["auto_state_interval"] = None
+        if "enabled_tools" in data:
+            # 会话级工具集：工具名列表，空列表/null 表示使用全局配置
+            names = data.get("enabled_tools")
+            if isinstance(names, list):
+                session["enabled_tools"] = [str(n).strip() for n in names if str(n).strip()][:100]
+            else:
+                session["enabled_tools"] = None
+        if "agent_goal" in data:
+            session["agent_goal"] = str(data.get("agent_goal") or "").strip()[:2000]
+        if "agent_spec" in data:
+            session["agent_spec"] = str(data.get("agent_spec") or "").strip()[:8000]
+        if "auto_name_interval" in data:
+            # 会话级自动命名间隔（消息条数），null=全局默认
+            raw_val = data.get("auto_name_interval")
+            if raw_val is None:
+                session["auto_name_interval"] = None
+            else:
+                try:
+                    session["auto_name_interval"] = max(0, min(100, int(raw_val)))
+                except (TypeError, ValueError):
+                    session["auto_name_interval"] = None
         if "tts_config" in data:
             session["tts_config"] = _normalize_tts_config(data.get("tts_config"))
+        if "authors_note" in data:
+            from nbot.core.authors_note import normalize_authors_note
+
+            note = normalize_authors_note(data.get("authors_note"))
+            if note:
+                session["authors_note"] = note
+            else:
+                session.pop("authors_note", None)
+        if "model_override" in data:
+            from nbot.web.session_model import normalize_model_override
+
+            override = normalize_model_override(data.get("model_override"))
+            if override:
+                session["model_override"] = override
+            else:
+                session.pop("model_override", None)
+        if "persona_id" in data:
+            # 用户人设：空值表示解绑（运行时回退全局默认人设）
+            persona_id = str(data.get("persona_id") or "").strip()[:64]
+            if persona_id:
+                session["persona_id"] = persona_id
+            else:
+                session.pop("persona_id", None)
+        if "agent_inherit_character" in data:
+            # agent 会话继承角色能力（P2-8）：只在 agent 会话上有意义，默认关闭
+            session["agent_inherit_character"] = bool(data.get("agent_inherit_character"))
 
         # 群聊模式：更新参与角色列表
         if "character_ids" in data and session.get("session_mode") == "group":
@@ -1127,6 +1220,34 @@ def register_session_routes(app, server):
         return jsonify({"success": True, "session": session})
 
     # ---- 自定义提示词 CRUD ----
+
+    @app.route("/api/sessions/<session_id>/macro-variables", methods=["GET"])
+    def get_macro_variables(session_id):
+        """读取会话的宏变量（{{setvar}}/{{getvar}} 持久化的键值）。"""
+        if not _get_web_session(session_id):
+            return jsonify({"error": "Session not found"}), 404
+        from nbot.core.macros import get_variable_store
+
+        try:
+            variables = get_variable_store(server.base_dir).get(session_id)
+        except Exception as exc:
+            _log.warning("读取宏变量失败: %s", exc)
+            variables = {}
+        return jsonify({"success": True, "variables": variables})
+
+    @app.route("/api/sessions/<session_id>/macro-variables", methods=["DELETE"])
+    def clear_macro_variables(session_id):
+        """清空会话的宏变量。"""
+        if not _get_web_session(session_id):
+            return jsonify({"error": "Session not found"}), 404
+        from nbot.core.macros import get_variable_store
+
+        try:
+            get_variable_store(server.base_dir).clear(session_id)
+        except Exception as exc:
+            _log.warning("清空宏变量失败: %s", exc)
+            return jsonify({"success": False, "error": str(exc)}), 500
+        return jsonify({"success": True})
 
     @app.route("/api/sessions/<session_id>/custom-prompts", methods=["GET"])
     def get_custom_prompts(session_id):
@@ -1774,30 +1895,36 @@ def register_session_routes(app, server):
             return jsonify({"success": False, "error": "Message not found"}), 404
 
         target = messages[message_index]
+        if is_message_deleted(target):
+            return jsonify({"success": False, "error": "Message not found"}), 404
         if target.get("role") != "assistant":
             return jsonify({"success": False, "error": "Only assistant messages can be regenerated"}), 400
 
         previous_user = next(
-            (msg for msg in reversed(messages[:message_index]) if msg.get("role") == "user"),
+            (
+                msg
+                for msg in reversed(messages[:message_index])
+                if msg.get("role") == "user" and not is_message_deleted(msg)
+            ),
             None,
         )
         if not previous_user or not previous_user.get("content"):
             return jsonify({"success": False, "error": "Previous user message not found"}), 400
 
         _ensure_mutable_session(session_id, session)
-        original_messages = deepcopy(messages)
-        trimmed_messages = deepcopy(messages[:message_index])
+        # swipes：原消息保留，新回复作为追加候选合并回原消息（variants）。
+        # 上下文裁剪由 WebCallbacks.load_messages 按 swipe_target_id 处理。
         previous_user_id = previous_user.get("id")
-        for retained_msg in reversed(trimmed_messages):
-            if str(retained_msg.get("id")) == str(previous_user_id):
-                retained_msg.pop("thinking_cards", None)
-                retained_msg.pop("todo_cards", None)
-                retained_msg.pop("change_cards", None)
-                break
-        session_store.replace_messages(session_id, trimmed_messages)
+        previous_user.pop("thinking_cards", None)
+        previous_user.pop("todo_cards", None)
+        previous_user.pop("change_cards", None)
+        ensure_message_variants(target)
+        target.pop("thinking_cards", None)
+        target.pop("todo_cards", None)
+        target.pop("change_cards", None)
+        session_store.set_session(session_id, session)
         trigger = getattr(server, "_trigger_ai_response", None)
         if not trigger:
-            session_store.replace_messages(session_id, original_messages)
             return jsonify({"success": False, "error": "AI trigger is unavailable"}), 500
 
         try:
@@ -1807,17 +1934,47 @@ def register_session_routes(app, server):
                 previous_user.get("sender", "web_user"),
                 previous_user.get("attachments") or [],
                 previous_user.get("id"),
+                {"swipe_target_id": str(target.get("id") or "")},
             )
         except Exception as exc:
-            session_store.replace_messages(session_id, original_messages)
             _log.error("Failed to trigger regenerated response: %s", exc, exc_info=True)
             return jsonify({"success": False, "error": "Failed to trigger AI response"}), 500
         return jsonify({
             "success": True,
             "session_id": session_id,
-            "removed_count": len(messages) - message_index,
+            "swipe": True,
+            "message_id": target.get("id"),
             "prompt_message_id": previous_user.get("id"),
         })
+
+    @app.route("/api/sessions/<session_id>/messages/<message_id>/variant", methods=["POST"])
+    def switch_message_variant(session_id, message_id):
+        """切换消息当前选中的候选回复（swipes）。"""
+        session = _get_web_session(session_id)
+        if not session:
+            return jsonify({"error": "Session not found"}), 404
+
+        data = request.get_json(silent=True) or {}
+        index = data.get("index")
+        if not isinstance(index, int):
+            return jsonify({"success": False, "error": "index must be an integer"}), 400
+
+        messages = session.get("messages", [])
+        message_index = _find_message_index(messages, message_id)
+        if message_index < 0 or is_message_deleted(messages[message_index]):
+            return jsonify({"success": False, "error": "Message not found"}), 404
+
+        _ensure_mutable_session(session_id, session)
+        message = messages[message_index]
+        if not select_message_variant(message, index):
+            return jsonify({"success": False, "error": "Variant index out of range"}), 400
+        session_store.set_session(session_id, session)
+        server.socketio.emit(
+            "message_variant_switched",
+            {"session_id": session_id, "message": message},
+            room=session_id,
+        )
+        return jsonify({"success": True, "message": message})
 
     @app.route("/api/stop", methods=["POST"])
     def stop_generation():
@@ -1847,9 +2004,45 @@ def register_session_routes(app, server):
         if not session:
             return jsonify({"error": "Session not found"}), 404
 
-        messages = session.get("messages", [])
+        messages = visible_messages(session.get("messages", []))
         display_messages = [m for m in messages if m.get("role") != "system"]
+        if "limit" in request.args:
+            try:
+                return jsonify(message_page(
+                    display_messages,
+                    request.args["limit"],
+                    request.args.get("before_message_id"),
+                ))
+            except (ValueError, TypeError) as error:
+                return jsonify({"error": str(error)}), 400
+            except LookupError as error:
+                return jsonify({"error": str(error)}), 404
         return jsonify(display_messages)
+
+    @app.route("/api/sessions/<session_id>/context-stats", methods=["GET"])
+    def get_context_stats(session_id):
+        """上下文占比分类统计（7 类），统一会计口径供前端圆环/面板共用。"""
+        session = _get_web_session(session_id)
+        if not session:
+            return jsonify({"error": "Session not found"}), 404
+
+        from nbot.web.context_stats import build_context_stats
+
+        try:
+            max_context_length = int(session.get("max_context_length") or 0) or int(
+                getattr(server, "ai_config", {}).get("max_context_length", 100000) or 100000
+            )
+        except (TypeError, ValueError):
+            max_context_length = 100000
+
+        payload = build_context_stats(session, max_context_length=max_context_length)
+        return jsonify({
+            "success": True,
+            "session_id": session_id,
+            "categories": payload["categories"],
+            "total": payload["total"],
+            "max_context_length": payload["max_context_length"],
+        })
 
     @app.route("/api/sessions/<session_id>/message-favorites", methods=["GET"])
     def get_message_favorites(session_id):
@@ -2000,7 +2193,13 @@ def register_session_routes(app, server):
         if "insert_index" in data:
             messages = session.setdefault("messages", [])
             visible_count = len(
-                [msg for msg in messages if isinstance(msg, dict) and msg.get("role") != "system"]
+                [
+                    msg
+                    for msg in messages
+                    if isinstance(msg, dict)
+                    and msg.get("role") != "system"
+                    and not is_message_deleted(msg)
+                ]
             )
             try:
                 insert_index = int(data.get("insert_index"))
@@ -2011,7 +2210,11 @@ def register_session_routes(app, server):
             actual_index = len(messages)
             seen_visible = 0
             for idx, existing in enumerate(messages):
-                if not isinstance(existing, dict) or existing.get("role") == "system":
+                if (
+                    not isinstance(existing, dict)
+                    or existing.get("role") == "system"
+                    or is_message_deleted(existing)
+                ):
                     continue
                 if seen_visible == insert_index:
                     actual_index = idx
@@ -2040,7 +2243,7 @@ def register_session_routes(app, server):
                 target_idx = idx
                 break
 
-        if target_idx is None:
+        if target_idx is None or is_message_deleted(messages[target_idx]):
             return jsonify({"error": "Message not found"}), 404
 
         if "role" in data:
@@ -2090,9 +2293,20 @@ def register_session_routes(app, server):
         if messages[target_idx].get("role") == "system":
             return jsonify({"error": "System message cannot be deleted here"}), 400
 
-        removed = messages.pop(target_idx)
+        removed = messages[target_idx]
+        removed["deleted"] = True
+        removed["deleted_at"] = datetime.now().astimezone().isoformat()
+        removed.pop("thinking_cards", None)
+        removed.pop("todo_cards", None)
+        removed.pop("change_cards", None)
         session_store.set_session(session_id, session)
-        return jsonify({"success": True, "message": removed, "message_count": len(messages)})
+        return jsonify(
+            {
+                "success": True,
+                "message": removed,
+                "message_count": len(visible_messages(messages)),
+            }
+        )
 
     @app.route("/api/sessions/<session_id>/messages", methods=["DELETE"])
     def clear_messages(session_id):

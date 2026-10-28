@@ -5,6 +5,8 @@ import base64
 import json
 import io
 import logging
+import mimetypes
+import tempfile
 from typing import Any, Dict, Optional
 from PIL import Image
 import imageio.v2 as imageio
@@ -15,6 +17,7 @@ from nbot.core import (
 )
 from nbot.core.model_proxy import model_proxy_request_kwargs
 from nbot.core.protocols import get_protocol
+from nbot.core.sampling import request_extra_body
 from nbot.web.secure_store import read_secure_json, write_secure_json
 
 config_parser = configparser.ConfigParser()
@@ -133,6 +136,12 @@ def get_runtime_ai_config() -> dict:
         "supports_reasoning": shared.get("supports_reasoning", supports_reasoning),
         "supports_stream": shared.get("supports_stream", supports_stream),
         "purpose": shared.get("purpose", "chat"),
+        "stop": shared.get("stop", ""),
+        # 采样参数：未配置时为 None，协议层会跳过这些字段
+        "temperature": shared.get("temperature"),
+        "top_p": shared.get("top_p"),
+        "max_tokens": shared.get("max_tokens"),
+        "token_limit_field": shared.get("token_limit_field", ""),
     }
     effective["api_key"] = resolve_runtime_api_key(
         shared.get("api_key") or api_key,
@@ -168,6 +177,11 @@ def refresh_runtime_ai_config() -> dict:
         client.supports_tools = supports_tools
         client.supports_reasoning = supports_reasoning
         client.supports_stream = supports_stream
+        client.stop = effective.get("stop", "")
+        client.temperature = effective.get("temperature")
+        client.top_p = effective.get("top_p")
+        client.max_tokens = effective.get("max_tokens")
+        client.token_limit_field = effective.get("token_limit_field", "")
 
     return effective
 
@@ -202,6 +216,11 @@ def apply_model_config(config: dict) -> None:
         client.supports_tools = supports_tools
         client.supports_reasoning = supports_reasoning
         client.supports_stream = supports_stream
+        client.stop = config.get("stop", "")
+        client.temperature = config.get("temperature")
+        client.top_p = config.get("top_p")
+        client.max_tokens = config.get("max_tokens")
+        client.token_limit_field = config.get("token_limit_field", "")
         # OAuth 账号绑定（chat_completion 时解析 fresh access_token）
         client.oauth_account_id = config.get("oauth_account_id", "")
 
@@ -216,6 +235,45 @@ try:
         group_messages = json.load(f)
 except FileNotFoundError:
     os.makedirs("saved_message", exist_ok=True)
+
+
+def _data_url_to_tempfile(data_url: str) -> Optional[str]:
+    """将 data: URL 落盘为临时文件，供 STT 等本地处理使用。"""
+    try:
+        header, encoded = data_url.split(",", 1)
+        mime = header[5:].split(";", 1)[0].strip() or "audio/mpeg"
+        ext = mimetypes.guess_extension(mime) or ".mp3"
+        with tempfile.NamedTemporaryFile(delete=False, suffix=ext) as tmp_file:
+            tmp_file.write(base64.b64decode(encoded))
+            return tmp_file.name
+    except Exception as exc:
+        _log.warning("[Audio] failed to decode data URL: %s", exc)
+        return None
+
+
+def _read_media_bytes(url: str) -> bytes:
+    """读取媒体内容，支持 data URL、http(s) 与本地路径。"""
+    if url.startswith("data:"):
+        return base64.b64decode(url.split(",", 1)[1])
+    if url.startswith(("http://", "https://")):
+        res = requests.get(url, timeout=10)
+        res.raise_for_status()
+        return res.content
+    path = url[7:] if url.startswith("file://") else url
+    with open(path, "rb") as fh:
+        return fh.read()
+
+
+def _ensure_remote_media_url(url: str) -> str:
+    """把本地路径转换为 data URL，保证视觉模型可访问。"""
+    if url.startswith(("http://", "https://", "data:")):
+        return url
+    try:
+        data = _read_media_bytes(url)
+        mime = mimetypes.guess_type(url)[0] or "application/octet-stream"
+        return f"data:{mime};base64," + base64.b64encode(data).decode("utf-8")
+    except Exception:
+        return url
 
 
 def _is_gemini_model(provider_type: str, model_name: str) -> bool:
@@ -256,8 +314,24 @@ class AIClient:
         self.supports_reasoning = bool(supports_reasoning)
         self.supports_stream = bool(supports_stream)
         self.proxy_url = proxy_url or ""
+        # 采样参数（由 refresh_runtime_ai_config / apply_model_config 同步）
+        self.stop: str = ""
+        self.temperature = None
+        self.top_p = None
+        self.max_tokens = None
+        self.token_limit_field: str = ""
         # OAuth 账号绑定（运行时由 _resolve_oauth_runtime 解析 fresh access_token）
         self.oauth_account_id: str = ""
+
+    def sampling_config(self) -> dict:
+        """当前客户端的采样参数快照，供协议层生成 extra_body。"""
+        return {
+            "stop": getattr(self, "stop", ""),
+            "temperature": getattr(self, "temperature", None),
+            "top_p": getattr(self, "top_p", None),
+            "max_tokens": getattr(self, "max_tokens", None),
+            "token_limit_field": getattr(self, "token_limit_field", ""),
+        }
 
     @staticmethod
     def clean_response(content: str) -> str:
@@ -353,6 +427,7 @@ class AIClient:
             stream=stream,
             base_url=self.base_url,
             provider_type=self.provider_type,
+            extra_body=request_extra_body(self.sampling_config()) or None,
         )
 
         if stream:
@@ -457,6 +532,7 @@ class AIClient:
                 stream=False,
                 base_url=cfg.get("base_url", ""),
                 provider_type=cfg_pt,
+                extra_body=request_extra_body(cfg) or None,
             )
             try:
                 # failover_timeout: 0 表示使用默认 120s
@@ -666,12 +742,47 @@ class AIClient:
         print("[图片识别] 无可用模型配置")
         return None
 
+    def describe_audio(self, audio_url: str) -> Optional[str]:
+        """语音识别：把音频附件转写为文字，供消息预处理注入上下文。"""
+        from nbot.services import stt as stt_service
+
+        if not audio_url:
+            return None
+
+        temp_path = None
+        try:
+            if audio_url.startswith("data:"):
+                temp_path = _data_url_to_tempfile(audio_url)
+                if not temp_path:
+                    return None
+                text = stt_service.transcribe(temp_path)
+            elif audio_url.startswith(("http://", "https://")):
+                text = stt_service.transcribe_from_url(audio_url)
+            else:
+                path = audio_url[7:] if audio_url.startswith("file://") else audio_url
+                if not os.path.exists(path):
+                    print(f"[语音识别] 音频文件不存在: {path}")
+                    return None
+                text = stt_service.transcribe(path)
+
+            if not text or not str(text).strip():
+                return None
+            result = str(text).strip()
+            print(f"[语音识别] 转写成功: {result[:100]}...")
+            return result
+        except Exception as exc:
+            print(f"[语音识别] 转写失败: {exc}")
+            return None
+        finally:
+            if temp_path:
+                try:
+                    os.unlink(temp_path)
+                except OSError:
+                    pass
+
     def gif_to_mp4_data_url(self, image_url: str, fps: int = 10) -> str:
         try:
-            res = requests.get(image_url, timeout=10)
-            if res.status_code != 200:
-                return ""
-            buf_in = io.BytesIO(res.content)
+            buf_in = io.BytesIO(_read_media_bytes(image_url))
             frames = imageio.mimread(buf_in, format="gif")
             if not frames:
                 return ""
@@ -687,14 +798,11 @@ class AIClient:
 
     def describe_gif(self, image_url: str, max_frames: int = 10) -> Optional[str]:
         try:
-            res = requests.get(image_url, timeout=10)
-            if res.status_code != 200:
-                return None
-            img = Image.open(io.BytesIO(res.content))
+            img = Image.open(io.BytesIO(_read_media_bytes(image_url)))
             total = getattr(img, "n_frames", 1)
             if total <= 1:
                 return self.describe_image(
-                    image_url,
+                    _ensure_remote_media_url(image_url),
                     "请描述这个图片的内容，仅作描述，不要分析内容",
                 )
 

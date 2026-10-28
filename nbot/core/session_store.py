@@ -1,9 +1,100 @@
+import hashlib
 import json
 import logging
+import os
+import threading
 import uuid
+from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional
 
 _log = logging.getLogger(__name__)
+
+# 工具轨迹实时暂存目录（每步 append，进程中断也能留下已完成步骤）
+_TOOL_TRACE_DIR = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+    "data",
+    "tool_traces",
+)
+_TOOL_TRACE_LOCK = threading.RLock()
+_TOOL_TRACE_STEPS: dict[str, list[dict[str, Any]]] = {}
+_TOOL_TRACE_MAX_STEPS = 500
+
+
+def tool_trace_key(session_id: str = "", conversation_id: str = "") -> str:
+    """工具轨迹暂存键：优先会话 id，回退对话 id。"""
+    key = str(session_id or "").strip() or str(conversation_id or "").strip()
+    return key
+
+
+def _tool_trace_path(key: str) -> str:
+    digest = hashlib.sha1(key.encode("utf-8")).hexdigest()[:24]
+    return os.path.join(_TOOL_TRACE_DIR, f"{digest}.jsonl")
+
+
+def begin_tool_trace(key: str) -> None:
+    """开始一轮工具轨迹记录（仅清理内存缓存，磁盘残留交给下一次成功收尾清理）。"""
+    if not key:
+        return
+    with _TOOL_TRACE_LOCK:
+        _TOOL_TRACE_STEPS.pop(key, None)
+
+
+def append_inflight_tool_step(key: str, step: dict[str, Any]) -> None:
+    """追加一个工具步骤：内存留一份，同时以 JSONL 落盘（不阻塞、异常吞掉）。"""
+    if not key or not isinstance(step, dict):
+        return
+    with _TOOL_TRACE_LOCK:
+        steps = _TOOL_TRACE_STEPS.setdefault(key, [])
+        steps.append(step)
+        if len(steps) > _TOOL_TRACE_MAX_STEPS:
+            del steps[: len(steps) - _TOOL_TRACE_MAX_STEPS]
+        path = _tool_trace_path(key)
+    try:
+        os.makedirs(_TOOL_TRACE_DIR, exist_ok=True)
+        with open(path, "a", encoding="utf-8") as handle:
+            handle.write(json.dumps(step, ensure_ascii=False) + "\n")
+    except Exception as exc:  # 落盘失败不影响对话主流程
+        _log.debug("[ToolTrace] 追加工具轨迹失败: %s", exc)
+
+
+def load_inflight_tool_steps(key: str, turn: str = "") -> list[dict[str, Any]]:
+    """读取暂存的工具步骤；给了 turn 只返回该回合。优先内存，回退磁盘。"""
+    if not key:
+        return []
+    with _TOOL_TRACE_LOCK:
+        steps = list(_TOOL_TRACE_STEPS.get(key) or [])
+    if not steps:
+        try:
+            path = _tool_trace_path(key)
+            if os.path.exists(path):
+                with open(path, encoding="utf-8") as handle:
+                    for line in handle:
+                        line = line.strip()
+                        if not line:
+                            continue
+                        try:
+                            steps.append(json.loads(line))
+                        except json.JSONDecodeError:
+                            continue
+        except Exception as exc:
+            _log.debug("[ToolTrace] 读取工具轨迹失败: %s", exc)
+    if turn:
+        steps = [step for step in steps if str(step.get("turn", "")) == str(turn)]
+    return steps
+
+
+def clear_inflight_tool_steps(key: str) -> None:
+    """收尾：清空内存缓存并删除落盘文件。"""
+    if not key:
+        return
+    with _TOOL_TRACE_LOCK:
+        _TOOL_TRACE_STEPS.pop(key, None)
+        path = _tool_trace_path(key)
+    try:
+        if os.path.exists(path):
+            os.remove(path)
+    except Exception as exc:
+        _log.debug("[ToolTrace] 清理工具轨迹失败: %s", exc)
 
 
 def build_qq_session_id(
@@ -42,12 +133,120 @@ def build_chat_message(
     role: str,
     content: str,
     *,
-    extra: Optional[Dict[str, Any]] = None,
-) -> Dict[str, Any]:
+    extra: Optional[dict[str, Any]] = None,
+) -> dict[str, Any]:
     message = {"role": role, "content": content}
     if extra:
         message.update(extra)
     return message
+
+
+def is_message_deleted(message: Any) -> bool:
+    """判断消息是否被软删除（保留记录，但所有展示与模型上下文均忽略）。"""
+    return bool(isinstance(message, dict) and message.get("deleted"))
+
+
+def visible_messages(messages: Any) -> list[dict[str, Any]]:
+    """过滤软删除消息，返回可展示/可送入模型的消息列表。"""
+    if not isinstance(messages, list):
+        return []
+    return [msg for msg in messages if isinstance(msg, dict) and not is_message_deleted(msg)]
+
+
+def deleted_message_ids(messages: Any) -> set:
+    """收集消息列表中的软删除消息 id，用于阻止异步回写复活。"""
+    if not isinstance(messages, list):
+        return set()
+    return {
+        str(msg.get("id"))
+        for msg in messages
+        if isinstance(msg, dict) and is_message_deleted(msg) and msg.get("id")
+    }
+
+
+# swipes：切换候选时需要一并失效的派生内容（旧语音不再匹配新文本）
+_VARIANT_DERIVED_KEYS = ("audio_url", "tts_audio")
+
+
+def ensure_message_variants(message: dict[str, Any]) -> list[dict[str, Any]]:
+    """回填消息的 variants 候选列表（swipes）。
+
+    未携带 variants 的历史消息以当前 content 作为第一个候选；
+    content 为空的消息（如表情包/图片气泡）不参与候选。
+    """
+    if not isinstance(message, dict):
+        return []
+    variants = message.get("variants")
+    if not isinstance(variants, list):
+        variants = []
+    variants = [v for v in variants if isinstance(v, dict)]
+    if not variants and str(message.get("content") or ""):
+        variants = [
+            {
+                "content": str(message.get("content") or ""),
+                "model": str(message.get("model") or ""),
+                "created_at": str(message.get("timestamp") or ""),
+            }
+        ]
+    message["variants"] = variants
+    index = message.get("variant_index")
+    if not isinstance(index, int) or index < 0 or index >= len(variants):
+        index = len(variants) - 1 if variants else 0
+        message["variant_index"] = index
+    return variants
+
+
+def select_message_variant(message: dict[str, Any], index: int) -> bool:
+    """切换当前选中候选：variant_index 指向新候选，content 镜像其文本。
+
+    上下文组装、导出、公开分享均读取 content，因此无需各自适配。
+    """
+    variants = ensure_message_variants(message)
+    if index < 0 or index >= len(variants):
+        return False
+    message["variant_index"] = index
+    message["content"] = str(variants[index].get("content") or "")
+    for key in _VARIANT_DERIVED_KEYS:
+        message.pop(key, None)
+    return True
+
+
+def merge_message_variant(
+    message: dict[str, Any],
+    incoming: dict[str, Any],
+    *,
+    model_id: str = "",
+    update_last: bool = False,
+) -> bool:
+    """将新生成的内容作为新候选追加到消息（swipes 重新生成）。
+
+    消息身份（id/位置/时间戳）保持不变，content 镜像新候选。
+    update_last=True 时回写当前选中候选（同轮生成内的二次保存，如剥离生图标签）。
+    """
+    if not isinstance(message, dict) or is_message_deleted(message):
+        return False
+    incoming = incoming if isinstance(incoming, dict) else {}
+    content = str(incoming.get("content") or "")
+    variants = ensure_message_variants(message)
+    if update_last and variants:
+        index = message.get("variant_index")
+        if not isinstance(index, int) or index < 0 or index >= len(variants):
+            index = len(variants) - 1
+        variants[index]["content"] = content
+        variants[index]["model"] = str(model_id or incoming.get("model") or "")
+    else:
+        variants.append(
+            {
+                "content": content,
+                "model": str(model_id or incoming.get("model") or ""),
+                "created_at": datetime.now().astimezone().isoformat(),
+            }
+        )
+        message["variant_index"] = len(variants) - 1
+    message["content"] = content
+    for key in _VARIANT_DERIVED_KEYS:
+        message.pop(key, None)
+    return True
 
 
 class QQSessionStore:
@@ -232,6 +431,9 @@ class WebSessionStore:
         if msg_id:
             for idx, existing in enumerate(messages):
                 if existing.get("id") == msg_id:
+                    if is_message_deleted(existing):
+                        # 已软删除的消息不允许被异步回写复活
+                        return messages
                     messages[idx] = message
                     if self.save_callback:
                         self.save_callback()
@@ -247,6 +449,18 @@ class WebSessionStore:
         session = self.get_session(session_id)
         if not session:
             return []
+        vanished_ids = deleted_message_ids(session.get("messages"))
+        if vanished_ids:
+            # 传入列表若来自软删除之前的快照，同 id 消息不得复活
+            messages = [
+                msg
+                for msg in messages
+                if not (
+                    isinstance(msg, dict)
+                    and str(msg.get("id") or "") in vanished_ids
+                    and not is_message_deleted(msg)
+                )
+            ]
         session["messages"] = self._filter_messages(session_id, messages, session)
         if self.save_callback:
             self.save_callback()

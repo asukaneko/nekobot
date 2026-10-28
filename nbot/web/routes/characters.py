@@ -31,6 +31,43 @@ def _get_profile_initial_state(server, character_id: str) -> dict[str, Any]:
     return profile.initial_state if profile else {}
 
 
+_HISTORY_STORES: dict[str, Any] = {}
+
+
+def _get_history_store(server):
+    """按 base_dir 缓存状态快照存储实例。"""
+    from nbot.character.state_history import StateHistoryStore
+
+    base_dir = _get_base_dir(server)
+    store = _HISTORY_STORES.get(base_dir)
+    if store is None:
+        store = StateHistoryStore(base_dir)
+        _HISTORY_STORES[base_dir] = store
+    return store
+
+
+def _record_state_history(server, character_id, scope_id, state, relationship,
+                          source="manual", reason=""):
+    """记录一条状态快照；失败只记日志，不影响接口返回。"""
+    try:
+        _get_history_store(server).record(
+            character_id, scope_id, state, relationship, source=source, reason=reason
+        )
+    except Exception as exc:
+        _log.debug("[StateHistory] 写入失败: %s", exc)
+
+
+def from_state_history_diff(before, after):
+    """包装 snapshot_diff，保持路由层命名清晰。"""
+    from nbot.character.state_history import snapshot_diff
+
+    return {
+        "from": str((before or {}).get("ts") or ""),
+        "to": str((after or {}).get("ts") or ""),
+        "changes": snapshot_diff(before or {}, after or {}),
+    }
+
+
 def _channel_from_scope_id(scope_id: str) -> str:
     scope_id = str(scope_id or "").strip()
     return scope_id.split(":", 1)[0] if ":" in scope_id else "unknown"
@@ -195,6 +232,8 @@ def register_character_routes(app, server):
             state.energy = int(data["energy"])
 
         repo.save(state)
+        _record_state_history(server, character_id, scope_id, state, None, source="manual",
+                              reason="手动修改状态")
         return jsonify({"success": True, "state": state.to_dict()})
 
     # ================================================================
@@ -244,7 +283,143 @@ def register_character_routes(app, server):
                 setattr(rel, field_name, value)
 
         repo.save(rel)
+        _record_state_history(server, character_id, target_id, None, rel, source="manual",
+                              reason="手动修改关系")
         return jsonify({"success": True, "relationship": rel.to_dict()})
+
+    # ================================================================
+    # 状态快照历史（时间线 / 趋势 / 恢复）
+    # ================================================================
+
+    @app.route("/api/characters/<character_id>/state/history", methods=["GET"])
+    def get_character_state_history(character_id):
+        """按 scope 返回状态快照时间线（升序）。"""
+        scope_id = request.args.get("scope_id", "").strip()
+        if not scope_id:
+            return jsonify({"success": False, "error": "缺少 scope_id 参数"}), 400
+        limit = request.args.get("limit", "50")
+        try:
+            limit = max(1, min(200, int(limit)))
+        except (TypeError, ValueError):
+            limit = 50
+
+        store = _get_history_store(server)
+        snapshots = store.list_snapshots(character_id, scope_id, limit=limit)
+        diffs = []
+        for prev, cur in zip(snapshots, snapshots[1:], strict=False):
+            diffs.append(from_state_history_diff(prev, cur))
+
+        return jsonify({
+            "success": True,
+            "character_id": character_id,
+            "scope_id": scope_id,
+            "count": len(snapshots),
+            "snapshots": snapshots,
+            "diffs": diffs,
+        })
+
+    @app.route("/api/characters/<character_id>/state/history/scopes", methods=["GET"])
+    def list_character_state_history_scopes(character_id):
+        """列出该角色有历史记录的会话范围。"""
+        store = _get_history_store(server)
+        return jsonify({"success": True, "scopes": store.list_scopes(character_id)})
+
+    @app.route("/api/characters/<character_id>/state/trend", methods=["GET"])
+    def get_character_state_trend(character_id):
+        """返回趋势序列，供折线图使用。"""
+        scope_id = request.args.get("scope_id", "").strip()
+        if not scope_id:
+            return jsonify({"success": False, "error": "缺少 scope_id 参数"}), 400
+        try:
+            limit = max(2, min(500, int(request.args.get("limit", "100"))))
+        except (TypeError, ValueError):
+            limit = 100
+        raw_fields = request.args.get("fields", "")
+        fields = [f for f in raw_fields.split(",") if f.strip()] or None
+
+        store = _get_history_store(server)
+        payload = store.trend(character_id, scope_id, limit=limit, fields=fields)
+        payload.update({"success": True, "character_id": character_id, "scope_id": scope_id})
+        return jsonify(payload)
+
+    @app.route("/api/characters/<character_id>/state/restore", methods=["POST"])
+    def restore_character_state(character_id):
+        """把状态（可选关系）恢复到指定快照。"""
+        from nbot.character.repository import CharacterStateRepository, RelationshipRepository
+
+        data = request.json or {}
+        scope_id = str(data.get("scope_id") or "").strip()
+        if not scope_id:
+            return jsonify({"success": False, "error": "缺少 scope_id"}), 400
+
+        store = _get_history_store(server)
+        snapshots = store.list_snapshots(character_id, scope_id, limit=0)
+        if not snapshots:
+            return jsonify({"success": False, "error": "该会话没有状态快照"}), 404
+
+        index = data.get("index")
+        if index is None:
+            index = len(snapshots) - 1
+        try:
+            index = int(index)
+        except (TypeError, ValueError):
+            return jsonify({"success": False, "error": "index 必须为整数"}), 400
+        if index < 0:
+            index += len(snapshots)
+        if not 0 <= index < len(snapshots):
+            return jsonify({"success": False, "error": "index 超出范围"}), 400
+
+        snapshot = snapshots[index]
+        base_dir = _get_base_dir(server)
+
+        state_repo = CharacterStateRepository(base_dir)
+        state = state_repo.get(character_id, scope_id)
+        if not state:
+            from nbot.character.models import CharacterState
+
+            state = CharacterState(character_id=character_id, scope_id=scope_id)
+        if "mood" in snapshot:
+            state.mood = str(snapshot["mood"])
+        if "mood_intensity" in snapshot:
+            state.mood_intensity = float(snapshot["mood_intensity"])
+        if "energy" in snapshot:
+            state.energy = int(snapshot["energy"])
+        state_repo.save(state)
+
+        relationship_payload = None
+        target_id = str(data.get("target_id") or "").strip()
+        if not target_id:
+            candidates = _target_candidates_from_scope_id(scope_id)
+            target_id = candidates[0] if candidates else ""
+        if target_id:
+            rel_repo = RelationshipRepository(base_dir)
+            rel = rel_repo.get(character_id, target_id)
+            if rel is None:
+                rel = rel_repo.get_or_create(
+                    character_id,
+                    target_id,
+                    initial_state=_get_profile_initial_state(server, character_id),
+                )
+            for field_name in ("affection", "trust", "familiarity", "dependency",
+                               "security", "jealousy"):
+                if field_name in snapshot:
+                    setattr(rel, field_name, max(0, min(100, int(snapshot[field_name]))))
+            rel_repo.save(rel)
+            relationship_payload = rel.to_dict()
+
+        _record_state_history(server, character_id, scope_id, state, rel if target_id else None,
+                              source="restore",
+                              reason=f"恢复到快照 {snapshot.get('ts', '')}")
+
+        return jsonify({
+            "success": True,
+            "restored": {
+                "state": state.to_dict(),
+                "relationship": relationship_payload,
+                "snapshot": snapshot,
+                "index": index,
+            },
+        })
 
     # ================================================================
     # 记忆管理
@@ -538,6 +713,7 @@ def register_character_routes(app, server):
             base_dir = _get_base_dir(server)
 
             from nbot.character.storage.world_book_store import WorldBookStore
+            from nbot.character.state_history import StateHistoryStore
 
             _hook_rt = None
             try:
@@ -555,6 +731,7 @@ def register_character_routes(app, server):
                 state_machine=StateMachine(),
                 world_book_store=WorldBookStore(base_dir),
                 hook_runtime=_hook_rt,
+                history_store=StateHistoryStore(base_dir),
             )
 
             server.character_runtime = runtime

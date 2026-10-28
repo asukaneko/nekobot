@@ -1,13 +1,26 @@
+import json
+import logging
 import os
 import uuid
 from datetime import datetime
+from typing import Any
 
 from flask import jsonify, request
+
 from nbot.core.model_proxy import (
     model_proxy_request_kwargs,
     normalize_model_proxy_url,
 )
+from nbot.core.sampling import (
+    DEFAULT_CHAT_MAX_TOKENS,
+    DEFAULT_VIDEO_MAX_TOKENS,
+    DEFAULT_VISION_MAX_TOKENS,
+    default_max_tokens_for,
+    normalize_token_limit_field,
+)
 from nbot.web.utils.config_loader import resolve_runtime_api_key
+
+_log = logging.getLogger(__name__)
 
 # 模型用途类型定义
 MODEL_PURPOSES = {
@@ -17,14 +30,72 @@ MODEL_PURPOSES = {
     "tts": {"name": "TTS语音合成", "icon": "🔊", "description": "用于文字转语音"},
     "stt": {"name": "STT语音识别", "icon": "🎤", "description": "用于语音转文字"},
     "embedding": {"name": "向量嵌入模型", "icon": "📊", "description": "用于知识库和语义搜索"},
+    "rerank": {
+        "name": "检索重排模型",
+        "icon": "🎯",
+        "description": "用于知识库检索结果重排（RAG rerank），提升召回片段的相关度",
+    },
     "image_generation": {"name": "图片生成模型", "icon": "🎨", "description": "用于AI生成图片，如角色立绘"}
 }
+
+# rerank 用途的专用字段（其余用途不写入，避免污染配置）
+RERANK_FORMATS = ("documents", "texts")
+DEFAULT_RERANK_TIMEOUT = 15
+DEFAULT_RERANK_WEIGHT = 1.0
+MAX_RERANK_TIMEOUT = 120
+
+
+def normalize_rerank_format(value: Any) -> str:
+    text = str(value or "").strip().lower()
+    return text if text in RERANK_FORMATS else "documents"
+
+
+def rerank_config_fields(data: dict, purpose: str) -> dict:
+    """抽取 purpose=rerank 的专用配置；其它用途返回空字典。"""
+    if purpose != "rerank" or not isinstance(data, dict):
+        return {}
+
+    def _number(raw, default, minimum=0.0, maximum=None):
+        try:
+            number = float(raw)
+        except (TypeError, ValueError):
+            return default
+        if maximum is not None:
+            number = min(number, maximum)
+        return max(number, minimum)
+
+    extra_body = data.get("rerank_extra_body")
+    if isinstance(extra_body, str):
+        try:
+            extra_body = json.loads(extra_body) if extra_body.strip() else {}
+        except json.JSONDecodeError:
+            extra_body = {}
+    if not isinstance(extra_body, dict):
+        extra_body = {}
+
+    return {
+        "rerank_path": str(data.get("rerank_path") or "").strip(),
+        "rerank_format": normalize_rerank_format(data.get("rerank_format")),
+        "rerank_timeout": _number(
+            data.get("rerank_timeout"),
+            DEFAULT_RERANK_TIMEOUT,
+            minimum=1.0,
+            maximum=MAX_RERANK_TIMEOUT,
+        ),
+        "rerank_weight": _number(
+            data.get("rerank_weight"),
+            DEFAULT_RERANK_WEIGHT,
+            minimum=0.0,
+            maximum=1.0,
+        ),
+        "rerank_extra_body": extra_body,
+    }
 
 # 各用途的默认配置
 DEFAULT_PURPOSE_CONFIGS = {
     "chat": {
         "temperature": 0.7,
-        "max_tokens": 2000,
+        "max_tokens": DEFAULT_CHAT_MAX_TOKENS,
         "top_p": 0.9,
         "supports_tools": True,
         "supports_reasoning": True,
@@ -33,7 +104,7 @@ DEFAULT_PURPOSE_CONFIGS = {
     },
     "vision": {
         "temperature": 0.5,
-        "max_tokens": 1000,
+        "max_tokens": DEFAULT_VISION_MAX_TOKENS,
         "supports_tools": False,
         "supports_reasoning": False,
         "supports_stream": True,
@@ -41,7 +112,7 @@ DEFAULT_PURPOSE_CONFIGS = {
     },
     "video": {
         "temperature": 0.5,
-        "max_tokens": 1500,
+        "max_tokens": DEFAULT_VIDEO_MAX_TOKENS,
         "supports_tools": False,
         "supports_reasoning": False,
         "supports_stream": True,
@@ -65,6 +136,19 @@ DEFAULT_PURPOSE_CONFIGS = {
         "model": "text-embedding-3-small",
         "dimensions": 1536
     },
+    "rerank": {
+        "temperature": 0,
+        "max_tokens": 0,
+        "top_p": 1,
+        "supports_tools": False,
+        "supports_reasoning": False,
+        "supports_stream": False,
+        "system_prompt": "",
+        "rerank_path": "",
+        "rerank_format": "documents",
+        "rerank_timeout": DEFAULT_RERANK_TIMEOUT,
+        "rerank_weight": DEFAULT_RERANK_WEIGHT,
+    },
     "image_generation": {
         "model": "dall-e-3",
         "size": "1024x1024",
@@ -75,6 +159,15 @@ DEFAULT_PURPOSE_CONFIGS = {
 
 
 def register_ai_model_routes(app, server):
+    def _refresh_rerank_service(reason: str) -> None:
+        """rerank 模型增删改后立刻刷新重排服务（配置读取有 30s 缓存）。"""
+        try:
+            from nbot.core.knowledge.rerank import get_rerank_service
+
+            get_rerank_service(force_reload=True)
+        except Exception as exc:  # pragma: no cover - 知识库未启用时忽略
+            _log.debug("[Rerank] %s 后刷新重排服务失败: %s", reason, exc)
+
     @app.route("/api/ai-models")
     def get_ai_models():
         models = []
@@ -110,6 +203,7 @@ def register_ai_model_routes(app, server):
         # 模型价格配置（人民币 元/百万token，null 表示使用兜底定价）
         raw_input_price = data.get("input_price")
         raw_output_price = data.get("output_price")
+        raw_cached_input_price = data.get("cached_input_price")
 
         model = {
             "id": str(uuid.uuid4()),
@@ -130,8 +224,10 @@ def register_ai_model_routes(app, server):
             "supports_reasoning": data.get("supports_reasoning", default_config.get("supports_reasoning", True)),
             "supports_stream": data.get("supports_stream", default_config.get("supports_stream", True)),
             "temperature": data.get("temperature", default_config.get("temperature", 0.7)),
-            "max_tokens": data.get("max_tokens", default_config.get("max_tokens", 2000)),
+            "max_tokens": data.get("max_tokens", default_config.get("max_tokens", 8192)),
             "top_p": data.get("top_p", default_config.get("top_p", 0.9)),
+            "token_limit_field": normalize_token_limit_field(data.get("token_limit_field")),
+            "stop": data.get("stop", default_config.get("stop", "")),
             "frequency_penalty": data.get("frequency_penalty", 0),
             "presence_penalty": data.get("presence_penalty", 0),
             "system_prompt": data.get("system_prompt", default_config.get("system_prompt", "")),
@@ -146,6 +242,11 @@ def register_ai_model_routes(app, server):
             # 模型价格（null 表示使用兜底定价）
             "input_price": raw_input_price if raw_input_price not in (None, "", "null") else None,
             "output_price": raw_output_price if raw_output_price not in (None, "", "null") else None,
+            "cached_input_price": (
+                raw_cached_input_price
+                if raw_cached_input_price not in (None, "", "null")
+                else None
+            ),
             # TTS 统一配置字段
             "tts_provider": data.get("tts_provider", "openai"),
             "tts_url": data.get("tts_url", ""),
@@ -180,8 +281,12 @@ def register_ai_model_routes(app, server):
             # OAuth 账号关联（绑定后 api_key 在运行时由 OAuthManager 注入）
             "oauth_account_id": data.get("oauth_account_id", ""),
         }
+        # rerank 用途的专用配置（路径/请求格式/超时/混合权重）
+        model.update(rerank_config_fields(data, purpose))
         server.ai_models.append(model)
         server._save_data("ai_models")
+        if purpose == "rerank":
+            _refresh_rerank_service("新建 rerank 模型")
         return jsonify({"success": True, "model": model})
 
     @app.route("/api/ai-models/<model_id>", methods=["PUT"])
@@ -204,7 +309,9 @@ def register_ai_model_routes(app, server):
                     model["supports_reasoning"] = default_config.get("supports_reasoning", True)
                     model["supports_stream"] = default_config.get("supports_stream", True)
                     model["temperature"] = default_config.get("temperature", 0.7)
-                    model["max_tokens"] = default_config.get("max_tokens", 2000)
+                    model["max_tokens"] = default_config.get(
+                    "max_tokens", default_max_tokens_for(new_purpose)
+                )
                     model["top_p"] = default_config.get("top_p", 0.9)
                     model["system_prompt"] = default_config.get("system_prompt", "")
             
@@ -237,8 +344,13 @@ def register_ai_model_routes(app, server):
                 "supports_stream", model.get("supports_stream", True)
             )
             model["temperature"] = data.get("temperature", model.get("temperature", 0.7))
-            model["max_tokens"] = data.get("max_tokens", model.get("max_tokens", 2000))
+            model["max_tokens"] = data.get("max_tokens", model.get("max_tokens", 8192))
             model["top_p"] = data.get("top_p", model.get("top_p", 0.9))
+            if "token_limit_field" in data:
+                model["token_limit_field"] = normalize_token_limit_field(
+                    data.get("token_limit_field")
+                )
+            model["stop"] = data.get("stop", model.get("stop", ""))
             model["frequency_penalty"] = data.get(
                 "frequency_penalty", model.get("frequency_penalty", 0)
             )
@@ -271,6 +383,9 @@ def register_ai_model_routes(app, server):
             if "output_price" in data:
                 raw = data["output_price"]
                 model["output_price"] = None if raw in (None, "", "null") else raw
+            if "cached_input_price" in data:
+                raw = data["cached_input_price"]
+                model["cached_input_price"] = None if raw in (None, "", "null") else raw
             # TTS 统一配置字段
             model["tts_provider"] = data.get("tts_provider", model.get("tts_provider", "openai"))
             model["tts_url"] = data.get("tts_url", model.get("tts_url", ""))
@@ -292,6 +407,8 @@ def register_ai_model_routes(app, server):
             model["tts_ref_audio"] = new_ref_audio
             model["tts_user"] = data.get("tts_user", model.get("tts_user", ""))
             model["language"] = data.get("language", model.get("language", "zh"))
+            # rerank 用途的专用配置（用途切走时保留原值，切回不用重填）
+            model.update(rerank_config_fields(data, model.get("purpose", "chat")))
             # STT 统一配置字段
             model["stt_provider"] = data.get("stt_provider", model.get("stt_provider", ""))
             model["stt_url"] = data.get("stt_url", model.get("stt_url", ""))
@@ -315,6 +432,8 @@ def register_ai_model_routes(app, server):
             )
             model["updated_at"] = datetime.now().isoformat()
             server._save_data("ai_models")
+            if model.get("purpose", "chat") == "rerank":
+                _refresh_rerank_service("更新 rerank 模型")
             return jsonify({"success": True, "model": model})
 
         return jsonify({"error": "Model not found"}), 404
@@ -473,12 +592,15 @@ def register_ai_model_routes(app, server):
                 model["supports_reasoning"] = default_config.get("supports_reasoning", True)
                 model["supports_stream"] = default_config.get("supports_stream", True)
                 model["temperature"] = default_config.get("temperature", 0.7)
-                model["max_tokens"] = default_config.get("max_tokens", 2000)
+                model["max_tokens"] = default_config.get(
+                    "max_tokens", default_max_tokens_for(new_purpose)
+                )
                 model["top_p"] = default_config.get("top_p", 0.9)
                 model["system_prompt"] = default_config.get("system_prompt", "")
                 model["updated_at"] = datetime.now().isoformat()
                 server._save_data("ai_models")
-            
+                if new_purpose == "rerank":
+                    _refresh_rerank_service("切换模型用途")
             model_copy = model.copy()
             if "api_key" in model_copy:
                 model_copy["api_key"] = "********" if model_copy["api_key"] else ""
@@ -497,8 +619,15 @@ def register_ai_model_routes(app, server):
     def delete_ai_model(model_id):
         if server.active_model_id == model_id:
             return jsonify({"error": "Cannot delete active model"}), 400
+        removed_purpose = ""
+        for m in server.ai_models:
+            if m["id"] == model_id:
+                removed_purpose = m.get("purpose", "chat")
+                break
         server.ai_models = [m for m in server.ai_models if m["id"] != model_id]
         server._save_data("ai_models")
+        if removed_purpose == "rerank":
+            _refresh_rerank_service("删除 rerank 模型")
 
         # 记录模型删除操作到 Gateway 日志
         try:
@@ -531,6 +660,8 @@ def register_ai_model_routes(app, server):
                     break
             model_purpose = purpose or (model.get("purpose", "chat") if model else "chat")
             purpose_name = MODEL_PURPOSES.get(model_purpose, {}).get("name", model_purpose)
+            if model_purpose == "rerank":
+                _refresh_rerank_service("应用 rerank 模型")
 
             # 记录模型切换操作到 Gateway 日志
             try:
@@ -961,6 +1092,38 @@ def register_ai_model_routes(app, server):
 
         return jsonify({"error": "Model not found"}), 404
 
+    @app.route("/api/ai-models/<model_id>/probe", methods=["POST"])
+    def probe_ai_model(model_id):
+        """实测模型能力（chat / tools / vision / stream），结果写回配置。
+
+        与 ``/test`` 的区别：``/test`` 只发一次最小请求验证连通性，
+        本接口会分别验证工具调用、视觉输入与流式能力，供"能力位"落地。
+        """
+        from nbot.web.model_probe import apply_probe_result, probe_model_config
+
+        model = next((m for m in server.ai_models if m.get("id") == model_id), None)
+        if not model:
+            return jsonify({"success": False, "error": "Model not found"}), 404
+
+        config = dict(model)
+        provider_type = config.get("provider_type", config.get("provider", ""))
+        config["api_key"] = resolve_runtime_api_key(config.get("api_key", ""), provider_type)
+
+        result = probe_model_config(config, timeout=float(request.args.get("timeout") or 20))
+        if result.get("supported"):
+            apply_probe_result(model, result)
+            try:
+                server._save_data("ai_models")
+            except Exception as exc:
+                _log.warning("保存实测能力失败: %s", exc)
+
+        return jsonify({
+            "success": bool(result.get("ok")),
+            "result": result,
+            "capabilities": result.get("capabilities", {}),
+            "probed_at": model.get("capabilities_probed_at", ""),
+        })
+
     # ========== 故障转移队列 API ==========
 
     @app.route("/api/ai-models/failover-status")
@@ -990,8 +1153,8 @@ def register_ai_model_routes(app, server):
         if purpose not in MODEL_PURPOSES:
             return jsonify({"error": "Invalid purpose"}), 400
 
-        from nbot.web.utils.config_loader import get_model_configs_by_purpose
         from nbot.core.failover import get_failover_state
+        from nbot.web.utils.config_loader import get_model_configs_by_purpose
 
         configs = get_model_configs_by_purpose(purpose)
         state = get_failover_state()
@@ -1072,7 +1235,6 @@ def register_ai_model_routes(app, server):
     def get_failover_model_detail(model_id):
         """获取故障转移队列中单个模型的详情"""
         from nbot.core.failover import get_failover_state
-        from nbot.web.utils.config_loader import get_model_configs_by_purpose
 
         model = next((m for m in server.ai_models if m["id"] == model_id), None)
         if not model:
@@ -1105,7 +1267,10 @@ def register_ai_model_routes(app, server):
             "token_usage": token_usage,
             "input_price": model.get("input_price"),
             "output_price": model.get("output_price"),
-            "max_tokens": model.get("max_tokens", 2000),
+            "cached_input_price": model.get("cached_input_price"),
+            "max_tokens": model.get(
+                "max_tokens", default_max_tokens_for(model.get("purpose", "chat"))
+            ),
             "temperature": model.get("temperature", 0.7),
         })
 

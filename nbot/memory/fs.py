@@ -15,6 +15,8 @@ import json
 import logging
 import os
 import re
+from collections.abc import Iterator
+from typing import Any
 
 from nbot.memory.models import MemoryFile
 
@@ -294,6 +296,37 @@ def normalize_memory_category(value) -> str:
     return _MEMORY_CATEGORY_ALIASES.get(category, "")
 
 
+_TERM_RE = re.compile(r"[a-zA-Z0-9_]{2,}|[\u3400-\u9fff\uf900-\ufaff]{2,}")
+
+
+def _query_terms(query: str) -> list[str]:
+    """从查询中提取匹配词：拉丁词元 + CJK 二元组（滑动窗口）。"""
+    terms: list[str] = []
+    for token in _TERM_RE.findall(str(query or "")):
+        if token[0].isascii():
+            terms.append(token.lower())
+        elif len(token) == 2:
+            terms.append(token)
+        else:
+            terms.extend(token[i:i + 2] for i in range(len(token) - 1))
+    return terms
+
+
+def _section_relevance(section: str, query: str) -> float:
+    """小节与查询的相关性：命中词元占比（0-1+）。"""
+    terms = _query_terms(query)
+    if not terms or not section:
+        return 0.0
+    text = section.lower()
+    hits = sum(1 for term in terms if term in text)
+    return hits / len(terms)
+
+
+def _split_memory_sections(content: str) -> list[str]:
+    """按空行拆分记忆小节，过滤空白。"""
+    return [s.strip() for s in str(content or "").split("\n\n") if s.strip()]
+
+
 def describe_memory_path(path: str) -> dict:
     path = str(path or "")
     category = "legacy"
@@ -510,6 +543,83 @@ class MemoryFS:
         files = [mf for path, mf in self._index.items() if path.startswith(prefix)]
         return sorted(files, key=lambda m: m.importance, reverse=True)
 
+    # ------------------------------------------------------------------
+    # 公开列表接口（供 Web 面板 / 全局搜索 / 导出等只读使用）
+    # ------------------------------------------------------------------
+
+    def list_paths(self, prefix: str = "") -> list[str]:
+        """列出所有逻辑路径（可按前缀过滤），按字母序稳定输出。"""
+        prefix = prefix or ""
+        return sorted(path for path in self._index if path.startswith(prefix))
+
+    def list_all(
+        self,
+        prefix: str = "",
+        *,
+        character_id: str = "",
+        target_id: str = "",
+        tags: list[str] | None = None,
+        order_by: str = "path",
+        descending: bool = False,
+    ) -> list[MemoryFile]:
+        """列出全部逻辑记忆文件，可按前缀 / 角色 / 关联对象 / 标签过滤。
+
+        Args:
+            prefix: 路径前缀，例如 ``characters/neko/``
+            character_id: 只保留该角色的文件
+            target_id: 只保留关联到该用户/角色的文件
+            tags: 只保留含任一标签的文件（空列表视为不过滤）
+            order_by: ``path`` / ``updated_at`` / ``importance`` / ``title``
+            descending: 是否倒序（``updated_at`` 常用倒序取最新）
+        """
+        files = list(self.iter_files(
+            prefix,
+            character_id=character_id,
+            target_id=target_id,
+            tags=tags,
+        ))
+        key = {
+            "path": lambda item: item.path,
+            "updated_at": lambda item: item.updated_at or "",
+            "importance": lambda item: float(item.importance or 0.0),
+            "title": lambda item: item.title or item.path,
+        }.get(order_by, lambda item: item.path)
+        return sorted(files, key=key, reverse=bool(descending))
+
+    def iter_files(
+        self,
+        prefix: str = "",
+        *,
+        character_id: str = "",
+        target_id: str = "",
+        tags: list[str] | None = None,
+    ) -> Iterator[MemoryFile]:
+        """迭代符合条件的逻辑记忆文件（过滤逻辑与 :meth:`list_all` 一致）。"""
+        prefix = prefix or ""
+        wanted_tags = {str(tag).strip() for tag in (tags or []) if str(tag).strip()}
+        for path, memory_file in self._index.items():
+            if prefix and not path.startswith(prefix):
+                continue
+            if character_id and memory_file.character_id != character_id:
+                continue
+            if target_id and memory_file.target_id != target_id:
+                continue
+            if wanted_tags and not wanted_tags.intersection(memory_file.tags or []):
+                continue
+            yield memory_file
+
+    def stats(self) -> dict[str, Any]:
+        """索引概览：文件数 / 总字数 / 角色数，供面板与全局搜索使用。"""
+        files = list(self._index.values())
+        return {
+            "files": len(files),
+            "chars": sum(len(mf.content or "") for mf in files),
+            "characters": len({
+                mf.character_id for mf in files if mf.character_id
+            }),
+            "index_file": self._index_file,
+        }
+
     def read_user(self, char_id: str, user_id: str) -> MemoryFile | None:
         return self.read(self.path_user(char_id, user_id))
 
@@ -524,13 +634,127 @@ class MemoryFS:
         char_id: str,
         user_id: str,
         conversation_id: str = "",
+        query: str = "",
+        max_chars: int = 0,
     ) -> str:
         """按结构化读取策略构建 prompt 注入文本（必读层）。
 
         必读：用户人格 + 角色关系理解 + 跨会话时间线 + 重要事件/剧情摘要 + 压缩近期摘要。
         旧版 raw daily 不再注入，避免把逐轮流水账塞进上下文。
         timeline 为跨会话人生经历汇总，注入最近 N 条，替代按 conversation 切片的事件注入。
+
+        检索化注入：提供 query 时，各记忆文件按"相关性 × 重要度 × 时间衰减"
+        挑选小节填充 max_chars 预算（人格类小节优先保留）；max_chars<=0 或
+        无 query 时保持整段注入的旧行为。
         """
+        parts: list[str] = []
+
+        if max_chars <= 0 or not query:
+            return self._build_prompt_context_full(char_id, user_id, conversation_id)
+
+        from datetime import datetime as _dt
+
+        def _decay(updated_at: str) -> float:
+            try:
+                ts = _dt.fromisoformat((updated_at or "").replace("Z", "+00:00"))
+                if ts.tzinfo is None:
+                    ts = ts.astimezone()
+                days = abs((_dt.now().astimezone() - ts).total_seconds()) / 86400
+            except (ValueError, TypeError):
+                return 0.5
+            if days < 3:
+                return 1.0
+            if days < 14:
+                return 0.7
+            return 0.4
+
+        candidates: list[tuple[float, bool, str]] = []  # (score, must_read, text)
+
+        def _add_sections(mf, *, label: str, must_read: bool = False, weight: float = 1.0):
+            if not mf or not mf.content:
+                return
+            sections = _split_memory_sections(mf.content)
+            if not sections:
+                return
+            limit = 3 if must_read else 2
+            scored = sorted(
+                (
+                    (
+                        _section_relevance(section, query) * 2.0
+                        + float(mf.importance or 0.0) * weight
+                        + _decay(mf.updated_at)
+                    ),
+                    section,
+                )
+                for section in sections
+            )
+            top = sorted(scored, reverse=True)[:limit]
+            for score, section in top:
+                text = f"[{label}]\n{section.strip()}"
+                candidates.append((score * weight, must_read, text))
+
+        _add_sections(
+            self.read(self.path_user_persona(char_id, user_id)),
+            label="user_persona", must_read=True, weight=1.2,
+        )
+        _add_sections(
+            self.read(self.path_character_persona(char_id, user_id)),
+            label="character_persona", must_read=True, weight=1.1,
+        )
+
+        timeline_mf = self.read(self.path_timeline(char_id))
+        if timeline_mf and timeline_mf.content:
+            timeline_text = format_timeline_for_prompt(
+                timeline_mf.content,
+                current_conversation_id=conversation_id,
+            )
+            if timeline_text:
+                candidates.append((
+                    0.6 * float(timeline_mf.importance or 0.5) * _decay(timeline_mf.updated_at) + _section_relevance(timeline_text, query),
+                    False,
+                    f"[character.timeline]\n{timeline_text}",
+                ))
+
+        if conversation_id:
+            event_mf = self.read(self.path_important_events(char_id, conversation_id))
+            _add_sections(event_mf, label="important_event", weight=1.0)
+            plot_mf = self.read_plot(char_id, conversation_id)
+            _add_sections(plot_mf, label="plot", weight=0.9)
+            life_sim_mf = self.read(self.path_life_sim(char_id, conversation_id))
+            if life_sim_mf and life_sim_mf.content:
+                life_sim_text = format_life_sim_for_prompt(life_sim_mf.content)
+                if life_sim_text:
+                    candidates.append((
+                        0.4 * float(life_sim_mf.importance or 0.4) * _decay(life_sim_mf.updated_at),
+                        False,
+                        f"[character.life_sim]\n{life_sim_text}",
+                    ))
+
+        _add_sections(
+            self.read(self.path_recent_digest(char_id, user_id)),
+            label="recent_digest", weight=0.8,
+        )
+
+        # 填充预算：必读小节优先，其余按分数降序
+        ordered = sorted(candidates, key=lambda c: (not c[1], -c[0]))
+        used = 0
+        for _score, _must, text in ordered:
+            if used + len(text) > max_chars:
+                continue
+            parts.append(text)
+            used += len(text)
+            if used >= max_chars:
+                break
+
+        return "\n\n".join(p for p in parts if p)
+
+    def _build_prompt_context_full(
+        self,
+        char_id: str,
+        user_id: str,
+        conversation_id: str = "",
+    ) -> str:
+        """整段注入（旧行为）：无预算/无查询时的兼容路径。"""
         parts: list[str] = []
 
         user_persona = self.read(self.path_user_persona(char_id, user_id))

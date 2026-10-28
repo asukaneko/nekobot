@@ -13,6 +13,9 @@ from nbot.core.model_adapter import (
     repair_mojibake_text,
 )
 from nbot.core.protocols.base import ModelProtocol
+from nbot.core.sampling import normalize_temperature, normalize_top_p, resolve_token_limit
+
+DEFAULT_MAX_TOKENS = 4096
 
 
 class AnthropicMessagesProtocol(ModelProtocol):
@@ -69,17 +72,35 @@ class AnthropicMessagesProtocol(ModelProtocol):
     ) -> Dict[str, Any]:
         system_message, anthropic_messages = self._convert_messages(messages)
 
+        extra = dict(extra_body) if extra_body else {}
+        # Anthropic 的 max_tokens 是必填项，未配置时沿用兜底值
+        token_limit = resolve_token_limit(extra, max_tokens) or DEFAULT_MAX_TOKENS
+
         payload: Dict[str, Any] = {
             "model": model,
             "messages": anthropic_messages,
-            "max_tokens": max_tokens,
+            "max_tokens": token_limit,
         }
 
+        # prompt caching：system 作为 content block 标记 ephemeral 断点
         if system_message:
-            payload["system"] = system_message
+            if extra.get("prompt_caching"):
+                payload["system"] = [{
+                    "type": "text",
+                    "text": system_message,
+                    "cache_control": {"type": "ephemeral"},
+                }]
+            else:
+                payload["system"] = system_message
 
         if tools:
             payload["tools"] = self._convert_tools(tools)
+            # 工具定义（稳定前缀）标记缓存断点
+            if extra.get("prompt_caching") and payload["tools"]:
+                payload["tools"][-1] = {
+                    **payload["tools"][-1],
+                    "cache_control": {"type": "ephemeral"},
+                }
             if tool_choice:
                 mapped = self._map_tool_choice(tool_choice)
                 if mapped is not None:
@@ -88,10 +109,19 @@ class AnthropicMessagesProtocol(ModelProtocol):
         if stream:
             payload["stream"] = True
 
-        if extra_body:
-            for key in ("temperature", "top_p", "top_k"):
-                if key in extra_body:
-                    payload[key] = extra_body[key]
+        # 采样参数：Anthropic 的温度上限是 1，超出会被接口拒绝
+        temperature = normalize_temperature(extra.get("temperature"))
+        if temperature is not None:
+            payload["temperature"] = min(temperature, 1.0)
+        top_p = normalize_top_p(extra.get("top_p"))
+        if top_p is not None:
+            payload["top_p"] = top_p
+        top_k = extra.get("top_k")
+        if isinstance(top_k, int) and not isinstance(top_k, bool) and top_k > 0:
+            payload["top_k"] = top_k
+        # 停止字符串：Anthropic 协议使用 stop_sequences
+        if extra.get("stop"):
+            payload["stop_sequences"] = extra["stop"]
 
         return payload
 

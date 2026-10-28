@@ -47,6 +47,8 @@ class ToolLoopHooks:
             Optional[Dict[str, Any]],
         ]
     ] = None
+    # 单个工具步骤落库回调（实时追加轨迹，中断也不丢）
+    on_tool_trace: Optional[Callable[["ToolCallTrace"], None]] = None
 
 
 @dataclass
@@ -84,6 +86,8 @@ class ToolLoopSession:
     tool_timeout: Optional[float] = None
     # 新增：是否并发执行同一轮的多个 tool_calls
     parallel_tool_execution: bool = True
+    # 新增：只读工具判定器（只读并发、写/副作用串行）。None 时用内置判定
+    read_only_classifier: Optional[Callable[[str, Dict[str, Any]], bool]] = None
 
 
 @dataclass
@@ -113,12 +117,33 @@ class ToolCallTrace:
     result: Dict[str, Any]
     success: bool
     error: Optional[str] = None
+    tool_call_id: str = ""
 
 
 @dataclass
 class _ToolLoopExitMarker:
     """内部辅助类：并发执行时包装 ToolLoopExit 异常。"""
     exc: ToolLoopExit
+
+
+_READ_ONLY_CLASSIFIER: Optional[Callable[[str, Dict[str, Any]], bool]] = None
+_READ_ONLY_CLASSIFIER_LOADED = False
+
+
+def _default_read_only_classifier() -> Callable[[str, Dict[str, Any]], bool]:
+    """懒加载只读工具判定器；加载失败时一律按“有副作用”处理（串行）。"""
+    global _READ_ONLY_CLASSIFIER, _READ_ONLY_CLASSIFIER_LOADED
+    if not _READ_ONLY_CLASSIFIER_LOADED:
+        _READ_ONLY_CLASSIFIER_LOADED = True
+        try:
+            from nbot.services.tools import is_read_only_tool
+
+            _READ_ONLY_CLASSIFIER = is_read_only_tool
+        except Exception as exc:  # 保持安全默认：不并发
+            _log.warning("[AgentHarness] 只读工具判定器加载失败，工具将串行执行: %s", exc)
+    if _READ_ONLY_CLASSIFIER is None:
+        return lambda name, arguments: False
+    return _READ_ONLY_CLASSIFIER
 
 
 class AgentHarness:
@@ -151,6 +176,8 @@ class AgentHarness:
         tool_timeout: Optional[float] = None,
         # 同一轮多个 tool_calls 是否并发执行
         parallel_tool_execution: bool = True,
+        # 只读工具判定器（只读并发、写/副作用串行）
+        read_only_classifier: Optional[Callable[[str, Dict[str, Any]], bool]] = None,
     ):
         self._initial_messages = copy.deepcopy(initial_messages)
         self._model_call = model_call
@@ -164,6 +191,7 @@ class AgentHarness:
         self._hooks = hooks
         self._tool_timeout = tool_timeout
         self._parallel_tool_execution = parallel_tool_execution
+        self._read_only_classifier = read_only_classifier
 
         # 运行时状态（可观测）
         self._tool_messages: List[Dict[str, Any]] = []
@@ -424,8 +452,64 @@ class AgentHarness:
                 self._execute_single_tool(tool_call, thinking_content)
             return
 
-        # 多工具并发执行
-        self._execute_tools_parallel(tool_calls, thinking_content)
+        # 多工具：按只读/写分批（只读并发，写串行）
+        self._execute_tools_batched(tool_calls, thinking_content)
+
+    def _is_read_only_call(self, tool_call: Dict[str, Any]) -> bool:
+        """判断单个 tool_call 是否为只读（判定异常时按写工具处理）。"""
+        classifier = self._read_only_classifier or _default_read_only_classifier()
+        arguments = tool_call.get("arguments")
+        if isinstance(arguments, str):
+            try:
+                arguments = json.loads(arguments)
+            except json.JSONDecodeError:
+                arguments = {}
+        if not isinstance(arguments, dict):
+            arguments = {}
+        try:
+            return bool(classifier(tool_call.get("name", ""), arguments))
+        except Exception as exc:
+            _log.debug(
+                "[AgentHarness] 只读判定失败，按串行处理: %s (%s)",
+                tool_call.get("name", ""),
+                exc,
+            )
+            return False
+
+    def _plan_tool_batches(
+        self, tool_calls: List[Dict[str, Any]]
+    ) -> List[List[Dict[str, Any]]]:
+        """把本轮工具调用切成执行批次，保持原始顺序。
+
+        - 连续的只读调用合并成一批并发执行；
+        - 每个有副作用的调用独占一批，串行执行；
+        - 批次之间严格按原顺序推进，写操作不会与前后调用乱序。
+        """
+        batches: List[List[Dict[str, Any]]] = []
+        read_only_buffer: List[Dict[str, Any]] = []
+        for tool_call in tool_calls:
+            if self._is_read_only_call(tool_call):
+                read_only_buffer.append(tool_call)
+                continue
+            if read_only_buffer:
+                batches.append(read_only_buffer)
+                read_only_buffer = []
+            batches.append([tool_call])
+        if read_only_buffer:
+            batches.append(read_only_buffer)
+        return batches
+
+    def _execute_tools_batched(
+        self, tool_calls: List[Dict[str, Any]], thinking_content: str
+    ) -> None:
+        """按批次执行工具：只读批并发，写工具逐个串行。"""
+        for batch in self._plan_tool_batches(tool_calls):
+            if self._finished:
+                return
+            if len(batch) == 1:
+                self._execute_single_tool(batch[0], thinking_content)
+            else:
+                self._execute_tools_parallel(batch, thinking_content)
 
     def _execute_single_tool(
         self, tool_call: Dict[str, Any], thinking_content: str
@@ -559,18 +643,94 @@ class AgentHarness:
             self._tool_messages.append(tool_history_message)
 
         # 记录工具调用轨迹（可观测性）
-        self._trace.append(
-            ToolCallTrace(
-                iteration=self._iteration,
-                tool_name=tool_call.get("name", ""),
-                arguments=copy.deepcopy(tool_call.get("arguments", {})),
-                result=copy.deepcopy(tool_result),
-                success=bool(tool_result.get("success", True))
-                if isinstance(tool_result, dict)
-                else True,
-                error=str(tool_result.get("error")) if isinstance(tool_result, dict) else None,
-            )
+        trace = ToolCallTrace(
+            iteration=self._iteration,
+            tool_name=tool_call.get("name", ""),
+            arguments=copy.deepcopy(tool_call.get("arguments", {})),
+            result=copy.deepcopy(tool_result),
+            success=bool(tool_result.get("success", True))
+            if isinstance(tool_result, dict)
+            else True,
+            error=str(tool_result.get("error")) if isinstance(tool_result, dict) else None,
+            tool_call_id=str(tool_call.get("id") or ""),
         )
+        self._trace.append(trace)
+
+        # 实时落库：每步追加，进程中断也能留下已完成的轨迹
+        if self._hooks and self._hooks.on_tool_trace:
+            try:
+                self._hooks.on_tool_trace(trace)
+            except Exception as exc:
+                _log.debug("[AgentHarness] 工具轨迹落库回调失败: %s", exc)
+
+
+# ---------------------------------------------------------------------------
+# 用户人设（persona）跨通道解析
+# ---------------------------------------------------------------------------
+#
+# 人设数据由 nbot/core/personas.py 管理（data/web/personas.json），会话通过
+# persona_id 绑定。Web 端在 nbot/web/ai_service.py 里注入，QQ/TG/飞书 走这里
+# 的通用解析，保证各通道行为一致；任何异常都降级为“不注入”，不阻断对话。
+
+
+def _lookup_session_record(chat_request: Any) -> Optional[Dict[str, Any]]:
+    """按 conversation_id 查运行时会话记录（各通道共用同一份会话存储）。
+
+    懒加载 Web 服务实例；没有 Web 实例或读取失败时返回 None。
+    """
+    conversation_id = str(getattr(chat_request, "conversation_id", "") or "").strip()
+    if not conversation_id:
+        return None
+    try:
+        from nbot.web.server import WebChatServer
+
+        server = WebChatServer.get_instance()
+        store = getattr(server, "session_store", None) if server else None
+        session = store.get_session(conversation_id) if store is not None else None
+        return session if isinstance(session, dict) else None
+    except Exception as exc:  # 核心管道不依赖 Web，这里失败只代表没有人设
+        _log.debug("[Persona] 会话记录查询失败: %s", exc)
+        return None
+
+
+def resolve_user_persona(
+    chat_request: Any,
+    session: Optional[Dict[str, Any]] = None,
+) -> Optional[Dict[str, Any]]:
+    """解析当前会话的人设：persona_id 优先，失效/未绑定回退全局默认。"""
+    session_data = session if isinstance(session, dict) else _lookup_session_record(chat_request)
+    if not isinstance(session_data, dict):
+        return None
+    try:
+        from nbot.core.personas import session_persona
+
+        return session_persona(session_data)
+    except Exception as exc:
+        _log.debug("[Persona] 人设解析失败: %s", exc)
+        return None
+
+
+def apply_user_persona_metadata(
+    chat_request: Any,
+    metadata: Optional[Dict[str, Any]] = None,
+    session: Optional[Dict[str, Any]] = None,
+) -> bool:
+    """把人设写入请求/管道元数据，返回是否命中了人设。
+
+    - ``user_persona``：供 AIPipeline._apply_user_persona 渲染成 prompt 块；
+    - ``macro_user_name``：{{user}} 的默认名称（不覆盖调用方已设置的值）。
+    """
+    target = metadata if isinstance(metadata, dict) else {}
+    if target.get("user_persona"):
+        return True
+    persona = resolve_user_persona(chat_request, session)
+    if not persona:
+        return False
+    target.setdefault("user_persona", persona)
+    name = str(persona.get("name") or "").strip()
+    if name:
+        target.setdefault("macro_user_name", name)
+    return True
 
 
 @dataclass
@@ -618,6 +778,15 @@ class AgentService:
                 )
         except Exception as filter_err:
             _log.warning("[消息过滤] AgentService 检查异常: %s", filter_err)
+
+        # === 用户人设（全通道一致） ===
+        # 会话绑定了 persona_id 或存在全局默认人设时，把说明带进本次请求；
+        # 解析失败只降级为不注入，不影响对话。
+        try:
+            chat_request.metadata = dict(chat_request.metadata or {})
+            apply_user_persona_metadata(chat_request, chat_request.metadata)
+        except Exception as persona_err:
+            _log.debug("[Persona] 请求级注入失败（忽略）: %s", persona_err)
 
         # === 路由到频道处理器 ===
         handler = self._handlers.get(chat_request.channel) or get_channel_handler(
@@ -907,6 +1076,7 @@ def run_tool_call_loop(
     hooks: Optional[ToolLoopHooks] = None,
     tool_timeout: Optional[float] = None,
     parallel_tool_execution: bool = True,
+    read_only_classifier: Optional[Callable[[str, Dict[str, Any]], bool]] = None,
 ) -> ToolLoopResult:
     """[已废弃] 函数式入口，内部委托给 AgentHarness。保留以保持向后兼容。"""
     harness = AgentHarness(
@@ -919,6 +1089,7 @@ def run_tool_call_loop(
         hooks=hooks,
         tool_timeout=tool_timeout,
         parallel_tool_execution=parallel_tool_execution,
+        read_only_classifier=read_only_classifier,
     )
     # 旧 API 不合并 tool_call_history（旧函数签名不含该参数），等价于直接 run
     harness._tool_messages = copy.deepcopy(initial_messages)
@@ -939,6 +1110,7 @@ def run_tool_loop_session(session: ToolLoopSession) -> ToolExecutionResult:
         hooks=session.hooks,
         tool_timeout=session.tool_timeout,
         parallel_tool_execution=session.parallel_tool_execution,
+        read_only_classifier=session.read_only_classifier,
     )
     loop_result = harness.run()
     return ToolExecutionResult(
@@ -961,6 +1133,7 @@ def execute_tool_loop_session(
     hooks: Optional[ToolLoopHooks] = None,
     tool_timeout: Optional[float] = None,
     parallel_tool_execution: bool = True,
+    read_only_classifier: Optional[Callable[[str, Dict[str, Any]], bool]] = None,
 ) -> ToolExecutionResult:
     """[已废弃] 便捷入口，内部委托给 AgentHarness。保留以保持向后兼容。"""
     return run_tool_loop_session(
@@ -975,6 +1148,7 @@ def execute_tool_loop_session(
             hooks=hooks,
             tool_timeout=tool_timeout,
             parallel_tool_execution=parallel_tool_execution,
+            read_only_classifier=read_only_classifier,
         )
     )
 

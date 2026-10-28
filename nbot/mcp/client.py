@@ -87,14 +87,24 @@ class MCPRemoteClient:
         if not self._session:
             raise RuntimeError("未连接，请先调用 connect()")
         result = await self._session.list_tools()
-        return [
-            {
-                "name": t.name,
-                "description": t.description or "",
-                "input_schema": t.inputSchema if hasattr(t, "inputSchema") else {},
-            }
-            for t in result.tools
-        ]
+        tools: list[dict[str, Any]] = []
+        for t in result.tools:
+            annotations = getattr(t, "annotations", None)
+            if annotations is not None and hasattr(annotations, "model_dump"):
+                try:
+                    annotations = annotations.model_dump()
+                except Exception:
+                    annotations = None
+            tools.append(
+                {
+                    "name": t.name,
+                    "description": t.description or "",
+                    "input_schema": t.inputSchema if hasattr(t, "inputSchema") else {},
+                    # MCP 注解（readOnlyHint 等）：用于只读工具并行调度
+                    "annotations": annotations if isinstance(annotations, dict) else {},
+                }
+            )
+        return tools
 
     async def call_tool(self, name: str, arguments: dict[str, Any] | None = None) -> Any:
         """调用远程工具"""

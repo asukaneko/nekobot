@@ -328,6 +328,15 @@ class ReactionPlan:
     relationship_deltas: Dict[str, Any] = field(default_factory=dict)
 
 
+def _clamp_probability(value: Any) -> int:
+    """把触发概率夹到 0-100，非数字回落为 100（旧数据无此字段）。"""
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        return 100
+    return max(0, min(100, number))
+
+
 @dataclass
 class WorldBookEntry:
     """世界书条目，包含关键词和对应注入内容"""
@@ -351,6 +360,18 @@ class WorldBookEntry:
     entry_type: str = "lore"
     weight: int = 0
 
+    # 注入位置：""=默认槽（PromptStack world_book 槽）
+    # before_char/after_char=角色基础提示词 前/后；
+    # before_an/after_an=距对话末尾 depth 条处的锚点 前/后；
+    # at_depth=按 depth 插入消息序列
+    position: str = ""
+    depth: int = 4
+
+    # 酒馆卡增强：命中后的触发概率（0-100）、关键词按正则解析、整词匹配
+    probability: int = 100
+    use_regex: bool = False
+    match_whole_words: bool = False
+
     created_at: str = ""
     updated_at: str = ""
 
@@ -372,6 +393,11 @@ class WorldBookEntry:
             "tags": self.tags,
             "entry_type": self.entry_type,
             "weight": self.weight,
+            "position": self.position,
+            "depth": self.depth,
+            "probability": self.probability,
+            "use_regex": self.use_regex,
+            "match_whole_words": self.match_whole_words,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
         }
@@ -395,6 +421,11 @@ class WorldBookEntry:
             tags=data.get("tags", []),
             entry_type=data.get("entry_type", "lore"),
             weight=data.get("weight", 0),
+            position=data.get("position", ""),
+            depth=data.get("depth", 4),
+            probability=_clamp_probability(data.get("probability", 100)),
+            use_regex=bool(data.get("use_regex", False)),
+            match_whole_words=bool(data.get("match_whole_words", False)),
             created_at=data.get("created_at", ""),
             updated_at=data.get("updated_at", ""),
         )
@@ -407,6 +438,7 @@ class WorldBook:
     id: str = ""
     name: str = ""
     description: str = ""
+    cover_url: str = ""
     character_ids: List[str] = field(default_factory=list)
     entries: List[WorldBookEntry] = field(default_factory=list)
     enabled: bool = True
@@ -418,6 +450,7 @@ class WorldBook:
             "id": self.id,
             "name": self.name,
             "description": self.description,
+            "cover_url": self.cover_url,
             "character_ids": self.character_ids,
             "entries": [e.to_dict() for e in self.entries],
             "enabled": self.enabled,
@@ -432,6 +465,7 @@ class WorldBook:
             id=data.get("id", ""),
             name=data.get("name", ""),
             description=data.get("description", ""),
+            cover_url=data.get("cover_url", data.get("coverUrl", "")),
             character_ids=data.get("character_ids", []),
             entries=entries,
             enabled=data.get("enabled", True),

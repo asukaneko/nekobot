@@ -435,11 +435,15 @@ class SimpleCLI:
 
             # ====== model_call 回调：调用 AI 模型 ======
             def _model_call(msgs, stop_event=None):
+                from nbot.core.sampling import default_max_tokens_for
+
                 payload = {
                     "model": model_name,
                     "messages": msgs,
                     "temperature": model.get("temperature", 0.7),
-                    "max_tokens": model.get("max_tokens", 2000),
+                    "max_tokens": model.get(
+                        "max_tokens", default_max_tokens_for("chat")
+                    ),
                     "stream": False,
                 }
                 if tools and supports_tools:

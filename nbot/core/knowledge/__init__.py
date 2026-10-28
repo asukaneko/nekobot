@@ -12,6 +12,13 @@ from datetime import datetime
 from pathlib import Path
 import re
 
+from nbot.core.knowledge.rerank import (
+    DEFAULT_MMR_LAMBDA,
+    drop_near_duplicates,
+    get_rerank_service,
+    mmr_select,
+)
+
 _log = logging.getLogger(__name__)
 
 # 导入新的配置加载器
@@ -604,9 +611,61 @@ class KnowledgeManager:
         self,
         query: str,
         base_id: str = None,
-        top_k: int = 3
+        top_k: int = 3,
+        **options: Any,
     ) -> List[Tuple[Document, float, str]]:
-        """检索知识库"""
+        """检索知识库（兼容旧接口：``[(文档, 分数, 片段), ...]``）。
+
+        内部走 :meth:`retrieve`，会自动使用已配置的 rerank 模型并做 MMR 去重；
+        传 ``rerank=False`` / ``mmr=False`` 可关闭，``candidates=N`` 控制候选池大小。
+        """
+        payload = self.retrieve(query, base_id=base_id, top_k=top_k, **options)
+        return payload["results"]
+
+    def search_with_citations(
+        self,
+        query: str,
+        base_id: str = None,
+        top_k: int = 3,
+        **options: Any,
+    ) -> Dict[str, Any]:
+        """检索并返回引用信息（doc id / 标题 / 片段位置 / 分数），见 :meth:`retrieve`。"""
+        return self.retrieve(query, base_id=base_id, top_k=top_k, **options)
+
+    def retrieve(
+        self,
+        query: str,
+        base_id: str = None,
+        top_k: int = 3,
+        *,
+        rerank: Optional[bool] = None,
+        mmr: Optional[bool] = None,
+        candidates: Optional[int] = None,
+        max_per_doc: int = 1,
+        lambda_param: float = DEFAULT_MMR_LAMBDA,
+    ) -> Dict[str, Any]:
+        """检索知识库，返回带 citations 的结构化结果。
+
+        Args:
+            query: 查询文本
+            base_id: 知识库 ID；为空时只用 ``default`` 库（与旧行为一致）
+            top_k: 返回条数
+            rerank: ``None`` 自动（配置了 rerank 模型就重排）/ ``True`` 强制 / ``False`` 关闭
+            mmr: ``None`` 自动（候选多于 top_k 时去重）/ ``False`` 关闭
+            candidates: 候选池大小，默认按是否启用增强自动取 ``top_k*2`` 或 ``top_k*4``
+            max_per_doc: 同一文档最多保留几个片段
+            lambda_param: MMR 相关度权重（0~1，越大多样性越强）
+
+        Returns:
+            ``{"query", "results": [(文档, 分数, 片段)], "citations": [...], "meta": {...}}``
+        """
+        top_k = max(1, int(top_k or 1))
+        max_per_doc = max(1, int(max_per_doc or 1))
+        try:
+            lambda_value = min(max(float(lambda_param), 0.0), 1.0)
+        except (TypeError, ValueError):
+            lambda_value = DEFAULT_MMR_LAMBDA
+
         # 确定要搜索的知识库
         if base_id:
             kb = self.store.load_base(base_id)
@@ -615,30 +674,171 @@ class KnowledgeManager:
             kb = self.store.load_base("default")
             bases = [kb] if kb else []
 
-        all_results = []
-        seen_docs = set()
+        service = get_rerank_service() if rerank is not False else None
+        use_mmr = bool(mmr) if mmr is not None else True
+        if candidates:
+            pool_size = max(top_k, int(candidates))
+        elif service is not None or use_mmr:
+            pool_size = max(top_k * 4, top_k)
+        else:
+            pool_size = top_k * 2
+
+        doc_cache: Dict[str, Optional[Document]] = {}
+        pool: List[Dict[str, Any]] = []
 
         for kb in bases:
             if not kb:
                 continue
 
             # 从 ChromaDB 搜索
-            chunk_results = self.store.search_chunks(kb.id, query, top_k=top_k * 2)
+            chunk_results = self.store.search_chunks(kb.id, query, top_k=pool_size)
 
             for chunk_content, similarity, metadata in chunk_results:
+                metadata = metadata or {}
                 doc_id = metadata.get("doc_id", "")
-                if not doc_id or doc_id in seen_docs:
+                if not doc_id:
                     continue
+                if doc_id not in doc_cache:
+                    doc_cache[doc_id] = self.store.load_document(doc_id)
+                doc = doc_cache[doc_id]
+                if doc is None:
+                    continue
+                try:
+                    chunk_index = int(metadata.get("chunk_index", -1))
+                except (TypeError, ValueError):
+                    chunk_index = -1
+                score = float(similarity or 0.0)
+                pool.append({
+                    "doc": doc,
+                    "base_id": kb.id,
+                    "chunk": chunk_content,
+                    "chunk_index": chunk_index,
+                    "similarity": score,
+                    "score": score,
+                    "rerank_score": None,
+                })
 
-                doc = self.store.load_document(doc_id)
-                if doc:
-                    seen_docs.add(doc_id)
-                    all_results.append((doc, similarity, chunk_content))
+        pool.sort(key=lambda item: item["score"], reverse=True)
 
-        # 按相似度排序
-        all_results.sort(key=lambda x: x[1], reverse=True)
+        # rerank：模型重排（未配置或失败时保持向量相似度顺序）
+        rerank_meta: Dict[str, Any] = {
+            "enabled": service is not None,
+            "model": getattr(service, "model", "") if service is not None else "",
+            "applied": False,
+            "error": "",
+        }
+        if service is not None and pool:
+            texts = [item["chunk"] for item in pool]
+            scores = service.scores_for(query, texts)
+            if scores:
+                values = list(scores.values())
+                highest, lowest = max(values), min(values)
+                span = (highest - lowest) or 1.0
+                weight = min(max(float(getattr(service, "weight", 1.0)), 0.0), 1.0)
+                for index, item in enumerate(pool):
+                    raw = scores.get(index)
+                    item["rerank_score"] = raw
+                    if raw is None:
+                        item["score"] = (1.0 - weight) * item["similarity"]
+                        continue
+                    normalized = (raw - lowest) / span if highest > lowest else 1.0
+                    item["score"] = (
+                        weight * normalized + (1.0 - weight) * item["similarity"]
+                    )
+                pool.sort(key=lambda item: item["score"], reverse=True)
+                rerank_meta["applied"] = True
+            else:
+                rerank_meta["error"] = "rerank 请求失败或没有可用结果"
 
-        return all_results[:top_k]
+        # MMR：同文档/近重复片段先去重，再按相关度-冗余度平衡挑选
+        mmr_meta = {"enabled": use_mmr, "lambda": round(lambda_value, 3), "applied": False}
+        chosen: List[Dict[str, Any]] = pool
+        for item in pool:
+            item["text"] = item["chunk"]
+        if use_mmr and len(pool) > top_k:
+            picked_count = min(len(pool), max(top_k * 2, top_k + 2))
+            chosen = mmr_select(
+                pool,
+                picked_count,
+                lambda_param=lambda_value,
+            )
+            mmr_meta["applied"] = True
+        elif len(pool) > 1:
+            chosen = drop_near_duplicates(pool)
+
+        # 同一文档最多 max_per_doc 个片段（旧行为默认每篇只留最相关的一段）
+        results: List[Tuple[Document, float, str]] = []
+        citations: List[Dict[str, Any]] = []
+        per_doc: Dict[str, int] = {}
+        for item in chosen:
+            doc_id = item["doc"].id
+            if per_doc.get(doc_id, 0) >= max_per_doc:
+                continue
+            per_doc[doc_id] = per_doc.get(doc_id, 0) + 1
+            results.append((item["doc"], item["score"], item["chunk"]))
+            citations.append(self._build_citation(item, len(citations) + 1))
+            if len(results) >= top_k:
+                break
+
+        return {
+            "query": query,
+            "results": results,
+            "citations": citations,
+            "meta": {
+                "top_k": top_k,
+                "candidates": len(pool),
+                "max_per_doc": max_per_doc,
+                "bases": [kb.id for kb in bases if kb],
+                "rerank": rerank_meta,
+                "mmr": mmr_meta,
+            },
+        }
+
+    @staticmethod
+    def _build_citation(item: Dict[str, Any], position: int) -> Dict[str, Any]:
+        """组装一条引用：文档 id / 标题 / 片段位置（分块序号 + 字符区间）/ 分数。"""
+        doc = item["doc"]
+        chunk = str(item.get("chunk") or "")
+        chunk_index = int(item.get("chunk_index", -1))
+        start, end = KnowledgeManager._chunk_offsets(doc.content or "", chunk, chunk_index)
+        citation = {
+            "id": f"K{position}",
+            "doc_id": doc.id,
+            "title": doc.title,
+            "source": getattr(doc, "source", "") or "",
+            "base_id": item.get("base_id", ""),
+            "chunk_index": chunk_index,
+            "start_char": start,
+            "end_char": end,
+            "chars": len(chunk),
+            "snippet": chunk[:200] + ("..." if len(chunk) > 200 else ""),
+            "score": round(float(item.get("score", 0.0)), 4),
+            "similarity": round(float(item.get("similarity", 0.0)), 4),
+            "rerank_score": (
+                round(float(item["rerank_score"]), 4)
+                if item.get("rerank_score") is not None
+                else None
+            ),
+            "tags": list(getattr(doc, "tags", None) or []),
+        }
+        return citation
+
+    @staticmethod
+    def _chunk_offsets(content: str, chunk: str, chunk_index: int) -> Tuple[int, int]:
+        """估算片段在原文中的字符区间；找不到时按分块参数回退，未知返回 (-1, -1)。"""
+        if not chunk or not content:
+            return -1, -1
+        start = content.find(chunk)
+        if start < 0:
+            # 分块时 strip 过，用去掉首尾空白的前缀再试一次
+            probe = chunk.strip()[:60]
+            start = content.find(probe) if probe else -1
+        if start < 0 and chunk_index >= 0:
+            # TextProcessor.chunk_text 默认 chunk_size=500 / overlap=50
+            start = min(chunk_index * 450, max(0, len(content) - len(chunk)))
+        if start < 0:
+            return -1, -1
+        return start, min(len(content), start + len(chunk))
 
     def list_knowledge_bases(
         self,

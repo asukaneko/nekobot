@@ -1908,7 +1908,7 @@ def register_web_tools(mcp_server: Any, ctx: MCPContext) -> None:
                     "enabled": model_copy.get("enabled", True),
                     "base_url": model_copy.get("base_url", ""),
                     "temperature": model_copy.get("temperature", 0.7),
-                    "max_tokens": model_copy.get("max_tokens", 2000),
+                    "max_tokens": model_copy.get("max_tokens", 8192),
                     "priority": model_copy.get("priority", 0),
                     "input_price": model_copy.get("input_price"),
                     "output_price": model_copy.get("output_price"),

@@ -27,6 +27,9 @@ PURPOSE_HEARTBEAT = "heartbeat"        # 心跳
 PURPOSE_EMBEDDING = "embedding"        # 知识库embedding
 PURPOSE_TTS = "tts"                    # 语音合成
 PURPOSE_IMAGE_GEN = "image_gen"        # 图片生成
+PURPOSE_COMPRESSION = "compression"    # 上下文自动/手动压缩摘要
+PURPOSE_AGENT_MEMORY = "agent_memory"  # Agent 会话记忆改写
+PURPOSE_PLUGIN = "plugin"              # 插件/技能内部调用
 
 # 用途显示名称映射（用于前端展示）
 PURPOSE_LABELS: Dict[str, str] = {
@@ -42,6 +45,9 @@ PURPOSE_LABELS: Dict[str, str] = {
     PURPOSE_EMBEDDING: "向量化",
     PURPOSE_TTS: "语音合成",
     PURPOSE_IMAGE_GEN: "图片生成",
+    PURPOSE_COMPRESSION: "压缩",
+    PURPOSE_AGENT_MEMORY: "Agent记忆",
+    PURPOSE_PLUGIN: "插件",
 }
 
 
@@ -62,24 +68,63 @@ _MODEL_PRICING = {
 }
 
 
+# 费用币种统一口径：用户自填价格按人民币（元/百万token）计，
+# 内置兜底定价表为美元（$/百万token），估算时按此汇率折算为人民币。
+USD_TO_CNY_RATE = 7.2
+
+# 缓存命中 token 的默认折扣（相对输入价）。
+# OpenAI 缓存输入通常为输入价的 50%，Anthropic cache read 约 10%；
+# 未单独配置 cached_input_price 时按 50% 估算，模型配置里可精确覆盖。
+CACHE_PRICE_FALLBACK_RATIO = 0.5
+
+
 def _estimate_cost(
     model: str,
     prompt_tokens: int,
     completion_tokens: int,
     input_price: Optional[float] = None,
     output_price: Optional[float] = None,
+    cached_tokens: int = 0,
+    cached_input_price: Optional[float] = None,
 ) -> float:
-    """估算费用。
+    """估算费用（统一返回人民币元）。
 
     优先使用传入的 input_price/output_price（人民币 元/百万token），
-    未传入时从 _MODEL_PRICING 兜底（单位：美元/百万token）。
+    未传入时从 _MODEL_PRICING 兜底（单位：美元/百万token，按 USD_TO_CNY_RATE 折算）。
+
+    缓存命中部分按 cached_input_price 计价；未配置时按
+    CACHE_PRICE_FALLBACK_RATIO 折扣估算（缓存 token 仍计入总 token）。
     """
     in_p = input_price if isinstance(input_price, (int, float)) else None
     out_p = output_price if isinstance(output_price, (int, float)) else None
 
+    rate_applied = False
     if in_p is None or out_p is None:
         in_p, out_p = _MODEL_PRICING.get(model, (1.0, 4.0))
-    return (prompt_tokens / 1_000_000) * in_p + (completion_tokens / 1_000_000) * out_p
+        rate_applied = True
+
+    try:
+        cached = max(0, min(int(cached_tokens or 0), int(prompt_tokens or 0)))
+    except (TypeError, ValueError):
+        cached = 0
+    uncached = max(0, int(prompt_tokens or 0) - cached)
+
+    if cached:
+        if isinstance(cached_input_price, (int, float)):
+            cache_p = float(cached_input_price)
+        else:
+            cache_p = float(in_p) * CACHE_PRICE_FALLBACK_RATIO
+    else:
+        cache_p = 0.0
+
+    cost = (
+        (uncached / 1_000_000) * in_p
+        + (cached / 1_000_000) * cache_p
+        + (completion_tokens / 1_000_000) * out_p
+    )
+    if rate_applied:
+        cost *= USD_TO_CNY_RATE
+    return cost
 
 
 class TokenStatsManager:
@@ -218,7 +263,8 @@ class TokenStatsManager:
         today_str = datetime.now().strftime("%Y-%m-%d")
         if date_range == "today":
             return [r for r in records if r.get("date") == today_str]
-        if date_range == "7d":
+        # "week"/"7d"：最近 7 天（前端"本周"选项发送 week）
+        if date_range in ("week", "7d"):
             cutoff = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d")
             return [r for r in records if (r.get("date") or "") >= cutoff]
         if date_range == "30d":
@@ -260,6 +306,8 @@ class TokenStatsManager:
         ttft_ms: Optional[float] = None,
         input_price: Optional[float] = None,
         output_price: Optional[float] = None,
+        cached_tokens: int = 0,
+        cached_input_price: Optional[float] = None,
     ):
         """记录一次 AI 调用用量。
 
@@ -267,10 +315,13 @@ class TokenStatsManager:
             purpose: 用途分类，使用 PURPOSE_* 常量
             duration_ms: 完整响应时间（毫秒）
             ttft_ms: 首字符时间（Time To First Token，毫秒）
+            cached_tokens: 命中提示词缓存的输入 token（各协议归一化后提供）
+            cached_input_price: 缓存 token 单价（元/百万token），留空按折扣估算
         """
         try:
             prompt_tokens = max(0, int(prompt_tokens or 0))
             completion_tokens = max(0, int(completion_tokens or 0))
+            cached_tokens = max(0, min(int(cached_tokens or 0), prompt_tokens))
             total_tokens = max(
                 0,
                 int(
@@ -288,6 +339,7 @@ class TokenStatsManager:
         cost = _estimate_cost(
             model or "default", prompt_tokens, completion_tokens,
             input_price=input_price, output_price=output_price,
+            cached_tokens=cached_tokens, cached_input_price=cached_input_price,
         )
         today_str = datetime.now().strftime("%Y-%m-%d")
         current_month = datetime.now().strftime("%Y-%m")
@@ -318,6 +370,7 @@ class TokenStatsManager:
                 today_entry["input"] += prompt_tokens
                 today_entry["output"] += completion_tokens
                 today_entry["total"] += total_tokens
+                today_entry["cache"] = today_entry.get("cache", 0) + cached_tokens
                 today_entry["message_count"] = today_entry.get("message_count", 0) + 1
                 today_entry["cost"] = (float(today_entry.get("cost", 0) or 0) + cost)
             else:
@@ -326,6 +379,7 @@ class TokenStatsManager:
                     "input": prompt_tokens,
                     "output": completion_tokens,
                     "total": total_tokens,
+                    "cache": cached_tokens,
                     "message_count": 1,
                     "cost": cost,
                 })
@@ -338,23 +392,26 @@ class TokenStatsManager:
             if session_id:
                 sessions = stats.setdefault("sessions", {})
                 if session_id not in sessions:
-                    sessions[session_id] = {"input": 0, "output": 0, "total": 0,
+                    sessions[session_id] = {"input": 0, "output": 0, "total": 0, "cache": 0,
                                              "type": channel_type, "message_count": 0}
                 s = sessions[session_id]
                 s["input"] += prompt_tokens
                 s["output"] += completion_tokens
                 s["total"] += total_tokens
+                s["cache"] = s.get("cache", 0) + cached_tokens
                 s["message_count"] = s.get("message_count", 0) + 1
 
             # 模型维度
             if model:
                 models = stats.setdefault("models", {})
                 if model not in models:
-                    models[model] = {"input": 0, "output": 0, "total": 0, "message_count": 0, "cost": 0.0}
+                    models[model] = {"input": 0, "output": 0, "total": 0, "cache": 0,
+                                     "message_count": 0, "cost": 0.0}
                 m = models[model]
                 m["input"] += prompt_tokens
                 m["output"] += completion_tokens
                 m["total"] += total_tokens
+                m["cache"] = m.get("cache", 0) + cached_tokens
                 m["message_count"] = m.get("message_count", 0) + 1
                 m["cost"] = float(m.get("cost", 0) or 0) + cost
 
@@ -363,11 +420,13 @@ class TokenStatsManager:
                 users = stats.setdefault("users", {})
                 uid = str(user_id)
                 if uid not in users:
-                    users[uid] = {"input": 0, "output": 0, "total": 0, "message_count": 0}
+                    users[uid] = {"input": 0, "output": 0, "total": 0, "cache": 0,
+                                  "message_count": 0}
                 u = users[uid]
                 u["input"] += prompt_tokens
                 u["output"] += completion_tokens
                 u["total"] += total_tokens
+                u["cache"] = u.get("cache", 0) + cached_tokens
                 u["message_count"] = u.get("message_count", 0) + 1
 
             record = {
@@ -381,6 +440,7 @@ class TokenStatsManager:
                 "input": prompt_tokens,
                 "output": completion_tokens,
                 "total": total_tokens,
+                "cached_tokens": cached_tokens,
                 "cost": round(cost, 6),
                 "source": source or channel_type or "api",
                 "purpose": purpose or PURPOSE_CHAT,
@@ -407,6 +467,17 @@ class TokenStatsManager:
             stats["records"] = records
 
             self._save()
+
+        # 成就系统：记录累计 token / 消费 / 对话消息
+        try:
+            from nbot.achievements.manager import get_achievement_manager
+            mgr = get_achievement_manager(self._data_dir)
+            mgr.record("tokens", total_tokens)
+            mgr.record("cost", cost)
+            if (purpose or PURPOSE_CHAT) == PURPOSE_CHAT:
+                mgr.record("messages", 1)
+        except Exception:
+            pass
 
     # ------------------------------------------------------------------
     # 查询统计
@@ -456,6 +527,8 @@ class TokenStatsManager:
                     "total_tokens": today_val,
                     "today_input": 0,
                     "today_output": 0,
+                    "cached_tokens": 0,
+                    "cache_hit_rate": 0,
                     "message_count": 0,
                     "avg_tokens_per_msg": 0,
                     "estimated_cost": f"{float(stats.get('estimated_cost', 0) or 0):.2f}",
@@ -480,7 +553,6 @@ class TokenStatsManager:
             history = [h for h in history if h.get("date", "") >= cutoff]
 
         # 汇总
-        total_input = sum(h.get("input", 0) for h in history)
         range_dates = [
             item.get("date")
             for item in [*history, *records]
@@ -491,6 +563,7 @@ class TokenStatsManager:
 
         total_input = sum(h.get("input", 0) for h in history)
         total_output = sum(h.get("output", 0) for h in history)
+        total_cached = sum(h.get("cache", 0) for h in history)
         total_tokens = sum(h.get("total", h.get("input", 0) + h.get("output", 0)) for h in history)
         message_count = sum(h.get("message_count", 0) for h in history)
         total_cost = sum(float(h.get("cost", 0) or 0) for h in history)
@@ -550,6 +623,10 @@ class TokenStatsManager:
             "total_tokens": total_tokens,
             "today_input": total_input,
             "today_output": total_output,
+            "cached_tokens": total_cached,
+            "cache_hit_rate": (
+                round(total_cached / total_input * 100, 1) if total_input else 0
+            ),
             "message_count": message_count,
             "avg_tokens_per_msg": round(total_tokens / message_count) if message_count > 0 else 0,
             "estimated_cost": f"{total_cost:.2f}",

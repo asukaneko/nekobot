@@ -1293,6 +1293,120 @@ def register_ai_commands(
             log.error(f"Compact context failed: {e}", exc_info=True)
             await reply_current_channel(msg, is_group, f"压缩失败：{e}")
 
+    def _mutate_current_session_field(msg, is_group, mutator) -> tuple[bool, str]:
+        """修改当前会话的字段（agent_goal/agent_spec 等）并持久化。"""
+        info = current_qq_session_info(msg, is_group)
+        session_id = str(info.get("session_id") or "")
+        if not session_id:
+            return False, "当前会话没有可用的 session_id"
+        try:
+            from nbot.web.server import WebChatServer
+
+            server = WebChatServer.get_instance()
+            session = None
+            if server and hasattr(server, "sessions"):
+                session = server.sessions.get(session_id)
+            if session is None and server and hasattr(server, "session_store"):
+                session = server.session_store.get_session(session_id)
+            if session is None:
+                return False, "当前会话不存在或尚未初始化"
+            mutator(session)
+            if hasattr(server, "session_store") and server.session_store:
+                server.session_store.set_session(session_id, session)
+            elif hasattr(server, "_save_sessions"):
+                server._save_sessions()
+            return True, session_id
+        except Exception as e:
+            log.error(f"Mutate session field failed: {e}", exc_info=True)
+            return False, str(e)
+
+    @register_command(
+        "/goal",
+        help_text="/goal <目标> -> 为会话设置持久目标，每轮注入提示词；/goal 查看；/goal clear 清除",
+        category="2",
+    )
+    async def handle_goal_command(msg, is_group=True):
+        info = current_qq_session_info(msg, is_group)
+        session_id = str(info.get("session_id") or "")
+
+        def _mutate(session):
+            if not goal_text or goal_text.lower() == "clear":
+                session.pop("agent_goal", None)
+            else:
+                session["agent_goal"] = goal_text
+
+        raw = str(getattr(msg, "message", "") or getattr(msg, "content", "") or "").strip()
+        # 兼容不同的命令参数传递方式：取 /goal 之后的全部文本
+        goal_text = raw[len("/goal"):].strip() if raw.lower().startswith("/goal") else raw.strip()
+
+        if not session_id:
+            await reply_current_channel(msg, is_group, "当前会话没有可用的 session_id，无法设置目标。")
+            return
+
+        if not goal_text:
+            from nbot.web.server import WebChatServer
+
+            server = WebChatServer.get_instance()
+            session = (server.sessions.get(session_id) or {}) if server else {}
+            current_goal = str(session.get("agent_goal") or "")
+            if current_goal:
+                await reply_current_channel(msg, is_group, f"当前会话目标：\n{current_goal}")
+            else:
+                await reply_current_channel(msg, is_group, "当前会话未设置目标。用法：/goal <目标描述>，/goal clear 清除。")
+            return
+
+        ok, result = _mutate_current_session_field(msg, is_group, _mutate)
+        if not ok:
+            await reply_current_channel(msg, is_group, f"设置目标失败：{result}")
+            return
+        if goal_text.lower() == "clear":
+            await reply_current_channel(msg, is_group, "已清除会话目标。")
+        else:
+            await reply_current_channel(msg, is_group, f"已设置会话目标（每轮自动注入）：\n{goal_text}")
+
+    @register_command(
+        "/spec",
+        help_text="/spec <规格> -> 为会话设置规格说明（Agent 规格驱动），每轮注入；/spec 查看；/spec clear 清除",
+        category="2",
+    )
+    async def handle_spec_command(msg, is_group=True):
+        info = current_qq_session_info(msg, is_group)
+        session_id = str(info.get("session_id") or "")
+
+        def _mutate(session):
+            if not spec_text or spec_text.lower() == "clear":
+                session.pop("agent_spec", None)
+            else:
+                session["agent_spec"] = spec_text
+
+        raw = str(getattr(msg, "message", "") or getattr(msg, "content", "") or "").strip()
+        spec_text = raw[len("/spec"):].strip() if raw.lower().startswith("/spec") else raw.strip()
+
+        if not session_id:
+            await reply_current_channel(msg, is_group, "当前会话没有可用的 session_id，无法设置规格。")
+            return
+
+        if not spec_text:
+            from nbot.web.server import WebChatServer
+
+            server = WebChatServer.get_instance()
+            session = (server.sessions.get(session_id) or {}) if server else {}
+            current_spec = str(session.get("agent_spec") or "")
+            if current_spec:
+                await reply_current_channel(msg, is_group, f"当前会话规格：\n{current_spec[:1500]}")
+            else:
+                await reply_current_channel(msg, is_group, "当前会话未设置规格。用法：/spec <规格说明>，/spec clear 清除。")
+            return
+
+        ok, result = _mutate_current_session_field(msg, is_group, _mutate)
+        if not ok:
+            await reply_current_channel(msg, is_group, f"设置规格失败：{result}")
+            return
+        if spec_text.lower() == "clear":
+            await reply_current_channel(msg, is_group, "已清除会话规格。")
+        else:
+            await reply_current_channel(msg, is_group, f"已设置会话规格（每轮自动注入）：\n{spec_text[:500]}")
+
     @register_command(
         "/context",
         help_text="/context -> 查看当前会话上下文使用情况",

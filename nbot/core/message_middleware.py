@@ -44,7 +44,20 @@ def _normalize_media_type(att_type: str) -> str:
 
 # 支持描述的标准附件类型
 DESCRIBABLE_TYPES = {"image", "video", "audio"}
-TYPE_LABELS = {"image": "图片", "video": "视频", "audio": "音频", "file": "文件"}
+TYPE_LABELS = {"image": "图片", "gif": "动图", "video": "视频", "audio": "音频", "file": "文件"}
+
+
+def _is_gif_attachment(attachment: Dict[str, Any], url: str) -> bool:
+    """判断图片附件是否为 GIF 动图（需要多帧理解）。"""
+    mime = str(attachment.get("mime_type") or attachment.get("mime") or "").lower()
+    if mime == "image/gif":
+        return True
+    if url.lower().startswith("data:image/gif"):
+        return True
+    for value in [str(attachment.get(key) or "") for key in ("name", "filename", "file")] + [str(url or "")]:
+        if value.lower().split("?", 1)[0].endswith(".gif"):
+            return True
+    return False
 
 # 描述失败时的错误标识，匹配到这些前缀的描述不会注入用户消息
 _DESC_ERROR_PREFIXES = ("链接失效", "解析失败")
@@ -156,19 +169,23 @@ class MessagePreprocessor:
                     except Exception as e:
                         _log.warning(f"Preprocessor: failed to read workspace file for AI: {e}")
 
-            desc = MediaDescriber.describe(att_type, url)
+            describer_type = att_type
+            if att_type == "image" and _is_gif_attachment(att, url):
+                describer_type = "gif"
+
+            desc = MediaDescriber.describe(describer_type, url)
             if desc:
                 # 过滤描述失败时的错误提示，避免将"链接失效"等注入用户消息
                 if any(desc.startswith(p) for p in _DESC_ERROR_PREFIXES):
                     _log.warning(
-                        f"Preprocessor: describe returned error for {att_type}: {desc}"
+                        f"Preprocessor: describe returned error for {describer_type}: {desc}"
                     )
                     continue
-                label = TYPE_LABELS.get(att_type, att_type)
+                label = TYPE_LABELS.get(describer_type, describer_type)
                 descriptions.append(f"[{label}{len(descriptions)+1}描述]: {desc}")
                 processed_indices.append(i)
             else:
-                _log.warning(f"Preprocessor: describe failed for {att_type} attachment")
+                _log.warning(f"Preprocessor: describe failed for {describer_type} attachment")
 
         if descriptions:
             desc_block = "\n".join(descriptions)

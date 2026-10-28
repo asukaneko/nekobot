@@ -20,6 +20,8 @@ from flask_socketio import SocketIO
 from werkzeug.exceptions import HTTPException
 
 from nbot.core.prompt_format import format_skills_prompt
+from nbot.core.sampling import default_max_tokens_for, request_extra_body
+from nbot.core.session_store import visible_messages
 from nbot.web.ai_service import (
     get_ai_response,
     get_ai_response_with_images,
@@ -39,6 +41,7 @@ from nbot.web.persistence import (
 )
 from nbot.web.routes import (
     register_plot_routes,
+    register_plugin_routes,
     register_admin_misc_routes,
     register_ai_config_routes,
     register_ai_model_routes,
@@ -48,11 +51,14 @@ from nbot.web.routes import (
     register_character_routes,
     register_config_legacy_routes,
     register_config_transfer_routes,
+    register_export_center_routes,
     register_file_routes,
     register_gateway_log_routes,
+    register_global_search_routes,
     register_gateway_routes,
     register_heartbeat_routes,
     register_hook_routes,
+    register_image_routes,
     register_group_routes,
     register_knowledge_routes,
     register_live2d_routes,
@@ -61,6 +67,8 @@ from nbot.web.routes import (
     register_memory_routes,
     register_message_filter_routes,
     register_personality_routes,
+    register_persona_routes,
+    register_prompt_preset_routes,
     register_public_session_routes,
     register_push_routes,
     register_qq_overview_routes,
@@ -80,13 +88,18 @@ from nbot.web.routes import (
     register_workflow_routes,
     register_workspace_misc_routes,
     register_oauth_routes,
-    register_workspace_private_routes,
-    register_workspace_shared_routes,
+    register_workspace_private_routes,                                       
+    register_workspace_shared_routes,                                        
     register_world_book_routes,
+    register_world_routes,
+    register_achievement_routes,
+    register_smart_routing_routes,
+    register_sticker_routes,
 )
 from nbot.core.oauth import init_oauth_manager
 from nbot.web.secure_store import read_secure_json, write_secure_json
 from nbot.web.socket_events import register_socket_events
+from nbot.web.world_socket_events import register_world_socket_events
 
 _log = logging.getLogger(__name__)
 
@@ -1588,7 +1601,7 @@ class WebChatServer:
                     "supports_reasoning": True,
                     "supports_stream": True,
                     "temperature": 0.7,
-                    "max_tokens": 2000,
+                    "max_tokens": default_max_tokens_for("chat"),
                     "top_p": 0.9,
                     "created_at": datetime.now().isoformat(),
                 }
@@ -1651,8 +1664,13 @@ class WebChatServer:
                         "proxy_url": model.get("proxy_url", ""),
                         "model": self.ai_model,
                         "temperature": model.get("temperature", 0.7),
-                        "max_tokens": model.get("max_tokens", 2000),
+                        "max_tokens": model.get(
+                            "max_tokens",
+                            default_max_tokens_for(model.get("purpose", "chat")),
+                        ),
                         "top_p": model.get("top_p", 0.9),
+                        "token_limit_field": model.get("token_limit_field", ""),
+                        "stop": model.get("stop", ""),
                         "frequency_penalty": model.get("frequency_penalty", 0),
                         "presence_penalty": model.get("presence_penalty", 0),
                         "system_prompt": model.get("system_prompt", ""),
@@ -1732,7 +1750,10 @@ class WebChatServer:
                             "base_url": self.ai_base_url,
                             "model": self.ai_model,
                             "temperature": model.get("temperature", 0.7),
-                            "max_tokens": model.get("max_tokens", 2000),
+                            "max_tokens": model.get(
+                                "max_tokens",
+                                default_max_tokens_for(model.get("purpose", "chat")),
+                            ),
                             "top_p": model.get("top_p", 0.9),
                             "supports_tools": model.get("supports_tools", True),
                             "supports_reasoning": model.get("supports_reasoning", True),
@@ -1803,13 +1824,15 @@ class WebChatServer:
                 except:
                     pass
 
-                # 添加新任务
+                # 添加新任务（错过时间点 1 小时内补跑一次，多次错过合并）
                 job = self.scheduler.add_job(
                     func=self._execute_workflow,
                     trigger=trigger,
                     id=job_id,
                     args=[workflow_id],
                     replace_existing=True,
+                    misfire_grace_time=3600,
+                    coalesce=True,
                 )
                 workflow["next_run"] = (
                     job.next_run_time.isoformat() if job.next_run_time else None
@@ -1902,12 +1925,55 @@ class WebChatServer:
             task["last_run"] = now
             task["finished_at"] = now
             task["last_error"] = None
+            task["retry_count"] = 0
         elif status == "failed":
             task["failed_at"] = now
             task["finished_at"] = now
             task["last_error"] = error or "Unknown task error"
         if save:
             self._save_data("scheduled_tasks")
+
+    _TASK_RETRY_MAX = 3
+
+    def _schedule_task_retry(self, task_id: str, task: dict[str, Any]) -> bool:
+        """定时任务失败后指数退避重试（2/4/8 分钟），最多 3 次。"""
+        if not self.scheduler:
+            return False
+        try:
+            retry_count = int(task.get("retry_count") or 0)
+        except (TypeError, ValueError):
+            retry_count = 0
+        if retry_count >= self._TASK_RETRY_MAX:
+            task["retry_count"] = 0
+            _log.warning(
+                f"Custom task {task_id} failed {retry_count} consecutive times, giving up retry"
+            )
+            return False
+        task["retry_count"] = retry_count + 1
+        delay_minutes = 2 ** (retry_count + 1)
+        job_id = f"custom_task_retry_{task_id}"
+        try:
+            self.scheduler.remove_job(job_id)
+        except Exception:
+            pass
+        run_at = datetime.now() + timedelta(minutes=delay_minutes)
+        try:
+            self.scheduler.add_job(
+                func=self._execute_custom_task,
+                trigger="date",
+                run_date=run_at,
+                id=job_id,
+                args=[task_id, "retry"],
+                replace_existing=True,
+                misfire_grace_time=600,
+            )
+            _log.info(
+                f"Custom task {task_id} retry #{retry_count + 1} scheduled at {run_at.isoformat()}"
+            )
+            return True
+        except Exception as exc:
+            _log.error(f"Failed to schedule retry for task {task_id}: {exc}")
+            return False
 
     def _schedule_custom_task(self, task: dict[str, Any]):
         if not self.scheduler:
@@ -1928,6 +1994,9 @@ class WebChatServer:
                 id=f"custom_task_{task_id}",
                 args=[task_id],
                 replace_existing=True,
+                # 错过时间点 1 小时内补跑一次，多次错过合并为一次
+                misfire_grace_time=3600,
+                coalesce=True,
                 **trigger_kwargs,
             )
             self.scheduled_task_jobs[task_id] = job
@@ -2068,6 +2137,8 @@ class WebChatServer:
             except Exception as e:
                 _log.error(f"Failed to execute QQ custom task {task_id}: {e}", exc_info=True)
                 self._mark_task_status(task, "failed", error=str(e), save=False)
+                self._schedule_task_retry(task_id, task)
+                self._save_data("scheduled_tasks")
                 return
             finally:
                 self.running_task_ids.discard(task_id)
@@ -2097,6 +2168,7 @@ class WebChatServer:
         except Exception as e:
             _log.error(f"Failed to execute custom task {task_id}: {e}", exc_info=True)
             self._mark_task_status(task, "failed", error=str(e), save=False)
+            self._schedule_task_retry(task_id, task)
         else:
             self._mark_task_status(task, "success", save=False)
         finally:
@@ -2321,7 +2393,7 @@ class WebChatServer:
 
         # 添加历史上下文（不再按条数限制，由 token 预算控制）
         session = self.session_store.get_session(session_id) or {}
-        history = session.get("messages", [])
+        history = visible_messages(session.get("messages", []))
         for msg in history:
             if msg.get("role") in ["user", "assistant"]:
                 messages.append({"role": msg["role"], "content": msg["content"]})
@@ -2663,10 +2735,13 @@ class WebChatServer:
 
             personality_name = ""
             personality_desc = ""
+            session_mode = ""
+            max_name_len = 15
 
             if session_id:
                 session = self.session_store.get_session(session_id)
                 if session:
+                    session_mode = str(session.get("session_mode") or "")
                     personality_name = _resolve_session_character_name(self, session)
                     character_id = session.get("character_id")
                     if character_id:
@@ -2705,6 +2780,20 @@ class WebChatServer:
             if is_update:
                 update_hint = "对话已经进行了较长时间，请根据最新的主要话题重新命名，忽略早期已结束的话题。\n"
 
+            # 风格区分：Agent 会话用功能性描述，角色会话用口语化/诗意标题
+            if session_mode == "agent":
+                max_name_len = 30
+                style_requirements = (
+                    "- 简明的功能性描述（如 '修复登录超时'、'爬虫数据清洗'、'季度报告整理'）\n"
+                    "- 概括当前正在推进的任务或主题\n"
+                    "- 不要口语化、不要诗意、不要表情符号\n"
+                )
+            else:
+                style_requirements = (
+                    "- 自然口语化，像聊天记录名称\n"
+                    "- 有趣或有诗意更好\n"
+                )
+
             prompt_messages = [
                 {
                     "role": "system",
@@ -2712,10 +2801,8 @@ class WebChatServer:
                         f"你是一个会话命名助手。{role_context}请根据对话内容生成一个简短、有辨识度、贴合当前话题的标题。\n\n"
                         f"{update_hint}"
                         "要求：\n"
-                        "- 2-15个字\n"
-                        "- 概括当前主要话题或最新亮点\n"
-                        "- 自然口语化，像聊天记录名称\n"
-                        "- 有趣或有诗意更好\n"
+                        f"- 2-{max_name_len}个字\n"
+                        f"{style_requirements}"
                         "- 直接返回标题，不要引号、标点或解释"
                     ),
                 },
@@ -2754,6 +2841,7 @@ class WebChatServer:
                 stream=False,
                 base_url=self.ai_base_url,
                 provider_type=srv_pt,
+                extra_body=request_extra_body(active_model or {}) or None,
             )
             from nbot.core.model_proxy import model_proxy_request_kwargs
 
@@ -2795,10 +2883,10 @@ class WebChatServer:
                     name = name[len(prefix):].strip()
                     break
             name = name.strip("`*_# \t\r\n\"'[](){}<>:：-—,.，。!！?？")
-            if len(name) > 15:
-                name = name[:15].rstrip("`*_# \t\r\n\"'[](){}<>:：-—,.，。!！?？")
+            if len(name) > max_name_len:
+                name = name[:max_name_len].rstrip("`*_# \t\r\n\"'[](){}<>:：-—,.，。!！?？")
 
-            if name and 2 <= len(name) <= 15:
+            if name and 2 <= len(name) <= max_name_len:
                 # 完成进度卡片
                 if progress_card:
                     from nbot.core.progress_card import StepType
@@ -2949,14 +3037,19 @@ class WebChatServer:
         register_character_routes(self.app, self)
         register_gateway_routes(self.app)
         register_gateway_log_routes(self.app)
+        register_global_search_routes(self.app, self)
         register_heartbeat_routes(self.app, self)
         register_group_routes(self.app, self)
         register_hook_routes(self.app, self)
+        register_image_routes(self.app, self)
         register_knowledge_routes(self.app, self)
         register_live2d_routes(self.app, self)
         register_memory_routes(self.app, self)
         register_message_filter_routes(self.app, self)
         register_personality_routes(self.app, self)
+        register_persona_routes(self.app, self)
+        register_plugin_routes(self.app, self)
+        register_prompt_preset_routes(self.app, self)
         register_plot_routes(self.app, self)
         register_push_routes(self.app, self)
         register_qq_overview_routes(self.app, self)
@@ -2971,16 +3064,21 @@ class WebChatServer:
         register_mcp_server_routes(self.app, self)
         register_workflow_routes(self.app, self)
         register_world_book_routes(self.app, self)
+        register_world_routes(self.app, self)
         register_web_agent_routes(self.app, self)
         register_workspace_private_routes(self.app, self)
         register_workspace_shared_routes(self.app, self)
         register_workspace_misc_routes(self.app, self)
         register_config_legacy_routes(self.app, self)
         register_config_transfer_routes(self.app, self)
+        register_export_center_routes(self.app, self)
         register_webdav_backup_routes(self.app, self)
         register_update_routes(self.app, self)
         register_login_token_routes(self.app, self)
         register_oauth_routes(self.app, self)
+        register_achievement_routes(self.app, self)
+        register_smart_routing_routes(self.app, self)
+        register_sticker_routes(self.app, self)
 
         # 初始化 Gateway 并注入 AgentService
         self._init_gateway()
@@ -3058,6 +3156,7 @@ class WebChatServer:
     def _register_socket_events(self):
         """Register WebSocket handlers."""
         register_socket_events(self)
+        register_world_socket_events(self)
 
     def _trigger_ai_response(
         self,
@@ -3542,7 +3641,7 @@ class WebChatServer:
 
         heartbeat_messages = []
         current_session = self.session_store.get_session(target_session_id) or session
-        for msg in current_session.get("messages", [])[-12:]:
+        for msg in visible_messages(current_session.get("messages", []))[-12:]:
             role = msg.get("role")
             if role in ["system", "user", "assistant"]:
                 heartbeat_messages.append(
@@ -3730,7 +3829,7 @@ class WebChatServer:
     def _collect_heartbeat_context_messages(self, session: dict) -> str:
         """收集会话最近消息作为上下文（最多 6 条，限长）。"""
         try:
-            messages = session.get("messages") or []
+            messages = visible_messages(session.get("messages") or [])
             recent = []
             for msg in reversed(messages):
                 if len(recent) >= 6:
@@ -4251,7 +4350,7 @@ class WebChatServer:
         try:
             heartbeat_session = self.session_store.get_session(session_id) or session or {}
             heartbeat_messages = []
-            for msg in heartbeat_session.get("messages", [])[-12:]:
+            for msg in visible_messages(heartbeat_session.get("messages", []))[-12:]:
                 role = msg.get("role")
                 if role in ["system", "user", "assistant"]:
                     heartbeat_messages.append(

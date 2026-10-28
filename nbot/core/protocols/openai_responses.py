@@ -15,6 +15,7 @@ from nbot.core.model_adapter import (
     repair_mojibake_text,
 )
 from nbot.core.protocols.base import ModelProtocol
+from nbot.core.sampling import is_reasoning_model, resolve_token_limit
 
 
 class OpenAIResponsesProtocol(ModelProtocol):
@@ -101,10 +102,18 @@ class OpenAIResponsesProtocol(ModelProtocol):
         if stream:
             payload["stream"] = True
 
-        if extra_body:
+        extra = dict(extra_body) if extra_body else {}
+        if extra:
+            token_limit = resolve_token_limit(extra)
+            if token_limit and not is_codex_backend:
+                payload["max_output_tokens"] = token_limit
+            if is_reasoning_model(model):
+                # 推理系模型只接受默认温度，top_p 同样不生效
+                extra.pop("temperature", None)
+                extra.pop("top_p", None)
             for key in ("temperature", "top_p", "instructions"):
-                if key in extra_body:
-                    payload[key] = extra_body[key]
+                if key in extra:
+                    payload[key] = extra[key]
 
         return payload
 

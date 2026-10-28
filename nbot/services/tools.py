@@ -1,23 +1,36 @@
 """
 工具模块 - 提供 AI 可调用的各种工具
 """
+import asyncio
+import configparser
+import difflib
+import importlib
+import inspect
 import json
 import logging
+import mimetypes
+import os
 import re
 import shlex
 import subprocess
-import urllib.request
-import urllib.parse
-import os
-import difflib
-import mimetypes
-import uuid
+import threading
 import time
-from typing import Dict, Any, Optional, List
+import urllib.parse
+import urllib.request
+import uuid
 from datetime import datetime
-import configparser
+from typing import Any, Dict, List, Optional
 
 _log = logging.getLogger(__name__)
+
+# 检索类工具（search_files / find_files / web_fetch），见 nbot/services/search_tools.py
+from nbot.services.search_tools import (  # noqa: E402
+    SEARCH_TOOL_NAMES,
+    execute_search_tool,
+    get_search_tool_schemas,
+)
+
+SEARCH_TOOL_NAME_SET = frozenset(SEARCH_TOOL_NAMES)
 
 # 动态执行器（延迟导入避免循环依赖）
 _dynamic_executor = None
@@ -152,6 +165,50 @@ def _is_bare_whitelisted_command(cmd_parts, main_command: str) -> bool:
     return main_command in EXEC_WHITELIST
 
 
+# 工具输出统一硬上限（原多处 5000/10000/50000 六档硬编码收敛于此）。
+# 可配置：data/web/settings.json features.tool_output_max_chars
+# 或环境变量 NBOT_TOOL_OUTPUT_MAX_CHARS，范围 1000..200000。
+DEFAULT_TOOL_OUTPUT_LIMIT = 20000
+
+
+def get_tool_output_limit() -> int:
+    """获取工具输出统一硬上限（字符数）。"""
+    import json as _json
+
+    limit = 0
+    settings_path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+        "data", "web", "settings.json",
+    )
+    try:
+        if os.path.exists(settings_path):
+            with open(settings_path, encoding="utf-8") as f:
+                settings = _json.load(f)
+            features = settings.get("features") if isinstance(settings, dict) else {}
+            if isinstance(features, dict):
+                limit = int(features.get("tool_output_max_chars") or 0)
+    except (OSError, ValueError, TypeError):
+        pass
+    if not limit:
+        try:
+            limit = int(os.getenv("NBOT_TOOL_OUTPUT_MAX_CHARS", "0") or 0)
+        except ValueError:
+            limit = 0
+    if not limit:
+        limit = DEFAULT_TOOL_OUTPUT_LIMIT
+    return max(1000, min(limit, 200000))
+
+
+def truncate_tool_output(text: Any, limit: int | None = None, label: str = "输出") -> str:
+    """按统一上限截断工具输出文本。"""
+    value = str(text or "")
+    if limit is None:
+        limit = get_tool_output_limit()
+    if len(value) <= limit:
+        return value
+    return value[:limit] + f"\n\n... ({label}已截断，共 {len(value)} 字符，上限 {limit})"
+
+
 def _execute_command_now(
     command: str,
     timeout: int,
@@ -182,20 +239,16 @@ def _execute_command_now(
             timeout=timeout,
             cwd=os.getcwd(),
         )
-        output = result.stdout
-        max_output_length = 10000
-        if len(output) > max_output_length:
-            output = (
-                output[:max_output_length]
-                + f"\n\n... (输出已截断，共 {len(result.stdout)} 字符)"
-            )
+        _limit = get_tool_output_limit()
+        output = truncate_tool_output(result.stdout, _limit, "输出")
+        stderr = truncate_tool_output(result.stderr, _limit // 2, "错误输出")
         return {
             "success": result.returncode == 0,
             "command": command,
             "main_command": main_command,
             "returncode": result.returncode,
             "stdout": output,
-            "stderr": result.stderr[:5000] if result.stderr else "",
+            "stderr": stderr,
             "executed": True,
             "authorization": authorization,
             "is_whitelisted": authorization == "whitelist",
@@ -615,6 +668,7 @@ def get_enabled_tools() -> List[Dict]:
     # 合并所有工具类别
     all_tool_categories = [
         WORKSPACE_TOOL_DEFINITIONS,
+        get_search_tool_schemas(),
     ]
 
     for category in all_tool_categories:
@@ -636,6 +690,13 @@ def get_enabled_tools() -> List[Dict]:
             tools.extend(mcp_tools)
     except Exception:
         pass
+
+    # 添加外部注册的工具（插件 / 多模态等，运行时生效）
+    try:
+        load_tool_providers()
+    except Exception as e:
+        _log.warning(f"[Tools] 外部工具提供者加载失败: {e}")
+    tools.extend(get_external_tool_definitions())
 
     return tools
 
@@ -1090,7 +1151,7 @@ class ToolExecutor:
                     "success": True,
                     "url": url,
                     "status": response.status,
-                    "content": content[:5000]  # 限制返回内容长度
+                    "content": truncate_tool_output(content, label="内容")
                 }
 
         except Exception as e:
@@ -1349,7 +1410,9 @@ class ToolExecutor:
                 }
 
             # 获取消息
-            messages = session.get('messages', [])
+            from nbot.core.session_store import visible_messages
+
+            messages = visible_messages(session.get('messages', []))
             if not messages:
                 return {
                     "success": True,
@@ -1434,6 +1497,526 @@ class ToolExecutor:
                 "success": False,
                 "error": str(e)
             }
+
+
+# ===========================================================================
+# 外部工具注册钩子（共享入口）
+# ===========================================================================
+#
+# 目的：插件（生态 plugin_use）、多模态（多模 generate_image）等外部模块，
+# 可以在**不修改本文件**的前提下，把工具挂进统一工具列表与执行入口。
+#
+# 约定：
+#   * 纯运行时注册，不写 data/web/tools*.json；注册后下一轮对话即可见。
+#   * 与内置工具/其他来源同名时注册失败返回 False，绝不覆盖；
+#     同一来源重复注册同名工具视为热重载，替换自己旧的那一份。
+#   * handler 支持同步函数与协程函数，签名 handler(args) 或
+#     handler(args, context) 均可；返回 str / dict 都会被规范化。
+#   * handler 抛异常不会打断整轮工具循环，会转成
+#     {"success": False, "error": ...} 交给模型。
+
+_EXTERNAL_TOOLS: dict[str, dict[str, Any]] = {}
+_EXTERNAL_TOOLS_LOCK = threading.RLock()
+_EXTERNAL_TOOLS_VERSION = 0
+_EXTERNAL_TOOL_NAME_RE = re.compile(r"^[A-Za-z0-9_.\-]{1,64}$")
+# MCP 工具走 nbot/services/mcp_bridge.py 的命名空间，外部注册不可占用
+_EXTERNAL_RESERVED_PREFIXES = ("mcp__", "workspace_", "todo_")
+
+# 外部工具提供者模块：模块内实现 register_tools(register) 主动注册即可；
+# 未实现时按 _EXTERNAL_TOOL_SPECS 的声明回退注册。
+TOOL_PROVIDER_MODULES = (
+    "nbot.services.image_service",  # 多模：generate_image
+)
+_LOADED_TOOL_PROVIDERS: set = set()
+
+# 提供者模块尚未提供 register_tools 时的回退声明（惰性解析 handler）
+_EXTERNAL_TOOL_SPECS = (
+    {
+        "name": "generate_image",
+        "module": "nbot.services.image_service",
+        "handler": "generate_image_tool",
+        "source": "builtin:image_service",
+        "read_only": False,
+        "definition": {
+            "description": (
+                "根据文本提示生成图片，或在参考图基础上重绘（图生图）。"
+                "适用于用户要求画图、生成插画、改图、换风格等场景。"
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "prompt": {
+                        "type": "string",
+                        "description": "画面描述，建议使用英文以获得更稳定的效果",
+                    },
+                    "mode": {
+                        "type": "string",
+                        "enum": ["txt2img", "img2img"],
+                        "default": "txt2img",
+                        "description": "生成模式：文生图或图生图",
+                    },
+                    "reference_images": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": (
+                            "参考图列表（img2img 必填，1~4 个）："
+                            "http(s) 链接、data URI 或本地绝对路径"
+                        ),
+                    },
+                    "strength": {
+                        "type": "number",
+                        "description": "重绘强度 0.0~1.0，默认 0.6，越大越偏离参考图",
+                    },
+                    "style": {
+                        "type": "string",
+                        "description": (
+                            "风格预设：anime/realistic/watercolor/cyberpunk/ink/pixel/3d/none"
+                        ),
+                    },
+                    "negative_prompt": {
+                        "type": "string",
+                        "description": "负面提示词（不希望出现的元素）",
+                    },
+                    "size": {
+                        "type": "string",
+                        "description": "图片尺寸，如 1024x1024",
+                    },
+                    "count": {
+                        "type": "integer",
+                        "description": "生成数量 1~4，默认 1",
+                    },
+                },
+                "required": ["prompt"],
+            },
+        },
+    },
+)
+
+
+def _external_name_taken_by_builtin(tool_name: str) -> bool:
+    """判断名称是否已被内置/注册表/Web 配置占用（不含外部注册表自身）。"""
+    for group in (TOOL_DEFINITIONS, WORKSPACE_TOOL_DEFINITIONS):
+        for item in group:
+            function = item.get("function") if isinstance(item, dict) else None
+            if isinstance(function, dict) and function.get("name") == tool_name:
+                return True
+    if tool_name in SEARCH_TOOL_NAME_SET:
+        return True
+    try:
+        from nbot.services.todo_tools import TODO_TOOL_DEFINITIONS
+
+        for item in TODO_TOOL_DEFINITIONS:
+            function = item.get("function") if isinstance(item, dict) else None
+            if isinstance(function, dict) and function.get("name") == tool_name:
+                return True
+    except Exception:
+        pass
+    try:
+        # 触发 skills/sticker 等装饰器注册，避免和懒加载工具撞名
+        importlib.import_module("nbot.services.skills_tools")
+        from nbot.services.tool_registry import get_registry
+
+        if tool_name in get_registry().list_tools():
+            return True
+    except Exception:
+        pass
+    try:
+        for config in load_tools_config():
+            if isinstance(config, dict) and str(config.get("name") or "") == tool_name:
+                return True
+    except Exception:
+        pass
+    return False
+
+
+def _build_external_definition(tool_name: str, spec: dict[str, Any]) -> dict[str, Any] | None:
+    """把外部 spec 规范化为 OpenAI function 定义。"""
+    if not isinstance(spec, dict):
+        return None
+    raw_function = spec.get("function")
+    if isinstance(raw_function, dict):
+        # 允许直接传完整定义 {"type": "function", "function": {...}}
+        function = dict(raw_function)
+        function.setdefault("name", tool_name)
+        function.setdefault("description", "")
+        if not isinstance(function.get("parameters"), dict):
+            function["parameters"] = {"type": "object", "properties": {}}
+        return {"type": "function", "function": function}
+
+    parameters = spec.get("parameters")
+    if not isinstance(parameters, dict):
+        parameters = {"type": "object", "properties": {}}
+    return {
+        "type": "function",
+        "function": {
+            "name": tool_name,
+            "description": str(spec.get("description") or ""),
+            "parameters": parameters,
+        },
+    }
+
+
+def _handler_accepts_context(handler: Any) -> bool:
+    """判断 handler 是否接受第二个参数（工具上下文）。"""
+    try:
+        signature = inspect.signature(handler)
+    except (TypeError, ValueError):
+        return False
+    positional = 0
+    for parameter in signature.parameters.values():
+        if parameter.kind is inspect.Parameter.VAR_POSITIONAL:
+            return True
+        if parameter.kind in (
+            inspect.Parameter.POSITIONAL_ONLY,
+            inspect.Parameter.POSITIONAL_OR_KEYWORD,
+        ):
+            positional += 1
+    return positional >= 2
+
+
+def register_external_tool(
+    name: str,
+    spec: dict[str, Any],
+    handler: Any,
+    *,
+    source: str,
+    read_only: bool = False,
+) -> bool:
+    """注册一个运行时外部工具，返回是否注册成功。
+
+    Args:
+        name: 工具名（同时用于模型调用）
+        spec: {"description": str, "parameters": dict} 或完整 function 定义
+        handler: handler(args) 或 handler(args, context)，可返回协程
+        source: 来源标识，如 "plugin:<id>"，供批量注销使用
+        read_only: 是否只读（只读工具会并发执行，写工具串行）
+    """
+    global _EXTERNAL_TOOLS_VERSION
+
+    tool_name = str(name or "").strip()
+    source_id = str(source or "").strip()
+    if not tool_name or not _EXTERNAL_TOOL_NAME_RE.match(tool_name):
+        _log.warning("[Tools] 外部工具名非法: %r (source=%s)", name, source_id)
+        return False
+    if tool_name.startswith(_EXTERNAL_RESERVED_PREFIXES):
+        _log.warning("[Tools] 外部工具名占用保留前缀: %s", tool_name)
+        return False
+    if not source_id:
+        _log.warning("[Tools] 外部工具缺少 source: %s", tool_name)
+        return False
+    if not callable(handler):
+        _log.warning("[Tools] 外部工具 handler 不可调用: %s (source=%s)", tool_name, source_id)
+        return False
+
+    definition = _build_external_definition(tool_name, spec)
+    if definition is None:
+        _log.warning("[Tools] 外部工具 spec 非法: %s (source=%s)", tool_name, source_id)
+        return False
+
+    read_only_flag = bool(read_only or (isinstance(spec, dict) and spec.get("read_only")))
+
+    with _EXTERNAL_TOOLS_LOCK:
+        existing = _EXTERNAL_TOOLS.get(tool_name)
+        if existing is not None and existing["source"] != source_id:
+            _log.warning(
+                "[Tools] 外部工具重名，拒绝注册: %s 已属于 %s，来自 %s",
+                tool_name,
+                existing["source"],
+                source_id,
+            )
+            return False
+        if existing is None and _external_name_taken_by_builtin(tool_name):
+            _log.warning(
+                "[Tools] 外部工具与内置工具重名，拒绝注册: %s (source=%s)",
+                tool_name,
+                source_id,
+            )
+            return False
+        _EXTERNAL_TOOLS[tool_name] = {
+            "name": tool_name,
+            "definition": definition,
+            "handler": handler,
+            "source": source_id,
+            "read_only": read_only_flag,
+            "accepts_context": _handler_accepts_context(handler),
+            "registered_at": time.time(),
+        }
+        _EXTERNAL_TOOLS_VERSION += 1
+
+    _log.info(
+        "[Tools] 已注册外部工具: %s (source=%s, read_only=%s)",
+        tool_name,
+        source_id,
+        read_only_flag,
+    )
+    return True
+
+
+def unregister_external_tool(name: str, *, source: str) -> bool:
+    """注销指定来源的外部工具；来源不匹配时拒绝删除。"""
+    global _EXTERNAL_TOOLS_VERSION
+
+    tool_name = str(name or "").strip()
+    source_id = str(source or "").strip()
+    with _EXTERNAL_TOOLS_LOCK:
+        existing = _EXTERNAL_TOOLS.get(tool_name)
+        if existing is None or existing["source"] != source_id:
+            return False
+        del _EXTERNAL_TOOLS[tool_name]
+        _EXTERNAL_TOOLS_VERSION += 1
+    _log.info("[Tools] 已注销外部工具: %s (source=%s)", tool_name, source_id)
+    return True
+
+
+def unregister_source(source: str) -> int:
+    """批量注销某个来源的全部外部工具，返回注销数量。"""
+    global _EXTERNAL_TOOLS_VERSION
+
+    source_id = str(source or "").strip()
+    if not source_id:
+        return 0
+    with _EXTERNAL_TOOLS_LOCK:
+        names = [
+            tool_name
+            for tool_name, entry in _EXTERNAL_TOOLS.items()
+            if entry["source"] == source_id
+        ]
+        for tool_name in names:
+            del _EXTERNAL_TOOLS[tool_name]
+        if names:
+            _EXTERNAL_TOOLS_VERSION += 1
+    if names:
+        _log.info("[Tools] 已批量注销 %d 个外部工具 (source=%s)", len(names), source_id)
+    return len(names)
+
+
+def get_external_tool_entry(tool_name: str) -> dict[str, Any] | None:
+    """获取外部工具注册项（含 handler），不存在返回 None。"""
+    with _EXTERNAL_TOOLS_LOCK:
+        entry = _EXTERNAL_TOOLS.get(str(tool_name or "").strip())
+        return dict(entry) if entry else None
+
+
+def list_external_tools() -> list[dict[str, Any]]:
+    """列出当前全部外部工具（不含 handler）。"""
+    with _EXTERNAL_TOOLS_LOCK:
+        return [
+            {
+                "name": entry["name"],
+                "source": entry["source"],
+                "read_only": entry["read_only"],
+                "description": entry["definition"].get("function", {}).get("description", ""),
+            }
+            for entry in _EXTERNAL_TOOLS.values()
+        ]
+
+
+def get_external_tool_definitions() -> list[dict[str, Any]]:
+    """获取外部工具的 OpenAI 定义列表（浅拷贝，避免外部修改注册表）。"""
+    with _EXTERNAL_TOOLS_LOCK:
+        return [dict(entry["definition"]) for entry in _EXTERNAL_TOOLS.values()]
+
+
+def get_external_tools_version() -> int:
+    """外部工具注册表版本号，注册/注销时自增（可用于工具快照失效判断）。"""
+    return _EXTERNAL_TOOLS_VERSION
+
+
+def _run_awaitable_blocking(awaitable: Any) -> Any:
+    """在同步上下文中执行协程；已有运行中的事件循环时换线程跑。"""
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(awaitable)
+
+    box: dict[str, Any] = {}
+
+    def _target() -> None:
+        try:
+            box["value"] = asyncio.run(awaitable)
+        except BaseException as exc:  # noqa: BLE001 - 需把异常带回调用线程
+            box["error"] = exc
+
+    thread = threading.Thread(target=_target, daemon=True, name="external-tool-await")
+    thread.start()
+    thread.join()
+    if "error" in box:
+        raise box["error"]
+    return box.get("value")
+
+
+def _normalize_external_result(outcome: Any) -> dict[str, Any]:
+    """把 handler 返回值规范化为工具结果字典。"""
+    if isinstance(outcome, dict):
+        return outcome
+    if outcome is None:
+        return {"success": True, "content": ""}
+    if isinstance(outcome, str):
+        return {"success": True, "content": outcome}
+    return {"success": True, "result": outcome}
+
+
+def execute_external_tool(
+    tool_name: str,
+    arguments: dict[str, Any],
+    context: dict | None = None,
+) -> dict[str, Any] | None:
+    """执行外部工具；工具未注册返回 None（交回统一入口继续兜底）。"""
+    entry = get_external_tool_entry(tool_name)
+    if entry is None:
+        return None
+
+    args = dict(arguments) if isinstance(arguments, dict) else {}
+    try:
+        if entry["accepts_context"]:
+            outcome = entry["handler"](args, context)
+        else:
+            outcome = entry["handler"](args)
+        if inspect.isawaitable(outcome):
+            outcome = _run_awaitable_blocking(outcome)
+    except Exception as exc:  # 外部工具异常不能打断工具循环
+        _log.error(
+            "[Tools] 外部工具执行失败: %s (source=%s): %s",
+            entry["name"],
+            entry["source"],
+            exc,
+            exc_info=True,
+        )
+        return {
+            "success": False,
+            "error": str(exc),
+            "tool": entry["name"],
+            "source": entry["source"],
+        }
+    return _normalize_external_result(outcome)
+
+
+def _register_spec_entry(spec_entry: dict[str, Any]) -> bool:
+    """按 _EXTERNAL_TOOL_SPECS 的声明注册回退工具。"""
+    module_path = spec_entry["module"]
+    tool_name = spec_entry["name"]
+    try:
+        module = importlib.import_module(module_path)
+    except Exception as exc:
+        _log.debug("[Tools] 工具提供者尚未就绪: %s (%s)", module_path, exc)
+        return False
+    handler = getattr(module, spec_entry["handler"], None)
+    if not callable(handler):
+        _log.debug(
+            "[Tools] 提供者 %s 未暴露 %s，跳过注册 %s",
+            module_path,
+            spec_entry["handler"],
+            tool_name,
+        )
+        return False
+    if get_external_tool_entry(tool_name) is not None:
+        return True  # 提供者已自行注册，优先保留
+    return register_external_tool(
+        tool_name,
+        spec_entry["definition"],
+        handler,
+        source=spec_entry["source"],
+        read_only=bool(spec_entry.get("read_only")),
+    )
+
+
+def load_tool_providers(force: bool = False) -> int:
+    """加载外部工具提供者模块并触发注册，返回本次新加载的模块数。"""
+    loaded = 0
+    for module_path in TOOL_PROVIDER_MODULES:
+        if module_path in _LOADED_TOOL_PROVIDERS and not force:
+            continue
+        try:
+            module = importlib.import_module(module_path)
+        except Exception as exc:
+            _log.debug("[Tools] 工具提供者未就绪: %s (%s)", module_path, exc)
+            continue
+        _LOADED_TOOL_PROVIDERS.add(module_path)
+        loaded += 1
+        registrar = getattr(module, "register_tools", None)
+        if callable(registrar):
+            try:
+                registrar(register_external_tool)
+                continue
+            except Exception as exc:
+                _log.warning("[Tools] 提供者 %s 注册失败: %s", module_path, exc)
+
+    for spec_entry in _EXTERNAL_TOOL_SPECS:
+        try:
+            _register_spec_entry(spec_entry)
+        except Exception as exc:
+            _log.warning("[Tools] 回退注册失败: %s (%s)", spec_entry.get("name"), exc)
+    return loaded
+
+
+# --- 只读判定：供工具循环决定并发还是串行 -------------------------------------
+
+_READ_ONLY_TOOL_NAMES = frozenset(
+    {
+        # 内置只读工具
+        "search_news",
+        "get_weather",
+        "search_web",
+        "get_date_time",
+        "http_get",
+        "understand_image",
+        "read_memory",
+        "get_session_thinking_history",
+        # 工作区只读工具
+        "workspace_read_file",
+        "workspace_list_files",
+        "workspace_file_info",
+        "workspace_parse_file",
+        # Skills / 贴纸只读工具
+        "skill_list",
+        "skill_view",
+        "skill_read",
+        "skill_get_info",
+        "list_stickers",
+        "view_sticker",
+    }
+)
+
+_READ_ONLY_TOOL_PREFIXES = (
+    "read_",
+    "list_",
+    "get_",
+    "search_",
+    "find_",
+    "view_",
+    "describe_",
+)
+
+
+def is_read_only_tool(tool_name: str, arguments: dict[str, Any] = None) -> bool:
+    """判断工具是否只读（无副作用），用于工具循环的并发/串行分批。
+
+    未知工具一律按“有副作用”处理，宁可串行也不要乱序执行。
+    """
+    name = str(tool_name or "").strip()
+    if not name:
+        return False
+
+    entry = get_external_tool_entry(name)
+    if entry is not None:
+        return bool(entry.get("read_only"))
+
+    if name in _READ_ONLY_TOOL_NAMES:
+        return True
+    if name in SEARCH_TOOL_NAME_SET:
+        return True
+    if name.startswith("mcp__"):
+        # MCP 工具按其注解 readOnlyHint 判定，未声明按有副作用串行
+        try:
+            from nbot.services.mcp_bridge import get_mcp_bridge
+
+            return bool(get_mcp_bridge().is_tool_read_only(name))
+        except Exception:
+            return False
+    # 工作区写 / Todo / 交互类工具默认串行
+    if name.startswith(("workspace_", "todo_")):
+        return False
+    return name.startswith(_READ_ONLY_TOOL_PREFIXES)
 
 
 # 工具定义（用于 AI 工具调用）
@@ -1960,6 +2543,14 @@ def get_all_tool_definitions(include_workspace: bool = True) -> List[Dict]:
 
     if include_workspace:
         tools.extend(WORKSPACE_TOOL_DEFINITIONS)
+        tools.extend(get_search_tool_schemas())
+
+    # 外部注册的工具（插件 plugin_use、多模态 generate_image 等，纯运行时）
+    try:
+        load_tool_providers()
+    except Exception as e:
+        _log.warning(f"[Tools] 外部工具提供者加载失败: {e}")
+    tools.extend(get_external_tool_definitions())
     return tools
 
 
@@ -1975,6 +2566,7 @@ def execute_tool(tool_name: str, arguments: Dict[str, Any], context: Dict = None
     执行优先级：
         1. workspace_* 工具（基于 session_id 隔离的工作区）
         2. tool_registry 装饰器注册的工具（如 skills_tools、todo_tools）
+        2.5 外部注册的工具（register_external_tool：插件、多模态等）
         3. save_to_memory / read_memory 记忆工具
         4. mcp__ 前缀的 MCP 远程工具
         5. Web 配置中的动态工具（DynamicExecutor 执行）
@@ -1992,6 +2584,10 @@ def execute_tool(tool_name: str, arguments: Dict[str, Any], context: Dict = None
     if tool_name.startswith("workspace_"):
         return _execute_workspace_tool(tool_name, arguments, context)
 
+    # 0.1 检索类工具（search_files / find_files / web_fetch）
+    if tool_name in SEARCH_TOOL_NAME_SET:
+        return execute_search_tool(tool_name, arguments, context)
+
     # 1. 优先从注册表获取（使用装饰器注册的工具）
     from nbot.services.tool_registry import get_registry
     registry = get_registry()
@@ -2002,6 +2598,11 @@ def execute_tool(tool_name: str, arguments: Dict[str, Any], context: Dict = None
         except Exception as e:
             _log.error(f"Tool execution error: {tool_name} - {e}")
             return {"success": False, "error": str(e)}
+
+    # 1.5 外部注册的工具（插件 / 多模态等，register_external_tool 注册）
+    external_result = execute_external_tool(tool_name, arguments, context)
+    if external_result is not None:
+        return external_result
 
     # 2. 处理 Todo 工具（优先于 Web 配置检查）
     if tool_name.startswith("todo_"):
@@ -2018,12 +2619,28 @@ def execute_tool(tool_name: str, arguments: Dict[str, Any], context: Dict = None
     # 3.5 MCP 工具（mcp__<server>__<tool> 格式）
     if tool_name.startswith("mcp__"):
         try:
-            from nbot.services.mcp_bridge import get_mcp_bridge
+            from nbot.services.mcp_bridge import (
+                DEFAULT_CALL_TIMEOUT,
+                MCPCallTimeout,
+                get_mcp_bridge,
+            )
+        except ImportError as e:
+            return {"success": False, "error": f"MCP bridge 不可用: {e}"}
+        try:
             bridge = get_mcp_bridge()
-            result = bridge.run_async(bridge.execute_by_full_name(tool_name, arguments))
+            # 内层 wait_for 负责超时取消 + 断连；外层只是最终兜底
+            result = bridge.run_async(
+                bridge.execute_by_full_name(
+                    tool_name, arguments, timeout=DEFAULT_CALL_TIMEOUT
+                ),
+                timeout=DEFAULT_CALL_TIMEOUT + 5,
+            )
             if isinstance(result, dict):
                 return result
             return {"success": True, "result": result}
+        except MCPCallTimeout as e:
+            _log.error(f"MCP tool timeout: {tool_name} - {e}")
+            return {"success": False, "error": str(e), "timeout": True}
         except Exception as e:
             _log.error(f"MCP tool execution error: {tool_name} - {e}")
             return {"success": False, "error": str(e)}

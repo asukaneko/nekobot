@@ -1,7 +1,9 @@
 import logging
 from datetime import datetime
+from typing import Any
 
 from flask import jsonify, request
+
 from nbot.core.knowledge import TextProcessor
 
 _log = logging.getLogger(__name__)
@@ -348,7 +350,7 @@ def register_knowledge_routes(app, server):
 
     @app.route("/api/knowledge/search", methods=["POST"])
     def search_knowledge():
-        """搜索知识库"""
+        """搜索知识库（带 citations 引用信息）"""
         if not getattr(server, "KNOWLEDGE_MANAGER_AVAILABLE", False):
             return jsonify(
                 {"success": False, "error": "Knowledge manager not available"}
@@ -362,7 +364,26 @@ def register_knowledge_routes(app, server):
                 return jsonify({"success": False, "error": "Query is required"}), 400
 
             km = server.get_knowledge_manager()
-            results = km.search(query, top_k=top_k)
+
+            def _flag(name):
+                value = data.get(name)
+                return None if value is None else bool(value)
+
+            options: dict[str, Any] = {}
+            if data.get("lambda_param") is not None:
+                # MMR 相关度权重（0~1），越大多样性越强
+                options["lambda_param"] = data["lambda_param"]
+
+            payload = km.search_with_citations(
+                query,
+                base_id=data.get("base_id") or None,
+                top_k=top_k,
+                rerank=_flag("rerank"),
+                mmr=_flag("mmr"),
+                candidates=data.get("candidates"),
+                max_per_doc=int(data.get("max_per_doc") or 1),
+                **options,
+            )
 
             return jsonify({
                 "success": True,
@@ -373,8 +394,10 @@ def register_knowledge_routes(app, server):
                         "similarity": round(sim, 4),
                         "chunk": chunk[:200] + "..." if len(chunk) > 200 else chunk,
                     }
-                    for doc, sim, chunk in results
-                ]
+                    for doc, sim, chunk in payload["results"]
+                ],
+                "citations": payload["citations"],
+                "meta": payload["meta"],
             })
         except Exception as e:
             _log.error(f"Search failed: {e}")

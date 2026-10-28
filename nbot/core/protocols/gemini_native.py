@@ -23,6 +23,7 @@ from nbot.core.model_adapter import (
     repair_mojibake_text,
 )
 from nbot.core.protocols.base import ModelProtocol
+from nbot.core.sampling import normalize_temperature, normalize_top_p, resolve_token_limit
 
 # Gemini API 不支持的 JSON Schema 扩展字段
 # additionalProperties 会被 Gemini 拒绝：
@@ -129,13 +130,31 @@ class GeminiNativeProtocol(ModelProtocol):
         if system_instruction:
             payload["systemInstruction"] = system_instruction
 
-        gen_config: Dict[str, Any] = {"maxOutputTokens": max_tokens}
-        if extra_body:
-            for key in ("temperature", "topP", "topK", "candidateCount",
-                        "stopSequences", "responseMimeType", "responseSchema"):
-                if key in extra_body:
-                    gen_config[key] = extra_body[key]
-        payload["generationConfig"] = gen_config
+        extra = dict(extra_body) if extra_body else {}
+        gen_config: Dict[str, Any] = {}
+        token_limit = resolve_token_limit(extra, max_tokens)
+        if token_limit:
+            gen_config["maxOutputTokens"] = token_limit
+        # 采样参数：Gemini 使用驼峰 temperature / topP / topK
+        temperature = normalize_temperature(extra.get("temperature"))
+        if temperature is not None:
+            gen_config["temperature"] = temperature
+        top_p = normalize_top_p(extra.get("top_p", extra.get("topP")))
+        if top_p is not None:
+            gen_config["topP"] = top_p
+        for key in ("topK", "candidateCount", "responseMimeType", "responseSchema"):
+            if key in extra:
+                gen_config[key] = extra[key]
+        top_k = extra.get("top_k")
+        if "topK" not in gen_config and isinstance(top_k, int) and not isinstance(top_k, bool):
+            if top_k > 0:
+                gen_config["topK"] = top_k
+        # 停止字符串：Gemini 协议使用 generationConfig.stopSequences
+        stops = extra.get("stop") or extra.get("stopSequences")
+        if stops:
+            gen_config["stopSequences"] = stops
+        if gen_config:
+            payload["generationConfig"] = gen_config
 
         if tools:
             payload["tools"] = self._convert_tools(tools)

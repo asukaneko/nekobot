@@ -1,5 +1,5 @@
 // NekoBot Service Worker
-const CACHE_NAME = 'nekobot-v20260725-oauth-icons';
+const CACHE_NAME = 'nekobot-v20261028-review-fixes-v2';
 const STATIC_ASSETS = [
     '/',
     '/static/css/app.css',

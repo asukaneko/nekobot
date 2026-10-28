@@ -930,48 +930,126 @@ const NbotMethods = {
                     return tokenCount;
                 },
 
+                // 上下文统计只以服务端 /context-stats 为唯一口径。
+                // 旧实现同时维护"本地估算"和"服务端统计"两套数字：先写本地值，400ms 后
+                // 被服务端值覆盖，而 2s 轮询又会再次写本地值 —— 于是消息数/字符数在 ±1
+                // 之间反复跳动；空会话还会让 contextBreakdown 在 null 与数据之间来回切换，
+                // 导致详情列表"消失 → 出现"循环。
+                resetContextStats() {
+                    this.contextCharCount = 0;
+                    this.contextTokenEstimate = 0;
+                    this.contextUsage = 0;
+                    this.contextMessageCount = 0;
+                    this.contextBreakdown = null;
+                    this._contextStatsSignature = '';
+                    this._contextStatsSessionId = '';
+                },
+
+                // 内容指纹：只有消息/提示词/模型上限变化时才重新统计
+                buildContextStatsSignature() {
+                    const session = this.currentSession;
+                    if (!session?.id) return '';
+                    const messages = this.getContextStatMessages();
+                    const head = messages[0] || null;
+                    const tail = messages.length ? messages[messages.length - 1] : null;
+                    const brief = (msg) => (
+                        msg ? `${msg.id || ''}:${(msg.content || '').length}` : ''
+                    );
+                    return [
+                        session.id,
+                        messages.length,
+                        brief(head),
+                        brief(tail),
+                        (session.system_prompt || '').length,
+                        session.session_mode || '',
+                        this.aiConfig?.max_context_length || ''
+                    ].join('|');
+                },
+
                 updateContextStats() {
-                    const contextMessages = this.getContextStatMessages();
-                    if (!this.currentSession || !contextMessages.length) {
-                        this.contextCharCount = 0;
-                        this.contextTokenEstimate = 0;
-                        this.contextUsage = 0;
-                        this.contextMessageCount = 0;
+                    if (!this.currentSession?.id) {
+                        this.resetContextStats();
                         return;
                     }
-                    
-                    // 计算总字符数
-                    this.contextMessageCount = contextMessages.length;
+                    // 切换会话：先清空，避免显示上一个会话的数字
+                    if (this._contextStatsSessionId !== this.currentSession.id) {
+                        this.resetContextStats();
+                        this._contextStatsSessionId = this.currentSession.id;
+                    }
+                    const signature = this.buildContextStatsSignature();
+                    if (signature && signature === this._contextStatsSignature) {
+                        // 内容没变：保持当前展示，不再请求，也不会把面板清空
+                        return;
+                    }
+                    this.scheduleContextBreakdownRefresh(signature);
+                },
 
-                    this.contextCharCount = contextMessages.reduce((total, msg) => {
-                        const content = typeof msg.content === 'string' ? msg.content : '';
-                        const role = msg.role || '';
-                        return total + role.length + content.length;
-                    }, 0);
-                    
-                    // 粗略估算token数 (中文字符约2个token，英文约0.75个)
-                    this.contextTokenEstimate = Math.ceil(
-                        this.currentMessages.reduce((total, msg) => {
-                            const content = typeof msg.content === 'string' ? msg.content : '';
-                            // 简单估算：每4个字符约等于1个token
-                            return total + Math.ceil(content.length / 4);
-                        }, 0)
-                    );
-                    
-                    // 计算使用百分比（基于 Token 数量，使用 max_context_length 作为限制）
-                    this.contextTokenEstimate = contextMessages.reduce(
-                        (total, msg) => total + this.estimateMessageTokens(msg),
-                        0
-                    );
+                // 上下文 7 类占比：后端统一口径（系统提示词/工具定义/压缩摘要/
+                // 用户消息/助手消息/工具轨迹/其他），行相加 = 总量
+                scheduleContextBreakdownRefresh(signature) {
+                    if (!this.currentSession?.id) return;
+                    if (this._contextBreakdownTimer) {
+                        clearTimeout(this._contextBreakdownTimer);
+                    }
+                    const sessionId = this.currentSession.id;
+                    const pendingSignature = signature || this.buildContextStatsSignature();
+                    this._contextBreakdownTimer = setTimeout(async () => {
+                        this._contextBreakdownTimer = null;
+                        if (!this.currentSession || this.currentSession.id !== sessionId) return;
+                        try {
+                            const res = await api.get(`/api/sessions/${sessionId}/context-stats`);
+                            if (!res.data?.success) return;
+                            if (!this.currentSession || this.currentSession.id !== sessionId) return;
+                            const b = res.data;
+                            this.contextBreakdown = { sessionId, categories: b.categories, total: b.total };
+                            this.contextCharCount = b.total.chars;
+                            this.contextTokenEstimate = b.total.tokens;
+                            this.contextMessageCount = b.total.messages;
+                            const maxTokens = b.max_context_length || this.aiConfig.max_context_length || 100000;
+                            this.contextUsage = Math.min(100, (b.total.tokens / maxTokens) * 100);
+                            this._contextStatsSignature = pendingSignature;
+                        } catch (e) {
+                            // 统计失败：保留当前展示，下次内容变化时再重试
+                        }
+                    }, 300);
+                },
 
-                    const maxTokens = this.aiConfig.max_context_length || 100000;
-                    const estimatedTokens = this.contextTokenEstimate || 0;
-                    this.contextUsage = Math.min(100, (estimatedTokens / maxTokens) * 100);
+                // 有占比的类别（过滤空行，避免空会话出现一排 0）
+                contextBreakdownRows() {
+                    const b = this.contextBreakdown;
+                    if (!b || !b.categories) return [];
+                    return Object.entries(b.categories)
+                        .map(([key, c]) => ({
+                            key,
+                            label: c.label || key,
+                            tokens: c.tokens || 0,
+                            chars: c.chars || 0,
+                            percent: b.total?.tokens ? Math.round((c.tokens || 0) / b.total.tokens * 100) : 0
+                        }))
+                        .filter(row => row.tokens > 0 || row.chars > 0);
                 },
 
                 toggleContextTooltip() {
                     // 移动端点击上下文指示器切换详情面板
                     this.showContextTooltip = !this.showContextTooltip;
+                },
+
+                // Agent 提问弹窗：提交回答（作为普通消息发送，服务端恢复等待）
+                submitAskUserAnswer() {
+                    if (!this.askUserDialog) return;
+                    const answer = (this.askUserAnswer || '').trim();
+                    if (!answer) {
+                        this.showToast('请输入回答', 'warning');
+                        return;
+                    }
+                    this.askUserDialog = null;
+                    this.inputMessage = answer;
+                    this.$nextTick(() => this.sendMessage());
+                },
+
+                dismissAskUserDialog() {
+                    this.askUserDialog = null;
+                    this.askUserAnswer = '';
                 },
 
                 async compressContext() {
@@ -1238,6 +1316,8 @@ const NbotMethods = {
                     }
 
                     this.currentPage = page;
+                    // 离开世界页时退出 socket 房间，避免继续收事件
+                    if (page !== 'worlds') this.leaveWorldSocket();
                     if (this.isChatOnlyMode) {
                         localStorage.setItem('nbot_home_page', 'chat');
                     } else {
@@ -1816,7 +1896,7 @@ const NbotMethods = {
                             supports_reasoning: true,
                             supports_stream: true,
                             temperature: 0.7,
-                            max_tokens: 2000,
+                            max_tokens: 8192,
                             max_context_length: 100000
                         });
                         const modelId = res.data?.model?.id || res.data?.id;
@@ -1955,6 +2035,9 @@ const NbotMethods = {
                                 this.loadCommandCatalog()
                             ]);
                             break;
+                        case 'export-center':
+                            await this.loadExportCategories();
+                            break;
                         case 'workflows':
                             await this.loadWorkflows();
                             break;
@@ -1999,6 +2082,28 @@ const NbotMethods = {
                         case 'world-book':
                             await this.loadWorldBooks();
                             break;
+                        case 'prompt-manager':
+                            await this.loadPromptPresets();
+                            await this.loadPromptBindings();
+                            break;
+                        case 'worlds':
+                            this.initWorldSocket();
+                            await this.loadWorlds();
+                            this.joinWorldSocket();
+                            break;
+                        case 'plugins':
+                            await this.loadPlugins();
+                            break;
+                        case 'webdav-versions':
+                            await this.loadWebdavConfig();
+                            await this.loadWebdavRevisions();
+                            break;
+                        case 'realtime':
+                            await this.loadRealtimePanel();
+                            break;
+                        case 'image-lab':
+                            await this.refreshImageLab();
+                            break;
                         case 'ai-config':
                             await this.loadAIConfig();
                             await this.loadAIModels();
@@ -2039,6 +2144,7 @@ const NbotMethods = {
                             await this.loadHookList();
                             this.reviewTab = this.reviewTab || 'events';
                             await this.loadReviewEvents();
+                            await this.loadReviewSettings();
                             break;
                         case 'message-filter':
                             await this.loadChannels();
@@ -2051,6 +2157,12 @@ const NbotMethods = {
                             break;
                         case 'login-tokens':
                             await this.loadLoginTokens();
+                            break;
+                        case 'achievements':
+                            await this.loadAchievements();
+                            break;
+                        case 'routing':
+                            await this.loadAllRouting();
                             break;
                     }
                 },
@@ -2100,20 +2212,23 @@ const NbotMethods = {
                 async initCharts() {
                     this.$nextTick(async () => {
                         if (this.$refs.trendChart) {
-                            this.trendChart = echarts.init(this.$refs.trendChart);
+                            this.trendChart = Vue.markRaw(echarts.init(this.$refs.trendChart));
                             await this.updateTrendChart();
                         }
                         if (this.$refs.platformChart) {
-                            this.platformChart = echarts.init(this.$refs.platformChart);
+                            this.platformChart = Vue.markRaw(echarts.init(this.$refs.platformChart));
                             await this.updatePlatformChart();
                         }
                     });
                 },
                 
                 async updateTrendChart() {
-                    if (!this.trendChart) return;
+                    const chart = this.trendChart;
+                    if (!chart || chart.isDisposed()) return;
                     
                     const data = await this.fetchTrendData();
+                    if (this.trendChart !== chart || chart.isDisposed()
+                        || this.$refs.trendChart !== chart.getDom()) return;
                     const option = {
                         backgroundColor: 'transparent',
                         tooltip: {
@@ -2172,16 +2287,19 @@ const NbotMethods = {
                             data: data.values
                         }]
                     };
-                    this.trendChart.setOption(option);
+                    chart.setOption(option);
                     this.$nextTick(() => {
-                        if (this.trendChart) this.trendChart.resize();
+                        if (this.trendChart === chart && !chart.isDisposed()) chart.resize();
                     });
                 },
                 
                 async updatePlatformChart() {
-                    if (!this.platformChart) return;
+                    const chart = this.platformChart;
+                    if (!chart || chart.isDisposed()) return;
                     
                     const data = await this.fetchPlatformData();
+                    if (this.platformChart !== chart || chart.isDisposed()
+                        || this.$refs.platformChart !== chart.getDom()) return;
                     const option = {
                         backgroundColor: 'transparent',
                         tooltip: {
@@ -2224,7 +2342,7 @@ const NbotMethods = {
                             data: data
                         }]
                     };
-                    this.platformChart.setOption(option);
+                    chart.setOption(option);
                 },
                 
                 async fetchTrendData() {
@@ -2299,6 +2417,11 @@ const NbotMethods = {
                     } else {
                         document.documentElement.removeAttribute('data-theme');
                     }
+                    // Mermaid SVG 的颜色在生成时固定，主题切换后需要重绘
+                    if (this.themeSettings.mode !== this._mermaidTheme) {
+                        this._mermaidTheme = this.themeSettings.mode;
+                        this.$nextTick(() => this.resetMermaidBlocks());
+                    }
 
                     // 应用主题颜色
                     const primaryColor = this.themeSettings.primaryColor;
@@ -2317,9 +2440,11 @@ const NbotMethods = {
                         body.classList.add('has-bg-image');
                         body.style.setProperty('--bg-image', `url(${this.themeSettings.bgImage})`);
                         const opacity = this.themeSettings.bgOpacity / 100;
+                        // 遮罩下限：保证图片不会强到"透穿"文字；滑块仍可在 38%~92% 调节
+                        const overlayAlpha = Math.min(0.92, Math.max(0.38, opacity));
                         const overlayColor = this.themeSettings.mode === 'light'
-                            ? `rgba(245, 247, 251, ${Math.min(0.82, opacity)})`
-                            : `rgba(13, 17, 23, ${opacity})`;
+                            ? `rgba(245, 247, 251, ${Math.max(0.55, overlayAlpha)})`
+                            : `rgba(13, 17, 23, ${overlayAlpha})`;
                         body.style.setProperty('--bg-overlay', overlayColor);
                     } else {
                         body.classList.remove('has-bg-image');
@@ -2328,10 +2453,14 @@ const NbotMethods = {
                     }
 
                     // 应用卡片透明度
+                    // 启用背景图时钳制下限 0.88：卡片本身就是承载正文的表面，
+                    // 低于该值会让图片纹理直接透到文字后面（历史可读性问题的主因）。
                     const cardOpacity = this.themeSettings.cardOpacity / 100;
+                    const hasBgImage = !!this.themeSettings.bgImage;
+                    const safeCardOpacity = hasBgImage ? Math.max(0.88, cardOpacity) : cardOpacity;
                     const cardBg = this.themeSettings.mode === 'light'
-                        ? `rgba(255, 255, 255, ${Math.max(0.82, cardOpacity)})`
-                        : `rgba(22, 27, 34, ${cardOpacity})`;
+                        ? `rgba(255, 255, 255, ${Math.max(0.9, safeCardOpacity)})`
+                        : `rgba(22, 27, 34, ${safeCardOpacity})`;
                     root.style.setProperty('--bg-card', cardBg);
 
                     // 更新图表颜色
@@ -2454,7 +2583,7 @@ const NbotMethods = {
                 },
 
                 updateChartColors() {
-                    if (this.trendChart) {
+                    if (this.trendChart && this.trendChart.getOption()?.series?.length) {
                         this.trendChart.setOption({
                             series: [{
                                 itemStyle: { color: this.themeSettings.primaryColor },
@@ -2769,6 +2898,7 @@ const NbotMethods = {
                     if (typeof this.personalityTimelineLoading !== 'boolean') this.personalityTimelineLoading = false;
                     if (!('personalityTimelinePlayTimer' in this)) this.personalityTimelinePlayTimer = null;
                     if (!('personalityTimelineChart' in this)) this.personalityTimelineChart = null;
+                    if (!('personalityTimelineSnapshotScope' in this)) this.personalityTimelineSnapshotScope = null;
                 },
 
                 getPersonalityTimelineSessionCharacter(session) {
@@ -2871,14 +3001,27 @@ const NbotMethods = {
                                 ? selectedSession.character_runtime_timeline
                                 : [];
                             const snapshotFallback = selectedSession.character_runtime_snapshot || null;
-                            const sessionTimeline = timeline.length
-                                ? timeline
-                                : (snapshotFallback ? [snapshotFallback] : []);
+                            // 优先读取频道态快照历史（states.json 只有最新值，历史在 state_history.json）
+                            const historyPoints = await this.fetchCharacterStateHistory(
+                                selectedSession.character_id,
+                                selectedSession.scope_id
+                            );
+                            const sessionTimeline = historyPoints.length
+                                ? historyPoints
+                                : (timeline.length ? timeline : (snapshotFallback ? [snapshotFallback] : []));
+                            this.personalityTimelineSnapshotScope = historyPoints.length
+                                ? {
+                                    characterId: selectedSession.character_id || '',
+                                    scopeId: selectedSession.scope_id || '',
+                                    count: historyPoints.length
+                                }
+                                : null;
                             this.personalityTimelineData = sessionTimeline.map(item => this.normalizePersonalityTimelinePoint(item));
                             this.personalityTimelineIndex = Math.max(0, this.personalityTimelineData.length - 1);
                             this.$nextTick(() => this.updatePersonalityTimelineChart());
                             return;
                         }
+                        this.personalityTimelineSnapshotScope = null;
 
                         const res = await api.get(`/api/sessions/${this.personalityTimelineSelectedSessionId}/runtime-timeline`);
                         const timeline = Array.isArray(res.data?.timeline) ? res.data.timeline : [];
@@ -2914,6 +3057,65 @@ const NbotMethods = {
                     } finally {
                         this.personalityTimelineLoading = false;
                     }
+                },
+
+                // 读取频道态状态快照历史（QQ/TG/飞书的 states.json 只有最新值）
+                async fetchCharacterStateHistory(characterId, scopeId, limit = 100) {
+                    if (!characterId || !scopeId) return [];
+                    try {
+                        const res = await api.get(
+                            `/api/characters/${encodeURIComponent(characterId)}/state/history`,
+                            { params: { scope_id: scopeId, limit } }
+                        );
+                        const snapshots = Array.isArray(res.data?.snapshots) ? res.data.snapshots : [];
+                        return snapshots.map(item => ({
+                            ...item,
+                            character_id: characterId,
+                            timestamp: item.ts || item.timestamp || ''
+                        }));
+                    } catch (e) {
+                        console.warn('加载状态快照历史失败:', e && (e.message || e));
+                        return [];
+                    }
+                },
+
+                // 把状态恢复到当前预览的节点
+                async restorePersonalityTimelineSnapshot() {
+                    const scope = this.personalityTimelineSnapshotScope;
+                    if (!scope || !scope.characterId || !scope.scopeId) {
+                        this.showToast('当前会话没有可恢复的快照', 'error');
+                        return;
+                    }
+                    const index = Number(this.personalityTimelineIndex) || 0;
+                    const point = this.personalityTimelineData[index] || {};
+                    const when = point.timestamp ? this.formatFullTime(point.timestamp) : `第 ${index + 1} 个节点`;
+                    this.showConfirm({
+                        title: '恢复状态快照',
+                        messageBefore: `确定把「${this.personalityTimelineCharacters.find(c => c.id === scope.characterId)?.name || scope.characterId}」的状态恢复到`,
+                        highlight: when,
+                        messageAfter: '吗？',
+                        impact: '角色心情、精力与六维关系会回滚到该时间点，后续对话从此状态继续。',
+                        confirmText: '恢复',
+                        onConfirm: async () => {
+                            this.isLoading = true;
+                            try {
+                                const res = await api.post(
+                                    `/api/characters/${encodeURIComponent(scope.characterId)}/state/restore`,
+                                    { scope_id: scope.scopeId, index }
+                                );
+                                if (res.data?.success) {
+                                    this.showToast('状态已恢复到所选节点', 'success');
+                                    await this.selectPersonalityTimelineSession(this.personalityTimelineSelectedSessionId);
+                                } else {
+                                    this.showToast(res.data?.error || '恢复失败', 'error');
+                                }
+                            } catch (e) {
+                                this.showToast('恢复失败: ' + (e.response?.data?.error || e.message), 'error');
+                            } finally {
+                                this.isLoading = false;
+                            }
+                        }
+                    });
                 },
 
                 normalizePersonalityTimelinePoint(point) {
@@ -4659,6 +4861,9 @@ def main(params):
                         max_injections_per_session: 0,
                         state_triggers: {},
                         tags: [],
+                        // 注入位置与深度
+                        position: '',
+                        depth: 4,
                         // UI checkbox helpers
                         _trigger_user: true,
                         _trigger_assistant: false,
@@ -4677,6 +4882,8 @@ def main(params):
                     e._trigger_assistant = sources.includes('assistant_recent');
                     e._trigger_history = sources.includes('history');
                     e._trigger_scene = sources.includes('scene_state');
+                    if (e.position === undefined || e.position === null) e.position = '';
+                    if (e.depth === undefined || e.depth === null) e.depth = 4;
                     this.editingWorldBookEntry = e;
                     this.newKeywordInput = '';
                     this.showWorldBookEntryModal = true;
@@ -4695,6 +4902,62 @@ def main(params):
                 closeEntryDetailModal() {
                     this.showWorldBookEntryDetailModal = false;
                     this.viewingWorldBookEntry = null;
+                },
+
+                // 世界书条目注入位置的展示文本
+                formatWorldBookPosition(entry) {
+                    const labels = {
+                        before_char: '角色设定之前',
+                        after_char: '角色设定之后',
+                        before_an: '对话末尾锚点前',
+                        after_an: '对话末尾锚点后',
+                        at_depth: '按深度插入'
+                    };
+                    const label = labels[entry.position] || entry.position;
+                    if (['before_an', 'after_an', 'at_depth'].includes(entry.position)) {
+                        return `${label} (深度 ${entry.depth ?? 4})`;
+                    }
+                    return label;
+                },
+
+                // 世界书命中调试：逐条解释命中 / 未命中 / 概率拦截原因
+                async runWorldBookDebug() {
+                    if (!this.worldBookDebugMessage || this.worldBookDebugLoading) return;
+                    this.worldBookDebugLoading = true;
+                    try {
+                        const payload = { message: this.worldBookDebugMessage };
+                        const characterId = String(this.worldBookDebugCharacter || '').trim();
+                        if (characterId) payload.character_id = characterId;
+                        const res = await api.post('/api/world-books/debug-match', payload);
+                        if (res.data?.success) {
+                            this.worldBookDebugResult = res.data;
+                            this.worldBookDebugFilter = 'all';
+                        } else {
+                            this.showToast(res.data?.error || '调试失败', 'error');
+                        }
+                    } catch (e) {
+                        this.showToast(e.response?.data?.error || '调试失败', 'error');
+                    } finally {
+                        this.worldBookDebugLoading = false;
+                    }
+                },
+
+                worldBookDebugBadgeClass(item) {
+                    if (!item) return 'is-missed';
+                    if (item.injected) return 'is-injected';
+                    if (item.probability_skipped) return 'is-probability';
+                    if (item.matched) return 'is-matched';
+                    if (!item.enabled) return 'is-disabled';
+                    return 'is-missed';
+                },
+
+                worldBookDebugBadgeText(item) {
+                    if (!item) return '未命中';
+                    if (item.injected) return '✓ 已注入';
+                    if (item.probability_skipped) return '命中但被概率拦截';
+                    if (item.matched) return '命中未注入';
+                    if (!item.enabled) return '条目已停用';
+                    return '未命中';
                 },
 
                 editFromDetail() {
@@ -4747,6 +5010,8 @@ def main(params):
                         state_triggers: entry.state_triggers || {},
                         tags: entry.tags || [],
                         max_injections_per_session: entry.max_injections_per_session || 0,
+                        position: entry.position || '',
+                        depth: (entry.depth === 0 || Number(entry.depth)) ? Number(entry.depth) : 4,
                     };
                     try {
                         if (entry.id) {
@@ -5161,6 +5426,162 @@ def main(params):
 
                 refreshTokenStats() {
                     this.loadTokenStats();
+                },
+
+                // ==================== 成就系统 ====================
+                async loadAchievements() {
+                    this.isLoading = true;
+                    try {
+                        const res = await api.get('/api/achievements');
+                        this.achievements = res.data.achievements || [];
+                        this.achievementsSummary = res.data.summary || { unlocked: 0, total: 0, percent: 0 };
+                        this.computeAchievementsByCategory();
+                    } catch (e) {
+                        this.showToast('加载成就失败: ' + (e.response?.data?.error || e.message), 'error');
+                    } finally {
+                        this.isLoading = false;
+                    }
+                },
+
+                computeAchievementsByCategory() {
+                    const map = {};
+                    for (const cat of (this.achievementsCategories || [])) {
+                        const items = (this.achievements || []).filter(a => a.category === cat.key);
+                        map[cat.key] = {
+                            total: items.length,
+                            unlocked: items.filter(a => a.unlocked).length
+                        };
+                    }
+                    this.achievementsByCategory = map;
+                },
+
+                async resetAchievements() {
+                    if (!confirm('确定要重置所有成就进度吗？此操作不可恢复。')) return;
+                    this.isLoading = true;
+                    try {
+                        await api.post('/api/achievements/reset');
+                        this.showToast('成就已重置', 'success');
+                        await this.loadAchievements();
+                    } catch (e) {
+                        this.showToast('重置失败: ' + (e.response?.data?.error || e.message), 'error');
+                    } finally {
+                        this.isLoading = false;
+                    }
+                },
+
+                formatCompactNumber(num) {
+                    const n = Number(num) || 0;
+                    if (n >= 100000000) return (n / 100000000).toFixed(1) + '亿';
+                    if (n >= 10000) return (n / 10000).toFixed(1) + '万';
+                    return n.toLocaleString('zh-CN');
+                },
+
+                // ==================== Review 复盘模式 ====================
+                async loadReviewSettings() {
+                    try {
+                        const res = await api.get('/api/review/settings');
+                        this.reviewMode = res.data.mode || 'rule';
+                    } catch (e) {
+                        console.error('Failed to load review settings:', e);
+                    }
+                },
+
+                async setReviewMode(mode) {
+                    this.reviewMode = mode;
+                    try {
+                        const res = await api.post('/api/review/settings', { mode });
+                        this.reviewMode = res.data.mode || mode;
+                        this.showToast(mode === 'llm' ? '已切换为 LLM 复盘（需要配置 chat 模型）' : '已切换为规则版复盘', 'success');
+                    } catch (e) {
+                        this.reviewMode = this.reviewMode === 'llm' ? 'rule' : 'llm';
+                        this.showToast('切换失败: ' + (e.response?.data?.error || e.message), 'error');
+                    }
+                },
+
+                // ==================== 智能路由 ====================
+                async loadAllRouting() {
+                    await Promise.all([
+                        this.loadRoutingSettings(),
+                        this.loadRoutingBudget(),
+                        this.loadRoutingAnalytics(),
+                        this.loadRoutingLogs(),
+                        this.loadRoutingChatModels()
+                    ]);
+                },
+
+                async loadRoutingSettings() {
+                    try {
+                        const res = await api.get('/api/smart-routing/settings');
+                        this.routingSettings = res.data.settings || this.routingSettings;
+                    } catch (e) {
+                        console.error('Failed to load routing settings:', e);
+                    }
+                },
+
+                async saveRoutingSettings() {
+                    this.isLoading = true;
+                    try {
+                        const res = await api.post('/api/smart-routing/settings', this.routingSettings);
+                        this.routingSettings = res.data.settings || this.routingSettings;
+                        this.showToast('智能路由设置已保存', 'success');
+                    } catch (e) {
+                        this.showToast('保存失败: ' + (e.response?.data?.error || e.message), 'error');
+                    } finally {
+                        this.isLoading = false;
+                    }
+                },
+
+                async toggleRoutingEnabled() {
+                    this.routingSettings.enabled = !this.routingSettings.enabled;
+                    await this.saveRoutingSettings();
+                },
+
+                async loadRoutingBudget() {
+                    try {
+                        const res = await api.get('/api/smart-routing/budget');
+                        this.routingBudget = res.data || {};
+                    } catch (e) {
+                        console.error('Failed to load routing budget:', e);
+                    }
+                },
+
+                async loadRoutingAnalytics() {
+                    try {
+                        const res = await api.get('/api/smart-routing/analytics');
+                        this.routingAnalytics = res.data || { models: {}, total_decisions: 0 };
+                    } catch (e) {
+                        console.error('Failed to load routing analytics:', e);
+                    }
+                },
+
+                async loadRoutingLogs() {
+                    try {
+                        const res = await api.get('/api/smart-routing/logs?limit=200');
+                        this.routingLogs = res.data.logs || [];
+                    } catch (e) {
+                        console.error('Failed to load routing logs:', e);
+                    }
+                },
+
+                async clearRoutingLogs() {
+                    if (!confirm('确定要清空所有路由决策日志吗？')) return;
+                    try {
+                        await api.post('/api/smart-routing/logs/clear');
+                        this.routingLogs = [];
+                        this.showToast('路由日志已清空', 'success');
+                    } catch (e) {
+                        this.showToast('清空失败: ' + (e.response?.data?.error || e.message), 'error');
+                    }
+                },
+
+                async loadRoutingChatModels() {
+                    try {
+                        const res = await api.get('/api/ai-models');
+                        const models = (res.data.models || []).filter(m => m.purpose === 'chat' && m.enabled !== false);
+                        this.routingChatModels = models;
+                    } catch (e) {
+                        console.error('Failed to load chat models for routing:', e);
+                    }
                 },
 
                 updateTokenTrendChart() {
@@ -6765,6 +7186,34 @@ def main(params):
                         [sessionId]: nextQueue
                     };
                     this.showToast('已移出待发送队列', 'success');
+                },
+
+                // 排队消息加急：中断当前生成并立即发送该条
+                async sendPendingMessageNow(sessionId, queuedId) {
+                    const queue = [...(this.pendingMessageQueues[sessionId] || [])];
+                    const payload = queue.find(item => item.id === queuedId);
+                    if (!payload) return;
+                    this.pendingMessageQueues = {
+                        ...this.pendingMessageQueues,
+                        [sessionId]: queue.filter(item => item.id !== queuedId)
+                    };
+                    // 正在生成时先请求停止，稍等流结束后发送
+                    if (this.isLoading && this.loadingSessionId === sessionId) {
+                        try {
+                            await api.post('/api/stop', { session_id: sessionId });
+                        } catch (e) {
+                            console.debug('[Queue] stop request failed:', e?.message || e);
+                        }
+                        await new Promise(resolve => setTimeout(resolve, 800));
+                    }
+                    try {
+                        await this.sendPreparedMessage(payload);
+                        this.showToast('已加急发送', 'success');
+                    } catch (e) {
+                        console.error('[Queue] urgent send failed:', e);
+                        this.enqueuePendingMessage(sessionId, payload);
+                        this.showToast('加急发送失败，已放回队列', 'error');
+                    }
                 },
 
                 async sendPreparedMessage(payload) {
@@ -8736,7 +9185,14 @@ def main(params):
                         },
                         character_runtime_snapshot: session.character_runtime_snapshot || null,
                         character_runtime_timeline: session.character_runtime_timeline || [],
+                        persona_id: session.persona_id || '',
                         customPrompts: [...(session.custom_prompts || [])].map(cp => ({ ...cp })),
+                        authors_note: session.authors_note
+                            ? { ...session.authors_note }
+                            : { enabled: false, text: '', depth: 4, role: 'system' },
+                        model_override: session.model_override
+                            ? { ...session.model_override }
+                            : { enabled: false, model_id: '' },
                     };
                     this.customPromptsDirty = false;
                     this.isEditingSessionTitle = false;
@@ -8759,6 +9215,9 @@ def main(params):
                     };
                     this.showSessionDetailsModal = true;
                     this.checkSessionPublicStatus(targetSessionId);
+                    this.loadMacroVariables();
+                    this.loadPersonas();
+                    if (!this.aiModelsLoaded) this.loadAIModels();
 
                     // 后台加载完整数据（含消息列表）
                     try {
@@ -8793,6 +9252,15 @@ def main(params):
                                 },
                                 message_count: res.data.message_count || this.viewingSession.message_count,
                                 customPrompts: mergedCustomPrompts,
+                                authors_note: res.data.authors_note
+                                    ? { ...res.data.authors_note }
+                                    : (this.viewingSession.authors_note
+                                        || { enabled: false, text: '', depth: 4, role: 'system' }),
+                                model_override: res.data.model_override
+                                    ? { ...res.data.model_override }
+                                    : (this.viewingSession.model_override
+                                        || { enabled: false, model_id: '' }),
+                                persona_id: res.data.persona_id || '',
                             };
                             // 同步 custom_prompts 到 sessions 列表，确保下次打开能拿到
                             const listSession = this.sessions.find(s => s.id === targetSessionId);
@@ -11424,7 +11892,12 @@ def main(params):
                         exampleDialogues: preset.exampleDialogues || '',
                         responseFormat: preset.responseFormat || '',
                         rules: preset.rules || [],
-                        state: preset.state || { affection: 50, mood: '开心' }
+                        state: preset.state || { affection: 50, mood: '开心' },
+                        alternateGreetings: Array.isArray(preset.alternateGreetings)
+                            ? [...preset.alternateGreetings]
+                            : [],
+                        tavern: preset.tavern || null,
+                        characterBookId: preset.characterBookId || ''
                     };
                     this.personalityTagsInput = (this.personality.tags || []).join(' ');
                     this.personalityHasUnsavedChanges = true;
@@ -11701,10 +12174,14 @@ def main(params):
                             exampleDialogues: this.personality.exampleDialogues || '',
                             responseFormat: this.personality.responseFormat || '',
                             rules: this.personality.rules || [],
-                            state: this.personality.state || { affection: 50, mood: '开心' }
+                            state: this.personality.state || { affection: 50, mood: '开心' },
+                            alternateGreetings: this.personality.alternateGreetings || [],
+                            tavern: this.personality.tavern || null,
+                            characterBookId: this.personality.characterBookId || ''
                         };
                         const res = await api.post('/api/personality/custom-presets', presetData);
                         this.customPersonalityPresets.push(res.data);
+                        await this.bindCardBookToPreset(res.data && res.data.id);
                         this.showToast('角色卡已保存到"我的角色卡"', 'success');
                     } catch (e) {
                         console.error('保存角色卡失败:', e);
@@ -11731,7 +12208,10 @@ def main(params):
                             exampleDialogues: this.personality.exampleDialogues || '',
                             responseFormat: this.personality.responseFormat || '',
                             rules: this.personality.rules || [],
-                            state: this.personality.state || { affection: 50, mood: '开心' }
+                            state: this.personality.state || { affection: 50, mood: '开心' },
+                            alternateGreetings: this.personality.alternateGreetings || [],
+                            tavern: this.personality.tavern || null,
+                            characterBookId: this.personality.characterBookId || ''
                         };
 
                         console.log('发送的 presetData:', presetData);
@@ -11745,10 +12225,28 @@ def main(params):
                         if (index !== -1) {
                             this.customPersonalityPresets.splice(index, 1, res.data.data);
                         }
+                        await this.bindCardBookToPreset(presetId);
                         this.showToast('角色卡已更新', 'success');
                     } catch (e) {
                         console.error('更新角色卡失败:', e);
                         this.showToast('更新失败: ' + (e.response?.data?.error || e.message), 'error');
+                    }
+                },
+
+                // 把角色卡关联的世界书绑定到角色（世界书 character_ids 追加预设 id）
+                async bindCardBookToPreset(presetId) {
+                    const bookId = this.personality.characterBookId;
+                    if (!bookId || !presetId) return;
+                    try {
+                        const res = await api.get(`/api/world-books/${bookId}`);
+                        const book = res.data || {};
+                        const ids = Array.isArray(book.character_ids) ? [...book.character_ids] : [];
+                        if (!ids.includes(presetId)) {
+                            ids.push(presetId);
+                            await api.put(`/api/world-books/${bookId}`, { character_ids: ids });
+                        }
+                    } catch (e) {
+                        console.warn('绑定世界书到角色失败:', e && (e.message || e));
                     }
                 },
 
@@ -11860,9 +12358,93 @@ def main(params):
                     }
                 },
 
+                // 收集角色卡的全部开场白（主开场白 + 备用开场白，去重）
+                collectGreetings(preset) {
+                    const source = preset || {};
+                    const candidates = [source.firstMessage || ''].concat(source.alternateGreetings || []);
+                    const result = [];
+                    candidates.forEach((item) => {
+                        const text = String(item || '').trim();
+                        if (text && !result.includes(text)) result.push(text);
+                    });
+                    return result;
+                },
+
+                // ---- 开场白库（主开场白 + 备用开场白） ----
+                ensureAlternateGreetings() {
+                    if (!Array.isArray(this.personality.alternateGreetings)) {
+                        this.personality.alternateGreetings = [];
+                    }
+                    return this.personality.alternateGreetings;
+                },
+
+                addAlternateGreeting() {
+                    this.ensureAlternateGreetings().push('');
+                    this.personalityHasUnsavedChanges = true;
+                },
+
+                removeAlternateGreeting(index) {
+                    const list = this.ensureAlternateGreetings();
+                    if (index < 0 || index >= list.length) return;
+                    list.splice(index, 1);
+                    this.personalityHasUnsavedChanges = true;
+                },
+
+                promoteAlternateGreeting(index) {
+                    const list = this.ensureAlternateGreetings();
+                    const text = String(list[index] || '').trim();
+                    if (!text) {
+                        this.showToast('这条开场白还是空的', 'error');
+                        return;
+                    }
+                    const previousPrimary = String(this.personality.firstMessage || '').trim();
+                    list.splice(index, 1);
+                    if (previousPrimary) list.unshift(previousPrimary);
+                    this.personality.firstMessage = text;
+                    this.personalityHasUnsavedChanges = true;
+                    this.showToast('已设为主开场白（原开场白已移到备用）', 'success');
+                },
+
                 // 用指定角色预设开启新会话（不切换当前角色）
                 async startSessionWithPreset(preset) {
-                    if (this.isLoading) return;
+                    if (this.isLoading || !preset) return;
+                    const greetings = this.collectGreetings(preset);
+
+                    if (greetings.length > 1) {
+                        // 多开场白：先让用户挑选，默认随机选中一条
+                        this.greetingPickerPreset = preset;
+                        this.greetingPickerGreetings = greetings;
+                        this.greetingPickerSelected = Math.floor(Math.random() * greetings.length);
+                        this.showGreetingPicker = true;
+                        return;
+                    }
+
+                    await this.createSessionWithPreset(preset, greetings[0] || '');
+                },
+
+                closeGreetingPicker() {
+                    this.showGreetingPicker = false;
+                    this.greetingPickerPreset = null;
+                    this.greetingPickerGreetings = [];
+                },
+
+                rollGreetingPicker() {
+                    if (!this.greetingPickerGreetings.length) return;
+                    this.greetingPickerSelected = Math.floor(
+                        Math.random() * this.greetingPickerGreetings.length
+                    );
+                },
+
+                async confirmGreetingPicker() {
+                    const preset = this.greetingPickerPreset;
+                    const greeting = this.greetingPickerGreetings[this.greetingPickerSelected] || '';
+                    this.closeGreetingPicker();
+                    if (!preset) return;
+                    await this.createSessionWithPreset(preset, greeting);
+                },
+
+                async createSessionWithPreset(preset, greetingText = '') {
+                    if (this.isLoading || !preset) return;
                     this.isLoading = true;
                     try {
                         // 处理背景故事中的模板变量
@@ -11872,13 +12454,19 @@ def main(params):
                             scenario = scenario.replace(/\{\{char\}\}/g, preset.name || '');
                         }
 
+                        let firstMessage = greetingText || preset.firstMessage || '';
+                        if (firstMessage) {
+                            firstMessage = firstMessage.replace(/\{\{user\}\}/g, this.username);
+                            firstMessage = firstMessage.replace(/\{\{char\}\}/g, preset.name || '');
+                        }
+
                         // 直接用预设的 systemPrompt 创建会话，不修改当前角色
                         const res = await api.post('/api/sessions', {
                             name: '新会话',
                             type: 'web',
                             user_id: this.username,
                             system_prompt: preset.systemPrompt || preset.prompt || '',
-                            first_message: preset.firstMessage || '',
+                            first_message: firstMessage,
                             sender_name: preset.name || '',
                             sender_avatar: preset.avatar || '',
                             sender_portrait: preset.portrait || '',
@@ -11982,32 +12570,44 @@ def main(params):
                     this.closeCharacterCardFullscreen();
                 },
 
-                // 导出当前角色卡（ZIP 格式，包含 JSON 和立绘图片）
-                async exportPersonality() {
+                // 导出当前角色卡
+                // format: native（本项目 ZIP）｜tavern_v2｜tavern_v3（酒馆 JSON）｜tavern_png（酒馆 PNG）
+                async exportPersonality(format = 'native') {
                     if (!this.personality.name) {
                         this.showToast('请先创建角色卡', 'error');
                         return;
                     }
 
+                    this.showExportImportDropdown = false;
                     this.isLoading = true;
                     try {
-                        // 调用后端 API 导出 ZIP
                         const res = await api.post('/api/personality/export', {
-                            character: this.personality
+                            character: this.personality,
+                            format: format,
+                            world_book_id: this.personality.characterBookId || ''
                         }, {
                             responseType: 'blob'
                         });
 
+                        const isPng = format === 'tavern_png';
+                        const isTavernJson = format === 'tavern_v2' || format === 'tavern_v3';
+                        const mime = isPng ? 'image/png' : (isTavernJson ? 'application/json' : 'application/zip');
+                        const ext = isPng ? 'png' : (isTavernJson ? 'json' : 'zip');
+                        const suffix = isPng ? '角色卡' : (isTavernJson ? `酒馆_${format}` : '角色卡');
+
                         // 创建下载链接
-                        const blob = new Blob([res.data], { type: 'application/zip' });
+                        const blob = new Blob([res.data], { type: mime });
                         const url = URL.createObjectURL(blob);
                         const a = document.createElement('a');
                         a.href = url;
-                        a.download = `${this.personality.name}_角色卡.zip`;
+                        a.download = `${this.personality.name}_${suffix}.${ext}`;
                         a.click();
                         URL.revokeObjectURL(url);
 
-                        this.showToast('角色卡已导出（包含立绘）', 'success');
+                        const tips = isPng
+                            ? '已导出酒馆 PNG 角色卡（含内嵌卡片数据）'
+                            : (isTavernJson ? '已导出酒馆兼容 JSON 角色卡' : '角色卡已导出（包含立绘）');
+                        this.showToast(tips, 'success');
                     } catch (e) {
                         console.error('导出角色卡失败:', e);
                         this.showToast('导出失败: ' + (e.response?.data?.error || e.message), 'error');
@@ -12264,11 +12864,12 @@ def main(params):
                     this.$refs.importPersonalityFile.click();
                 },
 
-                // 导入角色卡
+                // 导入角色卡（本项目 JSON/ZIP 与酒馆 PNG/JSON 均可）
                 async importPersonality(event) {
                     const file = event.target.files[0];
                     if (!file) return;
 
+                    this.showExportImportDropdown = false;
                     this.isLoading = true;
                     try {
                         const formData = new FormData();
@@ -12277,10 +12878,40 @@ def main(params):
                             headers: { 'Content-Type': 'multipart/form-data' }
                         });
                         if (res.data.success) {
-                            this.personality = { ...res.data.character };
+                            this.personality = {
+                                alternateGreetings: [],
+                                ...res.data.character
+                            };
+                            if (!Array.isArray(this.personality.alternateGreetings)) {
+                                this.personality.alternateGreetings = [];
+                            }
                             this.personalityTagsInput = (this.personality.tags || []).join(' ');
                             this.personalityHasUnsavedChanges = true;
-                            this.showToast('角色卡已导入，请点击"应用"保存', 'success');
+
+                            const meta = res.data.meta || {};
+                            const extras = [];
+                            if ((meta.alternate_greetings || []).length) {
+                                extras.push(`${meta.alternate_greetings.length} 条备用开场白`);
+                            }
+                            if (meta.character_book && (meta.character_book.entries || []).length) {
+                                extras.push(`内嵌世界书 ${meta.character_book.entries.length} 条`);
+                            }
+                            const extraText = extras.length ? `（含 ${extras.join('、')}）` : '';
+                            this.showToast(`角色卡已导入${extraText}，请点击"应用"保存`, 'success');
+
+                            // 内嵌世界书需要用户确认后再落地
+                            if (meta.character_book && (meta.character_book.entries || []).length) {
+                                this.pendingCardBook = {
+                                    book: meta.character_book,
+                                    characterName: res.data.character.name || '',
+                                    characterId: res.data.character.id || '',
+                                    entryCount: meta.character_book.entries.length
+                                };
+                                this.showCardImportResult = true;
+                            }
+                            if ((meta.warnings || []).length) {
+                                console.warn('[CardImport] 导入提示:', meta.warnings);
+                            }
                         } else {
                             this.showToast(res.data.error || '导入失败', 'error');
                         }
@@ -12291,6 +12922,40 @@ def main(params):
                         this.isLoading = false;
                         // 清除文件选择以便重新选择同一文件
                         event.target.value = '';
+                    }
+                },
+
+                closeCardImportResult() {
+                    this.showCardImportResult = false;
+                    this.pendingCardBook = null;
+                },
+
+                // 把内嵌世界书落地为独立世界书
+                async importPendingCardBook() {
+                    if (!this.pendingCardBook) return;
+                    this.isLoading = true;
+                    try {
+                        const res = await api.post('/api/personality/import-character-book', {
+                            book: this.pendingCardBook.book,
+                            character_name: this.pendingCardBook.characterName,
+                            character_id: this.pendingCardBook.characterId
+                        });
+                        if (res.data.success) {
+                            this.personality.characterBookId = res.data.world_book.id;
+                            this.personalityHasUnsavedChanges = true;
+                            this.showToast(
+                                `世界书「${res.data.world_book.name}」已导入（${res.data.entry_count} 条）`,
+                                'success'
+                            );
+                            this.closeCardImportResult();
+                        } else {
+                            this.showToast(res.data.error || '导入世界书失败', 'error');
+                        }
+                    } catch (e) {
+                        console.error('导入内嵌世界书失败:', e);
+                        this.showToast('导入世界书失败: ' + (e.response?.data?.error || e.message), 'error');
+                    } finally {
+                        this.isLoading = false;
                     }
                 },
 
@@ -13537,6 +14202,7 @@ def main(params):
                         this.modelForm.max_tokens = preset.max_tokens;
                         this.modelForm.max_context_length = preset.max_context_length;
                         this.modelForm.input_price = preset.input_price ?? null;
+                        this.modelForm.cached_input_price = preset.cached_input_price ?? null;
                         this.modelForm.output_price = preset.output_price ?? null;
                         if (!this.modelForm.name || this.modelForm.name === '新配置' || Object.values(this.aiPresets).some(p => this.modelForm.name === `${p.name} 配置`)) {
                             this.modelForm.name = `${preset.name} 配置`;
@@ -13562,7 +14228,7 @@ def main(params):
                     const purposeDefaults = {
                         chat: {
                             temperature: 0.7,
-                            max_tokens: 2000,
+                            max_tokens: 8192,
                             supports_tools: true,
                             supports_reasoning: true,
                             supports_stream: true,
@@ -13954,6 +14620,9 @@ def main(params):
                     if (preset.max_tokens) this.modelForm.max_tokens = preset.max_tokens;
                     if (preset.input_price != null) this.modelForm.input_price = preset.input_price;
                     if (preset.output_price != null) this.modelForm.output_price = preset.output_price;
+                    if (preset.cached_input_price != null) {
+                        this.modelForm.cached_input_price = preset.cached_input_price;
+                    }
                     if (!this.modelForm.name || this.modelForm.name === '新配置') {
                         this.modelForm.name = `${preset.name} 配置`;
                     }
@@ -13961,7 +14630,7 @@ def main(params):
 
                 resetAIParams() {
                     this.aiConfig.temperature = 0.7;
-                    this.aiConfig.max_tokens = 2000;
+                    this.aiConfig.max_tokens = 8192;
                     this.aiConfig.top_p = 0.9;
                     this.aiConfig.frequency_penalty = 0;
                     this.aiConfig.presence_penalty = 0;
@@ -14080,8 +14749,11 @@ def main(params):
                             max_context_length: matchedPreset ? matchedPreset.max_context_length : (model.max_context_length || 128000),
                             input_price: model.input_price ?? (matchedPreset?.input_price ?? null),
                             output_price: model.output_price ?? (matchedPreset?.output_price ?? null),
+                            cached_input_price: model.cached_input_price ?? null,
                             temperature: model.temperature ?? 0.7,
                             top_p: model.top_p ?? 0.9,
+                            stop: model.stop || '',
+                            token_limit_field: model.token_limit_field || '',
                             tts_provider: model.tts_provider || 'openai',
                             tts_url: model.tts_url || '',
                             tts_model: model.tts_model || '',
@@ -14144,6 +14816,8 @@ def main(params):
                             temperature: 0.7,
                             max_tokens: 8192,
                             top_p: 0.9,
+                            stop: '',
+                            token_limit_field: '',
                             frequency_penalty: 0,
                             presence_penalty: 0,
                             system_prompt: '',
@@ -14158,6 +14832,7 @@ def main(params):
                             // 模型价格（人民币 元/百万token，null 表示使用兜底定价）
                             input_price: null,
                             output_price: null,
+                            cached_input_price: null,
                             // TTS 统一配置字段
                             tts_provider: 'openai',
                             tts_url: '',
@@ -14269,6 +14944,38 @@ def main(params):
                         this.showToast('测试失败: ' + (e.response?.data?.message || e.message), 'error');
                     } finally {
                         this.isTesting = false;
+                    }
+                },
+
+                async probeModel(model) {
+                    if (!model || !model.id) return;
+                    this.isProbing = true;
+                    try {
+                        const res = await api.post(`/api/ai-models/${model.id}/probe`);
+                        const caps = res.data?.capabilities || {};
+                        const result = res.data?.result || {};
+                        if (!result.supported) {
+                            this.showToast(result.error || '该协议暂不支持实测', 'error');
+                            return;
+                        }
+                        const parts = [
+                            `对话${result.ok ? '✓' : '✗'}`,
+                            `工具${caps.tools ? '✓' : '✗'}`,
+                            `视觉${caps.vision ? '✓' : '✗'}`,
+                            `流式${caps.stream ? '✓' : '✗'}`
+                        ];
+                        const text = `实测结果：${parts.join(' / ')}（${result.latency_ms || 0}ms）`;
+                        this.showToast(text, result.ok ? 'success' : 'error');
+                        // 回填能力位，避免用户手动刷新
+                        Object.assign(model, caps.tools !== undefined ? { supports_tools: !!caps.tools } : {});
+                        Object.assign(model, caps.stream !== undefined ? { supports_stream: !!caps.stream } : {});
+                        Object.assign(model, caps.vision !== undefined ? { supports_vision: !!caps.vision } : {});
+                        model.capabilities_probed = true;
+                        model.capabilities_probed_at = res.data?.probed_at || new Date().toISOString();
+                    } catch (e) {
+                        this.showToast('实测失败: ' + (e.response?.data?.error || e.message), 'error');
+                    } finally {
+                        this.isProbing = false;
                     }
                 },
 
@@ -14687,6 +15394,2587 @@ def main(params):
                     }
                 },
 
+                // Author's Note（作者附注）：按深度插入对话末尾的附加指令
+                async saveAuthorsNote() {
+                    if (!this.viewingSession?.id) return;
+                    const note = this.viewingSession.authors_note
+                        || { enabled: false, text: '', depth: 4, role: 'system' };
+                    const text = String(note.text || '').trim();
+                    if (note.enabled && !text) {
+                        this.showToast('请先填写附注内容', 'error');
+                        return;
+                    }
+                    const payload = {
+                        enabled: !!note.enabled,
+                        text: text,
+                        depth: Math.max(0, Math.min(100, parseInt(note.depth, 10) || 0)),
+                        role: ['system', 'user', 'assistant'].includes(note.role) ? note.role : 'system',
+                        position: 'before_an'
+                    };
+                    this.isLoading = true;
+                    try {
+                        const res = await api.put(`/api/sessions/${this.viewingSession.id}`, {
+                            authors_note: payload
+                        });
+                        const saved = res.data?.session?.authors_note || payload;
+                        this.viewingSession.authors_note = { ...saved };
+                        if (this.currentSession?.id === this.viewingSession.id) {
+                            this.currentSession.authors_note = { ...saved };
+                        }
+                        const sessionInList = this.sessions.find(s => s.id === this.viewingSession.id);
+                        if (sessionInList) {
+                            sessionInList.authors_note = { ...saved };
+                        }
+                        this.showToast(saved.enabled ? '作者附注已保存，下一轮生效' : '作者附注已关闭', 'success');
+                    } catch (e) {
+                        this.showToast('作者附注保存失败: ' + (e.response?.data?.error || e.message), 'error');
+                    } finally {
+                        this.isLoading = false;
+                    }
+                },
+
+                async clearAuthorsNote() {
+                    if (!this.viewingSession?.id) return;
+                    this.viewingSession.authors_note = { enabled: false, text: '', depth: 4, role: 'system' };
+                    await this.saveAuthorsNote();
+                },
+
+                // ---- 用户人设（persona）----
+                async loadPersonas() {
+                    try {
+                        const res = await api.get('/api/personas');
+                        if (res.data && res.data.success) {
+                            this.personas = res.data.personas || [];
+                            this.personaDefaultId = res.data.default_id || '';
+                            this.personaLimit = res.data.limit || 50;
+                        }
+                    } catch (e) {
+                        console.warn('加载人设库失败:', e);
+                    }
+                },
+
+                personaName(personaId) {
+                    if (!personaId) return '';
+                    const found = (this.personas || []).find(p => p.id === personaId);
+                    return found ? found.name : '';
+                },
+
+                openPersonaModal() {
+                    this.showPersonaModal = true;
+                    this.newPersonaForm();
+                    this.loadPersonas();
+                },
+
+                closePersonaModal() {
+                    this.showPersonaModal = false;
+                },
+
+                newPersonaForm() {
+                    this.personaForm = { id: '', name: '', pronouns: '', description: '' };
+                },
+
+                editPersona(persona) {
+                    this.personaForm = {
+                        id: persona.id || '',
+                        name: persona.name || '',
+                        pronouns: persona.pronouns || '',
+                        description: persona.description || ''
+                    };
+                },
+
+                async savePersona() {
+                    const form = this.personaForm || {};
+                    const name = String(form.name || '').trim();
+                    const description = String(form.description || '').trim();
+                    if (!name && !description) {
+                        this.showToast('请至少填写名称或设定', 'error');
+                        return;
+                    }
+                    this.personaSaving = true;
+                    try {
+                        const payload = {
+                            name,
+                            pronouns: String(form.pronouns || '').trim(),
+                            description
+                        };
+                        const res = form.id
+                            ? await api.put(`/api/personas/${form.id}`, payload)
+                            : await api.post('/api/personas', payload);
+                        if (res.data && res.data.success) {
+                            this.personas = res.data.personas || [];
+                            this.personaDefaultId = res.data.default_id || '';
+                            if (res.data.persona) this.editPersona(res.data.persona);
+                            else this.newPersonaForm();
+                            this.showToast('人设已保存', 'success');
+                        }
+                    } catch (e) {
+                        this.showToast('人设保存失败: ' + (e.response?.data?.error || e.message), 'error');
+                    } finally {
+                        this.personaSaving = false;
+                    }
+                },
+
+                async deletePersona(persona) {
+                    if (!persona?.id) return;
+                    if (!confirm(`删除人设「${persona.name}」？使用它的会话会回退到默认人设。`)) return;
+                    try {
+                        const res = await api.delete(`/api/personas/${persona.id}`);
+                        if (res.data && res.data.success) {
+                            this.personas = res.data.personas || [];
+                            this.personaDefaultId = res.data.default_id || '';
+                            if (this.personaForm?.id === persona.id) this.newPersonaForm();
+                            if (this.viewingSession?.persona_id === persona.id) {
+                                this.viewingSession.persona_id = '';
+                            }
+                            this.showToast('人设已删除', 'success');
+                        }
+                    } catch (e) {
+                        this.showToast('删除失败: ' + (e.response?.data?.error || e.message), 'error');
+                    }
+                },
+
+                async setDefaultPersona(persona) {
+                    if (!persona?.id) return;
+                    try {
+                        const res = await api.post(`/api/personas/${persona.id}/default`, {});
+                        if (res.data && res.data.success) {
+                            this.personaDefaultId = res.data.default_id || '';
+                            this.personas = res.data.personas || this.personas;
+                            this.showToast(`默认人设已切换为「${persona.name}」`, 'success');
+                        }
+                    } catch (e) {
+                        this.showToast('设置默认人设失败: ' + (e.response?.data?.error || e.message), 'error');
+                    }
+                },
+
+                async saveSessionPersona() {
+                    if (!this.viewingSession?.id) return;
+                    const personaId = String(this.viewingSession.persona_id || '');
+                    this.isLoading = true;
+                    try {
+                        const res = await api.put(`/api/sessions/${this.viewingSession.id}`, {
+                            persona_id: personaId
+                        });
+                        const savedId = res.data?.session?.persona_id ?? personaId;
+                        this.viewingSession.persona_id = savedId;
+                        if (this.currentSession?.id === this.viewingSession.id) {
+                            this.currentSession.persona_id = savedId;
+                        }
+                        const inList = this.sessions.find(s => s.id === this.viewingSession.id);
+                        if (inList) inList.persona_id = savedId;
+                        this.showToast(savedId ? '已绑定人设，下一轮生效' : '已改为跟随默认人设', 'success');
+                    } catch (e) {
+                        this.showToast('人设绑定失败: ' + (e.response?.data?.error || e.message), 'error');
+                    } finally {
+                        this.isLoading = false;
+                    }
+                },
+
+                async exportPersonas() {
+                    try {
+                        const res = await api.get('/api/personas/export');
+                        this.personaImportText = JSON.stringify(res.data, null, 2);
+                        this.showToast('已导出到下方文本框，可复制保存', 'success');
+                    } catch (e) {
+                        this.showToast('导出失败: ' + (e.response?.data?.error || e.message), 'error');
+                    }
+                },
+
+                async importPersonas() {
+                    const raw = String(this.personaImportText || '').trim();
+                    if (!raw) {
+                        this.showToast('请先粘贴导出的 JSON', 'error');
+                        return;
+                    }
+                    let parsed;
+                    try {
+                        parsed = JSON.parse(raw);
+                    } catch (e) {
+                        this.showToast('JSON 解析失败', 'error');
+                        return;
+                    }
+                    const items = Array.isArray(parsed) ? parsed : parsed.personas;
+                    if (!Array.isArray(items)) {
+                        this.showToast('JSON 里没有 personas 数组', 'error');
+                        return;
+                    }
+                    this.personaSaving = true;
+                    try {
+                        const res = await api.post('/api/personas/import', { personas: items, mode: 'merge' });
+                        if (res.data && res.data.success) {
+                            this.personas = res.data.personas || [];
+                            this.personaDefaultId = res.data.default_id || '';
+                            this.showToast(`导入完成：新增 ${res.data.added}，跳过 ${res.data.skipped}`, 'success');
+                        }
+                    } catch (e) {
+                        this.showToast('导入失败: ' + (e.response?.data?.error || e.message), 'error');
+                    } finally {
+                        this.personaSaving = false;
+                    }
+                },
+
+                // ---- 提示词预设（Prompt Manager）----
+                // 单一适配层：后端 /api/prompt-presets 由「检索」提供。联调时只改这里，
+                // 页面与其他方法都用 promptApi() 返回的函数，不直接拼路径。
+                promptApi() {
+                    const base = '/api/prompt-presets';
+                    const enc = encodeURIComponent;
+                    return {
+                        base,
+                        list: () => api.get(base),
+                        get: id => api.get(`${base}/${enc(id)}`),
+                        create: payload => api.post(base, payload),
+                        update: (id, payload) => api.put(`${base}/${enc(id)}`, payload),
+                        remove: id => api.delete(`${base}/${enc(id)}`),
+                        setDefault: id => api.post(`${base}/${enc(id)}/default`, {}),
+                        reorder: (id, order) => api.post(`${base}/${enc(id)}/reorder`, { order }),
+                        preview: (id, payload) => api.post(`${base}/${enc(id)}/preview`, payload || {}),
+                        // 会话绑定：后端只有「单会话查询 GET ?session_id=」与「设置 PUT」两个口。
+                        // 列表口（/session-bindings）待「检索」补；缺接口时 loadPromptBindings 退化为逐会话查。
+                        getBinding: sessionId => api.get(`${base}/session-binding`, {
+                            params: { session_id: sessionId },
+                        }),
+                        setBinding: (sessionId, presetId) => api.put(`${base}/session-binding`, {
+                            session_id: sessionId,
+                            preset_id: presetId,
+                        }),
+                        listBindings: () => api.get(`${base}/session-bindings`),
+                        exportPreset: (id, format) => api.get(`${base}/${enc(id)}/export`, {
+                            params: { format },
+                        }),
+                        // 后端 import 直接吃酒馆 / 原生 preset JSON 本体，mode 与正文平铺同层
+                        importPreset: (preset, mode) => api.post(`${base}/import`, {
+                            ...(preset && typeof preset === 'object' ? preset : {}),
+                            mode: mode || 'merge',
+                        }),
+                    };
+                },
+
+                promptApiError(e, fallback) {
+                    const status = e && e.response ? e.response.status : 0;
+                    if (status === 404 || status === 405) {
+                        this.promptApiMissing = true;
+                        return `${fallback}：后端 /api/prompt-presets 尚未注册`;
+                    }
+                    return `${fallback}: ${(e && (e.response?.data?.error || e.message)) || '未知错误'}`;
+                },
+
+                // 兼容 preset 列表的两种返回形态：{presets:[...]} 或裸数组
+                promptPresetsFrom(data) {
+                    if (Array.isArray(data)) return data;
+                    if (data && Array.isArray(data.presets)) return data.presets;
+                    return [];
+                },
+
+                clonePromptPreset(preset) {
+                    const source = preset || {};
+                    const limits = this.promptLimits || {};
+                    const rawSections = Array.isArray(source.sections) ? source.sections : [];
+                    const sections = rawSections.map((sec, index) => {
+                        const depth = Number(sec.depth);
+                        return {
+                            id: sec.id || `sec-${index}-${Math.random().toString(36).slice(2, 8)}`,
+                            name: sec.name || `段落 ${index + 1}`,
+                            order: index,
+                            enabled: sec.enabled !== false,
+                            role: ['system', 'user', 'assistant'].includes(sec.role) ? sec.role : 'system',
+                            depth: Number.isFinite(depth)
+                                ? Math.max(0, Math.min(limits.depth || 100, Math.round(depth)))
+                                : 4,
+                            position: ['start', 'end', 'depth'].includes(sec.position) ? sec.position : 'end',
+                            content: sec.content || '',
+                            marker: !!sec.marker,
+                        };
+                    });
+                    return {
+                        id: source.id || '',
+                        name: source.name || '',
+                        description: source.description || '',
+                        sections,
+                        tavern: source.tavern && typeof source.tavern === 'object' ? { ...source.tavern } : {},
+                        source: source.source === 'tavern' ? 'tavern' : 'native',
+                        created_at: source.created_at || '',
+                        updated_at: source.updated_at || '',
+                    };
+                },
+
+                // 统计优先用后端 summaries[]（结构一致口径），缺失时本地算
+                promptStats(preset) {
+                    const id = (preset && preset.id) || '';
+                    const summary = (this.promptSummaries || []).find(item => item && item.id === id);
+                    if (summary) {
+                        return {
+                            sections: Number(summary.sections) || 0,
+                            enabled: Number(summary.enabled_sections) || 0,
+                            chars: Number(summary.chars) || 0,
+                        };
+                    }
+                    const sections = (preset && Array.isArray(preset.sections)) ? preset.sections : [];
+                    const enabled = sections.filter(sec => sec.enabled !== false);
+                    return {
+                        sections: sections.length,
+                        enabled: enabled.length,
+                        chars: enabled.reduce((sum, sec) => sum + String(sec.content || '').length, 0),
+                    };
+                },
+
+                promptSessionLabel(session) {
+                    const id = typeof session === 'string' ? session : (session && session.id) || '';
+                    if (!id) return '（未命名会话）';
+                    const list = Array.isArray(this.sessions) ? this.sessions : [];
+                    const found = list.find(s => s.id === id) || (session && typeof session === 'object' ? session : null);
+                    if (!found) return id;
+                    const name = found.name || found.title || found.character_name || '';
+                    return name ? `${name}（${id}）` : id;
+                },
+
+                // 后端 schema{roles,positions,max_presets,max_sections} + 列表里的 limit 对齐到本地上限
+                applyPromptSchema(schema) {
+                    if (!schema || typeof schema !== 'object') return;
+                    const limits = { ...(this.promptLimits || {}) };
+                    if (Number(schema.max_presets) > 0) limits.presets = Number(schema.max_presets);
+                    if (Number(schema.max_sections) > 0) limits.sections = Number(schema.max_sections);
+                    this.promptLimits = limits;
+                },
+
+                async loadPromptPresets() {
+                    this.promptLoading = true;
+                    try {
+                        const res = await this.promptApi().list();
+                        const data = res.data || {};
+                        this.promptPresets = this.promptPresetsFrom(data);
+                        this.promptSummaries = Array.isArray(data.summaries) ? data.summaries : [];
+                        this.promptDefaultId = data.default_id || '';
+                        this.promptApiMissing = false;
+                        this.applyPromptSchema(data.schema);
+                        const stillThere = this.promptSelectedId
+                            && this.promptPresets.some(p => p.id === this.promptSelectedId);
+                        if (this.promptSelectedId && !stillThere) {
+                            this.promptSelectedId = '';
+                            this.promptDraft = null;
+                        }
+                        if (!this.promptDraft && !this.promptDirty) {
+                            const preferred = this.promptPresets.find(p => p.id === this.promptDefaultId)
+                                || this.promptPresets[0];
+                            if (preferred) this.selectPromptPreset(preferred.id);
+                        }
+                    } catch (e) {
+                        this.showToast(this.promptApiError(e, '加载提示词预设失败'), this.promptApiMissing ? 'info' : 'error');
+                    } finally {
+                        this.promptLoading = false;
+                    }
+                },
+
+                async refreshPromptManager() {
+                    await this.loadPromptPresets();
+                    await this.loadPromptBindings();
+                },
+
+                selectPromptPreset(id) {
+                    this.promptSelectedId = id || '';
+                    const found = (this.promptPresets || []).find(p => p.id === this.promptSelectedId);
+                    this.promptDraft = found ? this.clonePromptPreset(found) : null;
+                    this.promptDirty = false;
+                    this.promptExpandedSection = '';
+                    this.promptDragIndex = null;
+                    this.promptDragOver = null;
+                },
+
+                newPromptPresetDraft() {
+                    this.promptSelectedId = '';
+                    this.promptDraft = this.clonePromptPreset({
+                        name: '',
+                        description: '',
+                        sections: [{ name: '主提示', role: 'system', position: 'end', depth: 4, content: '' }],
+                    });
+                    this.promptDirty = true;
+                    this.promptExpandedSection = this.promptDraft.sections[0].id;
+                },
+
+                discardPromptChanges() {
+                    if (!this.promptSelectedId) {
+                        this.newPromptPresetDraft();
+                        this.promptDirty = false;
+                        return;
+                    }
+                    this.selectPromptPreset(this.promptSelectedId);
+                },
+
+                async savePromptPreset() {
+                    const draft = this.promptDraft;
+                    if (!draft) return;
+                    const name = String(draft.name || '').trim();
+                    if (!name) {
+                        this.showToast('预设名称不能为空', 'error');
+                        return;
+                    }
+                    const payload = {
+                        ...draft,
+                        name,
+                        sections: (draft.sections || []).map((sec, index) => ({ ...sec, order: index })),
+                    };
+                    this.promptSaving = true;
+                    try {
+                        const adapter = this.promptApi();
+                        const res = payload.id
+                            ? await adapter.update(payload.id, payload)
+                            : await adapter.create(payload);
+                        const data = res.data || {};
+                        const list = this.promptPresetsFrom(data);
+                        if (list.length) this.promptPresets = list;
+                        if (data.default_id) this.promptDefaultId = data.default_id;
+                        this.promptApiMissing = false;
+                        const saved = data.preset || list.find(p => p.id === payload.id || p.name === name);
+                        if (saved && saved.id) {
+                            if (!list.length) this.promptPresets = [...this.promptPresets, saved];
+                            this.selectPromptPreset(saved.id);
+                        } else {
+                            this.promptDirty = false;
+                            await this.loadPromptPresets();
+                        }
+                        this.showToast(payload.id ? '预设已保存' : '预设已创建', 'success');
+                    } catch (e) {
+                        this.showToast(this.promptApiError(e, '保存预设失败'), this.promptApiMissing ? 'info' : 'error');
+                    } finally {
+                        this.promptSaving = false;
+                    }
+                },
+
+                deletePromptPreset(preset) {
+                    if (!preset || !preset.id) return;
+                    this.showConfirm({
+                        title: '删除提示词预设',
+                        messageBefore: '确定删除预设',
+                        highlight: preset.name || preset.id,
+                        messageAfter: '吗？',
+                        impact: '绑定到该预设的会话会回退到原有提示词流程。',
+                        confirmText: '删除',
+                        onConfirm: async () => {
+                            try {
+                                const res = await this.promptApi().remove(preset.id);
+                                const data = res.data || {};
+                                const list = this.promptPresetsFrom(data);
+                                this.promptPresets = list.length ? list : this.promptPresets.filter(p => p.id !== preset.id);
+                                if (data.default_id !== undefined) this.promptDefaultId = data.default_id || '';
+                                if (this.promptSelectedId === preset.id) {
+                                    this.promptSelectedId = '';
+                                    this.promptDraft = null;
+                                    this.promptDirty = false;
+                                }
+                                this.showToast('预设已删除', 'success');
+                                await this.loadPromptBindings();
+                            } catch (e) {
+                                this.showToast(this.promptApiError(e, '删除预设失败'), this.promptApiMissing ? 'info' : 'error');
+                            }
+                        },
+                    });
+                },
+
+                async setDefaultPromptPreset(preset) {
+                    if (!preset || !preset.id) return;
+                    try {
+                        const res = await this.promptApi().setDefault(preset.id);
+                        const data = res.data || {};
+                        if (data.default_id !== undefined) {
+                            this.promptDefaultId = data.default_id || preset.id;
+                        } else {
+                            this.promptDefaultId = preset.id;
+                        }
+                        const list = this.promptPresetsFrom(data);
+                        if (list.length) this.promptPresets = list;
+                        this.showToast(`默认预设已切换为「${preset.name}」`, 'success');
+                    } catch (e) {
+                        this.showToast(this.promptApiError(e, '设置默认预设失败'), this.promptApiMissing ? 'info' : 'error');
+                    }
+                },
+
+                addPromptSection() {
+                    if (!this.promptDraft) return;
+                    const limits = this.promptLimits || {};
+                    if (this.promptDraft.sections.length >= (limits.sections || 100)) {
+                        this.showToast(`段落数量已达上限（${limits.sections || 100}）`, 'warning');
+                        return;
+                    }
+                    const section = {
+                        id: `sec-new-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
+                        name: `段落 ${this.promptDraft.sections.length + 1}`,
+                        order: this.promptDraft.sections.length,
+                        enabled: true,
+                        role: 'system',
+                        depth: 4,
+                        position: 'end',
+                        content: '',
+                        marker: false,
+                    };
+                    this.promptDraft.sections.push(section);
+                    this.promptExpandedSection = section.id;
+                    this.promptDirty = true;
+                },
+
+                removePromptSection(index) {
+                    if (!this.promptDraft) return;
+                    const sections = this.promptDraft.sections || [];
+                    if (index < 0 || index >= sections.length) return;
+                    const removed = sections.splice(index, 1)[0];
+                    if (removed && this.promptExpandedSection === removed.id) {
+                        this.promptExpandedSection = '';
+                    }
+                    this.promptDirty = true;
+                },
+
+                movePromptSection(index, delta) {
+                    if (!this.promptDraft) return;
+                    const sections = this.promptDraft.sections || [];
+                    const target = index + delta;
+                    if (index < 0 || index >= sections.length || target < 0 || target >= sections.length) return;
+                    const [moved] = sections.splice(index, 1);
+                    sections.splice(target, 0, moved);
+                    this.promptDirty = true;
+                },
+
+                togglePromptSectionBody(sectionId) {
+                    this.promptExpandedSection = this.promptExpandedSection === sectionId ? '' : sectionId;
+                },
+
+                pmDragStart(index) {
+                    this.promptDragIndex = index;
+                    this.promptDragOver = index;
+                },
+
+                pmDragOver(index) {
+                    if (this.promptDragIndex === null) return;
+                    this.promptDragOver = index;
+                },
+
+                pmDrop(index) {
+                    const from = this.promptDragIndex;
+                    this.promptDragIndex = null;
+                    this.promptDragOver = null;
+                    if (from === null || from === index || !this.promptDraft) return;
+                    const sections = this.promptDraft.sections || [];
+                    if (from < 0 || from >= sections.length || index < 0 || index >= sections.length) return;
+                    const [moved] = sections.splice(from, 1);
+                    sections.splice(index, 0, moved);
+                    this.promptDirty = true;
+                    // 已落库的预设顺带同步排序；接口未就绪或新建草稿时只动本地
+                    if (this.promptDraft.id && !this.promptApiMissing) {
+                        this.persistPromptSectionOrder();
+                    }
+                },
+
+                pmDragEnd() {
+                    this.promptDragIndex = null;
+                    this.promptDragOver = null;
+                },
+
+                // 排序落库走 promptApi().reorder(id, [sectionId...])；草稿未保存时只动本地
+                async persistPromptSectionOrder() {
+                    const draft = this.promptDraft;
+                    if (!draft || !draft.id) return;
+                    const order = (draft.sections || []).map(sec => sec.id);
+                    try {
+                        const res = await this.promptApi().reorder(draft.id, order);
+                        const saved = (res.data || {}).preset;
+                        if (saved && saved.id) this.selectPromptPreset(saved.id);
+                    } catch (e) {
+                        this.showToast(this.promptApiError(e, '段落排序未保存'), this.promptApiMissing ? 'info' : 'error');
+                    }
+                },
+
+                buildPromptExportPayload(preset, format) {
+                    const draft = this.clonePromptPreset(preset);
+                    if (format === 'tavern') {
+                        return {
+                            prompts: (draft.sections || []).map(sec => ({
+                                identifier: sec.id,
+                                name: sec.name,
+                                role: sec.role,
+                                content: sec.content,
+                                injection_position: sec.position === 'depth' ? 1 : 0,
+                                injection_depth: sec.depth,
+                                enabled: sec.enabled,
+                                marker: sec.marker,
+                            })),
+                            prompt_order: [{
+                                order: (draft.sections || []).map(sec => ({ identifier: sec.id, enabled: sec.enabled })),
+                            }],
+                            ...(draft.tavern || {}),
+                        };
+                    }
+                    return {
+                        presets: [{
+                            id: draft.id,
+                            name: draft.name,
+                            description: draft.description,
+                            sections: draft.sections,
+                            tavern: draft.tavern,
+                            source: draft.source,
+                        }],
+                        default_id: draft.id,
+                    };
+                },
+
+                async exportPromptPresetToText() {
+                    if (!this.promptDraft) return;
+                    const format = this.promptExportFormat === 'tavern' ? 'tavern' : 'native';
+                    try {
+                        if (this.promptDraft.id) {
+                            const res = await this.promptApi().exportPreset(this.promptDraft.id, format);
+                            this.promptImportText = JSON.stringify(res.data, null, 2);
+                        } else {
+                            this.promptImportText = JSON.stringify(
+                                this.buildPromptExportPayload(this.promptDraft, format), null, 2
+                            );
+                        }
+                        this.showToast('已导出到下方文本框，可复制保存', 'success');
+                    } catch (e) {
+                        // 接口未就绪时用本地草稿兜底，保证导出按钮不空转
+                        this.promptImportText = JSON.stringify(
+                            this.buildPromptExportPayload(this.promptDraft, format), null, 2
+                        );
+                        this.showToast(this.promptApiError(e, '接口导出失败，已改用本地草稿导出'), 'info');
+                    }
+                },
+
+                downloadPromptPreset(preset) {
+                    if (!preset) return;
+                    const format = this.promptExportFormat === 'tavern' ? 'tavern' : 'native';
+                    const payload = this.buildPromptExportPayload(preset, format);
+                    const fileName = `${(preset.name || preset.id || 'prompt-preset').replace(/[\\/:*?"<>|]/g, '_')}.json`;
+                    try {
+                        const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+                        const url = URL.createObjectURL(blob);
+                        const link = document.createElement('a');
+                        link.href = url;
+                        link.download = fileName;
+                        document.body.appendChild(link);
+                        link.click();
+                        document.body.removeChild(link);
+                        URL.revokeObjectURL(url);
+                        this.showToast('预设已导出为 JSON', 'success');
+                    } catch (e) {
+                        this.showToast('导出失败: ' + (e.message || '未知错误'), 'error');
+                    }
+                },
+
+                async importPromptPresetFromText() {
+                    const raw = String(this.promptImportText || '').trim();
+                    if (!raw) {
+                        this.showToast('请先粘贴要导入的 JSON', 'error');
+                        return;
+                    }
+                    let parsed;
+                    try {
+                        parsed = JSON.parse(raw);
+                    } catch (e) {
+                        this.showToast('JSON 解析失败: ' + (e.message || '格式错误'), 'error');
+                        return;
+                    }
+                    const mode = this.promptImportMode === 'overwrite' ? 'overwrite' : 'merge';
+                    this.promptSaving = true;
+                    try {
+                        const res = await this.promptApi().importPreset(parsed, mode);
+                        const data = res.data || {};
+                        const list = this.promptPresetsFrom(data);
+                        if (list.length) this.promptPresets = list;
+                        else await this.loadPromptPresets();
+                        const added = data.added ?? 0;
+                        const updated = data.updated ?? 0;
+                        const skipped = data.skipped ?? 0;
+                        this.showToast(`导入完成：新增 ${added}，更新 ${updated}，跳过 ${skipped}`, 'success');
+                        const warnings = Array.isArray(data.warnings) ? data.warnings : [];
+                        if (warnings.length) this.showToast(`导入警告：${warnings.join('；')}`, 'warning');
+                    } catch (e) {
+                        this.showToast(this.promptApiError(e, '导入预设失败'), this.promptApiMissing ? 'info' : 'error');
+                    } finally {
+                        this.promptSaving = false;
+                    }
+                },
+
+                // 单会话绑定查询：合并进本地映射（列表口没上线时唯一的取值路径）
+                // 预览最终提示词：POST /<id>/preview，只组装不写盘
+                async previewPromptPreset() {
+                    const draft = this.promptDraft;
+                    if (!draft || !draft.id) {
+                        this.showToast('保存预设拿到 ID 后才能预览', 'warning');
+                        return;
+                    }
+                    this.promptPreviewing = true;
+                    try {
+                        const res = await this.promptApi().preview(draft.id, {
+                            messages: [{ role: 'user', content: '（预览占位）你好' }],
+                        });
+                        this.promptPreview = this.normalizePromptPreview(res.data);
+                        this.promptApiMissing = false;
+                    } catch (e) {
+                        this.showToast(this.promptApiError(e, '预览失败'), this.promptApiMissing ? 'info' : 'error');
+                    } finally {
+                        this.promptPreviewing = false;
+                    }
+                },
+
+                // 后端返回 {messages[],system_prompt,top_messages[],depth_insertions[],chars}；
+                // 优先用 messages，缺失时用 system_prompt + top_messages 兜底
+                normalizePromptPreview(data) {
+                    const payload = data || {};
+                    const depthCount = Array.isArray(payload.depth_insertions)
+                        ? payload.depth_insertions.length
+                        : 0;
+                    const chars = Number(payload.chars) || 0;
+                    const messages = (Array.isArray(payload.messages) ? payload.messages : [])
+                        .filter(msg => msg && typeof msg === 'object')
+                        .map(msg => ({
+                            role: String(msg.role || 'system'),
+                            content: String(msg.content ?? ''),
+                        }));
+                    if (messages.length) return { messages, chars, depthCount };
+                    const fallback = [];
+                    if (payload.system_prompt) {
+                        fallback.push({ role: 'system', content: String(payload.system_prompt) });
+                    }
+                    (Array.isArray(payload.top_messages) ? payload.top_messages : []).forEach(msg => {
+                        if (msg && typeof msg === 'object') {
+                            fallback.push({
+                                role: String(msg.role || 'user'),
+                                content: String(msg.content ?? ''),
+                            });
+                        }
+                    });
+                    return { messages: fallback, chars, depthCount };
+                },
+
+                async queryPromptBinding(sessionId) {
+                    const sid = String(sessionId || '').trim();
+                    if (!sid) return;
+                    try {
+                        const res = await this.promptApi().getBinding(sid);
+                        const data = res.data || {};
+                        const presetId = String(data.preset_id || '');
+                        const next = { ...(this.promptBindings || {}) };
+                        if (presetId) next[sid] = presetId;
+                        else delete next[sid];
+                        this.promptBindings = next;
+                        // 选中的会话顺带回填「预设」下拉，方便直接改绑
+                        if (sid === String(this.promptBindSessionId || '').trim()) {
+                            this.promptBindPresetId = presetId;
+                        }
+                    } catch (e) {
+                        this.showToast(this.promptApiError(e, '查询会话绑定失败'), this.promptApiMissing ? 'info' : 'error');
+                    }
+                },
+
+                async loadPromptBindings() {
+                    try {
+                        // 后端 5e70fa32 起有列表口：{bindings:{sid:preset_id}, preset_names:{id:name}, count}
+                        const res = await this.promptApi().listBindings();
+                        const data = res.data || {};
+                        const raw = data.bindings && typeof data.bindings === 'object' ? data.bindings : data;
+                        this.promptBindings = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
+                        this.promptPresetNames = (data.preset_names && typeof data.preset_names === 'object')
+                            ? data.preset_names
+                            : {};
+                        this.promptApiMissing = false;
+                        this.promptBindingsListMissing = false;
+                    } catch (e) {
+                        const status = e && e.response ? e.response.status : 0;
+                        if (status !== 404 && status !== 405) {
+                            if (!this.promptApiMissing) this.promptApiError(e, '加载会话绑定失败');
+                            return;
+                        }
+                        // 老版本后端没有列表口：退化为只查当前选中的会话
+                        this.promptBindingsListMissing = true;
+                        const sessionId = String(this.promptBindSessionId || '').trim();
+                        if (!sessionId) return;
+                        try {
+                            await this.queryPromptBinding(sessionId);
+                        } catch (inner) {
+                            this.promptApiError(inner, '加载会话绑定失败');
+                        }
+                    }
+                },
+
+                async bindPromptSession() {
+                    const sessionId = String(this.promptBindSessionId || '').trim();
+                    if (!sessionId) {
+                        this.showToast('请先选择会话', 'warning');
+                        return;
+                    }
+                    const presetId = String(this.promptBindPresetId || '');
+                    this.promptBindBusy = true;
+                    try {
+                        await this.promptApi().setBinding(sessionId, presetId);
+                        await this.loadPromptBindings();
+                        const preset = (this.promptPresets || []).find(p => p.id === presetId);
+                        this.showToast(presetId ? `已绑定预设「${preset ? preset.name : presetId}」` : '已解绑，回退原有提示词', 'success');
+                    } catch (e) {
+                        this.showToast(this.promptApiError(e, '保存绑定失败'), this.promptApiMissing ? 'info' : 'error');
+                    } finally {
+                        this.promptBindBusy = false;
+                    }
+                },
+
+                async unbindPromptSession(sessionId) {
+                    if (!sessionId) return;
+                    this.promptBindBusy = true;
+                    try {
+                        await this.promptApi().setBinding(sessionId, '');
+                        await this.loadPromptBindings();
+                        this.showToast('已解绑该会话', 'success');
+                    } catch (e) {
+                        this.showToast(this.promptApiError(e, '解绑失败'), this.promptApiMissing ? 'info' : 'error');
+                    } finally {
+                        this.promptBindBusy = false;
+                    }
+                },
+
+                // ---- 知识库检索与引用（RAG citations，/api/knowledge/search）----
+                async runKnowledgeSearch() {
+                    const query = String(this.knowledgeQuery || '').trim();
+                    if (!query) return;
+                    this.knowledgeSearching = true;
+                    this.knowledgeSearchError = '';
+                    try {
+                        const res = await api.post('/api/knowledge/search', {
+                            query,
+                            top_k: Math.max(1, Math.min(20, Number(this.knowledgeTopK) || 5)),
+                            rerank: !!this.knowledgeRerank,
+                            mmr: !!this.knowledgeMmr,
+                        });
+                        const data = res.data || {};
+                        if (data.success === false) {
+                            this.knowledgeSearchError = data.error || '检索失败';
+                            this.knowledgeSearchResults = [];
+                            this.knowledgeCitations = [];
+                            this.knowledgeSearchMeta = null;
+                        } else {
+                            this.knowledgeSearchResults = Array.isArray(data.results) ? data.results : [];
+                            this.knowledgeCitations = Array.isArray(data.citations) ? data.citations : [];
+                            this.knowledgeSearchMeta = data.meta || null;
+                            this.knowledgeOpenCitation = '';
+                        }
+                    } catch (e) {
+                        this.knowledgeSearchError = (e.response && e.response.data && e.response.data.error)
+                            || e.message
+                            || '检索失败';
+                        this.knowledgeSearchResults = [];
+                        this.knowledgeCitations = [];
+                        this.knowledgeSearchMeta = null;
+                    } finally {
+                        this.knowledgeSearchRan = true;
+                        this.knowledgeSearching = false;
+                    }
+                },
+
+                toggleKnowledgeCitation(cite) {
+                    if (!cite || !cite.id) return;
+                    this.knowledgeOpenCitation = this.knowledgeOpenCitation === cite.id ? '' : cite.id;
+                },
+
+                openCitationDoc(cite) {
+                    if (!cite) return;
+                    const doc = (this.knowledgeDocs || []).find(item => item.id === cite.doc_id);
+                    if (doc) {
+                        this.viewKnowledgeDetail(doc);
+                        return;
+                    }
+                    this.showToast('这份文档不在当前列表里（可能已删除或未加载）', 'warning');
+                },
+
+                // ---- 生图实验室（多模 /api/images/*）----
+                imageApi() {
+                    const base = '/api/images';
+                    const enc = encodeURIComponent;
+                    return {
+                        base,
+                        styles: () => api.get(`${base}/styles`),
+                        quota: count => api.get(`${base}/quota`, { params: { count: count || 1 } }),
+                        generate: payload => api.post(`${base}/generate`, payload),
+                        references: () => api.get(`${base}/references`),
+                        uploadReference: file => {
+                            const form = new FormData();
+                            form.append('file', file);
+                            return api.post(`${base}/references`, form, {
+                                headers: { 'Content-Type': 'multipart/form-data' },
+                            });
+                        },
+                        deleteReference: name => api.delete(`${base}/references/${enc(name)}`),
+                        history: params => api.get(`${base}/history`, { params: params || {} }),
+                        historyEntry: id => api.get(`${base}/history/${enc(id)}`),
+                        deleteHistory: (id, keepFiles) => api.delete(`${base}/history/${enc(id)}`, {
+                            params: { keep_files: keepFiles ? 1 : 0 },
+                        }),
+                        retryHistory: id => api.post(`${base}/history/${enc(id)}/retry`, {}),
+                        templates: () => api.get(`${base}/templates`),
+                        createTemplate: payload => api.post(`${base}/templates`, payload),
+                        updateTemplate: (id, payload) => api.put(`${base}/templates/${enc(id)}`, payload),
+                        deleteTemplate: id => api.delete(`${base}/templates/${enc(id)}`),
+                        plan: payload => api.post(`${base}/lab/plan`, payload),
+                        createTask: payload => api.post(`${base}/lab/tasks`, payload),
+                        tasks: limit => api.get(`${base}/lab/tasks`, { params: { limit: limit || 20 } }),
+                        task: id => api.get(`${base}/lab/tasks/${enc(id)}`),
+                        cancelTask: id => api.post(`${base}/lab/tasks/${enc(id)}/cancel`, {}),
+                    };
+                },
+
+                imageApiError(e, fallback) {
+                    const status = e && e.response ? e.response.status : 0;
+                    const body = e && e.response ? (e.response.data || {}) : {};
+                    if (status === 404 || status === 405) {
+                        this.imageApiMissing = true;
+                        return `${fallback}：后端 /api/images 尚未注册`;
+                    }
+                    if (status === 429) return '配额不足：今日生成次数已用完';
+                    if (status === 503) return '生图模型未配置：请先在 AI 配置里启用图像模型';
+                    return `${fallback}: ${body.error || body.reason || (e && e.message) || '未知错误'}`;
+                },
+
+                async refreshImageLab() {
+                    this.imageLabLoading = true;
+                    try {
+                        await this.loadImageCatalog();
+                        if (this.imageApiMissing) return;
+                        await this.loadImageReferences();
+                        await this.loadImageTasks();
+                        await this.loadImageHistory();
+                        await this.loadImageQuota(this.imageParams.count);
+                    } finally {
+                        this.imageLabLoading = false;
+                    }
+                },
+
+                async loadImageCatalog() {
+                    const adapter = this.imageApi();
+                    try {
+                        const res = await adapter.styles();
+                        const data = res.data || {};
+                        this.imageStyles = Array.isArray(data.styles) ? data.styles : [];
+                        this.imageSizes = Array.isArray(data.sizes) ? data.sizes : [];
+                        this.imageProviders = Array.isArray(data.providers) ? data.providers : [];
+                        this.imageDefaults = data.defaults || {};
+                        this.imageLimits = data.limits || {};
+                        this.imageApiMissing = false;
+                        const defaults = this.imageDefaults || {};
+                        const params = { ...(this.imageParams || {}) };
+                        if (!this.imageStyles.some(item => item.id === params.style)) {
+                            params.style = defaults.style
+                                || (this.imageStyles.length ? this.imageStyles[0].id : 'none');
+                        }
+                        if (!this.imageSizes.some(item => item.value === params.size)) {
+                            params.size = defaults.size
+                                || (this.imageSizes.length ? this.imageSizes[0].value : '1024x1024');
+                        }
+                        if (!params.style) params.style = 'none';
+                        if (defaults.mode && !params.mode) params.mode = defaults.mode;
+                        if (defaults.count && !params.count) params.count = defaults.count;
+                        if (defaults.strength !== undefined && params.strength === undefined) {
+                            params.strength = Number(defaults.strength);
+                        }
+                        this.imageParams = params;
+                        const tplRes = await adapter.templates();
+                        const tplData = tplRes.data || {};
+                        this.imageTemplates = Array.isArray(tplData.templates) ? tplData.templates : [];
+                    } catch (e) {
+                        this.showToast(this.imageApiError(e, '加载生图配置失败'), this.imageApiMissing ? 'info' : 'error');
+                    }
+                },
+
+                async loadImageQuota(count) {
+                    try {
+                        const res = await this.imageApi().quota(count || this.imageParams.count || 1);
+                        const data = res.data || {};
+                        this.imageQuota = {
+                            allowed: data.allowed !== false,
+                            limit: Number(data.limit) || 0,
+                            used: Number(data.used) || 0,
+                            remaining: data.remaining !== undefined ? Number(data.remaining) : 0,
+                            reason: data.reason || '',
+                        };
+                    } catch (e) {
+                        if (!this.imageApiMissing) this.imageApiError(e, '查询配额失败');
+                    }
+                },
+
+                async loadImageReferences() {
+                    try {
+                        const res = await this.imageApi().references();
+                        const data = res.data || {};
+                        this.imageReferences = Array.isArray(data.references) ? data.references : [];
+                        const names = this.imageReferences.map(ref => ref.name);
+                        this.imageSelectedRefs = (this.imageSelectedRefs || []).filter(name => names.includes(name));
+                    } catch (e) {
+                        if (!this.imageApiMissing) this.imageApiError(e, '加载参考图库失败');
+                    }
+                },
+
+                pickImageReference() {
+                    const input = this.$refs.imageRefInput;
+                    if (input) input.click();
+                },
+
+                async uploadImageReference(event) {
+                    const input = event && event.target;
+                    const file = input && input.files ? input.files[0] : null;
+                    if (!file) return;
+                    const maxBytes = Number(this.imageLimits.max_reference_bytes) || 0;
+                    if (maxBytes && file.size > maxBytes) {
+                        this.showToast(`参考图过大（上限 ${Math.round(maxBytes / 1024 / 1024)} MB）`, 'warning');
+                        if (input) input.value = '';
+                        return;
+                    }
+                    this.imageUploading = true;
+                    try {
+                        const res = await this.imageApi().uploadReference(file);
+                        const data = res.data || {};
+                        const reference = data.reference || data;
+                        await this.loadImageReferences();
+                        if (reference && reference.name) {
+                            const next = [...(this.imageSelectedRefs || [])];
+                            const cap = Number(this.imageLimits.max_reference_images) || 4;
+                            if (!next.includes(reference.name) && next.length < cap) next.push(reference.name);
+                            this.imageSelectedRefs = next;
+                        }
+                        this.showToast('参考图已上传', 'success');
+                    } catch (e) {
+                        this.showToast(this.imageApiError(e, '上传参考图失败'), this.imageApiMissing ? 'info' : 'error');
+                    } finally {
+                        this.imageUploading = false;
+                        if (input) input.value = '';
+                    }
+                },
+
+                deleteImageReference(ref) {
+                    if (!ref || !ref.name) return;
+                    this.showConfirm({
+                        title: '删除参考图',
+                        messageBefore: '确定删除',
+                        highlight: ref.name,
+                        messageAfter: '吗？',
+                        impact: '已生成的作品不受影响，只是图库少一张素材。',
+                        confirmText: '删除',
+                        onConfirm: async () => {
+                            try {
+                                await this.imageApi().deleteReference(ref.name);
+                                this.imageSelectedRefs = (this.imageSelectedRefs || []).filter(
+                                    name => name !== ref.name
+                                );
+                                await this.loadImageReferences();
+                                this.showToast('参考图已删除', 'success');
+                            } catch (e) {
+                                this.showToast(this.imageApiError(e, '删除参考图失败'), 'error');
+                            }
+                        },
+                    });
+                },
+
+                toggleImageRef(name) {
+                    if (!name) return;
+                    const cap = Number(this.imageLimits.max_reference_images) || 4;
+                    const next = [...(this.imageSelectedRefs || [])];
+                    const at = next.indexOf(name);
+                    if (at >= 0) {
+                        next.splice(at, 1);
+                    } else {
+                        if (next.length >= cap) {
+                            this.showToast(`最多选 ${cap} 张参考图`, 'warning');
+                            return;
+                        }
+                        next.push(name);
+                    }
+                    this.imageSelectedRefs = next;
+                },
+
+                setImageMode(mode) {
+                    this.imageParams = {
+                        ...(this.imageParams || {}),
+                        mode: mode === 'img2img' ? 'img2img' : 'txt2img',
+                    };
+                },
+
+                applyImageTemplate(tpl) {
+                    if (!tpl) return;
+                    const params = { ...(this.imageParams || {}) };
+                    if (tpl.prompt) params.prompt = tpl.prompt;
+                    if (tpl.negative_prompt !== undefined) params.negative_prompt = tpl.negative_prompt || '';
+                    if (tpl.mode) params.mode = tpl.mode;
+                    if (tpl.style) params.style = tpl.style;
+                    if (tpl.size) params.size = tpl.size;
+                    if (tpl.strength !== undefined && tpl.strength !== null) params.strength = Number(tpl.strength);
+                    if (tpl.count) params.count = Number(tpl.count);
+                    this.imageParams = params;
+                    this.imageSelectedTemplateId = tpl.id || '';
+                    const refs = Array.isArray(tpl.reference_images) ? tpl.reference_images : [];
+                    if (refs.length) {
+                        this.imageSelectedRefs = refs.slice(
+                            0, Number(this.imageLimits.max_reference_images) || 4
+                        );
+                    }
+                    this.showToast(`已套用模板「${tpl.name || tpl.id}」`, 'success');
+                },
+
+                buildImagePayload(extra) {
+                    const params = this.imageParams || {};
+                    const maxCount = Number(this.imageLimits.max_images_per_request) || 4;
+                    const payload = {
+                        prompt: String(params.prompt || '').trim(),
+                        mode: params.mode === 'img2img' ? 'img2img' : 'txt2img',
+                        style: params.style || 'none',
+                        size: params.size || '1024x1024',
+                        strength: Number.isFinite(Number(params.strength)) ? Number(params.strength) : 0.6,
+                        count: Math.max(1, Math.min(maxCount, Number(params.count) || 1)),
+                        negative_prompt: params.negative_prompt || '',
+                        reference_images: [...(this.imageSelectedRefs || [])],
+                        ...(extra || {}),
+                    };
+                    if (params.model_id) payload.model_id = params.model_id;
+                    if (this.currentSession && this.currentSession.id) payload.session_id = this.currentSession.id;
+                    return payload;
+                },
+
+                async submitImageGenerate() {
+                    const payload = this.buildImagePayload();
+                    if (!payload.prompt) {
+                        this.showToast('请先填写提示词', 'warning');
+                        return;
+                    }
+                    if (payload.mode === 'img2img' && !payload.reference_images.length) {
+                        this.showToast('图生图至少要选 1 张参考图', 'warning');
+                        return;
+                    }
+                    this.imageGenerating = true;
+                    this.imageLastError = '';
+                    this.imagePartial = false;
+                    try {
+                        const res = await this.imageApi().generate(payload);
+                        const data = res.data || {};
+                        this.imageApiMissing = false;
+                        this.imageResults = Array.isArray(data.images) ? data.images : [];
+                        this.imagePartial = !!data.partial;
+                        this.imageLastElapsed = Number(data.elapsed_ms) || 0;
+                        if (data.error) this.imageLastError = String(data.error);
+                        else if (!this.imageResults.length) this.imageLastError = '后端没有返回图片';
+                        if (data.quota) {
+                            this.imageQuota = {
+                                allowed: data.quota.allowed !== false,
+                                limit: Number(data.quota.limit) || 0,
+                                used: Number(data.quota.used) || 0,
+                                remaining: data.quota.remaining !== undefined ? Number(data.quota.remaining) : 0,
+                            };
+                        } else {
+                            await this.loadImageQuota(payload.count);
+                        }
+                        if (this.imageResults.length) {
+                            this.showToast(`生成完成：${this.imageResults.length} 张`, 'success');
+                            await this.loadImageHistory();
+                        }
+                    } catch (e) {
+                        this.imageLastError = this.imageApiError(e, '生成失败');
+                        this.showToast(this.imageLastError, this.imageApiMissing ? 'info' : 'error');
+                        await this.loadImageQuota(payload.count);
+                    } finally {
+                        this.imageGenerating = false;
+                    }
+                },
+
+                parseImageNumbers(text) {
+                    return String(text || '')
+                        .split(/[,，\s]+/)
+                        .map(item => Number(item))
+                        .filter(num => Number.isFinite(num));
+                },
+
+                buildImageVariationPlan(overrides) {
+                    const plan = this.buildImagePayload();
+                    const variations = this.imageVariations || {};
+                    const styles = Array.isArray(variations.styles)
+                        ? variations.styles.filter(Boolean)
+                        : [];
+                    const sizes = Array.isArray(variations.sizes)
+                        ? variations.sizes.filter(Boolean)
+                        : [];
+                    const strengths = this.parseImageNumbers(variations.strengthsText)
+                        .filter(value => value >= 0 && value <= 1);
+                    const counts = this.parseImageNumbers(variations.countsText)
+                        .filter(value => value >= 1);
+                    const next = { ...plan };
+                    const bundle = {};
+                    if (styles.length) bundle.styles = styles;
+                    if (sizes.length) bundle.sizes = sizes;
+                    if (strengths.length) bundle.strengths = strengths;
+                    if (counts.length) bundle.counts = counts;
+                    if (Object.keys(bundle).length) next.variations = bundle;
+                    return { ...next, ...(overrides || {}) };
+                },
+
+                async planImageComparison() {
+                    this.imagePlanBusy = true;
+                    try {
+                        const res = await this.imageApi().plan(this.buildImageVariationPlan());
+                        const data = res.data || {};
+                        this.imageApiMissing = false;
+                        this.imagePlanGroups = Array.isArray(data.groups) ? data.groups : [];
+                        this.imagePlanTruncated = !!data.truncated;
+                        this.imagePlanRequested = Number(data.requested_images) || 0;
+                        if (!this.imagePlanGroups.length) {
+                            this.showToast('没有可对比的组合：至少勾选一个风格或尺寸', 'warning');
+                        }
+                    } catch (e) {
+                        this.showToast(this.imageApiError(e, '生成对比计划失败'), this.imageApiMissing ? 'info' : 'error');
+                    } finally {
+                        this.imagePlanBusy = false;
+                    }
+                },
+
+                async planTemplateComparison(tpl) {
+                    if (!tpl) return;
+                    this.imagePlanBusy = true;
+                    this.imageSelectedTemplateId = tpl.id || '';
+                    try {
+                        const styles = (this.imageStyles || []).slice(0, 4).map(item => item.id);
+                        const res = await this.imageApi().plan({
+                            template_id: tpl.id,
+                            prompt: tpl.prompt || '',
+                            mode: tpl.mode || 'txt2img',
+                            style: tpl.style || 'none',
+                            size: tpl.size || '1024x1024',
+                            strength: tpl.strength !== undefined && tpl.strength !== null
+                                ? Number(tpl.strength)
+                                : 0.6,
+                            count: Number(tpl.count) || 1,
+                            negative_prompt: tpl.negative_prompt || '',
+                            reference_images: Array.isArray(tpl.reference_images)
+                                ? tpl.reference_images
+                                : [],
+                            variations: { styles },
+                        });
+                        const data = res.data || {};
+                        this.imagePlanGroups = Array.isArray(data.groups) ? data.groups : [];
+                        this.imagePlanTruncated = !!data.truncated;
+                        this.imagePlanRequested = Number(data.requested_images) || 0;
+                        this.showToast(
+                            `模板「${tpl.name || tpl.id}」生成 ${this.imagePlanGroups.length} 组对比计划`,
+                            'success'
+                        );
+                    } catch (e) {
+                        this.showToast(this.imageApiError(e, '生成模板对比计划失败'), 'error');
+                    } finally {
+                        this.imagePlanBusy = false;
+                    }
+                },
+
+                async runImageTaskFromPlan() {
+                    if (!this.imagePlanGroups.length) {
+                        this.showToast('先生成对比计划', 'warning');
+                        return;
+                    }
+                    this.imageTaskSubmitting = true;
+                    try {
+                        const res = await this.imageApi().createTask(this.buildImageVariationPlan());
+                        const data = res.data || {};
+                        this.imageApiMissing = false;
+                        const task = data.task || null;
+                        if (task && task.id) {
+                            this.imageActiveTaskId = task.id;
+                            this.imageActiveTask = task;
+                            this.pollImageTask(task.id);
+                        }
+                        const groups = task && task.groups ? task.groups.length : this.imagePlanGroups.length;
+                        this.showToast(`任务已提交（${groups} 组）`, 'success');
+                        await this.loadImageTasks();
+                    } catch (e) {
+                        this.showToast(this.imageApiError(e, '提交任务失败'), this.imageApiMissing ? 'info' : 'error');
+                    } finally {
+                        this.imageTaskSubmitting = false;
+                    }
+                },
+
+                async loadImageTasks() {
+                    this.imageTasksLoading = true;
+                    try {
+                        const res = await this.imageApi().tasks(20);
+                        const data = res.data || {};
+                        this.imageTasks = Array.isArray(data.tasks) ? data.tasks : [];
+                        this.imageApiMissing = false;
+                        const running = this.imageTasks.find(
+                            task => task.status === 'queued' || task.status === 'running'
+                        );
+                        if (running && !this._imageTaskTimer) this.pollImageTask(running.id);
+                    } catch (e) {
+                        if (!this.imageApiMissing) this.imageApiError(e, '加载任务队列失败');
+                    } finally {
+                        this.imageTasksLoading = false;
+                    }
+                },
+
+                async toggleActiveImageTask(taskId) {
+                    if (this.imageActiveTaskId === taskId) {
+                        this.imageActiveTaskId = '';
+                        this.imageActiveTask = null;
+                        this.stopImageTaskPolling();
+                        return;
+                    }
+                    this.imageActiveTaskId = taskId;
+                    await this.fetchImageTask(taskId);
+                },
+
+                async fetchImageTask(taskId) {
+                    if (!taskId) return null;
+                    try {
+                        const res = await this.imageApi().task(taskId);
+                        const data = res.data || {};
+                        const task = data.task || data;
+                        if (!task || !task.id) return null;
+                        this.imageActiveTask = task;
+                        const list = [...(this.imageTasks || [])];
+                        const index = list.findIndex(item => item.id === task.id);
+                        if (index >= 0) {
+                            list[index] = {
+                                ...list[index],
+                                status: task.status,
+                                progress: task.progress,
+                                image_count: (task.groups || []).reduce(
+                                    (sum, group) => sum + ((group.images || []).length), 0
+                                ),
+                            };
+                            this.imageTasks = list;
+                        }
+                        return task;
+                    } catch (e) {
+                        if (!this.imageApiMissing) this.imageApiError(e, '查询任务详情失败');
+                        return null;
+                    }
+                },
+
+                pollImageTask(taskId) {
+                    if (!taskId) return;
+                    this.stopImageTaskPolling();
+                    const tick = async () => {
+                        const task = await this.fetchImageTask(taskId);
+                        if (!task) return;
+                        const finished = ['succeeded', 'partial', 'failed', 'canceled'].includes(task.status);
+                        if (!finished) return;
+                        this.stopImageTaskPolling();
+                        if (task.status === 'succeeded' || task.status === 'partial') {
+                            this.showToast(`任务${task.status === 'partial' ? '部分完成' : '完成'}`, 'success');
+                            await this.loadImageHistory();
+                            await this.loadImageQuota(this.imageParams.count);
+                        } else if (task.status === 'failed') {
+                            this.showToast('任务失败：' + (task.error || '未知原因'), 'error');
+                        }
+                    };
+                    this._imageTaskTimer = setInterval(tick, 1200);
+                    tick();
+                },
+
+                stopImageTaskPolling() {
+                    if (this._imageTaskTimer) {
+                        clearInterval(this._imageTaskTimer);
+                        this._imageTaskTimer = null;
+                    }
+                },
+
+                async cancelImageTask(taskId) {
+                    if (!taskId) return;
+                    try {
+                        await this.imageApi().cancelTask(taskId);
+                        this.showToast('已请求取消', 'success');
+                        await this.fetchImageTask(taskId);
+                        await this.loadImageTasks();
+                    } catch (e) {
+                        this.showToast(this.imageApiError(e, '取消失败'), 'error');
+                    }
+                },
+
+                async retryImageTaskGroup(group) {
+                    if (!group) return;
+                    const params = group.params || {};
+                    try {
+                        const res = await this.imageApi().createTask({ ...params, variants: [{ ...params }] });
+                        const data = res.data || {};
+                        const task = data.task || null;
+                        if (task && task.id) {
+                            this.imageActiveTaskId = task.id;
+                            this.imageActiveTask = task;
+                            this.pollImageTask(task.id);
+                        }
+                        this.showToast('已按该组参数重新提交', 'success');
+                        await this.loadImageTasks();
+                    } catch (e) {
+                        this.showToast(this.imageApiError(e, '重试该组失败'), 'error');
+                    }
+                },
+
+                taskStatusLabel(status) {
+                    const labels = {
+                        queued: '排队中',
+                        running: '生成中',
+                        succeeded: '完成',
+                        partial: '部分完成',
+                        failed: '失败',
+                        canceled: '已取消',
+                        pending: '待生成',
+                    };
+                    return labels[status] || status || '未知';
+                },
+
+                taskProgressPercent(task) {
+                    if (!task) return 0;
+                    const progress = task.progress || {};
+                    if (progress.percent !== undefined && progress.percent !== null) {
+                        return Math.max(0, Math.min(100, Math.round(Number(progress.percent) || 0)));
+                    }
+                    const total = Number(progress.total) || 0;
+                    const done = Number(progress.done) || 0;
+                    if (total > 0) return Math.max(0, Math.min(100, Math.round((done / total) * 100)));
+                    return task.status === 'succeeded' ? 100 : 0;
+                },
+
+                groupParamsLabel(params) {
+                    if (!params || typeof params !== 'object') return '';
+                    const bits = [];
+                    if (params.style) bits.push(`风格 ${params.style}`);
+                    if (params.size) bits.push(params.size);
+                    if (params.strength !== undefined && params.strength !== null) {
+                        bits.push(`强度 ${Number(params.strength).toFixed(2)}`);
+                    }
+                    if (params.count) bits.push(`${params.count} 张`);
+                    if (params.mode) bits.push(params.mode === 'img2img' ? '图生图' : '文生图');
+                    return bits.join(' · ');
+                },
+
+                async loadImageHistory() {
+                    this.imageHistoryLoading = true;
+                    try {
+                        const res = await this.imageApi().history({ limit: 20, offset: 0 });
+                        const data = res.data || {};
+                        this.imageHistory = Array.isArray(data.entries) ? data.entries : [];
+                        this.imageApiMissing = false;
+                    } catch (e) {
+                        if (!this.imageApiMissing) this.imageApiError(e, '加载生成历史失败');
+                    } finally {
+                        this.imageHistoryLoading = false;
+                    }
+                },
+
+                async retryImageHistory(entry) {
+                    if (!entry || !entry.id) return;
+                    try {
+                        const res = await this.imageApi().retryHistory(entry.id);
+                        const data = res.data || {};
+                        const task = data.task || null;
+                        if (task && task.id) {
+                            this.imageActiveTaskId = task.id;
+                            this.imageActiveTask = task;
+                            this.pollImageTask(task.id);
+                        }
+                        this.showToast('已重新提交该记录', 'success');
+                        await this.loadImageTasks();
+                    } catch (e) {
+                        this.showToast(this.imageApiError(e, '重试失败'), 'error');
+                    }
+                },
+
+                deleteImageHistory(entry) {
+                    if (!entry || !entry.id) return;
+                    this.showConfirm({
+                        title: '删除生成记录',
+                        messageBefore: '确定删除这条记录吗？',
+                        highlight: entry.prompt ? String(entry.prompt).slice(0, 40) : entry.id,
+                        impact: '记录与对应图片文件会一起删除，无法恢复。',
+                        confirmText: '删除',
+                        onConfirm: async () => {
+                            try {
+                                await this.imageApi().deleteHistory(entry.id, false);
+                                this.imageHistory = (this.imageHistory || []).filter(
+                                    item => item.id !== entry.id
+                                );
+                                this.showToast('记录已删除', 'success');
+                            } catch (e) {
+                                this.showToast(this.imageApiError(e, '删除记录失败'), 'error');
+                            }
+                        },
+                    });
+                },
+
+                // 后端 history.status 只有 success/partial/failed，映射到任务状态样式
+                imageHistoryStatusClass(status) {
+                    const map = { success: 'succeeded', partial: 'partial', failed: 'failed' };
+                    return map[status] || status || 'queued';
+                },
+
+                async openImageHistoryEntry(entry) {
+                    if (!entry || !entry.id) return;
+                    this.imageHistoryDetail = entry;
+                    this.showImageHistoryModal = true;
+                    try {
+                        const res = await this.imageApi().historyEntry(entry.id);
+                        const data = res.data || {};
+                        const detail = data.entry || data.history || data.record || data;
+                        if (detail && typeof detail === 'object' && (detail.id || detail.results || detail.urls)) {
+                            this.imageHistoryDetail = { ...entry, ...detail };
+                        }
+                    } catch (e) {
+                        if (!this.imageApiMissing) this.imageApiError(e, '加载历史详情失败');
+                    }
+                },
+
+                closeImageHistoryModal() {
+                    this.showImageHistoryModal = false;
+                    this.imageHistoryDetail = null;
+                },
+
+                clearImageResults() {
+                    this.imageResults = [];
+                    this.imageLastError = '';
+                    this.imagePartial = false;
+                    this.imageLastElapsed = 0;
+                },
+
+                // ---- 世界模拟（世界 /api/worlds/*）----
+                // 字段按「世界」2026-10-26 契约：world/node/event/character/asset。
+                worldApi() {
+                    const base = '/api/worlds';
+                    const enc = encodeURIComponent;
+                    return {
+                        base,
+                        list: () => api.get(base),
+                        // 事件分页：?event_limit=N&before_sequence=S（世界 326ef53c）
+                        get: (id, params) => api.get(`${base}/${enc(id)}`, { params: params || {} }),
+                        create: payload => api.post(base, payload),
+                        update: (id, payload) => api.put(`${base}/${enc(id)}`, payload),
+                        remove: id => api.delete(`${base}/${enc(id)}`),
+                        duplicate: id => api.post(`${base}/${enc(id)}/duplicate`, {}),
+                        step: (id, nodeId, payload) => api.post(
+                            `${base}/${enc(id)}/nodes/${enc(nodeId)}/step`, payload || {}
+                        ),
+                        tick: (id, nodeId, payload) => api.post(
+                            `${base}/${enc(id)}/nodes/${enc(nodeId)}/tick`, payload || {}
+                        ),
+                        jumpTime: (id, nodeId, targetTime) => api.post(
+                            `${base}/${enc(id)}/nodes/${enc(nodeId)}/jump-time`, { target_time: targetTime }
+                        ),
+                    };
+                },
+
+                worldApiError(e, fallback) {
+                    const status = e && e.response ? e.response.status : 0;
+                    const data = e && e.response ? e.response.data : null;
+                    if (status === 404) this.worldApiMissing = true;
+                    const message = (data && (data.error || data.message)) || (e && e.message) || '未知错误';
+                    return `${fallback}: ${message}`;
+                },
+
+                worldTimeModeLabel(mode) {
+                    const map = { real: '真实', accelerated: '加速', paused: '暂停' };
+                    return map[mode] || mode || '——';
+                },
+
+                worldNodeState(key) {
+                    const node = this.worldCurrentNode;
+                    const global = node && node.state && node.state.global_state;
+                    return (global && global[key]) || '';
+                },
+
+                // 统一吃 {success, world, current_node, nodes[], events[], characters[], assets[]}
+                applyWorldPayload(data) {
+                    const payload = data || {};
+                    if (payload.world && payload.world.world_id) {
+                        const world = payload.world;
+                        this.worldDetail = world;
+                        this.worldSelectedId = world.world_id;
+                        if (this.worlds.some(item => item.world_id === world.world_id)) {
+                            this.worlds = this.worlds.map(item => (
+                                item.world_id === world.world_id ? { ...item, ...world } : item
+                            ));
+                        } else {
+                            this.worlds = [world, ...this.worlds];
+                        }
+                    }
+                    if (Array.isArray(payload.nodes)) this.worldNodes = payload.nodes;
+                    if (Array.isArray(payload.characters)) this.worldCharacters = payload.characters;
+                    if (Array.isArray(payload.assets)) this.worldAssets = payload.assets;
+                    if (Array.isArray(payload.events)) {
+                        this.worldEvents = payload.events
+                            .filter(ev => ev && ev.event_id)
+                            .slice()
+                            .sort((a, b) => (Number(b.sequence) || 0) - (Number(a.sequence) || 0));
+                    }
+                    if (payload.event_total !== undefined) {
+                        this.worldEventTotal = Number(payload.event_total) || this.worldEvents.length;
+                    } else if (!this.worldEventTotal) {
+                        this.worldEventTotal = this.worldEvents.length;
+                    }
+                    this.worldHasMoreEvents = !!payload.has_more;
+                    const current = payload.current_node;
+                    if (current && current.node_id) {
+                        this.worldCurrentNodeId = current.node_id;
+                        if (!this.worldNodes.some(node => node.node_id === current.node_id)) {
+                            this.worldNodes = [...this.worldNodes, current];
+                        }
+                    } else if (!this.worldCurrentNodeId && this.worldNodes.length) {
+                        this.worldCurrentNodeId = this.worldNodes[0].node_id;
+                    }
+                },
+
+                // step/tick/jump-time 返回：{state, display[], events[], suggested_actions[], branch_hint, ai_used}
+                applyWorldStepResult(data) {
+                    const payload = data || {};
+                    if (payload.state) {
+                        const currentId = this.worldCurrentNodeId;
+                        this.worldNodes = this.worldNodes.map(node => (
+                            node.node_id === currentId ? { ...node, state: payload.state } : node
+                        ));
+                    }
+                    this.worldLastDisplay = Array.isArray(payload.display) ? payload.display : [];
+                    this.worldLastAiUsed = payload.ai_used === undefined ? null : !!payload.ai_used;
+                    // 只有 act 的 ai_used=false 才是"本地规则降级"；tick/jump-time 恒为 false 但不是降级
+                    this.worldLastActionType = payload.action_type || '';
+                    this.worldSuggestedActions = Array.isArray(payload.suggested_actions)
+                        ? payload.suggested_actions
+                        : [];
+                    this.worldLastBranchHint = payload.branch_hint || '';
+                    if (Array.isArray(payload.events) && payload.events.length) {
+                        const seen = new Set();
+                        this.worldEvents = payload.events
+                            .concat(this.worldEvents)
+                            .filter(ev => {
+                                if (!ev || !ev.event_id || seen.has(ev.event_id)) return false;
+                                seen.add(ev.event_id);
+                                return true;
+                            })
+                            .sort((a, b) => (Number(b.sequence) || 0) - (Number(a.sequence) || 0));
+                    }
+                },
+
+                async loadWorlds() {
+                    this.worldLoading = true;
+                    try {
+                        const res = await this.worldApi().list();
+                        const data = res.data || {};
+                        this.worlds = Array.isArray(data.worlds) ? data.worlds : (Array.isArray(data) ? data : []);
+                        this.worldApiMissing = false;
+                        if (this.worldSelectedId && !this.worlds.some(w => w.world_id === this.worldSelectedId)) {
+                            this.worldSelectedId = '';
+                            this.worldDetail = null;
+                        }
+                        if (!this.worldSelectedId && this.worlds.length) {
+                            await this.selectWorld(this.worlds[0].world_id);
+                        }
+                    } catch (e) {
+                        this.showToast(this.worldApiError(e, '加载世界列表失败'), this.worldApiMissing ? 'info' : 'error');
+                    } finally {
+                        this.worldLoading = false;
+                    }
+                },
+
+                async loadWorldDetail(worldId, params) {
+                    const id = String(worldId || this.worldSelectedId || '').trim();
+                    if (!id) return;
+                    this.worldLoading = true;
+                    try {
+                        const query = params || { event_limit: this.worldEventPageSize };
+                        const res = await this.worldApi().get(id, query);
+                        this.applyWorldPayload(res.data);
+                        this.worldApiMissing = false;
+                    } catch (e) {
+                        this.showToast(this.worldApiError(e, '加载世界详情失败'), this.worldApiMissing ? 'info' : 'error');
+                    } finally {
+                        this.worldLoading = false;
+                    }
+                },
+
+                // 向上翻页：before_sequence = 当前最早一条的 sequence（世界 326ef53c）
+                async loadMoreWorldEvents() {
+                    const id = String(this.worldSelectedId || '').trim();
+                    if (!id || this.worldLoading || !this.worldHasMoreEvents) return;
+                    const sequences = (this.worldEvents || [])
+                        .map(ev => Number(ev.sequence))
+                        .filter(value => Number.isFinite(value));
+                    const earliest = sequences.length ? Math.min(...sequences) : undefined;
+                    this.worldLoading = true;
+                    try {
+                        const params = { event_limit: this.worldEventPageSize };
+                        if (earliest !== undefined) params.before_sequence = earliest;
+                        const res = await this.worldApi().get(id, params);
+                        const data = res.data || {};
+                        const older = (Array.isArray(data.events) ? data.events : [])
+                            .filter(ev => ev && ev.event_id);
+                        const seen = new Set((this.worldEvents || []).map(ev => ev.event_id));
+                        const merged = older.filter(ev => !seen.has(ev.event_id)).concat(this.worldEvents || []);
+                        this.worldEvents = merged.sort(
+                            (a, b) => (Number(b.sequence) || 0) - (Number(a.sequence) || 0)
+                        );
+                        this.worldHasMoreEvents = !!data.has_more;
+                        if (data.event_total !== undefined) {
+                            this.worldEventTotal = Number(data.event_total) || this.worldEvents.length;
+                        }
+                    } catch (e) {
+                        this.showToast(this.worldApiError(e, '加载更早事件失败'), this.worldApiMissing ? 'info' : 'error');
+                    } finally {
+                        this.worldLoading = false;
+                    }
+                },
+
+                async selectWorld(worldId) {
+                    // 切世界先退出旧房间，再按新世界重新 join
+                    this.leaveWorldSocket();
+                    this.worldSelectedId = worldId || '';
+                    this.worldCurrentNodeId = '';
+                    this.worldNodes = [];
+                    this.worldEvents = [];
+                    this.worldCharacters = [];
+                    this.worldAssets = [];
+                    this.worldLastDisplay = [];
+                    this.worldSuggestedActions = [];
+                    this.worldLastBranchHint = '';
+                    this.worldHasMoreEvents = false;
+                    this.worldEventTotal = 0;
+                    await this.loadWorldDetail(this.worldSelectedId);
+                    this.joinWorldSocket();
+                },
+
+                viewWorldNode(nodeId) {
+                    if (!nodeId || nodeId === this.worldCurrentNodeId) return;
+                    // 换节点后房间也要跟着换（世界按 world:<id>:<node> 分房间）
+                    this.leaveWorldSocket();
+                    this.worldCurrentNodeId = nodeId;
+                    this.joinWorldSocket();
+                },
+
+                async createWorld() {
+                    const form = this.worldCreateForm || {};
+                    const name = String(form.name || '').trim();
+                    if (!name) {
+                        this.showToast('世界名称不能为空', 'warning');
+                        return;
+                    }
+                    this.worldBusy = true;
+                    try {
+                        const res = await this.worldApi().create({
+                            name,
+                            genre: String(form.genre || '').trim(),
+                            tone: String(form.tone || '').trim(),
+                            description: String(form.description || '').trim(),
+                        });
+                        this.worldCreateForm = { name: '', genre: '', tone: '', description: '' };
+                        this.applyWorldPayload(res.data);
+                        this.showToast(`世界「${name}」已创建`, 'success');
+                    } catch (e) {
+                        this.showToast(this.worldApiError(e, '创建世界失败'), this.worldApiMissing ? 'info' : 'error');
+                    } finally {
+                        this.worldBusy = false;
+                    }
+                },
+
+                duplicateWorld() {
+                    const world = this.worldDetail;
+                    if (!world || !world.world_id) return;
+                    this.showConfirm({
+                        title: '复制世界',
+                        messageBefore: '复制世界',
+                        highlight: world.name || world.world_id,
+                        messageAfter: '？',
+                        impact: '会连同节点树、事件、角色与资产一起复制成一个新世界。',
+                        confirmText: '复制',
+                        onConfirm: async () => {
+                            this.worldBusy = true;
+                            try {
+                                const res = await this.worldApi().duplicate(world.world_id);
+                                this.applyWorldPayload(res.data);
+                                await this.loadWorlds();
+                                this.showToast('世界已复制', 'success');
+                            } catch (e) {
+                                this.showToast(this.worldApiError(e, '复制世界失败'), this.worldApiMissing ? 'info' : 'error');
+                            } finally {
+                                this.worldBusy = false;
+                            }
+                        },
+                    });
+                },
+
+                deleteWorld() {
+                    const world = this.worldDetail;
+                    if (!world || !world.world_id) return;
+                    this.showConfirm({
+                        title: '删除世界',
+                        messageBefore: '确定删除世界',
+                        highlight: world.name || world.world_id,
+                        messageAfter: '？',
+                        impact: '节点树、事件、角色与资产会一并删除，无法撤销。',
+                        confirmText: '删除',
+                        onConfirm: async () => {
+                            this.worldBusy = true;
+                            try {
+                                await this.worldApi().remove(world.world_id);
+                                this.worlds = this.worlds.filter(item => item.world_id !== world.world_id);
+                                this.worldSelectedId = '';
+                                this.worldDetail = null;
+                                this.worldNodes = [];
+                                this.worldEvents = [];
+                                this.showToast('世界已删除', 'success');
+                                if (this.worlds.length) await this.selectWorld(this.worlds[0].world_id);
+                            } catch (e) {
+                                this.showToast(this.worldApiError(e, '删除世界失败'), this.worldApiMissing ? 'info' : 'error');
+                            } finally {
+                                this.worldBusy = false;
+                            }
+                        },
+                    });
+                },
+
+                async stepWorldNode() {
+                    const world = this.worldDetail;
+                    const node = this.worldCurrentNode;
+                    if (!world || !node) {
+                        this.showToast('先选一个世界与节点', 'warning');
+                        return;
+                    }
+                    const content = String(this.worldActionText || '').trim();
+                    this.worldBusy = true;
+                    // 已 join 房间时走 socket（结果由 world_state_updated / world_event_created 推回）
+                    if (this.worldSocketJoined && socket && socket.connected) {
+                        socket.emit('world_action', {
+                            world_id: world.world_id,
+                            node_id: node.node_id,
+                            content,
+                        });
+                        if (content) this.worldActionText = '';
+                        this.worldStreaming = true;
+                        this.worldStreamAction = 'act';
+                        return;
+                    }
+                    try {
+                        const res = await this.worldApi().step(world.world_id, node.node_id, { content });
+                        this.applyWorldStepResult(res.data);
+                        if (content) this.worldActionText = '';
+                    } catch (e) {
+                        this.showToast(this.worldApiError(e, '推进失败'), this.worldApiMissing ? 'info' : 'error');
+                    } finally {
+                        this.worldBusy = false;
+                    }
+                },
+
+                async tickWorldNode() {
+                    const world = this.worldDetail;
+                    const node = this.worldCurrentNode;
+                    if (!world || !node) {
+                        this.showToast('先选一个世界与节点', 'warning');
+                        return;
+                    }
+                    this.worldBusy = true;
+                    if (this.worldSocketJoined && socket && socket.connected) {
+                        socket.emit('world_tick', { world_id: world.world_id, node_id: node.node_id });
+                        return;
+                    }
+                    try {
+                        const res = await this.worldApi().tick(world.world_id, node.node_id, {});
+                        this.applyWorldStepResult(res.data);
+                    } catch (e) {
+                        this.showToast(this.worldApiError(e, '时间推进失败'), this.worldApiMissing ? 'info' : 'error');
+                    } finally {
+                        this.worldBusy = false;
+                    }
+                },
+
+                async jumpWorldTime() {
+                    const world = this.worldDetail;
+                    const node = this.worldCurrentNode;
+                    const target = String(this.worldJumpTime || '').trim();
+                    if (!world || !node) {
+                        this.showToast('先选一个世界与节点', 'warning');
+                        return;
+                    }
+                    if (!target) {
+                        this.showToast('请填写目标时间', 'warning');
+                        return;
+                    }
+                    this.worldBusy = true;
+                    if (this.worldSocketJoined && socket && socket.connected) {
+                        socket.emit('world_jump_time', {
+                            world_id: world.world_id,
+                            node_id: node.node_id,
+                            target_time: target,
+                        });
+                        return;
+                    }
+                    try {
+                        const res = await this.worldApi().jumpTime(world.world_id, node.node_id, target);
+                        this.applyWorldStepResult(res.data);
+                        this.showToast(`已跳到 ${target}`, 'success');
+                    } catch (e) {
+                        this.showToast(this.worldApiError(e, '跳时失败'), this.worldApiMissing ? 'info' : 'error');
+                    } finally {
+                        this.worldBusy = false;
+                    }
+                },
+
+                // ---- 世界模拟 socket（世界 world_socket_events.py / worlds.py step-stream）----
+                initWorldSocket() {
+                    if (this._worldSocketBound || !socket) return;
+                    this._worldSocketBound = true;
+
+                    socket.on('joined_world', payload => this.onWorldJoined(payload));
+
+                    socket.on('world_state_updated', payload => {
+                        if (!this.isCurrentWorldEvent(payload)) return;
+                        this.worldBusy = false;
+                        this.worldStreaming = false;
+                        this.applyWorldStepResult(payload);
+                    });
+
+                    socket.on('world_event_created', payload => this.onWorldEventCreated(payload));
+
+                    socket.on('world_stream_start', payload => {
+                        if (!this.isCurrentWorldEvent(payload)) return;
+                        this.worldStreaming = true;
+                        this.worldStreamAction = (payload && payload.action) || 'step';
+                        this.worldBusy = true;
+                    });
+
+                    socket.on('world_stream_end', payload => {
+                        if (!this.isCurrentWorldEvent(payload)) return;
+                        this.worldStreaming = false;
+                        this.worldBusy = false;
+                        const data = payload || {};
+                        if (data.result) this.applyWorldStepResult(data.result);
+                        else if (data.error) this.showToast(`推进失败：${data.error}`, 'error');
+                    });
+
+                    socket.on('world_error', payload => {
+                        this.worldBusy = false;
+                        this.worldStreaming = false;
+                        const message = (payload && payload.message) || '未知错误';
+                        this.showToast(`世界模拟：${message}`, 'error');
+                    });
+
+                    // 断线重连后自动重新 join，避免切页/重连后收不到事件
+                    socket.on('connect', () => {
+                        if (this.currentPage === 'worlds' && this.worldSelectedId) this.joinWorldSocket();
+                    });
+                },
+
+                isCurrentWorldEvent(payload) {
+                    const data = payload || {};
+                    if (!this.worldSelectedId) return false;
+                    return !data.world_id || data.world_id === this.worldSelectedId;
+                },
+
+                joinWorldSocket() {
+                    if (!socket || !socket.connected) return false;
+                    const worldId = String(this.worldSelectedId || '').trim();
+                    if (!worldId) return false;
+                    socket.emit('join_world', {
+                        world_id: worldId,
+                        node_id: this.worldCurrentNodeId || '',
+                        event_limit: this.worldEventPageSize,
+                    });
+                    this.worldSocketJoined = true;
+                    return true;
+                },
+
+                leaveWorldSocket() {
+                    if (this.worldSocketJoined && socket && socket.connected) {
+                        socket.emit('leave_world', {
+                            world_id: this.worldSelectedId || '',
+                            node_id: this.worldCurrentNodeId || '',
+                        });
+                    }
+                    this.worldSocketJoined = false;
+                    this.worldStreaming = false;
+                },
+
+                // joined_world：{world_id, node_id, world, state, events[], event_total, has_more}
+                onWorldJoined(payload) {
+                    const data = payload || {};
+                    if (!data.world_id) return;
+                    if (this.worldSelectedId && data.world_id !== this.worldSelectedId) return;
+                    this.worldSocketJoined = true;
+                    this.applyWorldPayload({
+                        world: data.world,
+                        current_node: { node_id: data.node_id, state: data.state },
+                        events: data.events,
+                        event_total: data.event_total,
+                        has_more: data.has_more,
+                    });
+                },
+
+                // world_event_created：{world_id, node_id, action, event}
+                onWorldEventCreated(payload) {
+                    const data = payload || {};
+                    if (!this.isCurrentWorldEvent(data)) return;
+                    const event = data.event;
+                    if (!event || !event.event_id) return;
+                    if ((this.worldEvents || []).some(item => item.event_id === event.event_id)) return;
+                    this.worldEvents = [event, ...this.worldEvents].sort(
+                        (a, b) => (Number(b.sequence) || 0) - (Number(a.sequence) || 0)
+                    );
+                    this.worldEventTotal = (Number(this.worldEventTotal) || 0) + 1;
+                },
+
+
+                // ---- 插件管理（生态 /api/plugins/*）----
+                pluginsApi() {
+                    const base = '/api/plugins';
+                    const enc = encodeURIComponent;
+                    return {
+                        base,
+                        list: () => api.get(base),
+                        enable: id => api.post(`${base}/${enc(id)}/enable`, {}),
+                        disable: id => api.post(`${base}/${enc(id)}/disable`, {}),
+                        // 卸载：keep_state/delete_data 都是可选布尔（生态 86ef7024）
+                        remove: (id, options) => api.delete(`${base}/${enc(id)}`, {
+                            params: options || {},
+                        }),
+                        bridge: (id, payload) => api.post(`${base}/${enc(id)}/bridge`, payload),
+                    };
+                },
+
+                pluginsApiError(e, fallback) {
+                    const status = e && e.response ? e.response.status : 0;
+                    const data = e && e.response ? e.response.data : null;
+                    if (status === 404) this.pluginsApiMissing = true;
+                    const known = {
+                        400: '参数或方法不在白名单',
+                        403: '权限不足（插件未获授权）',
+                        404: '插件未启用或不存在',
+                        409: '插件未加载',
+                        429: '触发限流（每插件 30 次/分钟）',
+                        500: '后端内部错误',
+                    };
+                    const reason = known[status] || '';
+                    const message = (data && (data.error || data.message)) || (e && e.message) || '未知错误';
+                    return reason ? `${fallback}：${reason}（${message}）` : `${fallback}: ${message}`;
+                },
+
+                async loadPlugins() {
+                    this.pluginsLoading = true;
+                    try {
+                        const res = await this.pluginsApi().list();
+                        const data = res.data || {};
+                        this.plugins = Array.isArray(data.plugins) ? data.plugins : (Array.isArray(data) ? data : []);
+                        this.pluginsApiMissing = false;
+                        if (this.pluginSelectedId && !this.plugins.some(item => item.id === this.pluginSelectedId)) {
+                            this.pluginSelectedId = '';
+                            this.pluginFrameUrl = '';
+                        }
+                    } catch (e) {
+                        this.showToast(this.pluginsApiError(e, '加载插件列表失败'), this.pluginsApiMissing ? 'info' : 'error');
+                    } finally {
+                        this.pluginsLoading = false;
+                    }
+                },
+
+                // 生态的真名：permissions/effective_permissions/declared_permissions 都是 [{name,label}]
+                pluginPermissionList(plugin) {
+                    const source = plugin || {};
+                    const candidates = [
+                        source.permissions,
+                        source.effective_permissions,
+                        source.declared_permissions,
+                        source.declared_permissions_display,
+                        source.manifest && source.manifest.permissions,
+                    ];
+                    for (const item of candidates) {
+                        if (!Array.isArray(item) || !item.length) continue;
+                        return item.map(entry => (
+                            entry && typeof entry === 'object'
+                                ? String(entry.label || entry.name || '')
+                                : String(entry)
+                        )).filter(Boolean);
+                    }
+                    return [];
+                },
+
+                selectPlugin(plugin) {
+                    if (!plugin || !plugin.id) return;
+                    this.pluginSelectedId = plugin.id;
+                    this.pluginFrameUrl = '';
+                    this.pluginBridgeCalls = [];
+                },
+
+                openPluginPage(plugin) {
+                    if (!plugin || !plugin.id) return;
+                    this.selectPlugin(plugin);
+                    this.pluginFrameUrl = plugin.ui_url
+                        || `${this.pluginsApi().base}/${encodeURIComponent(plugin.id)}/ui/`;
+                },
+
+                reloadPluginFrame() {
+                    const plugin = this.pluginCurrent;
+                    if (!plugin) return;
+                    this.pluginFrameUrl = '';
+                    this.$nextTick(() => this.openPluginPage(plugin));
+                },
+
+                async togglePlugin(plugin) {
+                    if (!plugin || !plugin.id) return;
+                    this.pluginsBusy = true;
+                    const enabling = plugin.enabled === false;
+                    try {
+                        const adapter = this.pluginsApi();
+                        const res = enabling
+                            ? await adapter.enable(plugin.id)
+                            : await adapter.disable(plugin.id);
+                        const data = res.data || {};
+                        if (Array.isArray(data.plugins)) this.plugins = data.plugins;
+                        else await this.loadPlugins();
+                        this.showToast(enabling ? '插件已启用' : '插件已停用', 'success');
+                        if (!enabling && this.pluginSelectedId === plugin.id) this.pluginFrameUrl = '';
+                    } catch (e) {
+                        this.showToast(this.pluginsApiError(e, '切换插件状态失败'), this.pluginsApiMissing ? 'info' : 'error');
+                    } finally {
+                        this.pluginsBusy = false;
+                    }
+                },
+
+                uninstallPlugin(plugin) {
+                    if (!plugin || !plugin.id) return;
+                    this.showConfirm({
+                        title: '卸载插件',
+                        messageBefore: '确定卸载插件',
+                        highlight: plugin.name || plugin.id,
+                        messageAfter: '？',
+                        impact: '状态记录会删除；插件私有数据（KV 与日志）默认保留，需要一并清掉请用第二个按钮。',
+                        confirmText: '卸载',
+                        onConfirm: () => this.runPluginUninstall(plugin, { keep_state: 0, delete_data: 0 }),
+                    });
+                },
+
+                async runPluginUninstall(plugin, options) {
+                    if (!plugin || !plugin.id) return;
+                    this.pluginsBusy = true;
+                    try {
+                        await this.pluginsApi().remove(plugin.id, options);
+                        this.plugins = this.plugins.filter(item => item.id !== plugin.id);
+                        if (this.pluginSelectedId === plugin.id) {
+                            this.pluginSelectedId = '';
+                            this.pluginFrameUrl = '';
+                        }
+                        this.showToast('插件已卸载', 'success');
+                    } catch (e) {
+                        this.showToast(this.pluginsApiError(e, '卸载插件失败'), this.pluginsApiMissing ? 'info' : 'error');
+                    } finally {
+                        this.pluginsBusy = false;
+                    }
+                },
+
+                // ---- 插件页 ↔ 面板 桥（壳侧）----
+                attachPluginBridge() {
+                    this.pluginFrameLoading = false;
+                    // iframe 每次 load 都会走这里，window 监听只挂一次
+                    if (!this.pluginBridgeBound) {
+                        window.addEventListener('message', this.onPluginMessage);
+                        this.pluginBridgeBound = true;
+                    }
+                    const frame = this.$refs.pluginFrame;
+                    if (!frame || !frame.contentWindow) return;
+                    const root = getComputedStyle(document.documentElement);
+                    try {
+                        frame.contentWindow.postMessage({
+                            type: 'nbot.init',
+                            plugin_id: this.pluginSelectedId,
+                            theme: document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark',
+                            accent: (root.getPropertyValue('--accent-primary') || '').trim(),
+                            asset_version: window.__nbotAssetVersion || '',
+                        }, '*');
+                    } catch (e) {
+                        // 插件页尚未就绪：忽略，页面可以直接再发消息进来
+                    }
+                },
+
+                onPluginMessage(event) {
+                    const frame = this.$refs.pluginFrame;
+                    if (!frame || event.source !== frame.contentWindow) return;
+                    if (event.origin !== 'null') return;
+                    const data = event.data;
+                    if (!data || typeof data !== 'object') return;
+                    const method = String(data.method || '');
+                    if (!method) return;
+                    this.pluginBridgeQueue.push({
+                        id: data.id === undefined || data.id === null
+                            ? `shell-${++this.pluginBridgeSeq}`
+                            : data.id,
+                        method,
+                        params: data.params && typeof data.params === 'object' ? data.params : {},
+                    });
+                    this.processPluginBridge();
+                },
+
+                postToPluginFrame(payload) {
+                    const frame = this.$refs.pluginFrame;
+                    if (!frame || !frame.contentWindow) return;
+                    try {
+                        frame.contentWindow.postMessage(payload, '*');
+                    } catch (e) {
+                        // 页面已卸载
+                    }
+                },
+
+                // 严格串行：一次只发一个桥请求，避免把 30 次/分 的额度打成 429
+                async processPluginBridge() {
+                    if (this.pluginBridgeBusy) return;
+                    const plugin = this.pluginCurrent;
+                    if (!plugin) {
+                        this.pluginBridgeQueue = [];
+                        return;
+                    }
+                    this.pluginBridgeBusy = true;
+                    try {
+                        while (this.pluginBridgeQueue.length) {
+                            const now = Date.now();
+                            if (now < this.pluginBridgeBlockedUntil) {
+                                await new Promise(resolve => setTimeout(
+                                    resolve, this.pluginBridgeBlockedUntil - now
+                                ));
+                            }
+                            const call = this.pluginBridgeQueue.shift();
+                            const record = { id: call.id, method: call.method, ok: null, error: '' };
+                            this.pluginBridgeCalls.push(record);
+                            try {
+                                const res = await this.pluginsApi().bridge(plugin.id, {
+                                    id: call.id,
+                                    method: call.method,
+                                    params: call.params,
+                                });
+                                const data = res.data || {};
+                                const ok = data.ok !== false;
+                                record.ok = ok;
+                                if (!ok) record.error = data.error || 'error';
+                                this.postToPluginFrame({
+                                    id: call.id, ok, result: data.result, error: data.error,
+                                });
+                                // ui.resize：按插件请求调整 iframe 高度（80~2000，后端已校验）
+                                if (call.method === 'ui.resize' && ok) {
+                                    const height = Number((data.result && data.result.height) || call.params.height);
+                                    if (Number.isFinite(height)) {
+                                        this.pluginFrameHeight = Math.max(80, Math.min(2000, Math.round(height)));
+                                    }
+                                }
+                                if (call.method === 'ui.notify' && ok) {
+                                    const message = (data.result && data.result.message)
+                                        || call.params.message || '';
+                                    if (message) {
+                                        this.pluginLastNotify = String(message);
+                                        this.showToast(String(message), 'info');
+                                    }
+                                }
+                                this.pluginBridgeCount += 1;
+                            } catch (e) {
+                                const status = e && e.response ? e.response.status : 0;
+                                const text = this.pluginsApiError(e, '桥调用失败');
+                                record.ok = false;
+                                record.error = text;
+                                this.postToPluginFrame({ id: call.id, ok: false, error: text });
+                                if (status === 429) {
+                                    this.pluginBridgeBlockedUntil = Date.now() + 5000;
+                                    this.showToast('插件桥触发限流，暂停 5 秒', 'warning');
+                                } else {
+                                    this.showToast(text, this.pluginsApiMissing ? 'info' : 'error');
+                                }
+                            }
+                            if (this.pluginBridgeCalls.length > 30) {
+                                this.pluginBridgeCalls = this.pluginBridgeCalls.slice(-30);
+                            }
+                        }
+                    } finally {
+                        this.pluginBridgeBusy = false;
+                    }
+                },
+
+                // provided_actions 直接触发 tool.invoke（生态：params = {action, arguments?}）
+                async invokePluginAction(plugin, action) {
+                    if (!plugin || !plugin.id || !action) return;
+                    this.pluginBridgeQueue.push({
+                        id: `shell-act-${++this.pluginBridgeSeq}`,
+                        method: 'tool.invoke',
+                        params: { action },
+                    });
+                    await this.processPluginBridge();
+                },
+
+                // ---- 数据导出中心 ----
+                async loadExportCategories() {
+                    this.exportCenterLoading = true;
+                    try {
+                        // 会话范围影响各分类 count（生态 3698fc9b）
+                        const res = await api.get('/api/export-center/categories', {
+                            params: { sessions_scope: this.exportSessionsScope || 'all' },
+                        });
+                        if (res.data && res.data.success) {
+                            this.exportCategories = res.data.categories || [];
+                            if (res.data.sessions_scope) this.exportSessionsScope = res.data.sessions_scope;
+                            const next = {};
+                            for (const cat of this.exportCategories) {
+                                if (cat.key && this.exportSelected[cat.key]) next[cat.key] = true;
+                            }
+                            this.exportSelected = next;
+                        } else {
+                            this.exportCategories = [];
+                        }
+                    } catch (e) {
+                        console.warn('加载导出分类失败:', e && (e.message || e));
+                        this.exportCategories = [];
+                    } finally {
+                        this.exportCenterLoading = false;
+                    }
+                },
+
+                // 分类卡片的补充说明：sessions 显示 已加载/仅磁盘/合计，memories 显示 条目/记忆文件
+                exportCategoryExtra(cat) {
+                    if (!cat) return '';
+                    if (cat.key === 'sessions') {
+                        const parts = [];
+                        if (cat.loaded !== undefined) parts.push(`已加载 ${cat.loaded}`);
+                        if (cat.disk_only !== undefined) parts.push(`仅磁盘 ${cat.disk_only}`);
+                        if (cat.total !== undefined) parts.push(`合计 ${cat.total}`);
+                        return parts.join(' · ');
+                    }
+                    if (cat.key === 'memories') {
+                        const parts = [];
+                        if (cat.entries !== undefined) parts.push(`条目 ${cat.entries}`);
+                        if (cat.memory_fs !== undefined) parts.push(`记忆文件 ${cat.memory_fs}`);
+                        return parts.join(' / ');
+                    }
+                    return '';
+                },
+
+                selectedExportKeys() {
+                    return Object.keys(this.exportSelected || {}).filter(key => this.exportSelected[key]);
+                },
+
+                toggleAllExportCategories() {
+                    const keys = (this.exportCategories || []).map(cat => cat.key).filter(Boolean);
+                    const allSelected = keys.length > 0 && keys.every(key => this.exportSelected[key]);
+                    const next = {};
+                    if (!allSelected) {
+                        for (const key of keys) next[key] = true;
+                    }
+                    this.exportSelected = next;
+                },
+
+                async exportData() {
+                    const keys = this.selectedExportKeys();
+                    if (!keys.length) {
+                        this.showToast('请先勾选要导出的分类', 'error');
+                        return;
+                    }
+                    this.exportCenterLoading = true;
+                    try {
+                        const limit = Number(this.exportSessionLimit);
+                        const body = {
+                            categories: keys,
+                            sessions_scope: this.exportSessionsScope === 'loaded' ? 'loaded' : 'all',
+                        };
+                        if (Number.isFinite(limit) && limit > 0) body.session_limit = Math.floor(limit);
+                        const res = await api.post('/api/export-center/export', body, { responseType: 'blob' });
+                        const disposition = res.headers && (res.headers['content-disposition'] || res.headers['Content-Disposition']);
+                        const match = disposition && disposition.match(/filename="?([^"]+)"?/);
+                        const filename = match ? match[1] : `nekobot-export-${Date.now()}.zip`;
+                        const blob = new Blob([res.data], { type: 'application/zip' });
+                        const url = URL.createObjectURL(blob);
+                        const link = document.createElement('a');
+                        link.href = url;
+                        link.download = filename;
+                        link.click();
+                        URL.revokeObjectURL(url);
+                        this.showToast(`已导出 ${keys.length} 个分类`, 'success');
+                    } catch (e) {
+                        this.showToast('导出失败: ' + (e.response?.data?.error || e.message), 'error');
+                    } finally {
+                        this.exportCenterLoading = false;
+                    }
+                },
+
+                async importExportFile(event) {
+                    const file = event.target.files && event.target.files[0];
+                    if (!file) return;
+                    this.exportCenterLoading = true;
+                    this.exportImportResult = null;
+                    try {
+                        const formData = new FormData();
+                        formData.append('file', file);
+                        formData.append('mode', this.exportImportMode || 'merge');
+                        const res = await api.post('/api/export-center/import', formData, {
+                            headers: { 'Content-Type': 'multipart/form-data' }
+                        });
+                        if (res.data && res.data.success) {
+                            this.exportImportResult = res.data;
+                            const imported = res.data.imported || {};
+                            const added = Object.values(imported).reduce((sum, item) => sum + (item.added || 0), 0);
+                            this.showToast(`导入完成，新增 ${added} 项`, 'success');
+                            await this.loadExportCategories();
+                        } else {
+                            this.showToast(res.data?.error || '导入失败', 'error');
+                        }
+                    } catch (e) {
+                        this.showToast('导入失败: ' + (e.response?.data?.error || e.message), 'error');
+                    } finally {
+                        this.exportCenterLoading = false;
+                        event.target.value = '';
+                    }
+                },
+
+                // ---- 全局搜索（会话/消息/角色/世界书/记忆） ----
+                openGlobalSearch() {
+                    this.showGlobalSearch = true;
+                    this.globalSearchGroups = {};
+                    this.globalSearchTotal = 0;
+                    this.globalSearchScan = null;
+                    this.$nextTick(() => {
+                        const input = this.$refs && this.$refs.globalSearchInput;
+                        if (input && input.focus) input.focus();
+                    });
+                },
+
+                closeGlobalSearch() {
+                    this.showGlobalSearch = false;
+                    this.globalSearchQuery = '';
+                    this.globalSearchGroups = {};
+                    this.globalSearchTotal = 0;
+                    this.globalSearchScan = null;
+                },
+
+                scheduleGlobalSearch() {
+                    if (this._globalSearchTimer) clearTimeout(this._globalSearchTimer);
+                    const query = String(this.globalSearchQuery || '').trim();
+                    if (!query) {
+                        this.globalSearchGroups = {};
+                        this.globalSearchTotal = 0;
+                        return;
+                    }
+                    this._globalSearchTimer = setTimeout(() => this.runGlobalSearch(query), 250);
+                },
+
+                async runGlobalSearch(query) {
+                    this.globalSearchLoading = true;
+                    try {
+                        const res = await api.get('/api/search', { params: { q: query, limit: 10 } });
+                        if (String(this.globalSearchQuery || '').trim() !== query) return;
+                        if (res.data && res.data.success) {
+                            this.globalSearchGroups = res.data.groups || {};
+                            this.globalSearchTotal = res.data.total || 0;
+                            this.globalSearchScan = res.data.scan || null;
+                        } else {
+                            this.globalSearchGroups = {};
+                            this.globalSearchTotal = 0;
+                            this.globalSearchScan = null;
+                        }
+                    } catch (e) {
+                        console.warn('全局搜索失败:', e && (e.message || e));
+                        this.globalSearchGroups = {};
+                        this.globalSearchTotal = 0;
+                        this.globalSearchScan = null;
+                    } finally {
+                        this.globalSearchLoading = false;
+                    }
+                },
+
+                async openGlobalSearchResult(type, item) {
+                    if (!item) return;
+                    this.closeGlobalSearch();
+                    try {
+                        if (type === 'session' || type === 'message') {
+                            const sessionId = item.session_id || (type === 'session' ? item.id : '');
+                            if (sessionId) {
+                                this.currentPage = 'chat';
+                                const existing = (this.sessions || []).find(s => s.id === sessionId);
+                                if (existing) {
+                                    await this.openSession(existing);
+                                } else {
+                                    const res = await api.get(`/api/sessions/${sessionId}`);
+                                    if (res.data && !res.data.error) await this.openSession(res.data);
+                                }
+                                return;
+                            }
+                        }
+                        if (type === 'character') {
+                            this.navigateTo('characters');
+                            return;
+                        }
+                        if (type === 'world_book') {
+                            this.navigateTo('world-book');
+                            return;
+                        }
+                        if (type === 'memory') {
+                            this.navigateTo('memory');
+                            return;
+                        }
+                    } catch (e) {
+                        this.showToast('打开搜索结果失败: ' + (e.response?.data?.error || e.message), 'error');
+                    }
+                },
+
+                // 会话级模型覆盖可选项（仅聊天用途）
+                chatModelOptions() {
+                    const list = Array.isArray(this.aiModels) ? this.aiModels : [];
+                    return list.filter(m => (m.purpose || 'chat') === 'chat' && m.enabled !== false);
+                },
+
+                async saveModelOverride() {
+                    if (!this.viewingSession?.id) return;
+                    const override = this.viewingSession.model_override || { enabled: false, model_id: '' };
+                    const modelId = String(override.model_id || '');
+                    const payload = {
+                        enabled: !!override.enabled && !!modelId,
+                        model_id: modelId
+                    };
+                    if (override.enabled && !modelId) {
+                        this.showToast('请先选择一个模型', 'error');
+                        return;
+                    }
+                    this.isLoading = true;
+                    try {
+                        const res = await api.put(`/api/sessions/${this.viewingSession.id}`, {
+                            model_override: payload
+                        });
+                        const saved = res.data?.session?.model_override || null;
+                        const next = saved || { enabled: false, model_id: '' };
+                        this.viewingSession.model_override = { ...next };
+                        if (this.currentSession?.id === this.viewingSession.id) {
+                            this.currentSession.model_override = { ...next };
+                        }
+                        const sessionInList = this.sessions.find(s => s.id === this.viewingSession.id);
+                        if (sessionInList) {
+                            sessionInList.model_override = { ...next };
+                        }
+                        if (payload.enabled) {
+                            const chosen = this.chatModelOptions().find(m => m.id === modelId);
+                            this.showToast(`本会话将使用模型「${chosen?.name || chosen?.model || modelId}」`, 'success');
+                        } else {
+                            this.showToast('已恢复全局模型队列', 'success');
+                        }
+                    } catch (e) {
+                        this.showToast('保存模型设置失败: ' + (e.response?.data?.error || e.message), 'error');
+                    } finally {
+                        this.isLoading = false;
+                    }
+                },
+
+                // 宏变量（{{setvar}}/{{getvar}}）查看与清空
+                async loadMacroVariables() {
+                    if (!this.viewingSession?.id) return;
+                    try {
+                        const res = await api.get(`/api/sessions/${this.viewingSession.id}/macro-variables`);
+                        this.macroVariables = res.data?.variables || {};
+                    } catch (e) {
+                        console.warn('加载宏变量失败:', e && (e.message || e));
+                        this.macroVariables = {};
+                    }
+                },
+
+                async clearMacroVariables() {
+                    if (!this.viewingSession?.id) return;
+                    this.isLoading = true;
+                    try {
+                        await api.delete(`/api/sessions/${this.viewingSession.id}/macro-variables`);
+                        this.macroVariables = {};
+                        this.showToast('宏变量已清空', 'success');
+                    } catch (e) {
+                        this.showToast('清空宏变量失败: ' + (e.response?.data?.error || e.message), 'error');
+                    } finally {
+                        this.isLoading = false;
+                    }
+                },
+
                 async exportAllConfig() {
                     if (!this.configExportPassword) {
                         this.showToast('请输入导出密码', 'error');
@@ -14777,6 +18065,596 @@ def main(params):
                     }
                 },
 
+                // ── 实时语音（多模 cb32b868：/api/realtime/* + Socket.IO 命名空间）──
+                realtimeApi() {
+                    return {
+                        providers: () => api.get('/api/realtime/providers'),
+                        status: () => api.get('/api/realtime/status'),
+                    };
+                },
+
+                async loadRealtimePanel() {
+                    this.rtBusy = true;
+                    try {
+                        const [providerRes, statusRes] = await Promise.all([
+                            this.realtimeApi().providers(),
+                            this.realtimeApi().status(),
+                        ]);
+                        const pdata = providerRes.data || {};
+                        this.rtProviders = Array.isArray(pdata.providers) ? pdata.providers : [];
+                        this.rtDefaultProvider = pdata.default_provider || '';
+                        if (pdata.namespace) this.rtNamespace = pdata.namespace;
+                        if (pdata.audio) {
+                            this.rtAudioFormat = pdata.audio.format || this.rtAudioFormat;
+                            this.rtAudioRate = Number(pdata.audio.sample_rate) || this.rtAudioRate;
+                        }
+                        this.rtStatus = statusRes.data || null;
+                        if (!this.rtProviderId) {
+                            const preferred = this.rtProviders.find(item => item.default && item.configured !== false)
+                                || this.rtProviders.find(item => item.configured !== false)
+                                || this.rtProviders[0];
+                            if (preferred) {
+                                this.rtProviderId = preferred.id;
+                                this.rtModel = preferred.default_model || '';
+                                this.rtVoice = preferred.default_voice || '';
+                            }
+                        }
+                    } catch (e) {
+                        const data = e && e.response ? e.response.data : null;
+                        this.showToast(`加载实时语音配置失败: ${(data && data.error) || (e && e.message) || '未知错误'}`, 'error');
+                    } finally {
+                        this.rtBusy = false;
+                    }
+                },
+
+                onRealtimeProviderChange() {
+                    const provider = this.rtProvider;
+                    this.rtModel = (provider && provider.default_model) || '';
+                    this.rtVoice = (provider && provider.default_voice) || '';
+                },
+
+                rtSocketAuth() {
+                    const main = window.__nbotSocket;
+                    if (main && main.auth && main.auth.token) return { token: main.auth.token };
+                    const stored = sessionStorage.getItem('nbot_token') || localStorage.getItem('nbot_token');
+                    return stored ? { token: stored } : {};
+                },
+
+                rtEnsureSocket() {
+                    if (this._rtSocket) return this._rtSocket;
+                    if (!window.io) return null;
+                    const sock = window.io(this.rtNamespace, {
+                        auth: this.rtSocketAuth(),
+                        transports: ['websocket', 'polling'],
+                    });
+                    this._rtSocket = sock;
+                    const events = [
+                        'starting', 'ready', 'session', 'response_started',
+                        'assistant_transcript_delta', 'assistant_transcript_done',
+                        'user_transcript', 'speech_started', 'speech_stopped',
+                        'response_done', 'interrupted', 'reconnecting', 'error', 'closed',
+                    ];
+                    events.forEach(name => sock.on(name, payload => this.rtHandleEvent(name, payload)));
+                    sock.on('audio', payload => this.rtOnAudio(payload));
+                    return sock;
+                },
+
+                rtHandleEvent(event, payload) {
+                    const data = payload || {};
+                    switch (event) {
+                        case 'starting':
+                            this.rtConnState = 'starting';
+                            this.rtErrorText = '';
+                            break;
+                        case 'ready':
+                            this.rtConnState = 'ready';
+                            this.rtReconnect = null;
+                            if (data.sample_rate) this.rtAudioRate = Number(data.sample_rate) || this.rtAudioRate;
+                            break;
+                        case 'response_started':
+                            this.rtSpeaking = true;
+                            break;
+                        case 'assistant_transcript_delta':
+                            this.rtAppendAssistantDelta(data.delta || '');
+                            break;
+                        case 'assistant_transcript_done':
+                            this.rtFinalizeAssistant(data.text || '');
+                            break;
+                        case 'user_transcript':
+                            this.rtAppendUser(data.text || '');
+                            break;
+                        case 'speech_started':
+                            this.rtSpeaking = true;
+                            break;
+                        case 'speech_stopped':
+                            this.rtSpeaking = false;
+                            break;
+                        case 'response_done':
+                            this.rtSpeaking = false;
+                            this.rtFinalizeAssistant('');
+                            if (data.usage) {
+                                this.rtUsage = typeof data.usage === 'string' ? data.usage : JSON.stringify(data.usage);
+                            }
+                            break;
+                        case 'interrupted':
+                            this.rtSpeaking = false;
+                            this.rtClearPlayback();
+                            break;
+                        case 'reconnecting':
+                            this.rtConnState = 'reconnecting';
+                            this.rtReconnect = { attempt: data.attempt || 0, delay: data.delay || 0 };
+                            break;
+                        case 'error':
+                            this.rtErrorText = data.message || '未知错误';
+                            this.showToast(`实时语音：${this.rtErrorText}`, data.retryable === false ? 'error' : 'warning');
+                            // retryable=true 是瞬态（坏音频块/会话未启动/厂商抖动），保持通话态
+                            if (data.retryable === false) this.rtEndCall('error', null);
+                            break;
+                        case 'closed':
+                            this.rtEndCall(data.reason || 'closed', data.stats || null);
+                            break;
+                        default:
+                            break;
+                    }
+                },
+
+                rtOnAudio(payload) {
+                    const delta = payload && payload.delta;
+                    if (delta) this.rtPlayDelta(delta);
+                },
+
+                rtBase64ToInt16(b64) {
+                    const binary = atob(b64);
+                    const bytes = new Uint8Array(binary.length);
+                    for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+                    return new Int16Array(bytes.buffer, 0, Math.floor(binary.length / 2));
+                },
+
+                rtInt16ToBase64(int16) {
+                    const bytes = new Uint8Array(int16.buffer);
+                    let binary = '';
+                    const chunk = 0x8000;
+                    for (let i = 0; i < bytes.length; i += chunk) {
+                        binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk));
+                    }
+                    return btoa(binary);
+                },
+
+                rtPlayDelta(b64) {
+                    const ctx = this._rtPlayCtx;
+                    if (!ctx) return;
+                    let int16;
+                    try {
+                        int16 = this.rtBase64ToInt16(b64);
+                    } catch (e) {
+                        return;
+                    }
+                    if (!int16.length) return;
+                    const buffer = ctx.createBuffer(1, int16.length, this.rtAudioRate);
+                    const channel = buffer.getChannelData(0);
+                    for (let i = 0; i < int16.length; i += 1) channel[i] = int16[i] / 32768;
+                    const source = ctx.createBufferSource();
+                    source.buffer = buffer;
+                    source.connect(ctx.destination);
+                    // 起播余量 100ms（多模建议 80–120ms），避免片段接缝处爆音
+                    const startAt = Math.max(ctx.currentTime + 0.1, this._rtPlayTime || 0);
+                    source.start(startAt);
+                    this._rtPlayTime = startAt + buffer.duration;
+                    this._rtSources = this._rtSources || [];
+                    this._rtSources.push(source);
+                    source.onended = () => {
+                        this._rtSources = (this._rtSources || []).filter(item => item !== source);
+                    };
+                },
+
+                rtClearPlayback() {
+                    (this._rtSources || []).forEach(source => {
+                        try { source.stop(); } catch (e) { /* 已停止 */ }
+                    });
+                    this._rtSources = [];
+                    this._rtPlayTime = 0;
+                },
+
+                rtDownsample(input, fromRate, toRate) {
+                    if (!input || !input.length) return new Int16Array(0);
+                    const ratio = (fromRate || toRate) / (toRate || 24000);
+                    const targetLength = Math.max(1, Math.floor(input.length / ratio));
+                    const out = new Int16Array(targetLength);
+                    for (let i = 0; i < targetLength; i += 1) {
+                        const start = Math.floor(i * ratio);
+                        const end = Math.min(input.length, Math.floor((i + 1) * ratio));
+                        let sum = 0;
+                        let count = 0;
+                        for (let j = start; j < end; j += 1) {
+                            sum += input[j];
+                            count += 1;
+                        }
+                        const value = count ? sum / count : input[Math.min(start, input.length - 1)];
+                        out[i] = Math.max(-32768, Math.min(32767, Math.round(value * 32767)));
+                    }
+                    return out;
+                },
+
+                async rtStartMic() {
+                    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                        throw new Error('当前环境不支持麦克风（需要 HTTPS 或 localhost）');
+                    }
+                    const stream = await navigator.mediaDevices.getUserMedia({
+                        audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true },
+                    });
+                    this._rtMicStream = stream;
+                    const Ctx = window.AudioContext || window.webkitAudioContext;
+                    const ctx = new Ctx();
+                    this._rtMicCtx = ctx;
+                    const source = ctx.createMediaStreamSource(stream);
+                    const processor = ctx.createScriptProcessor(2048, 1, 1);
+                    this._rtProcessor = processor;
+                    processor.onaudioprocess = event => {
+                        const sock = this._rtSocket;
+                        if (!sock || !this.rtActive) return;
+                        const input = event.inputBuffer.getChannelData(0);
+                        const chunk = this.rtDownsample(input, ctx.sampleRate, this.rtAudioRate);
+                        if (!chunk.length) return;
+                        const b64 = this.rtInt16ToBase64(chunk);
+                        // 单块 base64 上限 700k 字符（多模口径），超了会被回 retryable 错误
+                        if (b64.length > 700000) return;
+                        sock.emit('realtime.audio', { audio: b64 });
+                    };
+                    source.connect(processor);
+                    processor.connect(ctx.destination);
+                },
+
+                rtStopMic() {
+                    if (this._rtProcessor) {
+                        try { this._rtProcessor.disconnect(); } catch (e) { /* 已断开 */ }
+                        this._rtProcessor = null;
+                    }
+                    if (this._rtMicStream) {
+                        this._rtMicStream.getTracks().forEach(track => track.stop());
+                        this._rtMicStream = null;
+                    }
+                    if (this._rtMicCtx) {
+                        try { this._rtMicCtx.close(); } catch (e) { /* 已关闭 */ }
+                        this._rtMicCtx = null;
+                    }
+                },
+
+                async startRealtimeCall() {
+                    if (!this.rtConfiguredProvider) {
+                        this.showToast('没有配置好的 provider，无法开始通话', 'warning');
+                        return;
+                    }
+                    const sock = this.rtEnsureSocket();
+                    if (!sock) {
+                        this.showToast('Socket.IO 未就绪，无法连接实时语音', 'error');
+                        return;
+                    }
+                    this.rtBusy = true;
+                    try {
+                        const Ctx = window.AudioContext || window.webkitAudioContext;
+                        if (!this._rtPlayCtx) this._rtPlayCtx = new Ctx();
+                        this._rtPlayTime = 0;
+                        this.rtTranscript = [];
+                        this.rtErrorText = '';
+                        this.rtUsage = null;
+                        this.rtReconnect = null;
+                        this.rtConnState = 'starting';
+                        this.rtActive = true;
+                        sock.emit('realtime.start', {
+                            provider: this.rtProviderId,
+                            model: this.rtModel || undefined,
+                            voice: this.rtVoice || undefined,
+                            instructions: this.rtInstructions || undefined,
+                            sample_rate: this.rtAudioRate,
+                            session_id: this.currentSession ? this.currentSession.id : undefined,
+                        });
+                        await this.rtStartMic();
+                    } catch (e) {
+                        this.rtErrorText = `麦克风不可用: ${e.message || e}`;
+                        this.showToast(this.rtErrorText, 'error');
+                        this.rtEndCall('mic_error', null);
+                    } finally {
+                        this.rtBusy = false;
+                    }
+                },
+
+                interruptRealtime() {
+                    // 先本地清播放队列，再通知服务端取消（多模口径）
+                    this.rtClearPlayback();
+                    this.rtSpeaking = false;
+                    if (this._rtSocket) this._rtSocket.emit('realtime.interrupt', {});
+                },
+
+                stopRealtimeCall() {
+                    if (this._rtSocket) this._rtSocket.emit('realtime.stop', {});
+                    this.rtEndCall('stopped', null);
+                },
+
+                rtEndCall(reason, stats) {
+                    this.rtActive = false;
+                    this.rtConnState = 'closed';
+                    this.rtSpeaking = false;
+                    this.rtReconnect = null;
+                    this.rtStopMic();
+                    this.rtClearPlayback();
+                    if (stats) this.rtUsage = typeof stats === 'string' ? stats : JSON.stringify(stats);
+                    if (reason && reason !== 'stopped') this.rtErrorText = `会话结束：${reason}`;
+                },
+
+                rtAppendUser(text) {
+                    if (!text) return;
+                    this.rtTranscript.push({ role: 'user', text, streaming: false });
+                },
+
+                rtAppendAssistantDelta(delta) {
+                    if (!delta) return;
+                    const last = this.rtTranscript[this.rtTranscript.length - 1];
+                    if (last && last.role === 'assistant' && last.streaming) {
+                        last.text += delta;
+                        return;
+                    }
+                    this.rtTranscript.push({ role: 'assistant', text: delta, streaming: true });
+                },
+
+                rtFinalizeAssistant(text) {
+                    const last = this.rtTranscript[this.rtTranscript.length - 1];
+                    if (last && last.role === 'assistant' && last.streaming) {
+                        if (text) last.text = text;
+                        last.streaming = false;
+                        return;
+                    }
+                    if (text) this.rtTranscript.push({ role: 'assistant', text, streaming: false });
+                },
+
+                // ── WebDAV 版本历史（生态 8a83ecff）────────────────
+                webdavRevApi() {
+                    const base = '/api/webdav/revisions';
+                    const enc = encodeURIComponent;
+                    return {
+                        list: () => api.get(base),
+                        blob: id => api.get(`${base}/${enc(id)}/download`, { responseType: 'blob' }),
+                        remove: id => api.delete(`${base}/${enc(id)}`),
+                        restore: (id, payload) => api.post(`${base}/${enc(id)}/restore`, payload || {}),
+                        sync: payload => api.post('/api/webdav/sync', payload || {}),
+                        backup: payload => api.post('/api/webdav/backup', payload || {}),
+                        syncAssets: payload => api.post('/api/webdav/assets/sync', payload || {}),
+                    };
+                },
+
+                // <id> 必须匹配 ^\d{8}-\d{6}-[0-9a-f]{4}$，不合规不发请求
+                isValidWebdavRevisionId(id) {
+                    return /^\d{8}-\d{6}-[0-9a-f]{4}$/.test(String(id || ''));
+                },
+
+                webdavRevError(e, fallback) {
+                    const data = e && e.response ? e.response.data : null;
+                    const message = (data && (data.error || data.message)) || (e && e.message) || '未知错误';
+                    return `${fallback}: ${message}`;
+                },
+
+                // 口令：留空 = 后端用配置里已存的加密口令
+                webdavPasswordPayload() {
+                    const password = String(this.webdavRestorePassword || '');
+                    return password ? { password } : {};
+                },
+
+                // 只改两个素材同步开关：后端 PUT 是逐键更新（缺失键保持原值），
+                // 因此不传 password/encryption_password（= 不修改），也不传 revisions_folder/
+                // assets_folder（后端忽略、由常量派生）。
+                async saveWebdavAssetSwitches() {
+                    const raw = this.webdavConfigRaw || {};
+                    const payload = {
+                        enabled: !!raw.enabled,
+                        url: raw.url || '',
+                        username: raw.username || '',
+                        sync_tts_cache: !!this.webdavConfig.sync_tts_cache,
+                        sync_stickers: !!this.webdavConfig.sync_stickers,
+                    };
+                    if (raw.retention) payload.retention = raw.retention;
+                    this.webdavRevBusy = true;
+                    try {
+                        await api.put('/api/webdav/config', payload);
+                        this.showToast('素材同步开关已保存', 'success');
+                        await this.loadWebdavConfig();
+                    } catch (e) {
+                        this.showToast(this.webdavRevError(e, '保存开关失败'), 'error');
+                    } finally {
+                        this.webdavRevBusy = false;
+                    }
+                },
+
+                webdavResultSummary(data) {
+                    const payload = data || {};
+                    const parts = [];
+                    if (payload.revision && payload.revision.id) {
+                        parts.push(`${payload.deduplicated ? '内容未变，沿用修订' : '新修订'} ${payload.revision.id}`);
+                    }
+                    if (payload.revision_id) parts.push(`已恢复 ${payload.revision_id}`);
+                    if (Array.isArray(payload.imported)) parts.push(`导入 ${payload.imported.length}`);
+                    if (Array.isArray(payload.skipped)) parts.push(`跳过 ${payload.skipped.length}`);
+                    if (Array.isArray(payload.retention && payload.retention.deleted)) {
+                        parts.push(`清理 ${payload.retention.deleted.length}`);
+                    }
+                    if (payload.synced_at) parts.push(`同步于 ${payload.synced_at}`);
+                    if (payload.assets && typeof payload.assets === 'object') {
+                        Object.keys(payload.assets).forEach(kind => {
+                            const stat = payload.assets[kind] || {};
+                            const done = stat.uploaded !== undefined ? stat.uploaded : stat.downloaded;
+                            parts.push(`${kind} ${done || 0}/${stat.total || 0}${stat.failed ? `（失败 ${stat.failed}）` : ''}`);
+                        });
+                    }
+                    if (payload.portraits) parts.push(`立绘 ${payload.portraits}`);
+                    return parts.join(' · ') || '完成';
+                },
+
+                async loadWebdavRevisions() {
+                    this.webdavRevLoading = true;
+                    try {
+                        const res = await this.webdavRevApi().list();
+                        const data = res.data || {};
+                        this.webdavRevisions = Array.isArray(data.revisions) ? data.revisions : [];
+                        this.webdavRevSource = data.source || '';
+                        this.webdavRevFolder = data.folder || '';
+                        this.webdavRevRetention = data.retention || null;
+                    } catch (e) {
+                        this.showToast(this.webdavRevError(e, '加载修订列表失败'), 'error');
+                    } finally {
+                        this.webdavRevLoading = false;
+                    }
+                },
+
+                async webdavRevBackup() {
+                    if (!this.webdavConfig.url) {
+                        this.showToast('请先在系统设置的 WebDAV 标签里填写根地址', 'warning');
+                        return;
+                    }
+                    this.webdavRevBusy = true;
+                    try {
+                        const payload = { ...this.webdavPasswordPayload() };
+                        const note = String(this.webdavBackupNote || '').trim();
+                        if (note) payload.note = note;
+                        const res = await this.webdavRevApi().backup(payload);
+                        this.webdavLastResult = this.webdavResultSummary(res.data);
+                        this.showToast(`备份完成：${this.webdavLastResult}`, 'success');
+                        this.webdavBackupNote = '';
+                        await this.loadWebdavRevisions();
+                        await this.loadWebdavConfig();
+                    } catch (e) {
+                        this.showToast(this.webdavRevError(e, '备份失败'), 'error');
+                    } finally {
+                        this.webdavRevBusy = false;
+                    }
+                },
+
+                async webdavRevSyncLatest() {
+                    if (!this.webdavConfig.url) {
+                        this.showToast('请先在系统设置的 WebDAV 标签里填写根地址', 'warning');
+                        return;
+                    }
+                    this.webdavRevBusy = true;
+                    try {
+                        const res = await this.webdavRevApi().sync(this.webdavPasswordPayload());
+                        this.webdavLastResult = this.webdavResultSummary(res.data);
+                        this.showToast(`已同步最新修订：${this.webdavLastResult}`, 'success');
+                        await this.loadWebdavConfig();
+                    } catch (e) {
+                        this.showToast(this.webdavRevError(e, '同步失败'), 'error');
+                    } finally {
+                        this.webdavRevBusy = false;
+                    }
+                },
+
+                async downloadWebdavRevision(rev) {
+                    if (!rev || !this.isValidWebdavRevisionId(rev.id)) {
+                        this.showToast('修订 ID 格式不合法', 'error');
+                        return;
+                    }
+                    this.webdavRevBusy = true;
+                    try {
+                        const res = await this.webdavRevApi().blob(rev.id);
+                        const blob = res.data instanceof Blob ? res.data : new Blob([res.data]);
+                        const url = URL.createObjectURL(blob);
+                        const link = document.createElement('a');
+                        link.href = url;
+                        link.download = rev.filename || `${rev.id}.nbotcfg`;
+                        document.body.appendChild(link);
+                        link.click();
+                        document.body.removeChild(link);
+                        URL.revokeObjectURL(url);
+                        this.showToast('修订已下载', 'success');
+                    } catch (e) {
+                        this.showToast(this.webdavRevError(e, '下载修订失败'), 'error');
+                    } finally {
+                        this.webdavRevBusy = false;
+                    }
+                },
+
+                restoreWebdavRevision(rev) {
+                    if (!rev || !this.isValidWebdavRevisionId(rev.id)) {
+                        this.showToast('修订 ID 格式不合法', 'error');
+                        return;
+                    }
+                    const hasStoredPassword = !!this.webdavConfig.has_encryption_password;
+                    this.showConfirm({
+                        title: '恢复修订',
+                        messageBefore: '确定用修订',
+                        highlight: rev.id,
+                        messageAfter: '覆盖当前配置吗？',
+                        impact: hasStoredPassword
+                            ? '会用配置里已存的加密口令解密；当前配置会被远端内容覆盖。'
+                            : '配置里还没存加密口令，请先在上方填写「恢复/同步口令」，否则后端会报未设置密码。',
+                        confirmText: '恢复',
+                        onConfirm: async () => {
+                            this.webdavRevBusy = true;
+                            try {
+                                const res = await this.webdavRevApi().restore(rev.id, this.webdavPasswordPayload());
+                                this.webdavLastResult = this.webdavResultSummary(res.data);
+                                this.showToast(`已恢复：${this.webdavLastResult}`, 'success');
+                                await this.loadWebdavConfig();
+                                await this.loadWebdavRevisions();
+                            } catch (e) {
+                                this.showToast(this.webdavRevError(e, '恢复失败'), 'error');
+                            } finally {
+                                this.webdavRevBusy = false;
+                            }
+                        },
+                    });
+                },
+
+                deleteWebdavRevision(rev) {
+                    if (!rev || !this.isValidWebdavRevisionId(rev.id)) {
+                        this.showToast('修订 ID 格式不合法', 'error');
+                        return;
+                    }
+                    this.showConfirm({
+                        title: '删除修订',
+                        messageBefore: '确定删除远端修订',
+                        highlight: rev.id,
+                        messageAfter: '吗？',
+                        impact: '删除后无法再从这个修订恢复。',
+                        confirmText: '删除',
+                        onConfirm: async () => {
+                            this.webdavRevBusy = true;
+                            try {
+                                const res = await this.webdavRevApi().remove(rev.id);
+                                const remaining = (res.data || {}).remaining;
+                                this.webdavRevisions = this.webdavRevisions.filter(item => item.id !== rev.id);
+                                this.showToast(
+                                    remaining === undefined ? '修订已删除' : `修订已删除，剩余 ${remaining} 个`,
+                                    'success'
+                                );
+                            } catch (e) {
+                                this.showToast(this.webdavRevError(e, '删除修订失败'), 'error');
+                            } finally {
+                                this.webdavRevBusy = false;
+                            }
+                        },
+                    });
+                },
+
+                async syncWebdavAssets() {
+                    const kinds = [];
+                    if (this.webdavConfig.sync_tts_cache) kinds.push('tts_cache');
+                    if (this.webdavConfig.sync_stickers) kinds.push('stickers');
+                    if (!kinds.length) {
+                        this.showToast('先开启一个素材同步开关', 'warning');
+                        return;
+                    }
+                    this.webdavRevBusy = true;
+                    try {
+                        const res = await this.webdavRevApi().syncAssets({
+                            direction: this.webdavAssetDirection === 'download' ? 'download' : 'upload',
+                            kinds,
+                        });
+                        this.webdavLastResult = this.webdavResultSummary(res.data);
+                        this.showToast(`素材同步完成：${this.webdavLastResult}`, 'success');
+                    } catch (e) {
+                        this.showToast(this.webdavRevError(e, '素材同步失败'), 'error');
+                    } finally {
+                        this.webdavRevBusy = false;
+                    }
+                },
+
                 // ── WebDAV 备份与同步 ─────────────────────────────
 
                 async loadWebdavConfig() {
@@ -14794,12 +18672,20 @@ def main(params):
                             encryption_password: cfg.encryption_password || '',
                             has_password: !!cfg.has_password,
                             has_encryption_password: !!cfg.has_encryption_password,
+                            // 生态 8a83ecff：版本页/素材同步需要的字段
+                            revisions_folder: cfg.revisions_folder || 'nekobot/revisions',
+                            assets_folder: cfg.assets_folder || 'nekobot/assets',
+                            retention: cfg.retention || null,
+                            sync_tts_cache: !!cfg.sync_tts_cache,
+                            sync_stickers: !!cfg.sync_stickers,
+                            last_revision_id: cfg.last_revision_id || '',
                             last_backup_at: cfg.last_backup_at || '',
                             last_sync_at: cfg.last_sync_at || '',
                             last_error: cfg.last_error || '',
                             last_file_size: cfg.last_file_size || 0,
                             last_modified: cfg.last_modified || '',
                         };
+                        this.webdavConfigRaw = cfg;
                         // 同步到表单（密码字段留空，避免回填掩码字符串）
                         this.webdavForm = {
                             enabled: !!cfg.enabled,
@@ -14964,7 +18850,8 @@ def main(params):
                                     const portraitInfo = res.data.portraits
                                         ? `, 立绘 ${res.data.portraits.uploaded || 0}/${res.data.portraits.total || 0}`
                                         : '';
-                                    this.showToast(`备份成功 (${this.formatBytes(res.data.size || 0)}${portraitInfo})`, 'success');
+                                    const revisionInfo = res.data.deduplicated ? '，内容未变，沿用已有修订' : '';
+                                    this.showToast(`备份成功 (${this.formatBytes(res.data.size || 0)}${portraitInfo})${revisionInfo}`, 'success');
                                     await this.loadWebdavConfig();
                                 } else {
                                     this.webdavBackupResult = { error: res.data?.error || '备份失败' };
@@ -16131,13 +20018,16 @@ def main(params):
                                     existingMessage.change_cards = data.message.change_cards || existingMessage.change_cards || [];
                                     existingMessage.attachments = data.message.attachments || existingMessage.attachments || [];
                                 } else {
-                                    const _savedAudioUrl = existingMessage.audio_url;
+                                    const _savedAudioUrl = data.swipe ? null : existingMessage.audio_url;
                                     Object.assign(existingMessage, data.message, {
                                         thinking_cards: data.message.thinking_cards || existingMessage.thinking_cards || [],
                                         change_cards: data.message.change_cards || existingMessage.change_cards || []
                                     });
                                     if (_savedAudioUrl && !existingMessage.audio_url) {
                                         existingMessage.audio_url = _savedAudioUrl;
+                                    }
+                                    if (data.swipe) {
+                                        delete existingMessage.audio_url;
                                     }
                                 }
                                 // 只在用户没有手动滚动时才滚动
@@ -16190,6 +20080,29 @@ def main(params):
                         localStorage.removeItem('nbot_loading_start_time');
                         this.showToast(data?.message || '当前内容被过滤', 'warning');
                         this.processPendingQueue(filteredSessionId);
+                    });
+
+                    // 自动上下文压缩：压缩按钮显示进度并禁用
+                    socket.on('context_auto_compress', (data) => {
+                        if (!this.currentSession || data?.session_id !== this.currentSession.id) return;
+                        if (data?.phase === 'start') {
+                            this.isCompressing = true;
+                        } else if (data?.phase === 'end') {
+                            this.isCompressing = false;
+                            if (this.currentSession) {
+                                this.loadMessages(true).then(() => this.updateContextStats());
+                            }
+                        }
+                    });
+
+                    // Agent 提问弹窗（ask_user_question 工具）
+                    socket.on('ask_user_question', (data) => {
+                        if (!this.currentSession || data?.session_id !== this.currentSession.id) return;
+                        this.askUserDialog = {
+                            request_id: data?.request_id || '',
+                            question: data?.question || ''
+                        };
+                        this.askUserAnswer = '';
                     });
 
                     socket.on('error', (err) => {
@@ -16775,9 +20688,12 @@ def main(params):
                     const protectedBlocks = [];
                     const placeholder = (i) => `__NBOT_PROTECTED_${i}__`;
                     let guarded = normalized.replace(
-                        /<span class="inner-monologue"[\s\S]*?<\/span>/g,
-                        (m) => {
-                            const idx = protectedBlocks.push(m) - 1;
+                        /<span class="inner-monologue"[^>]*>([\s\S]*?)<\/span>/g,
+                        (_match, inner) => {
+                            // 只保护「转义后的内文」，外壳在 restore 阶段重建。
+                            // 保护整段原始标签会让模型原文里的 outerHTML 原样回到 DOM
+                            // （<img onerror> 之类），等于绕过 escapeHtml。
+                            const idx = protectedBlocks.push(this.escapeHtml(inner || '')) - 1;
                             return placeholder(idx);
                         }
                     );
@@ -16787,7 +20703,8 @@ def main(params):
                         .join('');
                     // 还原被保护的块
                     guarded = guarded.replace(/__NBOT_PROTECTED_(\d+)__/g, (_m, i) => {
-                        return protectedBlocks[Number(i)] || '';
+                        // 外壳由这里重建，内文始终是已转义文本
+                        return `<span class="inner-monologue">${protectedBlocks[Number(i)] || ''}</span>`;
                     });
                     return guarded;
                 },
@@ -16872,11 +20789,40 @@ def main(params):
                 },
 
                 // 渲染 Markdown 内容
+                // 加载自定义表情包映射（聊天中 [名称] 内联渲染原图）
+                async loadCustomStickers() {
+                    try {
+                        const res = await api.get('/api/stickers');
+                        if (res.data?.success && Array.isArray(res.data.stickers)) {
+                            const map = {};
+                            for (const s of res.data.stickers) {
+                                map[s.name] = s.url;
+                            }
+                            this.customStickers = map;
+                        }
+                    } catch (e) {
+                        console.debug('[Stickers] load failed:', e?.message || e);
+                    }
+                },
+
+                // 将文本中命中表情库的 [名称] 替换为内联图片
+                replaceStickerTags(text) {
+                    const map = this.customStickers || {};
+                    if (!text || !Object.keys(map).length) return text;
+                    return String(text).replace(/\[([^\[\]\n]{1,40})\]/g, (match, name) => {
+                        const url = map[name.trim()];
+                        return url ? `![${name}](${url})` : match;
+                    });
+                },
+
                 renderMarkdown(content, options = {}) {
                     if (!content) return '';
                     
                     // 配置 marked 选项
                     marked.setOptions({
+                        // 关掉原始 HTML：模型/后端文本里的 <img onerror> 先被转义，
+                        // 再由 sanitizeRenderedHtml 兜底（双层防线）
+                        html: false,
                         breaks: true,  // 支持换行
                         gfm: true,     // 支持 GitHub Flavored Markdown
                         headerIds: false,  // 不生成 header id
@@ -16898,9 +20844,11 @@ def main(params):
                         // 在 Markdown 源码级修复表格分隔行（处理 AI 输出分隔行列数不一致的情况）
                         const tildePlaceholder = 'NBOT_TILDE_PLACEHOLDER_8f4d9c2a';
                         let markdownSource = this.normalizeMarkdownTables(
-                            options.disableStrikethrough
-                                ? String(content).replace(/~/g, tildePlaceholder)
-                                : content
+                            this.replaceStickerTags(
+                                options.disableStrikethrough
+                                    ? String(content).replace(/~/g, tildePlaceholder)
+                                    : content
+                            )
                         );
                         let html = marked.parse(markdownSource);
                         if (options.disableStrikethrough) {
@@ -16913,6 +20861,19 @@ def main(params):
                             /<pre><code class="language-(\w+)">([\s\S]*?)<\/code><\/pre>/g,
                             (match, lang, code) => {
                                 const id = `cb_${Date.now()}_${blockIndex++}`;
+                                if (String(lang).toLowerCase() === 'mermaid') {
+                                    // Mermaid：先放源码占位，DOM 插入后由 renderMermaidBlocks 替换成 SVG
+                                    return `
+                                  <div class="mermaid-block" data-mermaid-id="${id}" data-rendered="false">
+                                    <div class="mermaid-toolbar">
+                                      <span class="mermaid-label"><i class="fas fa-diagram-project"></i> 图表</span>
+                                      <button class="mermaid-source-toggle" data-mermaid-toggle="${id}">查看源码</button>
+                                    </div>
+                                    <div class="mermaid-canvas" id="mmd_${id}"></div>
+                                    <div class="mermaid-error" id="mmd_err_${id}" style="display:none;"></div>
+                                    <pre class="mermaid-source" id="mmd_src_${id}" style="display:none;"><code class="language-mermaid">${code}</code></pre>
+                                  </div>`;
+                                }
                                 return `
                                   <div class="code-wrap">
                                     <div class="code-header">
@@ -16933,6 +20894,124 @@ def main(params):
                         console.error('Markdown parse error:', e);
                         return this.escapeHtml(content);
                     }
+                },
+
+                // ---- Mermaid 图表渲染（懒加载 3.5MB 的 vendor 库，仅在有图表时加载） ----
+
+                initMermaidObserver() {
+                    if (this._mermaidObserver || typeof MutationObserver === 'undefined') return;
+                    this._mermaidTimer = null;
+                    // 「查看源码」用事件委托（内联 onclick 会被 sanitize 剥离）
+                    this._mermaidToggleHandler = (event) => {
+                        const btn = event.target && event.target.closest
+                            ? event.target.closest('[data-mermaid-toggle]')
+                            : null;
+                        if (!btn) return;
+                        const block = btn.closest('.mermaid-block');
+                        const sourceEl = block ? block.querySelector('.mermaid-source') : null;
+                        if (!sourceEl) return;
+                        const isHidden = sourceEl.style.display === 'none';
+                        sourceEl.style.display = isHidden ? 'block' : 'none';
+                        btn.textContent = isHidden ? '隐藏源码' : '查看源码';
+                    };
+                    document.addEventListener('click', this._mermaidToggleHandler);
+                    this._mermaidObserver = new MutationObserver(() => {
+                        if (!document.querySelector('.mermaid-block[data-rendered="false"]')) return;
+                        clearTimeout(this._mermaidTimer);
+                        this._mermaidTimer = setTimeout(() => this.renderMermaidBlocks(), 250);
+                    });
+                    this._mermaidObserver.observe(document.body, { childList: true, subtree: true });
+                    // 首次进入页面时可能已有内容
+                    this.renderMermaidBlocks();
+                },
+
+                ensureMermaidLoaded() {
+                    if (window.mermaid) return Promise.resolve(true);
+                    if (this._mermaidPromise) return this._mermaidPromise;
+                    this._mermaidPromise = new Promise((resolve) => {
+                        const script = document.createElement('script');
+                        script.src = '/static/vendor/mermaid.min.js?cache=20261025-p7';
+                        script.async = true;
+                        script.onload = () => {
+                            try {
+                                const isLight = this.themeSettings?.mode === 'light';
+                                window.mermaid.initialize({
+                                    startOnLoad: false,
+                                    theme: isLight ? 'default' : 'dark',
+                                    securityLevel: 'strict',
+                                    fontFamily: 'inherit'
+                                });
+                                resolve(true);
+                            } catch (e) {
+                                console.warn('Mermaid 初始化失败:', e);
+                                resolve(false);
+                            }
+                        };
+                        script.onerror = () => {
+                            console.warn('Mermaid 资源加载失败，保留源码展示');
+                            resolve(false);
+                        };
+                        document.head.appendChild(script);
+                    });
+                    return this._mermaidPromise;
+                },
+
+                async renderMermaidBlocks() {
+                    const blocks = Array.from(
+                        document.querySelectorAll('.mermaid-block[data-rendered="false"]')
+                    );
+                    if (!blocks.length) return;
+                    blocks.forEach(block => block.setAttribute('data-rendered', 'rendering'));
+
+                    const ready = await this.ensureMermaidLoaded();
+                    let index = 0;
+                    for (const block of blocks) {
+                        const blockId = block.getAttribute('data-mermaid-id') || `mmd_${index++}`;
+                        const sourceEl = block.querySelector('.mermaid-source code');
+                        const canvas = block.querySelector('.mermaid-canvas');
+                        const errorEl = block.querySelector('.mermaid-error');
+                        const sourceElWrap = block.querySelector('.mermaid-source');
+                        const code = (sourceEl?.textContent || '').trim();
+                        if (!code || !canvas) {
+                            block.setAttribute('data-rendered', 'empty');
+                            continue;
+                        }
+                        if (!ready) {
+                            if (sourceElWrap) sourceElWrap.style.display = 'block';
+                            if (errorEl) {
+                                errorEl.style.display = 'block';
+                                errorEl.textContent = '图表库未加载，已展示源码。';
+                            }
+                            block.setAttribute('data-rendered', 'failed');
+                            continue;
+                        }
+                        try {
+                            const { svg } = await window.mermaid.render(`mmd_render_${blockId}`, code);
+                            canvas.innerHTML = svg;
+                            block.setAttribute('data-rendered', 'true');
+                        } catch (e) {
+                            console.warn('Mermaid 渲染失败:', e);
+                            if (sourceElWrap) sourceElWrap.style.display = 'block';
+                            if (errorEl) {
+                                errorEl.style.display = 'block';
+                                errorEl.textContent = '图表语法解析失败，已展示源码：' + (e && e.message ? e.message : e);
+                            }
+                            block.setAttribute('data-rendered', 'failed');
+                        }
+                    }
+                },
+
+                // 主题切换后重新渲染（SVG 颜色固定在生成时）
+                resetMermaidBlocks() {
+                    if (!this._mermaidPromise) return;
+                    document.querySelectorAll('.mermaid-block[data-rendered="true"]').forEach(block => {
+                        const canvas = block.querySelector('.mermaid-canvas');
+                        if (canvas) canvas.innerHTML = '';
+                        const sourceElWrap = block.querySelector('.mermaid-source');
+                        if (sourceElWrap) sourceElWrap.style.display = 'none';
+                        block.setAttribute('data-rendered', 'false');
+                    });
+                    this.renderMermaidBlocks();
                 },
 
                 /**
@@ -17572,7 +21651,8 @@ def main(params):
                                 break;
                             }
                         }
-                        this.currentMessages = this.currentMessages.slice(0, msgIndex).map(currentMsg => {
+                        // swipes：原气泡保留（新候选会以同 id 流式覆盖），仅清理提示消息上的旧卡片
+                        this.currentMessages = this.currentMessages.map(currentMsg => {
                             if (promptMessageId && currentMsg.id !== promptMessageId) {
                                 return currentMsg;
                             }
@@ -17614,6 +21694,32 @@ def main(params):
                         localStorage.removeItem('nbot_loading_start_time');
                         await this.loadMessages(true);
                         this.showToast(e.response?.data?.error || '重新生成失败', 'error');
+                    }
+                },
+
+                // swipes：切换消息当前选中的候选回复
+                async switchVariant(msg, index) {
+                    if (!this.currentSession || !msg?.id) return;
+                    const variants = msg.variants || [];
+                    if (index < 0 || index >= variants.length) return;
+                    const sessionId = this.currentSession.id;
+                    try {
+                        const res = await api.post(
+                            `/api/sessions/${sessionId}/messages/${msg.id}/variant`,
+                            { index }
+                        );
+                        if (res.data?.success && res.data.message) {
+                            const idx = this.currentMessages.findIndex(m => m.id === msg.id);
+                            if (idx !== -1) {
+                                const savedAudio = null; // 切换候选后旧语音失效
+                                Object.assign(this.currentMessages[idx], res.data.message, {
+                                    is_streaming: false,
+                                    audio_url: savedAudio
+                                });
+                            }
+                        }
+                    } catch (e) {
+                        this.showToast(e.response?.data?.error || '切换候选失败', 'error');
                     }
                 },
 

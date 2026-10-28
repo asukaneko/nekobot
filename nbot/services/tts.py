@@ -11,7 +11,9 @@ _log = logging.getLogger(__name__)
 config_parser = configparser.ConfigParser()
 config_parser.read('config.ini', encoding='utf-8')
 
-cache_address = os.path.abspath(config_parser.get('cache', 'cache_address'))
+cache_address = os.path.abspath(
+    os.getenv("CACHE_ADDRESS") or config_parser.get("cache", "cache_address", fallback="cache")
+)
 
 
 def _get_legacy_tts_config():

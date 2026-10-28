@@ -6,10 +6,12 @@ import os
 import threading
 import time
 
-from flask import Response, jsonify, request, send_file, send_from_directory
+from flask import jsonify, request, send_file
+from werkzeug.exceptions import HTTPException
 from werkzeug.utils import safe_join
 
 from nbot.services.tts_config import get_tts_config_from_server
+from nbot.web.audio_cache import normalize_generated_audio_path
 
 _log = logging.getLogger(__name__)
 _STT_MODEL = None
@@ -197,10 +199,67 @@ def _get_stt_config_for_adapter(server) -> dict:
     }
 
 
+def _register_realtime_routes(app, server):
+    """P2-13 Realtime 实时语音：provider 列表 / 会话状态 + Socket.IO 命名空间。"""
+    try:
+        from nbot.web import realtime_voice
+    except Exception as exc:  # noqa: BLE001 - 缺依赖时不拖垮语音路由
+        _log.warning("[Realtime] 导入实时语音模块失败: %s", exc)
+        return
+
+    try:
+        registered = realtime_voice.register_realtime_voice(server)
+    except Exception as exc:  # noqa: BLE001
+        _log.warning("[Realtime] 注册实时语音命名空间失败: %s", exc)
+        registered = False
+
+    @app.route("/api/realtime/providers", methods=["GET"])
+    def realtime_providers_route():
+        """可用的 Realtime provider 及配置状态（前端下拉用）。"""
+        try:
+            providers = realtime_voice.list_realtime_providers()
+            default_id = next(
+                (item["id"] for item in providers if item.get("default")), "qwen_omni"
+            )
+            return jsonify({
+                "success": True,
+                "providers": providers,
+                "default_provider": default_id,
+                "namespace": realtime_voice.REALTIME_NAMESPACE,
+                "registered": registered,
+                "audio": {
+                    "format": "pcm16",
+                    "sample_rate": 24000,
+                    "channels": 1,
+                    "transport": "socket.io base64 chunks",
+                },
+            })
+        except Exception as exc:  # noqa: BLE001
+            _log.error("[Realtime] providers 失败: %s", exc)
+            return jsonify({"success": False, "error": str(exc)}), 500
+
+    @app.route("/api/realtime/status", methods=["GET"])
+    def realtime_status_route():
+        """当前实时语音会话数与统计。"""
+        try:
+            manager = getattr(server, "_realtime_voice_manager", None)
+            stats = manager.stats() if manager is not None else {"active_sessions": 0, "sessions": []}
+            return jsonify({
+                "success": True,
+                "registered": registered,
+                "namespace": realtime_voice.REALTIME_NAMESPACE,
+                **stats,
+            })
+        except Exception as exc:  # noqa: BLE001
+            _log.error("[Realtime] status 失败: %s", exc)
+            return jsonify({"success": False, "error": str(exc)}), 500
+
+
 def register_voice_routes(app, server):
     """Register voice-related API routes."""
     _configure_model_root(server.data_dir)
     _preload_stt_model()
+    _register_realtime_routes(app, server)
 
     _VALID_VOICES = frozenset({
         "alloy", "echo", "fable", "onyx", "nova", "shimmer",
@@ -247,12 +306,16 @@ def register_voice_routes(app, server):
 
             temp_dir = os.path.join(server.data_dir, "tts_cache")
             os.makedirs(temp_dir, exist_ok=True)
-            output_file = os.path.join(temp_dir, f"tts_{int(time.time())}.mp3")
+            requested_ext = "." + str(tts_config.get("tts_format") or "mp3").lower()
+            if requested_ext not in (".mp3", ".wav", ".opus", ".ogg", ".flac", ".m4a", ".aac", ".amr"):
+                requested_ext = ".mp3"
+            output_file = os.path.join(temp_dir, f"tts_{time.time_ns()}{requested_ext}")
 
             adapter = get_adapter(provider)
             adapter.synthesize(text, tts_config, output_file)
             if not os.path.exists(output_file) or os.path.getsize(output_file) <= 0:
                 raise RuntimeError("TTS adapter did not produce an audio file")
+            output_file = normalize_generated_audio_path(output_file)
 
             audio_url = f"/api/tts/audio/{os.path.basename(output_file)}"
             return jsonify({
@@ -284,13 +347,17 @@ def register_voice_routes(app, server):
                 ".opus": "audio/opus",
                 ".flac": "audio/flac",
                 ".ogg": "audio/ogg",
+                ".m4a": "audio/mp4",
+                ".aac": "audio/aac",
+                ".amr": "audio/amr",
             }
             mimetype = mime_map.get(ext, "audio/mpeg")
-            # 直接读取文件返回，兼容 Docker 各种路径配置
-            with open(file_path, "rb") as f:
-                audio_data = f.read()
-            return Response(audio_data, mimetype=mimetype)
+            response = send_file(file_path, mimetype=mimetype, conditional=True)
+            response.headers["Accept-Ranges"] = "bytes"
+            return response
 
+        except HTTPException:
+            raise
         except Exception as e:
             return jsonify({"error": str(e)}), 500
 

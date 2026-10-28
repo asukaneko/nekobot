@@ -15,6 +15,39 @@ _MEMORY_TURN_INTERVAL = 6
 # 对话缓冲区：按角色存储累积的对话轮次
 _MEMORY_TURN_BUFFER: dict[str, list[dict[str, str]]] = {}
 
+_MEMORY_OPS_SCHEMA = (
+    '{"operations": [{"action": "add|update|delete", "category": "...", '
+    '"title": "...", "summary": "...", "content": "...", "importance": 0.0, "reason": "..."}]}'
+)
+
+
+def get_memory_turn_interval() -> int:
+    """自动记忆提取间隔（轮），可在 settings.json features.auto_memory_interval 配置。"""
+    settings_file = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
+        "data",
+        "settings.json",
+    )
+    try:
+        if os.path.exists(settings_file):
+            with open(settings_file, encoding="utf-8") as file:
+                settings = json.load(file)
+            features = settings.get("features") if isinstance(settings, dict) else {}
+            if isinstance(features, dict):
+                interval = int(features.get("auto_memory_interval") or 0)
+                if interval > 0:
+                    return max(1, min(interval, 50))
+    except (ValueError, TypeError, OSError):
+        pass
+
+    try:
+        env_value = int(os.getenv("NBOT_AUTO_MEMORY_INTERVAL", "0") or 0)
+        if env_value > 0:
+            return max(1, min(env_value, 50))
+    except ValueError:
+        pass
+    return _MEMORY_TURN_INTERVAL
+
 _STRUCTURED_MEMORY_CATEGORIES = {
     "user_persona",
     "character_persona",
@@ -151,6 +184,228 @@ def parse_memory_response(text: str) -> list[dict[str, Any]]:
             normalized["importance"] = importance
         memories.append(normalized)
     return memories[:8]
+
+
+def parse_memory_operations(text: str) -> list[dict[str, Any]]:
+    """解析增量记忆操作协议（先审查再改写）。
+
+    期望格式：{"operations": [{action, category, title, summary, content, importance}]}
+    兼容旧格式（memories 数组 / 单对象 / 顶层数组），旧格式条目视为 add 操作。
+    """
+    text = _clean_json_text(text)
+    if not text:
+        return []
+
+    try:
+        parsed = json.loads(text)
+    except json.JSONDecodeError:
+        match = re.search(r"\{[\s\S]*\}|\[[\s\S]*\]", text)
+        if not match:
+            return []
+        try:
+            parsed = json.loads(match.group(0))
+        except json.JSONDecodeError:
+            return []
+
+    raw_ops: list[Any] = []
+    if isinstance(parsed, dict):
+        if isinstance(parsed.get("operations"), list):
+            raw_ops = parsed["operations"]
+        elif isinstance(parsed.get("memories"), list):
+            raw_ops = parsed["memories"]
+        elif any(key in parsed for key in ("title", "summary", "content", "action")):
+            raw_ops = [parsed]
+    elif isinstance(parsed, list):
+        raw_ops = parsed
+    if not isinstance(raw_ops, list):
+        return []
+
+    valid_actions = {"add", "update", "delete"}
+    ops: list[dict[str, Any]] = []
+    for item in raw_ops[:12]:
+        if not isinstance(item, dict):
+            continue
+        action = str(item.get("action") or "add").strip().lower()
+        if action not in valid_actions:
+            action = "add"
+        category = _normalize_memory_category(
+            item.get("category") or item.get("kind") or item.get("target")
+        )
+        title = str(item.get("title") or "").strip()
+        content = str(item.get("content") or "").strip()
+        summary = str(item.get("summary") or "").strip()
+        importance = _coerce_importance(item.get("importance"))
+        if action == "delete":
+            if not title and not content:
+                continue
+        elif not title or (not content and not summary):
+            continue
+        if not content and summary:
+            content = summary
+        op: dict[str, Any] = {
+            "action": action,
+            "title": title[:80],
+            "content": content[:2000],
+            "summary": (summary or content)[:200],
+        }
+        if category:
+            op["category"] = category
+        if importance:
+            op["importance"] = importance
+        ops.append(op)
+    return ops
+
+
+def _load_existing_memory_sections(
+    character_id: str,
+    target_id: str,
+    session_id: str,
+) -> dict[str, str]:
+    """读取 MemoryFS 现有记忆小节，供增量改写审查。"""
+    sections: dict[str, str] = {}
+    try:
+        from nbot.memory.fs import get_memory_fs
+
+        mfs = get_memory_fs()
+        pairs = [
+            ("user_persona", mfs.path_user_persona(character_id, target_id)),
+            ("character_persona", mfs.path_character_persona(character_id, target_id)),
+            ("recent_digest", mfs.path_recent_digest(character_id, target_id)),
+            ("important_event", mfs.path_important_events(character_id, session_id or target_id or "general")),
+        ]
+        for category, path in pairs:
+            mf = mfs.read(path)
+            if mf and mf.content:
+                sections[category] = mf.content[:600]
+    except Exception as exc:
+        _log.debug("[AutoMemory] 读取现有记忆失败: %s", exc)
+    return sections
+
+
+def _remove_sections_by_title(content: str, title: str) -> str:
+    """从记忆内容中移除标题匹配的小节（按空行分节）。"""
+    if not content or not title:
+        return content
+    sections = [
+        s for s in str(content).split("\n\n")
+        if s.strip() and title.lower() not in s.lower()
+    ]
+    return "\n\n".join(sections)
+
+
+def _apply_memory_operations(
+    ops: list[dict[str, Any]],
+    *,
+    character_id: str,
+    target_id: str,
+    session_id: str,
+) -> int:
+    """应用增量记忆操作（add/update/delete），返回受影响的条目数。
+
+    - add：按原结构化写入（persona 类追加小节）
+    - update：persona/digest 原子替换整个文件；事件类追加
+    - delete：事件/时间线按标题移除小节；persona/digest 不支持整文件删除（安全）
+    """
+    if not character_id or not ops:
+        return 0
+    try:
+        from nbot.memory.fs import get_memory_fs
+
+        mfs = get_memory_fs()
+        changed = 0
+        for op in ops:
+            action = op.get("action", "add")
+            category = str(op.get("category") or "")
+            if category not in _STRUCTURED_MEMORY_CATEGORIES:
+                continue
+            title = op.get("title", "")
+            content = op.get("content", "")
+
+            if action == "delete":
+                if category == "important_event":
+                    events_path = mfs.path_important_events(
+                        character_id, session_id or target_id or "general"
+                    )
+                    mf = mfs.read(events_path)
+                    if mf and mf.content:
+                        mf.content = _remove_sections_by_title(mf.content, title)
+                        mfs.write(
+                            events_path,
+                            character_id=character_id,
+                            target_id=target_id,
+                            title=mf.title,
+                            content=mf.content,
+                            summary=mf.summary,
+                            importance=mf.importance,
+                            append=False,
+                        )
+                        changed += 1
+                continue
+
+            if not content:
+                continue
+            importance = op.get("importance", 0.0)
+            atomic = action == "update"
+            if category == "user_persona" and target_id:
+                mfs.write(
+                    mfs.path_user_persona(character_id, target_id),
+                    character_id=character_id,
+                    target_id=target_id,
+                    title=title or "用户人格记忆",
+                    content=content,
+                    summary=op.get("summary", ""),
+                    importance=importance or 0.6,
+                    append=not atomic,
+                )
+                changed += 1
+            elif category == "character_persona" and target_id:
+                mfs.write(
+                    mfs.path_character_persona(character_id, target_id),
+                    character_id=character_id,
+                    target_id=target_id,
+                    title=title or "角色人格记忆",
+                    content=content,
+                    summary=op.get("summary", ""),
+                    importance=importance or 0.6,
+                    append=not atomic,
+                )
+                changed += 1
+            elif category == "important_event":
+                mfs.write(
+                    mfs.path_important_events(character_id, session_id or target_id or "general"),
+                    character_id=character_id,
+                    target_id=target_id,
+                    title=title or "重要事件",
+                    content=content,
+                    summary=op.get("summary", ""),
+                    importance=importance or 0.8,
+                    append=True,
+                )
+                _append_to_timeline(
+                    mfs,
+                    character_id=character_id,
+                    target_id=target_id,
+                    session_id=session_id,
+                    title=title or "重要事件",
+                    content=content,
+                )
+                changed += 1
+            elif category == "recent_digest" and target_id:
+                mfs.write(
+                    mfs.path_recent_digest(character_id, target_id),
+                    character_id=character_id,
+                    target_id=target_id,
+                    title=title or "近期对话压缩摘要",
+                    content=content,
+                    summary=op.get("summary", ""),
+                    importance=importance or 0.4,
+                    append=False,
+                )
+                changed += 1
+        return changed
+    except Exception as exc:
+        _log.warning("[AutoMemory] 应用记忆操作失败: %s", exc, exc_info=True)
+        return 0
 
 
 def format_memories_for_prompt(memories: list[dict[str, Any]]) -> str:
@@ -408,7 +663,8 @@ def inject_memories_into_messages(messages: list[dict[str, Any]], memory_text: s
 
 def _call_memory_model(turns: list[dict[str, str]],
                        character_name: str = "", user_name: str = "",
-                       language: str = "") -> list[dict[str, Any]]:
+                       language: str = "",
+                       existing_sections: dict[str, str] | None = None) -> list[dict[str, Any]]:
     """调用 AI 模型从多轮对话中提取记忆
 
     Args:
@@ -416,6 +672,7 @@ def _call_memory_model(turns: list[dict[str, str]],
         character_name: 角色名称
         user_name: 用户名称
         language: 记忆输出语言
+        existing_sections: 现有记忆分类小节（增量改写协议：模型先审查再输出增删改操作）
     """
     from nbot.core.model_adapter import response_json_utf8
     from nbot.core.protocols import get_protocol
@@ -440,26 +697,50 @@ def _call_memory_model(turns: list[dict[str, str]],
         lang_display = lang_names.get(language, language)
         lang_instruction = f"\nIMPORTANT: Write ALL memory fields (title, summary, content) in {lang_display}. Do NOT use any other language."
 
-    system_prompt = (
-        "You are a memory extraction middleware, not a roleplay character."
-        f"{char_desc}{user_desc}\n"
-        "You will receive multiple conversation turns. Reuse this one call to extract only compressed, future-useful memory. "
-        "IMPORTANT: The memory MUST be specifically about or related to the character. "
-        "Do NOT include generic information that is not tied to this character. "
-        "Never store raw dialogue transcripts.\n"
-        "Return JSON only. Use either [] if nothing is worth remembering, or an object with a memories array. "
-        "Each memory item must contain category, title, summary, content, type ('long' or 'short'), and importance (0-1). "
-        "Allowed categories:\n"
-        "- user_persona: stable user preferences, boundaries, names, interaction style, emotional needs, or recurring traits.\n"
-        "- character_persona: how the character's attitude, promises, habits, or relationship understanding toward the user changed.\n"
-        "- important_event: promises, conflicts, confessions, separations, plot turns, confirmed setting changes, or world-state changes.\n"
-        "- recent_digest: a compact summary of the recent turns only if it helps continuity; omit it for ordinary small talk.\n"
-        "Use at most one item per category. Write summaries, not quotes. "
-        "Ignore ordinary chat, one-off requests, and claims invented only by the assistant."
-        f"{lang_instruction}"
-    )
+    # 增量改写协议：先审查现有记忆，再输出增删改操作，避免重复条目膨胀
+    if existing_sections:
+        sections_text = "\n".join(
+            f"### [{category}]\n{content}"
+            for category, content in existing_sections.items()
+            if str(content or "").strip()
+        )
+        system_prompt = (
+            "You are a memory maintenance middleware, not a roleplay character."
+            f"{char_desc}{user_desc}\n"
+            "You will receive the character's EXISTING memory sections and NEW conversation turns. "
+            "First review the existing memories against the new turns, then output JSON operations to keep "
+            "memory accurate and compact. Rules:\n"
+            "- Prefer 'update' over 'add': merge new facts into the existing entry instead of creating duplicates.\n"
+            "- For user_persona and character_persona, keep ONE consolidated entry; use 'update' to atomically replace it when traits change.\n"
+            "- Use 'delete' only for entries that are outdated, wrong, or fully superseded (give the exact title).\n"
+            "- Use 'add' only for genuinely new information not covered by any existing entry.\n"
+            "The memory MUST be specifically about or related to this character. Never store raw dialogue transcripts.\n"
+            "Allowed categories: user_persona, character_persona, important_event, recent_digest.\n"
+            "Return JSON only: " + _MEMORY_OPS_SCHEMA +
+            " Use {\"operations\": []} when no change is needed."
+            f"{lang_instruction}"
+        )
+    else:
+        system_prompt = (
+            "You are a memory extraction middleware, not a roleplay character."
+            f"{char_desc}{user_desc}\n"
+            "You will receive multiple conversation turns. Reuse this one call to extract only compressed, future-useful memory. "
+            "IMPORTANT: The memory MUST be specifically about or related to the character. "
+            "Do NOT include generic information that is not tied to this character. "
+            "Never store raw dialogue transcripts.\n"
+            "Return JSON only. Use either [] if nothing is worth remembering, or an object with a memories array. "
+            "Each memory item must contain category, title, summary, content, type ('long' or 'short'), and importance (0-1). "
+            "Allowed categories:\n"
+            "- user_persona: stable user preferences, boundaries, names, interaction style, emotional needs, or recurring traits.\n"
+            "- character_persona: how the character's attitude, promises, habits, or relationship understanding toward the user changed.\n"
+            "- important_event: promises, conflicts, confessions, separations, plot turns, confirmed setting changes, or world-state changes.\n"
+            "- recent_digest: a compact summary of the recent turns only if it helps continuity; omit it for ordinary small talk.\n"
+            "Use at most one item per category. Write summaries, not quotes. "
+            "Ignore ordinary chat, one-off requests, and claims invented only by the assistant."
+            f"{lang_instruction}"
+        )
 
-    # 拼接多轮对话
+    # 拼接多轮对话（增量协议时附带现有记忆小节供审查）
     turn_parts = []
     for i, turn in enumerate(turns, 1):
         user_msg = turn.get("user", "")[:2000]
@@ -469,7 +750,19 @@ def _call_memory_model(turns: list[dict[str, str]],
             f"User ({user_name or 'User'}):\n{user_msg}\n\n"
             f"Assistant ({character_name or 'Assistant'}):\n{asst_msg}"
         )
-    user_prompt = f"Conversation ({len(turns)} turns):\n\n" + "\n\n".join(turn_parts) + "\n"
+    prompt_sections = []
+    if existing_sections:
+        existing_text = "\n".join(
+            f"[{category}]\n{str(content or '')[:600]}"
+            for category, content in existing_sections.items()
+            if str(content or "").strip()
+        )
+        if existing_text:
+            prompt_sections.append(f"EXISTING MEMORY SECTIONS:\n{existing_text}")
+    prompt_sections.append(
+        f"NEW CONVERSATION ({len(turns)} turns):\n\n" + "\n\n".join(turn_parts)
+    )
+    user_prompt = "\n\n".join(prompt_sections) + "\n"
     messages = [
         {"role": "system", "content": system_prompt},
         {"role": "user", "content": user_prompt},
@@ -520,6 +813,8 @@ def _call_memory_model(turns: list[dict[str, str]],
     except Exception:
         pass
 
+    if existing_sections is not None:
+        return parse_memory_operations(normalized.content)
     return parse_memory_response(normalized.content)
 
 
@@ -586,14 +881,15 @@ def extract_and_save_turn_memories(ctx, callbacks, result) -> int:
         turn_count = _MEMORY_TURN_COUNTERS.get(counter_key, 0) + 1
         _MEMORY_TURN_COUNTERS[counter_key] = turn_count
 
-    if turn_count < _MEMORY_TURN_INTERVAL:
+    memory_interval = get_memory_turn_interval()
+    if turn_count < memory_interval:
         return 0
 
     buffered_turns = _MEMORY_TURN_BUFFER.pop(counter_key, [])
 
     _log.info(
         "[AutoMemory] 达到%d轮，开始提取记忆: character=%s",
-        _MEMORY_TURN_INTERVAL, character_name or "-",
+        memory_interval, character_name or "-",
     )
 
     user_name = ""
@@ -612,14 +908,20 @@ def extract_and_save_turn_memories(ctx, callbacks, result) -> int:
     except Exception:
         pass
 
+    # 增量改写：先审查现有记忆，再输出增删改操作
+    existing_sections = _load_existing_memory_sections(
+        character_id or character_name, target_id, session_id
+    )
+
     try:
         memories = _call_memory_model(buffered_turns,
                                       character_name=character_name, user_name=user_name,
-                                      language=language)
+                                      language=language,
+                                      existing_sections=existing_sections or None)
     except Exception as exc:
         _log.warning("[AutoMemory] 记忆提取模型调用失败: %s", exc, exc_info=True)
         _MEMORY_TURN_BUFFER[counter_key] = buffered_turns
-        _MEMORY_TURN_COUNTERS[counter_key] = _MEMORY_TURN_INTERVAL
+        _MEMORY_TURN_COUNTERS[counter_key] = memory_interval
         return 0
 
     if not memories:
@@ -628,6 +930,21 @@ def extract_and_save_turn_memories(ctx, callbacks, result) -> int:
         return 0
 
     _MEMORY_TURN_COUNTERS[counter_key] = 0
+
+    # 增量操作协议返回值带 action 字段
+    if memories and isinstance(memories[0], dict) and "action" in memories[0]:
+        changed = _apply_memory_operations(
+            memories,
+            character_id=character_id or character_name,
+            target_id=target_id,
+            session_id=session_id,
+        )
+        if changed:
+            _log.info(
+                "[AutoMemory] 增量记忆操作完成: character=%s changed=%d",
+                character_id or character_name, changed,
+            )
+        return changed
 
     if _has_structured_memories(memories):
         saved_count = _save_structured_memories_to_memory_fs(

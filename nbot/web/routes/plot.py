@@ -2,6 +2,7 @@ import logging
 
 from flask import jsonify, request
 
+from nbot.core.session_store import visible_messages
 from nbot.plot.graph_manager import get_plot_graph_manager
 from nbot.web.routes.sessions import restore_runtime_state_to_path
 
@@ -30,7 +31,7 @@ def _ensure_plot_choices(server, session_id: str) -> bool:
 
     # Get session and find the last assistant message (including opening)
     session = server.session_store.get_session(session_id) or {}
-    messages = session.get("messages") or []
+    messages = visible_messages(session.get("messages") or [])
     last_assistant = ""
     for msg in reversed(messages):
         if isinstance(msg, dict) and msg.get("role") == "assistant":
@@ -316,7 +317,7 @@ def register_plot_routes(app, server):
 
         # 获取最后一条助手消息作为生成上下文
         session = server.session_store.get_session(conversation_id) or {}
-        messages = session.get("messages") or []
+        messages = visible_messages(session.get("messages") or [])
         last_assistant = ""
         for msg in reversed(messages):
             if isinstance(msg, dict) and msg.get("role") == "assistant":

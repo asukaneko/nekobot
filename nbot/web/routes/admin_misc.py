@@ -237,27 +237,39 @@ def register_admin_misc_routes(app, server):
             "时间",
             "日期",
             "来源",
+            "用途",
             "模型",
             "会话",
             "频道",
             "用户",
             "输入Token",
+            "缓存命中Token",
             "输出Token",
             "总计",
             "费用",
             "耗时ms",
             "记录ID",
         ])
+        try:
+            from nbot.core.token_stats import PURPOSE_LABELS
+
+            def _purpose_label(value):
+                return PURPOSE_LABELS.get(str(value or ""), str(value or ""))
+        except Exception:
+            def _purpose_label(value):
+                return str(value or "")
         for item in records:
             writer.writerow([
                 item.get("timestamp", ""),
                 item.get("date", ""),
                 item.get("source") or item.get("channel_type") or "api",
+                _purpose_label(item.get("purpose", "")),
                 item.get("model") or "unknown",
                 item.get("session_id", ""),
                 item.get("channel_type", ""),
                 item.get("user_id", ""),
                 item.get("input", 0),
+                item.get("cached_tokens", 0),
                 item.get("output", 0),
                 item.get("total", (item.get("input", 0) or 0) + (item.get("output", 0) or 0)),
                 item.get("cost", 0),

@@ -19,12 +19,15 @@ from nbot.core import (
 )
 from nbot.core.ai_pipeline import (
     AIPipeline,
+    ModePolicy,
     PipelineCallbacks,
     PipelineContext,
     PipelineResult,
 )
 from nbot.core.background_tasks import submit_background_task
 from nbot.core.model_proxy import model_proxy_request_kwargs
+from nbot.core.sampling import request_extra_body
+from nbot.core.session_store import merge_message_variant
 from nbot.web.utils.config_loader import get_vision_model_config
 
 try:
@@ -309,7 +312,12 @@ class WebProgressReporter:
     def on_tool_done(self, ctx, tool_name: str, result: dict, thinking: str) -> None:
         if self.progress_card:
             from nbot.core.progress_card import StepType
+            duration_ms = None
+            if isinstance(result, dict):
+                duration_ms = result.pop("_duration_ms", None)
             result_preview = json.dumps(result, ensure_ascii=False)[:200]
+            if duration_ms is not None:
+                result_preview += f" · {duration_ms}ms"
             self.progress_card.update(
                 StepType.TOOL_DONE,
                 _get_tool_display_name(tool_name),
@@ -348,7 +356,19 @@ class WebProgressReporter:
             self.progress_card.complete("✅ 处理完成")
 
     def on_waiting_confirmation(self, ctx, command: str, request_id: str) -> None:
-        pass
+        """Agent 向用户提问时推送 Web 弹窗事件（ask_user_question）。"""
+        try:
+            self.server.socketio.emit(
+                "ask_user_question",
+                {
+                    "session_id": self.session_id,
+                    "request_id": request_id,
+                    "question": command,
+                },
+                room=self.session_id,
+            )
+        except Exception as exc:
+            _log.debug("[AskUser] 弹窗事件发送失败: %s", exc)
 
     def on_send_file(self, ctx, file_path: str, filename: str) -> None:
         if not file_path or not os.path.isfile(file_path):
@@ -400,10 +420,156 @@ class WebCallbacks(PipelineCallbacks):
 
     def load_messages(self, ctx: PipelineContext) -> list[dict]:
         import copy
+
+        from nbot.core.session_store import visible_messages
+
         session = self.session_store.get_session(self.session_id)
-        if session:
-            return copy.deepcopy(session.get("messages", []))
-        return []
+        if not session:
+            return []
+        messages = copy.deepcopy(visible_messages(session.get("messages", [])))
+        # swipes：重新生成时上下文截断到目标消息之前（目标消息本身不进上下文）
+        swipe_target_id = str((ctx.metadata or {}).get("swipe_target_id") or "")
+        if swipe_target_id:
+            target_index = next(
+                (
+                    i
+                    for i, msg in enumerate(messages)
+                    if str(msg.get("id") or "") == swipe_target_id
+                ),
+                -1,
+            )
+            if target_index >= 0:
+                messages = messages[:target_index]
+        return messages
+
+    def auto_compress_context(
+        self, ctx: PipelineContext, messages: list, threshold_chars: int
+    ) -> list:
+        """上下文达到 80% 阈值时自动摘要压缩（失败时按未压缩继续）。"""
+        from nbot.core.auto_compression import auto_compress
+        from nbot.core.token_stats import PURPOSE_COMPRESSION, get_token_stats_manager
+
+        # swipes 模式下上下文已按目标截断，压缩会破坏目标之后的消息，跳过
+        if ctx.metadata.get("swipe_target_id"):
+            return messages
+        session = self.session_store.get_session(self.session_id)
+        if not session:
+            return messages
+
+        ts_map = getattr(self.server, "_auto_compress_ts", None)
+        if ts_map is None:
+            ts_map = {}
+            self.server._auto_compress_ts = ts_map
+        last_ts = float(ts_map.get(self.session_id, 0.0))
+
+        def _chat_complete(complete_messages):
+            if not self.server.ai_client:
+                raise RuntimeError("AI 服务不可用")
+            return self.server.ai_client.chat_completion(
+                model=self.server.ai_model,
+                messages=complete_messages,
+                stream=False,
+            )
+
+        def _on_usage(usage, model):
+            if not usage:
+                return
+            try:
+                get_token_stats_manager().record_usage(
+                    prompt_tokens=getattr(usage, "prompt_tokens", 0) or 0,
+                    completion_tokens=getattr(usage, "completion_tokens", 0) or 0,
+                    total_tokens=getattr(usage, "total_tokens", 0) or 0,
+                    model=model or self.server.ai_model or "",
+                    session_id=self.session_id,
+                    channel_type="web",
+                    source="web",
+                    purpose=PURPOSE_COMPRESSION,
+                )
+            except Exception:
+                pass
+
+        self.server.socketio.emit(
+            "context_auto_compress",
+            {"session_id": self.session_id, "phase": "start"},
+            room=self.session_id,
+        )
+        try:
+            new_messages, info = auto_compress(
+                messages,
+                chat_complete=_chat_complete,
+                max_context_chars=max(threshold_chars, 1),
+                trigger_ratio=1.0,
+                last_compress_ts=last_ts,
+                on_usage=_on_usage,
+                model_label=str(self.server.ai_model or ""),
+            )
+        finally:
+            self.server.socketio.emit(
+                "context_auto_compress",
+                {"session_id": self.session_id, "phase": "end"},
+                room=self.session_id,
+            )
+
+        if not info.get("compressed"):
+            return messages
+
+        self._archive_compressed_messages(messages, new_messages)
+        self.session_store.replace_messages(self.session_id, new_messages)
+        ts_map[self.session_id] = __import__("time").time()
+        return new_messages
+
+    def _archive_compressed_messages(self, old_messages: list, new_messages: list) -> None:
+        """将被压缩的原始消息归档到会话的归档会话（复用压缩按钮的归档语义）。"""
+        import time as _time
+
+        new_ids = {str(m.get("id")) for m in new_messages if isinstance(m, dict) and m.get("id")}
+        to_archive = [
+            m for m in old_messages
+            if isinstance(m, dict)
+            and m.get("role") != "system"
+            and (not m.get("id") or str(m.get("id")) not in new_ids)
+        ]
+        if not to_archive:
+            return
+        session = self.session_store.get_session(self.session_id)
+        if not session:
+            return
+
+        archive_id = session.get("archive_session_id")
+        archive = self.session_store.get_session(archive_id) if archive_id else None
+        if not archive:
+            from datetime import datetime as _dt
+            now = _dt.now().isoformat()
+            archive_id = str(uuid.uuid4())
+            archive = {
+                "id": archive_id,
+                "name": f"📦 {session.get('name') or '会话'} - 归档",
+                "type": "web",
+                "created_at": now,
+                "archived": True,
+                "archived_at": now,
+                "is_archive": True,
+                "read_only": True,
+                "source_session_id": self.session_id,
+                "messages": [],
+                "system_prompt": "",
+                "character_id": session.get("character_id") or session.get("sender_name", ""),
+                "sender_name": session.get("sender_name", ""),
+                "sender_avatar": session.get("sender_avatar", ""),
+                "sender_portrait": session.get("sender_portrait", ""),
+                "scenario": session.get("scenario", ""),
+            }
+            session["archive_session_id"] = archive_id
+
+        archive.setdefault("messages", []).append({
+            "id": f"archive_divider_{int(_time.time())}",
+            "role": "system",
+            "content": f"━━━ 自动压缩于 {__import__('datetime').datetime.now().strftime('%Y-%m-%d %H:%M')} ({len(to_archive)} 条消息) ━━━",
+            "timestamp": __import__("datetime").datetime.now().isoformat(),
+        })
+        archive["messages"].extend(to_archive)
+        self.session_store.set_session(archive_id, archive)
+        self.session_store.set_session(self.session_id, session)
 
     def get_system_prompt(self, ctx: PipelineContext) -> str:
         session = self.session_store.get_session(self.session_id)
@@ -415,6 +581,20 @@ class WebCallbacks(PipelineCallbacks):
         return str(
             getattr(self.server, "personality", {}).get("systemPrompt") or ""
         ).strip()
+
+    # swipes：合并新候选时从新消息同步到原消息的字段
+    _SWIPE_SYNC_KEYS = (
+        "model",
+        "thinking_cards",
+        "todo_cards",
+        "change_cards",
+        "attachments",
+        "tool_call_history",
+        "can_continue",
+        "token_usage",
+        "perf",
+        "citations",
+    )
 
     def save_assistant_message(self, ctx: PipelineContext, message: dict) -> None:
         if not message.get("sender"):
@@ -436,10 +616,139 @@ class WebCallbacks(PipelineCallbacks):
             message["is_proactive_chat"] = True
             if ctx.metadata.get("proactive_chat_triggered_at"):
                 message["proactive_chat_triggered_at"] = ctx.metadata["proactive_chat_triggered_at"]
+        self._attach_message_perf(ctx, message)
+        self._attach_knowledge_citations(ctx, message)
+        if self._merge_swipe_variant(ctx, message):
+            self._try_auto_name_session()
+            return
         self.session_store.append_message(self.session_id, message)
         self._try_auto_name_session()
 
+    @staticmethod
+    def _knowledge_citations(ctx: PipelineContext) -> list:
+        """取出本次命中的知识库引用；没有/格式异常都返回空列表。"""
+        try:
+            citations = (ctx.metadata or {}).get("knowledge_citations") or []
+            return list(citations) if isinstance(citations, list) else []
+        except Exception:
+            return []
+
+    def _attach_knowledge_citations(self, ctx: PipelineContext, message: dict) -> None:
+        """把知识库引用挂到消息上（前端气泡/引用面板读 message.citations）。"""
+        citations = self._knowledge_citations(ctx)
+        if citations:
+            message["citations"] = citations
+
+    def _attach_message_perf(self, ctx: PipelineContext, message: dict) -> None:
+        """消息级性能指标：输出 tok/s 与生成耗时（气泡展示用）。"""
+        usage = getattr(ctx, "usage", None) or {}
+        duration_ms = ctx.metadata.get("duration_ms")
+        if not usage and not duration_ms:
+            return
+        perf: dict = {}
+        try:
+            if duration_ms:
+                perf["duration_ms"] = round(float(duration_ms))
+        except (TypeError, ValueError):
+            pass
+        output_tokens = 0
+        try:
+            output_tokens = int(usage.get("completion_tokens") or 0)
+        except (TypeError, ValueError):
+            pass
+        if output_tokens and duration_ms:
+            try:
+                perf["tokens_per_second"] = round(
+                    output_tokens / (float(duration_ms) / 1000.0), 1
+                )
+            except (ZeroDivisionError, TypeError, ValueError):
+                pass
+        if usage:
+            perf["token_usage"] = {
+                "input": usage.get("prompt_tokens") or 0,
+                "output": output_tokens,
+                "total": usage.get("total_tokens") or 0,
+            }
+        if perf:
+            message["perf"] = perf
+
+    def _merge_swipe_variant(self, ctx: PipelineContext, message: dict) -> bool:
+        """swipes：把新生成的内容作为候选合并回原消息，而不是追加新气泡。"""
+        swipe_target_id = str(ctx.metadata.get("swipe_target_id") or "")
+        if not swipe_target_id:
+            return False
+        session = self.session_store.get_session(self.session_id)
+        if not session:
+            return False
+        messages = self.session_store.get_messages(self.session_id)
+        target = next(
+            (
+                msg
+                for msg in messages
+                if isinstance(msg, dict) and str(msg.get("id") or "") == swipe_target_id
+            ),
+            None,
+        )
+        if target is None:
+            return False
+        # 同轮生成的后续保存（如剥离生图标签回写）更新最后一个候选而非追加
+        update_last = bool(ctx.metadata.get("_swipe_merged", False))
+        if not merge_message_variant(
+            target,
+            message,
+            model_id=str(ctx.metadata.get("model_id") or ""),
+            update_last=update_last,
+        ):
+            return False
+        ctx.metadata["_swipe_merged"] = True
+        for key in self._SWIPE_SYNC_KEYS:
+            target.pop(key, None)
+            if message.get(key):
+                target[key] = message[key]
+        self.session_store.set_session(self.session_id, session)
+        self.server.socketio.emit(
+            "ai_response",
+            {
+                "session_id": self.session_id,
+                "message": target,
+                "swipe": True,
+                "system_prompt": ctx.metadata.get("composed_system_prompt", ""),
+                "prompt_stack_debug": ctx.metadata.get("prompt_stack_debug", []),
+                **(
+                    {"citations": self._knowledge_citations(ctx)}
+                    if self._knowledge_citations(ctx)
+                    else {}
+                ),
+            },
+            room=self.session_id,
+        )
+        return True
+
     # ---- AI 模型交互 ----
+
+    def _session_model_configs(self, model_configs: list) -> list:
+        """按会话级模型覆盖重排候选队列（未开启时原样返回）。"""
+        try:
+            from nbot.web.session_model import resolve_model_configs
+
+            session = None
+            if self.session_store:
+                session = self.session_store.get_session(self.session_id)
+            resolved = resolve_model_configs(
+                session,
+                model_configs,
+                getattr(self.server, "ai_models", []) or [],
+            )
+            if resolved and model_configs and resolved[0] is not model_configs[0]:
+                _log.info(
+                    "[ModelOverride] session=%s -> %s",
+                    str(self.session_id)[:8],
+                    resolved[0].get("name") or resolved[0].get("model") or "",
+                )
+            return resolved or model_configs
+        except Exception as exc:
+            _log.debug("[ModelOverride] resolve failed: %s", exc)
+            return model_configs
 
     def build_model_call(self, ctx, tools):
         """Web 频道使用服务器的 AI 方法，支持故障转移队列。"""
@@ -450,12 +759,23 @@ class WebCallbacks(PipelineCallbacks):
         runtime_ai = refresh_runtime_ai_config()
         purpose = runtime_ai.get("purpose", "chat")
         model_configs = get_model_configs_by_purpose(purpose)
+        resolved_configs = self._session_model_configs(model_configs)
+        override_active = bool(
+            model_configs and resolved_configs and resolved_configs[0] is not model_configs[0]
+        )
 
-        if len(model_configs) > 1:
-            # Multiple models: use failover wrapper
+        if len(resolved_configs) > 1 or override_active:
+            # 多模型或会话覆盖：统一走故障转移包装（覆盖模型排首位）
             from nbot.core.ai_pipeline import AIPipeline
             pipeline = AIPipeline()
-            return pipeline._wrap_with_failover(model_configs, purpose, tools=tools)
+            session_id = ""
+            try:
+                session_id = getattr(ctx, "chat_request", None).session_id if getattr(ctx, "chat_request", None) else ""
+            except Exception:
+                pass
+            return pipeline._wrap_with_failover(
+                resolved_configs, purpose, tools=tools, session_id=session_id
+            )
 
         # Single model: direct call
         return lambda messages, stop_event=None: _call_web_ai(
@@ -479,6 +799,7 @@ class WebCallbacks(PipelineCallbacks):
         model_configs = get_model_configs_by_purpose(purpose)
         if not model_configs:
             model_configs = [runtime_ai]
+        model_configs = self._session_model_configs(model_configs)
 
         def streamer(messages, stop_event=None):
             return _stream_to_web(
@@ -504,6 +825,11 @@ class WebCallbacks(PipelineCallbacks):
                 "message": message,
                 "system_prompt": ctx.metadata.get("composed_system_prompt", ""),
                 "prompt_stack_debug": ctx.metadata.get("prompt_stack_debug", []),
+                **(
+                    {"citations": self._knowledge_citations(ctx)}
+                    if self._knowledge_citations(ctx)
+                    else {}
+                ),
             },
             room=self.session_id,
         )
@@ -562,6 +888,10 @@ class WebCallbacks(PipelineCallbacks):
             "system_prompt": ctx.metadata.get("composed_system_prompt", "") if ctx else "",
             "prompt_stack_debug": ctx.metadata.get("prompt_stack_debug", []) if ctx else [],
         }
+        if ctx:
+            citations = self._knowledge_citations(ctx)
+            if citations:
+                end_payload["citations"] = citations
         # 群聊模式：附加 sender 以便前端匹配到正确的流式气泡
         if ctx and ctx.metadata:
             speaker_name = ctx.metadata.get("group_speaker_name", "")
@@ -690,6 +1020,28 @@ class WebCallbacks(PipelineCallbacks):
         except Exception:
             return ""
 
+    def search_knowledge_with_citations(self, ctx: PipelineContext, query: str):
+        """知识库检索：文本沿用既有路径，另取结构化 citations 随响应返回。
+
+        空知识库 / 检索失败时返回 (文本, [])，不新增字段也不报错。
+        """
+        text = self.search_knowledge(ctx, query)
+        if not text or not query or get_knowledge_manager is None:
+            return text, []
+        try:
+            km = get_knowledge_manager()
+            if not km:
+                return text, []
+            payload = km.search_with_citations(query, base_id=None, top_k=3)
+            citations = list(payload.get("citations") or [])
+            if not citations:
+                return text, []
+            ctx.metadata["knowledge_citations"] = citations
+            return text, citations
+        except Exception as exc:
+            _log.debug("[Knowledge] citations 取回失败（忽略）: %s", exc)
+            return text, []
+
     # ---- 工作区 ----
 
     def ensure_workspace(self, ctx: PipelineContext) -> str:
@@ -742,9 +1094,9 @@ class WebCallbacks(PipelineCallbacks):
     # ---- 角色运行时 ----
 
     def get_character_context(self, ctx):
-        """返回当前会话的角色身份标识（agent 模式跳过）"""
+        """返回当前会话的角色身份标识（agent 模式默认跳过，开启继承后照常返回）"""
         session = self.session_store.get_session(self.session_id) if self.session_store else {}
-        if (session or {}).get("session_mode") == "agent":
+        if not ModePolicy.character_features_enabled(session):
             return None
         from nbot.character.adapters.nekobot import get_web_character_context
         identity = get_web_character_context(
@@ -756,9 +1108,9 @@ class WebCallbacks(PipelineCallbacks):
         return identity
 
     def get_character_runtime(self, ctx):
-        """返回 CharacterRuntime 实例（agent 模式跳过）"""
+        """返回 CharacterRuntime 实例（agent 模式默认跳过，开启继承后照常返回）"""
         session = self.session_store.get_session(self.session_id) if self.session_store else {}
-        if (session or {}).get("session_mode") == "agent":
+        if not ModePolicy.character_features_enabled(session):
             return None
         from nbot.character.adapters.nekobot import get_character_runtime_from_server
         return get_character_runtime_from_server(self.server)
@@ -885,12 +1237,22 @@ class WebCallbacks(PipelineCallbacks):
                 or name.endswith("的对话")
             )
 
+            # 会话级自动命名间隔：null=全局默认(10)；0=关闭自动命名；正整数=每 N 条
+            # （PUT /api/sessions/<id> 的 auto_name_interval 字段设置）
+            raw_interval = session.get("auto_name_interval")
+            try:
+                name_interval = int(raw_interval) if raw_interval is not None else 10
+            except (TypeError, ValueError):
+                name_interval = 10
+            if name_interval <= 0:
+                return
+
             # 首次命名：默认名称 + 至少一轮对话
-            # 后续更新：每 10 条消息（约 5 轮对话）更新一次
+            # 后续更新：按会话配置的间隔更新
             last_rename_count = session.get("_last_rename_count", 0)
             was_auto_named = bool(session.get("_auto_name_generated"))
             should_rename = is_default_name or (
-                was_auto_named and total_count - last_rename_count >= 10
+                was_auto_named and total_count - last_rename_count >= name_interval
             )
 
             if not should_rename:
@@ -1110,6 +1472,7 @@ def _call_web_ai(server, messages: list[dict], tools: list, stop_event=None) -> 
         stream=False,
         base_url=base_url,
         provider_type=provider_type,
+        extra_body=request_extra_body(runtime_ai) or None,
     )
     resp = requests.post(
         url,
@@ -1172,7 +1535,9 @@ def _stream_to_web(
     headers = protocol.build_headers(api_key, stream=True)
 
     def _build_stream_payload(include_usage: bool = True):
-        extra_body = {"stream_options": {"include_usage": True}} if include_usage else None
+        extra_body = dict(request_extra_body(runtime_ai))
+        if include_usage:
+            extra_body["stream_options"] = {"include_usage": True}
         return protocol.build_payload(
             model, messages,
             tools=tools if tools else None,
@@ -1180,7 +1545,7 @@ def _stream_to_web(
             stream=True,
             base_url=base_url,
             provider_type=provider_type,
-            extra_body=extra_body,
+            extra_body=extra_body or None,
         )
 
     # ---- 故障转移：连接阶段（首个 chunk 前） ----
@@ -1211,6 +1576,8 @@ def _stream_to_web(
                 api_key=cfg.get("api_key", ""),
             )
             cfg_headers = cfg_protocol.build_headers(cfg.get("api_key", ""), stream=True)
+            cfg_extra_body = dict(request_extra_body(cfg))
+            cfg_extra_body["stream_options"] = {"include_usage": True}
             cfg_payload = cfg_protocol.build_payload(
                 cfg.get("model", ""),
                 messages,
@@ -1219,7 +1586,7 @@ def _stream_to_web(
                 stream=True,
                 base_url=cfg.get("base_url", ""),
                 provider_type=cfg_pt,
-                extra_body={"stream_options": {"include_usage": True}},
+                extra_body=cfg_extra_body,
             )
             try:
                 _log.info(
@@ -1515,6 +1882,16 @@ def trigger_ai_response_for_request(server, chat_request: ChatRequest, adapter=N
         try:
             from nbot.services.tools import get_enabled_tools
             tools = get_enabled_tools()
+            # 会话级工具集过滤（会话设置 enabled_tools 列表时仅保留其中工具）
+            session_enabled = (_session_data or {}).get("enabled_tools")
+            if isinstance(session_enabled, list) and session_enabled:
+                allowed = {str(n) for n in session_enabled}
+                tools = [
+                    t for t in tools
+                    if str((t.get("function") or {}).get("name") or "") in allowed
+                ]
+                if not tools:
+                    tools = None
         except Exception:
             tools = None
 
@@ -1533,6 +1910,11 @@ def trigger_ai_response_for_request(server, chat_request: ChatRequest, adapter=N
         # 跳过角色记忆注入（character.memories_legacy / MemoryFS 等）
         if _session_data.get("session_mode"):
             ctx.metadata.setdefault("session_mode", _session_data["session_mode"])
+        # agent 继承角色能力（P2-8）：会话级开关，默认关闭
+        if _session_data.get("agent_inherit_character") is not None:
+            ctx.metadata.setdefault(
+                "agent_inherit_character", _session_data.get("agent_inherit_character")
+            )
         if _session_data.get("plot_mode"):
             ctx.metadata.setdefault("plot_mode", True)
             if _session_data.get("plot_real_time_sync"):
@@ -1547,6 +1929,31 @@ def trigger_ai_response_for_request(server, chat_request: ChatRequest, adapter=N
         # 注入会话级 auto_state 触发轮次（None 表示用全局默认）
         if _session_data.get("auto_state_interval") is not None:
             ctx.metadata.setdefault("auto_state_interval", _session_data["auto_state_interval"])
+        # Agent 持久目标 / 规格（/goal、/spec 命令设置）
+        if _session_data.get("agent_goal"):
+            ctx.metadata.setdefault("agent_goal", _session_data["agent_goal"])
+        if _session_data.get("agent_spec"):
+            ctx.metadata.setdefault("agent_spec", _session_data["agent_spec"])
+        # Author's Note（会话级附注，按深度插入消息序列）
+        note = _session_data.get("authors_note")
+        if note:
+            ctx.metadata.setdefault("authors_note", note)
+        # 用户人设（persona）：注入 system prompt，并作为 {{user}} 的默认名称
+        from nbot.core.personas import session_persona
+
+        persona = session_persona(_session_data)
+        if persona:
+            ctx.metadata.setdefault("user_persona", persona)
+            if persona.get("name"):
+                ctx.metadata["macro_user_name"] = str(persona["name"])
+        # 宏上下文：用户名/角色名（{{user}} / {{char}}）
+        ctx.metadata.setdefault(
+            "macro_user_name", str(_session_data.get("user_id") or "")
+        )
+        ctx.metadata.setdefault(
+            "macro_char_name",
+            str(_session_data.get("sender_name") or _session_data.get("character_id") or ""),
+        )
     # 注入价格信息供公共 token 统计使用
     try:
         active_model_id = getattr(server, "active_model_id", None)
@@ -2041,6 +2448,7 @@ def _update_web_token_stats(server, usage: dict, session_id: str, metadata: dict
         # 从当前活跃模型配置中查找价格
         input_price = None
         output_price = None
+        cached_input_price = None
         try:
             active_model_id = getattr(server, "active_model_id", None)
             if active_model_id:
@@ -2048,9 +2456,16 @@ def _update_web_token_stats(server, usage: dict, session_id: str, metadata: dict
                     if m.get("id") == active_model_id:
                         input_price = m.get("input_price")
                         output_price = m.get("output_price")
+                        cached_input_price = m.get("cached_input_price")
                         break
         except Exception:
             pass
+
+        # 缓存命中 token（各协议在 model_adapter 里已归一化）
+        try:
+            cached_tokens = int(usage.get("cached_tokens") or 0)
+        except (TypeError, ValueError):
+            cached_tokens = 0
 
         # 从 metadata 提取时间指标（由调用方测量并传入）
         duration_ms = (metadata or {}).get("duration_ms")
@@ -2069,6 +2484,8 @@ def _update_web_token_stats(server, usage: dict, session_id: str, metadata: dict
             ttft_ms=ttft_ms,
             input_price=input_price,
             output_price=output_price,
+            cached_tokens=cached_tokens,
+            cached_input_price=cached_input_price,
         )
     except Exception:
         pass
@@ -2548,6 +2965,7 @@ server,
                 stream=False,
                 base_url=config.get("base_url", ""),
                 provider_type=_srv_pt,
+                extra_body=request_extra_body(config) or None,
             )
 
             _payload_size = len(json.dumps(_payload, ensure_ascii=False))
@@ -2750,6 +3168,7 @@ server,
                         stream=False,
                         base_url=cfg.get("base_url", ""),
                         provider_type=cfg_pt,
+                        extra_body=request_extra_body(cfg) or None,
                     )
                     resp = requests.post(
                         cfg_url, json=cfg_payload, headers=cfg_headers,

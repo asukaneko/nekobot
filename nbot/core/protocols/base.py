@@ -50,10 +50,15 @@ class ModelProtocol(ABC):
         tools: Optional[List[Dict[str, Any]]] = None,
         tool_choice: Optional[str] = None,
         stream: bool = False,
-        max_tokens: int = 4096,
+        max_tokens: Optional[int] = None,
         extra_body: Optional[Dict[str, Any]] = None,
+        **kwargs: Any,
     ) -> Dict[str, Any]:
-        """Build the JSON payload for the API request."""
+        """Build the JSON payload for the API request.
+
+        model 配置里的采样参数（temperature / top_p / max_tokens）通过
+        ``extra_body`` 传入，由各协议翻译为自家字段名。
+        """
         ...
 
     @abstractmethod
