@@ -1422,10 +1422,9 @@ def _decorate_history_entry(entry: dict, *, sanitize_paths: bool = True) -> dict
     for item in results:
         if sanitize_paths:
             item["path"] = static_relative_path(str(item.get("path") or ""))
-        if not item.get("name"):
-            item["name"] = os.path.basename(
-                str(item.get("path") or item.get("url") or "")
-            )
+        item["name"] = ntpath.basename(
+            str(item.get("name") or item.get("path") or item.get("url") or "")
+        )
     urls = [
         str(item.get("url"))
         for item in results
