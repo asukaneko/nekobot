@@ -15,7 +15,7 @@ from nbot.web.routes.skills_storage import register_skills_storage_routes
 
 
 def test_sanitize_skill_name_rejects_traversal():
-    for bad in ("", ".", "..", "../evil", "a/b", "a\\b", "/abs", "C:\\abs", "x" * 101):
+    for bad in ("", ".", "..", "../evil", "a/b", "a\\b", "/abs", "C:\\abs", "C:evil", "x" * 101):
         with pytest.raises(SkillPathError):
             sanitize_skill_name(bad)
     assert sanitize_skill_name(" my-skill ") == "my-skill"
@@ -28,7 +28,10 @@ def test_resolve_within_rejects_escape(tmp_path):
     assert resolve_within(str(base), "scripts/a.py") == str(base / "scripts" / "a.py")
     assert resolve_within(str(base), "scripts\\a.py") == str(base / "scripts" / "a.py")
 
-    for bad in ("../outside.txt", "sub/../../outside.txt", "C:\\Windows\\evil.txt"):
+    for bad in (
+        "../outside.txt", "sub/../../outside.txt", "C:\\Windows\\evil.txt",
+        "C:relative.txt", "/outside.txt", "\\\\server\\share\\evil.txt",
+    ):
         with pytest.raises(SkillPathError):
             resolve_within(str(base), bad)
 

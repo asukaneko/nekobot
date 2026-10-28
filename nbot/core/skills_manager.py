@@ -14,10 +14,11 @@ skill-name/
     ├── main.py          # 主实现
     └── helper.py       # 辅助函数
 """
-import os
 import json
 import logging
-from typing import Dict, Any, List, Optional
+import ntpath
+import os
+from typing import Any, Dict, List, Optional
 
 _log = logging.getLogger(__name__)
 
@@ -38,16 +39,16 @@ def sanitize_skill_name(skill_name: str) -> str:
     name = str(skill_name or "").strip()
     if not name or name in (".", "..") or len(name) > 100:
         raise SkillPathError(f"invalid skill name: {skill_name!r}")
-    if "/" in name or "\\" in name or os.path.isabs(name):
+    if "/" in name or "\\" in name or os.path.isabs(name) or ntpath.splitdrive(name)[0]:
         raise SkillPathError(f"invalid skill name: {skill_name!r}")
     return name
 
 
 def resolve_within(base_dir: str, relative_path: str) -> str:
     """把相对路径解析到 base_dir 内部，越界或绝对路径直接拒绝。"""
-    rel = str(relative_path or "").replace("\\", "/").lstrip("/")
-    if not rel:
-        raise SkillPathError("empty path")
+    rel = str(relative_path or "").strip().replace("\\", "/")
+    if not rel or "\x00" in rel or os.path.isabs(rel) or ntpath.splitdrive(rel)[0]:
+        raise SkillPathError(f"invalid relative path: {relative_path!r}")
     base_abs = os.path.abspath(base_dir)
     candidate = os.path.abspath(os.path.join(base_abs, rel))
     if candidate != base_abs and not candidate.startswith(base_abs + os.sep):

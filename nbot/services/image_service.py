@@ -19,6 +19,7 @@ import ipaddress
 import itertools
 import json
 import logging
+import ntpath
 import os
 import queue
 import random
@@ -1112,8 +1113,10 @@ def static_relative_path(path: str) -> str:
     raw = (path or "").strip()
     if not raw:
         return ""
+    if ntpath.splitdrive(raw)[0] and not os.path.isabs(raw):
+        return ""
     if not os.path.isabs(raw):
-        return raw.replace(os.sep, "/")
+        return raw.replace("\\", "/")
     static_root = get_static_root()
     abs_path = os.path.abspath(raw)
     try:
