@@ -23,6 +23,7 @@ import requests
 
 from nbot.web.config_transfer import (
     _PORTRAIT_URL_PREFIX,
+    _try_parse_legacy_nbotcfg,
     ConfigTransferError,
     apply_bundle,
     build_plain_bundle,
@@ -700,13 +701,20 @@ def pull_backup(
         _update_status(server, last_error=msg)
         raise WebDAVBackupError(msg)
 
-    # 解析 JSON 配置包
+    # 解析 JSON 配置包（兼容旧格式纯二进制文件）
     try:
         raw_bundle = json.loads(raw_bytes.decode("utf-8"))
-    except Exception as exc:
-        msg = f"远程备份文件不是有效的 JSON: {exc}"
-        _update_status(server, last_error=msg)
-        raise WebDAVBackupError(msg) from exc
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        try:
+            raw_bundle = _try_parse_legacy_nbotcfg(raw_bytes, enc_password)
+        except ConfigTransferError:
+            hex_preview = raw_bytes[:16].hex()
+            msg = (
+                f"远程备份文件不是有效的配置包: {exc} "
+                f"(前16字节: {hex_preview}, 大小: {len(raw_bytes)})"
+            )
+            _update_status(server, last_error=msg)
+            raise WebDAVBackupError(msg) from exc
 
     # 解密并应用
     try:
@@ -1405,8 +1413,17 @@ def restore_revision(
 
     try:
         raw_bundle = json.loads(downloaded["content"].decode("utf-8"))
-    except Exception as exc:  # noqa: BLE001
-        raise WebDAVBackupError(f"修订文件不是有效的 JSON: {exc}") from exc
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        try:
+            raw_bundle = _try_parse_legacy_nbotcfg(
+                downloaded["content"], enc_password
+            )
+        except ConfigTransferError:
+            hex_preview = downloaded["content"][:16].hex()
+            raise WebDAVBackupError(
+                f"修订文件不是有效的配置包 "
+                f"(前16字节: {hex_preview}, 大小: {len(downloaded['content'])})"
+            )
 
     try:
         bundle = decrypt_bundle(raw_bundle, enc_password)

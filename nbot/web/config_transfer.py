@@ -268,6 +268,53 @@ def decrypt_bundle(bundle: Dict[str, Any], password: str) -> Dict[str, Any]:
     return data
 
 
+def _try_parse_legacy_nbotcfg(raw_bytes: bytes, password: str) -> Dict[str, Any]:
+    """尝试解析旧格式的 .nbotcfg 文件（纯二进制：salt + Fernet token）。
+
+    兼容 Android 端直接导出的二进制文件（无 JSON 包装）：
+    - 前 16 字节（KDF_SALT_BYTES）：PBKDF2 salt
+    - 剩余部分：Fernet token（原始字节或 Base64 编码）
+
+    解析成功返回解密后的配置字典，否则抛出 ConfigTransferError。
+    """
+    if len(raw_bytes) <= KDF_SALT_BYTES:
+        raise ConfigTransferError(
+            f"文件太小（{len(raw_bytes)} 字节），不是有效的配置包"
+        )
+
+    salt = raw_bytes[:KDF_SALT_BYTES]
+    token_data = raw_bytes[KDF_SALT_BYTES:]
+
+    # 尝试 1：剩余部分是 Fernet token 原始字节
+    try:
+        fernet = _fernet_from_password(password, salt)
+        plaintext = fernet.decrypt(base64.urlsafe_b64encode(token_data))
+        data = json.loads(plaintext.decode("utf-8"))
+        if isinstance(data, dict) and isinstance(data.get("configs"), dict):
+            _log.info("[ConfigTransfer] 成功解析旧格式配置包（原始字节 Fernet token）")
+            return data
+    except Exception:
+        pass
+
+    # 尝试 2：剩余部分是 Base64 编码的 Fernet token
+    try:
+        token_b64 = token_data.decode("ascii").strip()
+        fernet = _fernet_from_password(password, salt)
+        plaintext = fernet.decrypt(token_b64.encode("ascii"))
+        data = json.loads(plaintext.decode("utf-8"))
+        if isinstance(data, dict) and isinstance(data.get("configs"), dict):
+            _log.info("[ConfigTransfer] 成功解析旧格式配置包（Base64 Fernet token）")
+            return data
+    except Exception:
+        pass
+
+    hex_preview = raw_bytes[:16].hex()
+    raise ConfigTransferError(
+        f"无法解析配置包（前 16 字节 hex: {hex_preview}，大小: {len(raw_bytes)} 字节）。"
+        f"文件可能已损坏或使用了不兼容的格式。"
+    )
+
+
 def _save_imported_configs(server, touched: Iterable[str]) -> None:
     for data_type in touched:
         if data_type in SAVE_TYPES:
@@ -500,7 +547,12 @@ def extract_zip_bundle(zip_bytes: bytes, password: str) -> Tuple[Dict[str, Any],
             raise ConfigTransferError("ZIP 中未找到配置文件 (config.nbotcfg)")
 
         # 解析并解密配置
-        raw_config = json.loads(zf.read(config_filename).decode("utf-8"))
+        config_bytes = zf.read(config_filename)
+        try:
+            raw_config = json.loads(config_bytes.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            # 回退：尝试把文件当作旧格式（salt + Fernet token）解析
+            raw_config = _try_parse_legacy_nbotcfg(config_bytes, password)
         bundle = decrypt_bundle(raw_config, password)
 
         # 收集所有立绘文件
