@@ -288,7 +288,7 @@ def _try_parse_legacy_nbotcfg(raw_bytes: bytes, password: str) -> Dict[str, Any]
     # 尝试 1：剩余部分是 Fernet token 原始字节
     try:
         fernet = _fernet_from_password(password, salt)
-        plaintext = fernet.decrypt(token_data)
+        plaintext = fernet.decrypt(base64.urlsafe_b64encode(token_data))
         data = json.loads(plaintext.decode("utf-8"))
         if isinstance(data, dict) and isinstance(data.get("configs"), dict):
             _log.info("[ConfigTransfer] 成功解析旧格式配置包（原始字节 Fernet token）")
