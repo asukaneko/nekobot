@@ -1,4 +1,7 @@
 import base64
+import binascii
+import codecs
+import gzip
 import io
 import json
 import logging
@@ -8,7 +11,7 @@ import re
 import zipfile
 from copy import deepcopy
 from datetime import datetime
-from typing import Any, Dict, Iterable, List, Tuple
+from typing import Any, Dict, Iterable, Tuple
 
 from cryptography.fernet import Fernet, InvalidToken
 from cryptography.hazmat.primitives import hashes
@@ -59,8 +62,25 @@ SAVE_TYPES = (
 )
 
 
+# 配置包容器魔数：按文件头嗅探，不依赖扩展名
+_ZIP_MAGICS = (b"PK\x03\x04", b"PK\x05\x06", b"PK\x07\x08")
+_GZIP_MAGIC = b"\x1f\x8b"
+# 文本配置包可能出现的编码（Windows 端导出可能落在 GBK/GB18030）
+_BUNDLE_TEXT_ENCODINGS = ("utf-8-sig", "gb18030")
+# 嵌套容器（gzip 套 zip、zip 套 zip）的最大解包层数
+_BUNDLE_MAX_DEPTH = 3
+# 单层解包后的体积上限，防御压缩炸弹
+_BUNDLE_MAX_BYTES = 512 * 1024 * 1024
+# Fernet token 由 Base64 字母表组成，用于从伪 JSON 中截取 payload
+_B64_CHARS = frozenset(b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_+=")
+
+
 class ConfigTransferError(ValueError):
     pass
+
+
+class _BundleFormatError(ConfigTransferError):
+    """当前容器层级无法识别（用于在同一文件上继续尝试下一种布局）。"""
 
 
 def _derive_key(password: str, salt: bytes) -> bytes:
@@ -243,6 +263,45 @@ def encrypt_bundle(
     }
 
 
+def _b64decode_any(value: Any) -> bytes:
+    """宽松解码 Base64：兼容 urlsafe / 标准字母表，缺省或带 padding。
+
+    各端实现不完全一致（Android 用 ``Base64.getUrlEncoder()`` 会带 ``=``，
+    部分工具会去掉 padding），这里统一补齐后解码，失败返回 ``b""``。
+    """
+    if isinstance(value, (bytes, bytearray)):
+        data = bytes(value).strip()
+    elif isinstance(value, (list, tuple)) and all(isinstance(item, int) for item in value):
+        # 少数实现把 salt 直接写成整数数组
+        return bytes(value)
+    else:
+        data = str(value or "").strip().encode("ascii", "ignore")
+    if not data:
+        return b""
+    data = data.replace(b"\n", b"").replace(b"\r", b"").replace(b" ", b"")
+    data += b"=" * (-len(data) % 4)
+    try:
+        return base64.urlsafe_b64decode(data)
+    except (binascii.Error, ValueError):
+        try:
+            return base64.b64decode(data, validate=False)
+        except (binascii.Error, ValueError):
+            return b""
+
+
+def _finalize_plain_bundle(plaintext: bytes) -> dict[str, Any]:
+    """校验解密后的明文是合法的配置包字典。"""
+    try:
+        data = json.loads(plaintext.decode("utf-8"))
+    except UnicodeDecodeError as exc:
+        raise ConfigTransferError(f"配置包解密成功但内容不是 UTF-8 文本: {exc}") from exc
+    except json.JSONDecodeError as exc:
+        raise ConfigTransferError(f"配置包解密成功但内容不是有效 JSON: {exc}") from exc
+    if not isinstance(data, dict) or not isinstance(data.get("configs"), dict):
+        raise ConfigTransferError("配置包内容无效")
+    return data
+
+
 def decrypt_bundle(bundle: Dict[str, Any], password: str) -> Dict[str, Any]:
     if not isinstance(bundle, dict):
         raise ConfigTransferError("配置包格式无效")
@@ -253,19 +312,274 @@ def decrypt_bundle(bundle: Dict[str, Any], password: str) -> Dict[str, Any]:
             return bundle
         raise ConfigTransferError("配置包未加密且缺少配置内容")
 
+    salt = _b64decode_any(bundle.get("salt", ""))
+    if not salt:
+        raise ConfigTransferError("配置包缺少有效的 salt（KDF 盐值）")
+    payload = str(bundle.get("payload", "")).strip().encode("ascii", "ignore")
+    payload += b"=" * (-len(payload) % 4)
+
     try:
-        salt = base64.urlsafe_b64decode(str(bundle.get("salt", "")).encode("ascii"))
-        payload = str(bundle.get("payload", "")).encode("ascii")
         plaintext = _fernet_from_password(password, salt).decrypt(payload)
-        data = json.loads(plaintext.decode("utf-8"))
     except InvalidToken as exc:
         raise ConfigTransferError("密码错误或配置包已损坏") from exc
+    except ConfigTransferError:
+        raise
     except Exception as exc:
         raise ConfigTransferError(f"无法解密配置包: {exc}") from exc
 
-    if not isinstance(data, dict) or not isinstance(data.get("configs"), dict):
-        raise ConfigTransferError("配置包内容无效")
+    return _finalize_plain_bundle(plaintext)
+
+
+# ============================================================
+# 配置包原始字节加载：按文件头嗅探容器，绝不把二进制当文本读
+# （见 issue #16：WebDAV 同步 / 本地导入把二进制密文按 UTF-8 解码导致崩溃）
+# ============================================================
+
+
+def sniff_bundle_format(raw: bytes) -> str:
+    """按文件头嗅探配置包容器，返回 ``zip`` / ``gzip`` / ``json`` / ``binary`` / ``empty``。"""
+    if not raw:
+        return "empty"
+    if raw.startswith(_ZIP_MAGICS):
+        return "zip"
+    if raw.startswith(_GZIP_MAGIC):
+        return "gzip"
+    if raw.startswith((codecs.BOM_UTF16_LE, codecs.BOM_UTF16_BE)):
+        return "json"
+    head = raw[3:] if raw.startswith(codecs.BOM_UTF8) else raw
+    if head.lstrip(b" \t\r\n")[:1] in (b"{", b"["):
+        return "json"
+    return "binary"
+
+
+def _bundle_diagnostic(raw: bytes, fmt: str) -> str:
+    preview = " ".join(f"{byte:02x}" for byte in raw[:16]) or "-"
+    return f"无法识别的配置包格式（容器={fmt}, 大小={len(raw)} 字节, 头16字节={preview}）"
+
+
+def _iter_bundle_texts(raw: bytes):
+    """依次产出 (编码, 文本)，覆盖 UTF-8(BOM) / UTF-16(BOM) / GB18030。"""
+    if raw.startswith((codecs.BOM_UTF16_LE, codecs.BOM_UTF16_BE)):
+        encodings = ("utf-16", "gb18030")
+    else:
+        encodings = _BUNDLE_TEXT_ENCODINGS
+    for encoding in encodings:
+        try:
+            yield encoding, raw.decode(encoding)
+        except (UnicodeDecodeError, UnicodeError, LookupError):
+            continue
+
+
+def _decrypt_salt_token(
+    salt: bytes, candidates: Iterable[bytes], password: str
+) -> bytes | None:
+    """用给定 salt 依次尝试候选 token，成功返回明文，全部失败返回 None。"""
+    fernet = _fernet_from_password(password, salt)
+    for candidate in candidates:
+        if not candidate:
+            continue
+        try:
+            return fernet.decrypt(candidate)
+        except (InvalidToken, binascii.Error, ValueError, TypeError):
+            continue
+    return None
+
+
+def _bundle_from_pseudo_json(raw: bytes, password: str) -> dict[str, Any] | None:
+    """解析「salt 以原始字节内嵌在 JSON 字符串里」的配置包。
+
+    部分第三方 / 旧客户端把 16 字节 KDF salt 直接写进 JSON 字符串，salt 值的
+    起始引号之后就是随机二进制（issue #16 里从第 11 个字节开始报错即是此形态），
+    因此无法按任何编码整体解码，只能在字节层面定位 ``salt`` / ``payload`` 字段。
+    """
+    marker = raw.find(b'"salt"')
+    if marker < 0:
+        return None
+    index = marker + len(b'"salt"')
+    colon = raw.find(b":", index)
+    if colon < 0:
+        return None
+    index = colon + 1
+    while index < len(raw) and raw[index] in b" \t\r\n":
+        index += 1
+    if raw[index : index + 1] != b'"':
+        return None
+    salt = raw[index + 1 : index + 1 + KDF_SALT_BYTES]
+    if len(salt) != KDF_SALT_BYTES:
+        return None
+
+    payload_marker = raw.find(b'"payload"', index + 1 + KDF_SALT_BYTES)
+    if payload_marker < 0:
+        return None
+    index = raw.find(b":", payload_marker)
+    if index < 0:
+        return None
+    index += 1
+    while index < len(raw) and raw[index] in b" \t\r\n":
+        index += 1
+    if raw[index : index + 1] != b'"':
+        return None
+    start = index + 1
+    end = start
+    while end < len(raw) and raw[end] in _B64_CHARS:
+        end += 1
+
+    candidates = [
+        raw[start:end],
+        raw[start:end].strip(),
+        _b64decode_any(raw[start:end]),
+    ]
+    # payload 也可能是原始 token 字节（不是 Base64 文本），需要重新编码
+    quote_end = raw.find(b'"', start)
+    if quote_end > start:
+        raw_token = raw[start:quote_end]
+        candidates.append(raw_token)
+        candidates.append(base64.urlsafe_b64encode(raw_token))
+
+    plaintext = _decrypt_salt_token(salt, candidates, password)
+    if plaintext is None:
+        raise ConfigTransferError("密码错误或配置包已损坏")
+    return _finalize_plain_bundle(plaintext)
+
+
+def _looks_like_bundle(bundle: Any) -> bool:
+    """粗略判断 JSON 结构是否像配置包（避免把编码错乱的结果当成配置包）。"""
+    if not isinstance(bundle, dict):
+        return False
+    if bundle.get("type") != "nbot_config_bundle":
+        return False
+    if not bundle.get("encrypted"):
+        return isinstance(bundle.get("configs"), dict)
+    salt = _b64decode_any(bundle.get("salt", ""))
+    payload = str(bundle.get("payload") or "").strip()
+    return len(salt) >= 8 and len(payload) >= 32
+
+
+def _bundle_from_text_json(raw: bytes, password: str) -> dict[str, Any]:
+    """按文本 JSON 解析配置包；无法解析时抛 ``_BundleFormatError``。"""
+    parse_error: str = ""
+    for _encoding, text in _iter_bundle_texts(raw):
+        try:
+            bundle = json.loads(text)
+        except json.JSONDecodeError as exc:
+            parse_error = str(exc)
+            continue
+        if not _looks_like_bundle(bundle):
+            # 例如二进制 salt 被强制按 GB18030 解码后的“JSON”，交给字节级解析器
+            parse_error = "JSON 结构不像配置包"
+            continue
+        return decrypt_bundle(bundle, password)
+    repaired = _bundle_from_pseudo_json(raw, password)
+    if repaired is not None:
+        return repaired
+    raise _BundleFormatError(parse_error or "内容无法按 UTF-8/UTF-16/GB18030 解码")
+
+
+def _bundle_from_binary(raw: bytes, password: str) -> dict[str, Any]:
+    """解析裸二进制布局：前 ``KDF_SALT_BYTES`` 字节为 salt，其后为 Fernet token。"""
+    if len(raw) <= KDF_SALT_BYTES + 16:
+        raise _BundleFormatError("文件长度不足以构成「salt + token」布局")
+    salt = raw[:KDF_SALT_BYTES]
+    token = raw[KDF_SALT_BYTES:]
+    candidates = [
+        token.strip(),
+        token,
+        # 少数实现直接写入解码后的 Fernet token 字节，需要重新编码成 Base64
+        base64.urlsafe_b64encode(token),
+        base64.urlsafe_b64encode(token).rstrip(b"="),
+        _b64decode_any(token),
+    ]
+    plaintext = _decrypt_salt_token(salt, candidates, password)
+    if plaintext is None:
+        raise _BundleFormatError("二进制布局按「salt + Fernet token」解密失败")
+    return _finalize_plain_bundle(plaintext)
+
+
+def _gunzip(raw: bytes) -> bytes:
+    try:
+        with gzip.GzipFile(fileobj=io.BytesIO(raw)) as handle:
+            data = handle.read(_BUNDLE_MAX_BYTES + 1)
+    except OSError as exc:
+        raise _BundleFormatError(f"GZIP 解压失败: {exc}") from exc
+    if len(data) > _BUNDLE_MAX_BYTES:
+        raise ConfigTransferError("配置包解压后体积过大（>512MB），已中止")
     return data
+
+
+def _pick_zip_config_member(names: Iterable[str]) -> str | None:
+    """在 ZIP 成员中挑选配置文件：优先 config.nbotcfg，其次任意 .nbotcfg / JSON。"""
+    files = [name for name in names if not name.endswith("/")]
+    for name in files:
+        if os.path.basename(name) == "config.nbotcfg":
+            return name
+    for name in files:
+        if name.lower().endswith(".nbotcfg"):
+            return name
+    for name in files:
+        if os.path.basename(name).lower() in ("config.json", "bundle.json"):
+            return name
+    return None
+
+
+def _read_zip_member(archive: zipfile.ZipFile, name: str) -> bytes:
+    try:
+        size = archive.getinfo(name).file_size
+    except KeyError as exc:
+        raise ConfigTransferError(f"ZIP 中缺少成员 {name}") from exc
+    if size > _BUNDLE_MAX_BYTES:
+        raise ConfigTransferError("配置包解压后体积过大（>512MB），已中止")
+    return archive.read(name)
+
+
+def load_bundle_bytes(raw: bytes, password: str, *, _depth: int = 0) -> dict[str, Any]:
+    """把任意来源的 ``.nbotcfg`` 原始字节解析成已解密的配置字典。
+
+    全程使用二进制读取，按文件头嗅探容器后再解码，绝不把二进制密文当文本读：
+
+    1. ``PK\\x03\\x04`` → ZIP，取出 ``config.nbotcfg`` 成员后递归；
+    2. ``\\x1f\\x8b`` → GZIP，解压后递归；
+    3. 文本 JSON（UTF-8/BOM/UTF-16/GB18030）→ ``decrypt_bundle``；
+    4. 回退：salt 以原始字节内嵌的伪 JSON，或裸二进制「16 字节 salt + token」。
+
+    解密成功但内容不合法、密码错误、体积超限等一律抛 ``ConfigTransferError``。
+    """
+    if not isinstance(raw, (bytes, bytearray)):
+        raise ConfigTransferError("配置包内容无效")
+    raw = bytes(raw)
+    if not raw:
+        raise ConfigTransferError("配置包内容为空")
+
+    fmt = sniff_bundle_format(raw)
+    if fmt == "gzip":
+        if _depth >= _BUNDLE_MAX_DEPTH:
+            raise ConfigTransferError("配置包嵌套层数过多，已中止")
+        return load_bundle_bytes(_gunzip(raw), password, _depth=_depth + 1)
+
+    if fmt == "zip":
+        if _depth >= _BUNDLE_MAX_DEPTH:
+            raise ConfigTransferError("配置包嵌套层数过多，已中止")
+        try:
+            with zipfile.ZipFile(io.BytesIO(raw)) as archive:
+                member = _pick_zip_config_member(archive.namelist())
+                if not member:
+                    raise ConfigTransferError("ZIP 中未找到配置文件 (config.nbotcfg)")
+                inner = _read_zip_member(archive, member)
+        except zipfile.BadZipFile as exc:
+            raise ConfigTransferError(f"ZIP 文件损坏: {exc}") from exc
+        return load_bundle_bytes(inner, password, _depth=_depth + 1)
+
+    failures: list[str] = []
+    for parser in (_bundle_from_text_json, _bundle_from_binary):
+        try:
+            return parser(raw, password)
+        except _BundleFormatError as exc:
+            failures.append(str(exc))
+    message = _bundle_diagnostic(raw, fmt)
+    detail = "；".join(item for item in failures if item)
+    if detail:
+        message = f"{message}：{detail}"
+    message = f"{message}；若这确实是加密配置包，请确认加密密码是否正确"
+    raise ConfigTransferError(message)
 
 
 def _save_imported_configs(server, touched: Iterable[str]) -> None:
@@ -485,23 +799,13 @@ def extract_zip_bundle(zip_bytes: bytes, password: str) -> Tuple[Dict[str, Any],
     with zipfile.ZipFile(io.BytesIO(zip_bytes), 'r') as zf:
         namelist = zf.namelist()
 
-        # 查找配置文件
-        config_filename = None
-        for name in namelist:
-            if name == "config.nbotcfg":
-                config_filename = name
-                break
-            # 兼容旧版 .nbotcfg 直接打ZIP的情况
-            if name.endswith(".nbotcfg"):
-                config_filename = name
-                break
-
+        # 查找配置文件（兼容旧版 .nbotcfg 直接打 ZIP 的情况）
+        config_filename = _pick_zip_config_member(namelist)
         if not config_filename:
             raise ConfigTransferError("ZIP 中未找到配置文件 (config.nbotcfg)")
 
-        # 解析并解密配置
-        raw_config = json.loads(zf.read(config_filename).decode("utf-8"))
-        bundle = decrypt_bundle(raw_config, password)
+        # 二进制读取成员，再按文件头嗅探容器/编码（不再假定成员一定是 UTF-8 JSON）
+        bundle = load_bundle_bytes(_read_zip_member(zf, config_filename), password)
 
         # 收集所有立绘文件
         portraits = {}

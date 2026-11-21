@@ -26,8 +26,8 @@ from nbot.web.config_transfer import (
     ConfigTransferError,
     apply_bundle,
     build_plain_bundle,
-    decrypt_bundle,
     encrypt_bundle,
+    load_bundle_bytes,
 )
 
 _log = logging.getLogger(__name__)
@@ -700,20 +700,13 @@ def pull_backup(
         _update_status(server, last_error=msg)
         raise WebDAVBackupError(msg)
 
-    # 解析 JSON 配置包
+    # 按文件头嗅探容器后用二进制解析（远程包可能是 ZIP/GZIP/JSON 或裸二进制密文）
     try:
-        raw_bundle = json.loads(raw_bytes.decode("utf-8"))
-    except Exception as exc:
-        msg = f"远程备份文件不是有效的 JSON: {exc}"
+        bundle = load_bundle_bytes(raw_bytes, enc_password)
+    except ConfigTransferError as exc:
+        msg = str(exc)
         _update_status(server, last_error=msg)
         raise WebDAVBackupError(msg) from exc
-
-    # 解密并应用
-    try:
-        bundle = decrypt_bundle(raw_bundle, enc_password)
-    except ConfigTransferError as exc:
-        _update_status(server, last_error=str(exc))
-        raise WebDAVBackupError(str(exc)) from exc
 
     try:
         result = apply_bundle(server, bundle, overwrite=True)
@@ -1404,12 +1397,12 @@ def restore_revision(
         raise WebDAVBackupError("未设置加密密码，请先在配置中填写或本次提供")
 
     try:
-        raw_bundle = json.loads(downloaded["content"].decode("utf-8"))
-    except Exception as exc:  # noqa: BLE001
-        raise WebDAVBackupError(f"修订文件不是有效的 JSON: {exc}") from exc
+        bundle = load_bundle_bytes(downloaded["content"], enc_password)
+    except ConfigTransferError as exc:
+        _update_status(server, last_error=str(exc))
+        raise WebDAVBackupError(str(exc)) from exc
 
     try:
-        bundle = decrypt_bundle(raw_bundle, enc_password)
         result = apply_bundle(server, bundle, overwrite=True)
     except ConfigTransferError as exc:
         _update_status(server, last_error=str(exc))

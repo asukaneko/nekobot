@@ -132,7 +132,9 @@ def _make_env(tmp_path, monkeypatch):
     monkeypatch.setattr(
         wd, "encrypt_bundle", lambda server, password, **kwargs: {"payload": "x"}
     )
-    monkeypatch.setattr(wd, "decrypt_bundle", lambda raw, password: {"settings": {"ok": True}})
+    monkeypatch.setattr(
+        wd, "load_bundle_bytes", lambda raw, password, **kwargs: {"settings": {"ok": True}}
+    )
     monkeypatch.setattr(
         wd,
         "apply_bundle",

@@ -29,6 +29,21 @@
 
 `config.nbotcfg` 是 `config_transfer.encrypt_bundle()` 的产物，由用户自行设置的 `encryption_password` 加密，与 WebDAV 账号密码相互独立。
 
+### 配置包格式兼容
+
+读取远程包 / 导入本地文件时，服务端**全程使用二进制读取**，先按文件头嗅探容器再解码，绝不把二进制密文当 UTF-8 文本读（历史 bug 见 issue #16：`UnicodeDecodeError: 'utf-8' codec can't decode byte 0xba in position 10`）。`config_transfer.load_bundle_bytes()` 支持的布局：
+
+| 文件头 | 容器 | 处理方式 |
+|--------|------|----------|
+| `PK\x03\x04` | ZIP | 取出 `config.nbotcfg` 成员后递归解析（含立绘包） |
+| `\x1f\x8b` | GZIP | 解压后递归解析 |
+| `{` / `{`+BOM | JSON 文本 | 按 UTF-8(BOM) / UTF-16(BOM) / GB18030 解码后解密 |
+| 其他 | 裸二进制 | 前 16 字节为 KDF salt，其余为 Fernet token（原始字节或 Base64） |
+
+此外还兼容「salt 以原始字节内嵌在 JSON 字符串里」的伪 JSON：这类文件从 `{"salt": "` 之后就是随机二进制，只能按字节定位 `salt` / `payload` 字段再解密。
+
+无法识别时的报错会带上容器类型、文件大小和头 16 字节十六进制，便于排查；密码错误仍返回 `密码错误或配置包已损坏`。
+
 ### 兼容性策略
 
 不同 WebDAV 服务商对 `PROPFIND` / `HEAD` 的支持差异较大（典型如坚果云对根目录 `HEAD` 返回 403），模块通过**探测 + 回退**策略保证在大多数服务商下都能工作：
