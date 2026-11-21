@@ -16,6 +16,7 @@ from nbot.core.session_store import (
     visible_messages,
 )
 from nbot.web.persistence import is_web_visible_session
+from nbot.web.session_import.payload import extract_export_sessions, import_export_payload
 from nbot.web.sessions_db import get_session as get_session_from_db
 
 _log = logging.getLogger(__name__)
@@ -1529,41 +1530,6 @@ def register_session_routes(app, server):
             "sessions": sessions,
         }
 
-    def _normalize_imported_session(raw_session):
-        if not isinstance(raw_session, dict):
-            raise ValueError("session must be an object")
-        old_id = str(raw_session.get("id") or "").strip()
-        new_id = str(uuid.uuid4())
-        now = datetime.now().isoformat()
-        session = dict(raw_session)
-        session["id"] = new_id
-        session["name"] = session.get("name") or f"Imported {new_id[:8]}"
-        if old_id:
-            session["imported_from"] = old_id
-        session["imported_at"] = now
-        session["type"] = session.get("type") or "web"
-        if session["type"] not in {"web", "cli"}:
-            session["type"] = "web"
-        messages = session.get("messages")
-        if not isinstance(messages, list):
-            messages = []
-        session["messages"] = [m for m in messages if isinstance(m, dict)]
-        system_prompt = session.get("system_prompt")
-        if not system_prompt:
-            system_msg = next((m for m in session["messages"] if m.get("role") == "system"), None)
-            system_prompt = (system_msg or {}).get("content", "")
-        session["system_prompt"] = system_prompt or ""
-        if not session.get("character_id") and session.get("sender_name"):
-            session["character_id"] = session["sender_name"]
-        if session["system_prompt"] and not any(m.get("role") == "system" for m in session["messages"]):
-            session["messages"].insert(0, {"role": "system", "content": session["system_prompt"]})
-        session["created_at"] = session.get("created_at") or now
-        session["archived"] = bool(session.get("archived"))
-        session["archived_at"] = session.get("archived_at") if session["archived"] else None
-        if not is_web_visible_session(new_id, session):
-            raise ValueError("invalid session type")
-        return new_id, session
-
     def _merge_session_with_archive(session):
         """将归档会话的消息拼到主会话前面，导出完整对话历史。"""
         archive_id = session.get("archive_session_id")
@@ -1704,35 +1670,12 @@ def register_session_routes(app, server):
     @app.route("/api/sessions/import", methods=["POST"])
     def import_sessions():
         data = request.get_json(silent=True) or {}
-        sessions_payload = data.get("sessions")
-        if sessions_payload is None and isinstance(data.get("session"), dict):
-            sessions_payload = [data["session"]]
-        if sessions_payload is None and isinstance(data, dict) and data.get("type") != "nbot_session_export":
-            sessions_payload = [data]
+        sessions_payload = extract_export_sessions(data)
         if not isinstance(sessions_payload, list):
             return jsonify({"success": False, "error": "sessions must be a list"}), 400
 
-        imported = []
-        errors = []
-        for idx, raw_session in enumerate(sessions_payload):
-            try:
-                session_id, session = _normalize_imported_session(raw_session)
-                session_store.set_session(session_id, session)
-                if server.WORKSPACE_AVAILABLE and server.workspace_manager:
-                    server.workspace_manager.get_or_create(
-                        session_id, session.get("type", "web"), session.get("name", "")
-                    )
-                imported.append({"id": session_id, "name": session.get("name")})
-            except Exception as exc:
-                errors.append({"index": idx, "error": str(exc)})
-
-        return jsonify({
-            "success": True,
-            "imported": len(imported),
-            "failed": len(errors),
-            "sessions": imported,
-            "errors": errors,
-        })
+        result = import_export_payload(server, session_store, sessions_payload)
+        return jsonify({"success": True, **result})
 
     @app.route("/api/sessions/<session_id>/fork", methods=["POST"])
     def fork_session(session_id):

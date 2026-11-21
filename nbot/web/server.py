@@ -74,6 +74,7 @@ from nbot.web.routes import (
     register_qq_overview_routes,
     register_qrcode_routes,
     register_review_routes,
+    register_session_import_routes,
     register_session_routes,
     register_skill_routes,
     register_skills_storage_routes,
@@ -3057,6 +3058,7 @@ class WebChatServer:
         register_review_routes(self.app, self)
         register_public_session_routes(self.app, self)
         register_session_routes(self.app, self)
+        register_session_import_routes(self.app, self)
         register_skill_routes(self.app, self)
         register_ssl_validation_routes(self.app, self)
         register_task_center_routes(self.app, self)

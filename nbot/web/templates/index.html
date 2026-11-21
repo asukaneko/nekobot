@@ -31,7 +31,7 @@
         window.__nbotAssetVersion = '20261028-review-fixes-v2';
     </script>
     <link rel="stylesheet" href="/static/css/boot.css?v=20260542">
-    <link rel="stylesheet" href="/static/css/app.css?v=20261028-review-fixes-v2">
+    <link rel="stylesheet" href="/static/css/app.css?v=20261121-session-import">
     <link rel="stylesheet" href="/static/css/tts-playground.css?v=20260608">
     <script>
         // PWA install prompt - must be captured before Vue mounts
@@ -2409,7 +2409,8 @@
                                             </button>
                                         </div>
                                         <input ref="sessionImportInput" type="file" accept=".json,application/json" style="display: none;" @change="handleSessionImportFile">
-                                        <button class="btn btn-secondary sessions-icon-btn" @click="triggerSessionImport" :disabled="isLoading" title="导入">
+                                        <input ref="sessionImportArchiveInput" type="file" accept=".zip,application/zip" style="display: none;" @change="handleDeepSeekArchiveFile">
+                                        <button class="btn btn-secondary sessions-icon-btn" @click="openSessionImportDialog" :disabled="isLoading" title="导入">
                                             <i class="fas fa-file-import"></i>
                                         </button>
                                         <button class="btn btn-secondary sessions-icon-btn" @click="exportSelectedOrVisibleSessions" :disabled="isLoading || managedSessions.length === 0" title="导出">
@@ -2654,6 +2655,130 @@
                                         暂无匹配的会话
                                     </div>
                                 </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 导入会话（nekobot JSON / DeepSeek 官方导出 ZIP） -->
+                    <div v-if="sessionImportDialog.show" class="modal-overlay" @click.self="closeSessionImportDialog">
+                        <div class="modal session-import-modal">
+                            <div class="modal-header">
+                                <span class="modal-title"><i class="fas fa-file-import"></i> 导入会话</span>
+                                <button class="modal-close" @click="closeSessionImportDialog">&times;</button>
+                            </div>
+                            <div class="modal-body">
+                                <div class="form-hint">只新增会话，不覆盖已有数据。</div>
+
+                                <!-- 1. 选择格式 -->
+                                <div v-if="sessionImportDialog.step === 'format'" class="session-import-formats">
+                                    <button
+                                        v-for="fmt in sessionImportDialog.formats"
+                                        :key="'session-import-format-' + fmt.id"
+                                        type="button"
+                                        class="session-import-format"
+                                        @click="chooseSessionImportFormat(fmt.id)"
+                                    >
+                                        <i class="fas" :class="fmt.id === 'deepseek' ? 'fa-comment-dots' : 'fa-file-code'"></i>
+                                        <strong>{{ fmt.label }}</strong>
+                                        <span>{{ fmt.description }}</span>
+                                    </button>
+                                </div>
+
+                                <!-- 2. 选择 DeepSeek 归档 -->
+                                <div v-else-if="sessionImportDialog.step === 'archive'">
+                                    <div class="session-import-tabs">
+                                        <button type="button" :class="{ active: sessionImportDialog.tab === 'file' }" @click="sessionImportDialog.tab = 'file'">
+                                            <i class="fas fa-upload"></i> 本地 ZIP
+                                        </button>
+                                        <button type="button" :class="{ active: sessionImportDialog.tab === 'url' }" @click="sessionImportDialog.tab = 'url'">
+                                            <i class="fas fa-link"></i> 下载链接
+                                        </button>
+                                    </div>
+
+                                    <div v-if="sessionImportDialog.tab === 'file'" class="session-import-panel">
+                                        <button class="btn btn-secondary" @click="$refs.sessionImportArchiveInput.click()" :disabled="sessionImportDialog.scanning">
+                                            <i class="fas fa-folder-open"></i> 选择 DeepSeek 导出 ZIP
+                                        </button>
+                                        <div class="form-hint">DeepSeek 网页端「设置 → 数据管理 → 导出数据」下载的 ZIP 包。</div>
+                                    </div>
+                                    <div v-else class="session-import-panel">
+                                        <div class="session-import-url-row">
+                                            <input
+                                                v-model="sessionImportDialog.url"
+                                                type="url"
+                                                class="form-input"
+                                                placeholder="https://…/deepseek_data-xxxx.zip"
+                                                @keyup.enter="scanDeepSeekArchiveFromUrl"
+                                            >
+                                            <button class="btn btn-primary" @click="scanDeepSeekArchiveFromUrl" :disabled="sessionImportDialog.scanning || !sessionImportDialog.url.trim()">
+                                                <i class="fas fa-cloud-arrow-down"></i> 获取
+                                            </button>
+                                        </div>
+                                        <div class="form-hint">只支持公网 HTTPS 地址；导出链接可能有时效，过期后请重新获取。</div>
+                                    </div>
+
+                                    <div v-if="sessionImportDialog.scanning" class="session-import-status">
+                                        <i class="fas fa-spinner fa-spin"></i> 正在处理归档…
+                                    </div>
+                                </div>
+
+                                <!-- 3. 勾选会话 -->
+                                <div v-else-if="sessionImportDialog.step === 'select'" class="session-import-select">
+                                    <div class="session-import-summary">
+                                        <span>{{ sessionImportDialog.archiveName || 'DeepSeek 导出包' }} · 共 {{ sessionImportDialog.conversations.length }} 个会话</span>
+                                        <button type="button" class="btn btn-ghost btn-small" @click="toggleAllSessionImportConversations">
+                                            <i class="fas" :class="isAllSessionImportSelected ? 'fa-square-check' : 'fa-list-check'"></i>
+                                            {{ isAllSessionImportSelected ? '取消全选' : '全选' }}
+                                        </button>
+                                    </div>
+                                    <div class="session-import-list">
+                                        <label
+                                            v-for="item in sessionImportDialog.conversations"
+                                            :key="'session-import-conv-' + item.id"
+                                            class="session-import-item"
+                                            :class="{ active: sessionImportDialog.selected.includes(item.id) }"
+                                        >
+                                            <input type="checkbox" :value="item.id" v-model="sessionImportDialog.selected">
+                                            <div class="session-import-item-copy">
+                                                <strong>
+                                                    {{ item.title }}
+                                                    <i v-if="item.pinned" class="fas fa-thumbtack"></i>
+                                                </strong>
+                                                <span>
+                                                    {{ item.message_count }} 条消息<template v-if="item.updated_at"> · {{ formatSessionImportTime(item.updated_at) }}</template>
+                                                </span>
+                                            </div>
+                                        </label>
+                                    </div>
+                                    <div class="form-hint">已选 {{ sessionImportDialog.selected.length }} / {{ sessionImportDialog.conversations.length }}</div>
+                                    <div v-if="sessionImportDialog.importing" class="session-import-status">
+                                        <i class="fas fa-spinner fa-spin"></i> 正在导入 {{ sessionImportDialog.importProgress }} / {{ sessionImportDialog.selected.length }}
+                                    </div>
+                                </div>
+
+                                <div v-if="sessionImportDialog.error" class="session-import-error">{{ sessionImportDialog.error }}</div>
+                                <div v-if="sessionImportDialog.result" class="export-import-result">
+                                    <div>
+                                        成功导入 {{ sessionImportDialog.result.imported }} 个会话<template v-if="sessionImportDialog.result.skipped">，跳过 {{ sessionImportDialog.result.skipped }} 个（没有可读正文）</template><template v-if="sessionImportDialog.result.failed">，失败 {{ sessionImportDialog.result.failed }} 个</template>
+                                    </div>
+                                    <div v-if="(sessionImportDialog.result.errors || []).length" class="form-hint">
+                                        {{ sessionImportDialog.result.errors.slice(0, 5).map(err => err.error).join('；') }}
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="modal-footer">
+                                <button v-if="sessionImportDialog.step === 'select'" class="btn btn-secondary" @click="sessionImportDialog.step = 'archive'" :disabled="sessionImportDialog.importing">
+                                    上一步
+                                </button>
+                                <button class="btn btn-secondary" @click="closeSessionImportDialog">{{ sessionImportDialog.result ? '关闭' : '取消' }}</button>
+                                <button
+                                    v-if="sessionImportDialog.step === 'select'"
+                                    class="btn btn-primary"
+                                    @click="commitSessionImport"
+                                    :disabled="sessionImportDialog.importing || !sessionImportDialog.selected.length"
+                                >
+                                    <i class="fas fa-file-import"></i> 导入 {{ sessionImportDialog.selected.length }} 个会话
+                                </button>
                             </div>
                         </div>
                     </div>
@@ -14862,7 +14987,7 @@
     </div>
 
     <script src="/static/js/nbot-shared.js?v=20260618-ws-auth"></script>
-    <script src="/static/js/nbot-methods.js?cache=20261028-review-fixes-v2"></script>
+    <script src="/static/js/nbot-methods.js?cache=20261121-session-import"></script>
     <script>
         (async function () {
         await (window.__nbotCoreDepsReady || Promise.resolve());
@@ -15094,6 +15219,28 @@
                     sessionSortKey: 'created_at',
                     sessionSortDir: 'desc',
                     selectedSessions: [],  // 批量选择的会话
+                    // 导入会话（nekobot JSON / DeepSeek 官方导出 ZIP）
+                    sessionImportDialog: {
+                        show: false,
+                        step: 'format',  // format | archive | select
+                        format: '',
+                        formats: [
+                            { id: 'nekobot', label: 'nekobot 格式', description: '会话 JSON 导出文件' },
+                            { id: 'deepseek', label: 'DeepSeek 官方格式', description: '官方数据导出 ZIP，可用链接或本地文件' },
+                        ],
+                        tab: 'file',  // file | url
+                        url: '',
+                        scanning: false,
+                        token: '',
+                        archiveName: '',
+                        formatVersion: null,
+                        conversations: [],
+                        selected: [],
+                        importing: false,
+                        importProgress: 0,
+                        error: '',
+                        result: null,
+                    },
                     showFileMenu: false,  // 文件上传菜单显示状态
                     selectedSenderFilter: '',  // 按角色筛选会话
 
@@ -17222,9 +17369,15 @@
                     return sessionPool;
                 },
 
+                // 会话导入：是否已选中全部可导入会话
+                isAllSessionImportSelected() {
+                    const dialog = this.sessionImportDialog;
+                    return dialog.conversations.length > 0 &&
+                        dialog.selected.length === dialog.conversations.length;
+                },
+
                 // 获取所有唯一的会话角色名称
-                uniqueSessionSenders() {
-                    const senders = new Set();
+                uniqueSessionSenders() {                    const senders = new Set();
                     this.sessions.forEach(s => {
                         if (s.type === 'web' && s.sender_name) {
                             senders.add(s.sender_name);

@@ -119,6 +119,9 @@ window.__nbotHookTemplates = [
 ];
 const connectSocketWithAuth = window.__nbotConnectSocketWithAuth;
 
+// 会话导入：每批提交的会话数（与客户端一致），控制单次请求体积并让进度真实推进
+const SESSION_IMPORT_BATCH = 20;
+
 const NbotMethods = {
                 async refreshPushState() {
                     if (!window.NekoPush) {
@@ -7056,6 +7059,204 @@ def main(params):
                     } finally {
                         if (event.target) event.target.value = '';
                     }
+                },
+
+                // ---- 导入会话：nekobot JSON / DeepSeek 官方导出 ZIP ----
+
+                openSessionImportDialog() {
+                    this.sessionImportDialog = {
+                        ...this.sessionImportDialog,
+                        show: true,
+                        step: 'format',
+                        format: '',
+                        tab: 'file',
+                        url: '',
+                        scanning: false,
+                        token: '',
+                        archiveName: '',
+                        formatVersion: null,
+                        conversations: [],
+                        selected: [],
+                        importing: false,
+                        importProgress: 0,
+                        error: '',
+                        result: null,
+                    };
+                    this.loadSessionImportFormats();
+                },
+
+                closeSessionImportDialog() {
+                    const dialog = this.sessionImportDialog;
+                    if (dialog.token) {
+                        this.discardSessionImportArchive(dialog.token);
+                    }
+                    this.sessionImportDialog = {
+                        ...dialog,
+                        show: false,
+                        scanning: false,
+                        importing: false,
+                        token: '',
+                        conversations: [],
+                        selected: [],
+                    };
+                },
+
+                async loadSessionImportFormats() {
+                    try {
+                        const res = await api.get('/api/sessions/import/formats');
+                        const formats = res.data?.formats;
+                        if (Array.isArray(formats) && formats.length) {
+                            this.sessionImportDialog.formats = formats;
+                        }
+                    } catch (e) {
+                        // 服务端未就绪时保留内置格式列表，不打断导入弹窗
+                        console.warn('加载导入格式失败:', e);
+                    }
+                },
+
+                chooseSessionImportFormat(formatId) {
+                    const dialog = this.sessionImportDialog;
+                    dialog.format = formatId;
+                    dialog.error = '';
+                    dialog.result = null;
+                    if (formatId === 'nekobot') {
+                        // 单会话 JSON：直接走原有的文件选择与 /api/sessions/import
+                        this.closeSessionImportDialog();
+                        this.triggerSessionImport();
+                        return;
+                    }
+                    if (formatId === 'deepseek') {
+                        dialog.step = 'archive';
+                        return;
+                    }
+                    dialog.error = '暂不支持该导入格式';
+                },
+
+                async discardSessionImportArchive(token) {
+                    if (!token) return;
+                    try {
+                        await api.post('/api/sessions/import/deepseek/discard', { token });
+                    } catch (e) {
+                        console.warn('丢弃导入归档失败:', e);
+                    }
+                },
+
+                async handleDeepSeekArchiveFile(event) {
+                    const file = event.target.files?.[0];
+                    if (event.target) event.target.value = '';
+                    if (!file) return;
+                    const form = new FormData();
+                    form.append('file', file);
+                    await this.scanDeepSeekArchive(form);
+                },
+
+                async scanDeepSeekArchiveFromUrl() {
+                    const url = String(this.sessionImportDialog.url || '').trim();
+                    if (!url) {
+                        this.showToast('请填写下载链接', 'warning');
+                        return;
+                    }
+                    await this.scanDeepSeekArchive(null, url);
+                },
+
+                async scanDeepSeekArchive(form, url) {
+                    const dialog = this.sessionImportDialog;
+                    if (dialog.scanning) return;
+                    if (dialog.token) {
+                        this.discardSessionImportArchive(dialog.token);
+                        dialog.token = '';
+                    }
+                    dialog.show = true;
+                    dialog.step = 'archive';
+                    dialog.scanning = true;
+                    dialog.error = '';
+                    dialog.result = null;
+                    try {
+                        // 大归档的上传/下载可能超过默认 60s，这里不设超时
+                        const config = { timeout: 0 };
+                        const res = form
+                            ? await api.post('/api/sessions/import/deepseek/scan', form, config)
+                            : await api.post('/api/sessions/import/deepseek/scan', { url }, config);
+                        const data = res.data || {};
+                        dialog.token = data.token || '';
+                        dialog.archiveName = data.archive?.name || '';
+                        dialog.formatVersion = data.format_version ?? null;
+                        dialog.conversations = Array.isArray(data.conversations) ? data.conversations : [];
+                        dialog.selected = dialog.conversations.map(item => item.id);
+                        dialog.step = dialog.conversations.length ? 'select' : 'archive';
+                        if (!dialog.conversations.length) {
+                            dialog.error = '归档里没有可导入的会话';
+                        }
+                    } catch (e) {
+                        dialog.token = '';
+                        dialog.conversations = [];
+                        dialog.selected = [];
+                        dialog.error = e.response?.data?.error || e.message || '归档解析失败';
+                    } finally {
+                        dialog.scanning = false;
+                    }
+                },
+
+                toggleAllSessionImportConversations() {
+                    const dialog = this.sessionImportDialog;
+                    dialog.selected = this.isAllSessionImportSelected
+                        ? []
+                        : dialog.conversations.map(item => item.id);
+                },
+
+                async commitSessionImport() {
+                    const dialog = this.sessionImportDialog;
+                    const ids = [...(dialog.selected || [])];
+                    if (!dialog.token || !ids.length || dialog.importing) return;
+
+                    dialog.importing = true;
+                    dialog.error = '';
+                    dialog.result = null;
+                    dialog.importProgress = 0;
+                    const total = { imported: 0, skipped: 0, failed: 0, errors: [] };
+                    try {
+                        // 分批提交：每批 20 个会话，进度真实推进且单个请求不会过长
+                        for (let start = 0; start < ids.length; start += SESSION_IMPORT_BATCH) {
+                            const batch = ids.slice(start, start + SESSION_IMPORT_BATCH);
+                            const res = await api.post(
+                                '/api/sessions/import/deepseek/import',
+                                { token: dialog.token, ids: batch },
+                                { timeout: 0 }
+                            );
+                            const data = res.data || {};
+                            total.imported += data.imported || 0;
+                            total.skipped += data.skipped || 0;
+                            total.failed += data.failed || 0;
+                            if (Array.isArray(data.errors)) total.errors.push(...data.errors);
+                            dialog.importProgress = Math.min(start + batch.length, ids.length);
+                        }
+                        dialog.result = total;
+                        // 已导入的会话从待选列表移除，避免重复导入；全部导完后回到归档选择
+                        dialog.conversations = dialog.conversations.filter(item => !ids.includes(item.id));
+                        dialog.selected = [];
+                        if (!dialog.conversations.length) {
+                            dialog.step = 'archive';
+                        }
+                        if (total.imported > 0) {
+                            await this.loadSessions();
+                            const skippedText = total.skipped ? `，跳过 ${total.skipped} 个` : '';
+                            const failedText = total.failed ? `，失败 ${total.failed} 个` : '';
+                            this.showToast(`成功导入 ${total.imported} 个会话${skippedText}${failedText}`, total.failed ? 'warning' : 'success');
+                        } else {
+                            this.showToast('没有导入任何会话', 'warning');
+                        }
+                    } catch (e) {
+                        dialog.error = e.response?.data?.error || e.message || '导入失败';
+                    } finally {
+                        dialog.importing = false;
+                    }
+                },
+
+                formatSessionImportTime(value) {
+                    if (!value) return '';
+                    const date = new Date(value);
+                    if (Number.isNaN(date.getTime())) return String(value);
+                    return date.toLocaleString('zh-CN', { hour12: false });
                 },
 
                 getSessionPendingQueue(sessionId) {
