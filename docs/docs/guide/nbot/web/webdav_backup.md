@@ -29,6 +29,34 @@
 
 `config.nbotcfg` 是 `config_transfer.encrypt_bundle()` 的产物，由用户自行设置的 `encryption_password` 加密，与 WebDAV 账号密码相互独立。
 
+### 配置包格式兼容
+
+读取远程包 / 导入本地文件时，服务端**全程使用二进制读取**，先按文件头嗅探容器再解码，绝不把二进制密文当 UTF-8 文本读（历史 bug 见 issue #16：`UnicodeDecodeError: 'utf-8' codec can't decode byte 0xba in position 10`）。`config_transfer.load_bundle_bytes()` 支持的布局：
+
+| 文件头 | 容器 | 处理方式 |
+|--------|------|----------|
+| `PK\x03\x04` | ZIP | 取出 `config.nbotcfg` 成员后递归解析（含立绘包） |
+| `\x1f\x8b` | GZIP | 解压后递归解析 |
+| `{` / `{`+BOM | JSON 文本 | 按 UTF-8(BOM) / UTF-16(BOM) / GB18030 解码后解密 |
+| 其他 | 裸二进制 | 前 16 字节为 KDF salt，其余为 Fernet token（原始字节或 Base64） |
+
+此外还兼容「salt 以原始字节内嵌在 JSON 字符串里」的伪 JSON：这类文件从 `{"salt": "` 之后就是随机二进制，只能按字节定位 `salt` / `payload` 字段再解密。
+
+几个边界处理：
+
+- 容器魔数命中但解包失败（如 salt 恰好以 `\x1f\x8b` 开头）时，会回退按「salt + token」布局再试一次；
+- 截断 / 损坏的 GZIP（`EOFError`、`zlib.error`、`BadGzipFile`）统一转成 `ConfigTransferError`，返回可读错误而不是 500；
+- `salt` 写成整数数组时，越界值按非法处理，不会抛 `ValueError`；
+- ZIP 级加密（需要 ZIP 口令）或成员损坏时，读取失败同样转成 `ConfigTransferError`（与 Fernet 密码无关）；
+- 伪 JSON 的 `salt` / `payload` 字段顺序不固定，两个字段各自独立定位；
+- 嵌套容器（ZIP 套 ZIP、GZIP 包裹 ZIP）里的 `portraits/` 立绘会被一并收集并恢复，导入路由用 `load_bundle_bytes_with_portraits()` 取回 `(bundle, portraits)`；立绘收集有累计预算（跨层共享，默认 128 MiB / 500 个文件），超出部分跳过。
+
+> 立绘收集只发生在**本地导入**（`POST /api/config-transfer/import`，走 `load_bundle_bytes_with_portraits()`）。
+> WebDAV 的拉取与版本恢复走 `load_bundle_bytes()`，只恢复配置；立绘由 `pull_backup(include_portraits=True)` 从远程 `nekobot/portraits/` 目录单独下载。
+> 因此如果备份包里的立绘**只存在于 ZIP 内**（没有上传到 `nekobot/portraits/`），请用「配置迁移 → 导入」上传那个 ZIP，而不是 WebDAV 同步。
+
+无法识别时的报错会带上容器类型、文件大小和头 16 字节十六进制，便于排查；密码错误仍返回 `密码错误或配置包已损坏`。
+
 ### 兼容性策略
 
 不同 WebDAV 服务商对 `PROPFIND` / `HEAD` 的支持差异较大（典型如坚果云对根目录 `HEAD` 返回 403），模块通过**探测 + 回退**策略保证在大多数服务商下都能工作：
