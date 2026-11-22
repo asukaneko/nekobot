@@ -72,8 +72,13 @@ _BUNDLE_TEXT_ENCODINGS = ("utf-8-sig", "gb18030")
 _BUNDLE_MAX_DEPTH = 3
 # 单层解包后的体积上限，防御压缩炸弹
 _BUNDLE_MAX_BYTES = 512 * 1024 * 1024
+# 一次导入中累计收集的立绘上限（跨嵌套层共享），防止多成员叠加吃满内存
+_PORTRAITS_MAX_BYTES = 128 * 1024 * 1024
+_PORTRAITS_MAX_FILES = 500
 # Fernet token 由 Base64 字母表组成，用于从伪 JSON 中截取 payload
 _B64_CHARS = frozenset(b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_+=")
+# 伪 JSON 中 payload 为原始 token 字节时，最多尝试多少个「引号位置」作为结尾
+_PSEUDO_JSON_TOKEN_TRIES = 16
 
 
 class ConfigTransferError(ValueError):
@@ -389,18 +394,9 @@ def _decrypt_salt_token(
     return None
 
 
-def _bundle_from_pseudo_json(raw: bytes, password: str) -> dict[str, Any] | None:
-    """解析「salt 以原始字节内嵌在 JSON 字符串里」的配置包。
-
-    部分第三方 / 旧客户端把 16 字节 KDF salt 直接写进 JSON 字符串，salt 值的
-    起始引号之后就是随机二进制（issue #16 里从第 11 个字节开始报错即是此形态），
-    因此无法按任何编码整体解码，只能在字节层面定位 ``salt`` / ``payload`` 字段。
-    """
-    marker = raw.find(b'"salt"')
-    if marker < 0:
-        return None
-    index = marker + len(b'"salt"')
-    colon = raw.find(b":", index)
+def _json_value_start(raw: bytes, marker_end: int) -> int | None:
+    """从 JSON key 的结尾定位其字符串值的首字节（开引号之后）。"""
+    colon = raw.find(b":", marker_end)
     if colon < 0:
         return None
     index = colon + 1
@@ -408,37 +404,75 @@ def _bundle_from_pseudo_json(raw: bytes, password: str) -> dict[str, Any] | None
         index += 1
     if raw[index : index + 1] != b'"':
         return None
-    salt = raw[index + 1 : index + 1 + KDF_SALT_BYTES]
+    return index + 1
+
+
+def _find_value_marker(raw: bytes, marker: bytes, skip_from: int, skip_to: int) -> int:
+    """查找 key 标记，跳过落在 [skip_from, skip_to) 区间（如原始 salt 字节）内的伪命中。"""
+    search_from = 0
+    while True:
+        found = raw.find(marker, search_from)
+        if found < 0:
+            return -1
+        if skip_from <= found < skip_to:
+            search_from = found + 1
+            continue
+        return found
+
+
+def _bundle_from_pseudo_json(raw: bytes, password: str) -> dict[str, Any] | None:
+    """解析「salt 以原始字节内嵌在 JSON 字符串里」的配置包。
+
+    部分第三方 / 旧客户端把 16 字节 KDF salt 直接写进 JSON 字符串，salt 值的
+    起始引号之后就是随机二进制（issue #16 里从第 11 个字节开始报错即是此形态），
+    因此无法按任何编码整体解码，只能在字节层面定位 ``salt`` / ``payload`` 字段。
+    两个字段的先后顺序不固定，这里各自独立定位。
+    """
+    salt_marker = raw.find(b'"salt"')
+    if salt_marker < 0:
+        return None
+    salt_start = _json_value_start(raw, salt_marker + len(b'"salt"'))
+    if salt_start is None:
+        return None
+    salt = raw[salt_start : salt_start + KDF_SALT_BYTES]
     if len(salt) != KDF_SALT_BYTES:
         return None
+    salt_end = salt_start + KDF_SALT_BYTES
 
-    payload_marker = raw.find(b'"payload"', index + 1 + KDF_SALT_BYTES)
+    payload_marker = _find_value_marker(raw, b'"payload"', salt_start, salt_end)
     if payload_marker < 0:
         return None
-    index = raw.find(b":", payload_marker)
-    if index < 0:
+    start = _json_value_start(raw, payload_marker + len(b'"payload"'))
+    if start is None:
         return None
-    index += 1
-    while index < len(raw) and raw[index] in b" \t\r\n":
-        index += 1
-    if raw[index : index + 1] != b'"':
-        return None
-    start = index + 1
+
+    candidates: list[bytes] = []
     end = start
     while end < len(raw) and raw[end] in _B64_CHARS:
         end += 1
+    plain_base64 = end > start and raw[end : end + 1] == b'"'
 
-    candidates = [
-        raw[start:end],
-        raw[start:end].strip(),
-        _b64decode_any(raw[start:end]),
-    ]
-    # payload 也可能是原始 token 字节（不是 Base64 文本），需要重新编码
-    quote_end = raw.find(b'"', start)
-    if quote_end > start:
-        raw_token = raw[start:quote_end]
-        candidates.append(raw_token)
-        candidates.append(base64.urlsafe_b64encode(raw_token))
+    if plain_base64:
+        # 常见形态：payload 是 Base64 文本，紧跟结束引号
+        candidates.append(raw[start:end])
+        candidates.append(_b64decode_any(raw[start:end]))
+    else:
+        # payload 也可能是原始 token 字节（需要重新编码成 Base64）。
+        # 0x22 本身是合法 token 字节，所以「下一个引号」不一定就是结尾；
+        # 逐个引号位置尝试，总有一个正好落在真正的结束引号上。
+        position = raw.find(b'"', start)
+        tries = 0
+        while position > start and tries < _PSEUDO_JSON_TOKEN_TRIES:
+            encoded = base64.urlsafe_b64encode(raw[start:position])
+            tries += 1
+            candidates.append(encoded)
+            candidates.append(encoded.rstrip(b"="))
+            candidates.append(raw[start:position])
+            position = raw.find(b'"', position + 1)
+        if end > start:
+            # 混合内容（Base64 前缀后跟非 Base64 字节）也试一下纯前缀
+            candidates.append(raw[start:end])
+            candidates.append(_b64decode_any(raw[start:end]))
 
     plaintext = _decrypt_salt_token(salt, candidates, password)
     if plaintext is None:
@@ -474,13 +508,17 @@ def _bundle_from_text_json(raw: bytes, password: str) -> dict[str, Any]:
             continue
         try:
             return decrypt_bundle(bundle, password)
-        except ConfigTransferError:
+        except ConfigTransferError as exc:
             # 伪 JSON 的 salt 若恰好是合法文本（如全可打印 ASCII），JSON 层能解析成功，
-            # 但用它当 salt 解密必然失败；此处再用字节级 salt 重试一次
-            repaired = _bundle_from_pseudo_json(raw, password)
+            # 但用它当 salt 解密必然失败；此处再用字节级 salt 重试一次。
+            # 回退也失败时保留原错误（如「配置包内容无效」而不是「密码错误」）。
+            try:
+                repaired = _bundle_from_pseudo_json(raw, password)
+            except ConfigTransferError:
+                repaired = None
             if repaired is not None:
                 return repaired
-            raise
+            raise exc
     repaired = _bundle_from_pseudo_json(raw, password)
     if repaired is not None:
         return repaired
@@ -541,24 +579,47 @@ def _read_zip_member(archive: zipfile.ZipFile, name: str) -> bytes:
         raise ConfigTransferError(f"ZIP 中缺少成员 {name}") from exc
     if size > _BUNDLE_MAX_BYTES:
         raise ConfigTransferError("配置包解压后体积过大（>512MB），已中止")
-    return archive.read(name)
+    try:
+        return archive.read(name)
+    except (RuntimeError, zipfile.BadZipFile, zlib.error, OSError) as exc:
+        # RuntimeError：ZIP 级加密（与 Fernet 密码无关）；BadZipFile/zlib.error：损坏或 CRC 失败
+        raise ConfigTransferError(f"ZIP 成员 {name} 读取失败（可能已加密或损坏）: {exc}") from exc
 
 
 def _collect_zip_portraits(archive: zipfile.ZipFile, portraits: dict[str, bytes]) -> None:
-    """把 ZIP 内的立绘成员收集起来（供嵌套容器的导入路径恢复立绘）。"""
+    """把 ZIP 内的立绘成员收集起来（供嵌套容器的导入路径恢复立绘）。
+
+    ``portraits`` 在所有嵌套层之间共享，因此这里的字节/数量预算也是累计的：
+    避免恶意包用多个「单成员合规」的大文件把内存吃满。
+    """
     for name in archive.namelist():
         if not name.startswith(_ZIP_PORTRAIT_DIR) or name.endswith("/"):
             continue
         if name in portraits:
             continue
+        if len(portraits) >= _PORTRAITS_MAX_FILES:
+            _log.warning("[ConfigTransfer] 立绘成员数超过 %d，跳过其余成员", _PORTRAITS_MAX_FILES)
+            return
         try:
             size = archive.getinfo(name).file_size
         except KeyError:
             continue
-        if size > _BUNDLE_MAX_BYTES:
-            _log.warning("[ConfigTransfer] 跳过超大立绘成员 %s (%d bytes)", name, size)
+        used = sum(len(item) for item in portraits.values())
+        if size > _BUNDLE_MAX_BYTES or used + size > _PORTRAITS_MAX_BYTES:
+            _log.warning(
+                "[ConfigTransfer] 跳过超预算立绘成员 %s（%d bytes，已用 %d/%d）",
+                name,
+                size,
+                used,
+                _PORTRAITS_MAX_BYTES,
+            )
             continue
-        portraits[name] = archive.read(name)
+        try:
+            data = archive.read(name)
+        except (RuntimeError, zipfile.BadZipFile, zlib.error, OSError) as exc:
+            _log.warning("[ConfigTransfer] 立绘成员 %s 读取失败: %s", name, exc)
+            continue
+        portraits[name] = data
 
 
 def _binary_fallback(raw: bytes, password: str) -> dict[str, Any] | None:

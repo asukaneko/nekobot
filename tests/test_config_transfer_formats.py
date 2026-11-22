@@ -212,6 +212,12 @@ def test_load_pseudo_json_with_whitespace_and_long_salt():
 # ============================================================
 
 
+def _binary_payload(password=PASSWORD):
+    """单次生成的 salt + token，保证错误密码用例只考察密码拒绝。"""
+    salt, token = _salt_and_token(password=password)
+    return salt + token
+
+
 @pytest.mark.parametrize(
     "raw_factory",
     [
@@ -219,7 +225,7 @@ def test_load_pseudo_json_with_whitespace_and_long_salt():
         lambda: _zip_bytes(_json_bytes()),
         lambda: gzip.compress(_json_bytes()),
         lambda: _pseudo_json_bytes(),
-        lambda: _salt_and_token()[0] + _salt_and_token()[1],
+        _binary_payload,
     ],
 )
 def test_wrong_password_raises_config_transfer_error(raw_factory):
@@ -332,7 +338,10 @@ def test_route_imports_zip_named_without_zip_extension(import_client):
 
 def test_route_reports_clean_error_for_garbage(import_client):
     http, _server = import_client
-    response = _upload(http, os.urandom(96), "config.nbotcfg")
+    # 固定字节：既不是 ZIP/GZIP 魔数，也不是 JSON（避免随机前缀偶发命中容器魔数）
+    garbage = b"\x00\xff" * 48
+    assert ct.sniff_bundle_format(garbage) == "binary"
+    response = _upload(http, garbage, "config.nbotcfg")
     body = response.get_json()
     assert response.status_code == 400
     assert "无法识别" in body["error"]
@@ -554,4 +563,103 @@ def test_route_restores_portraits_from_gzip_wrapped_zip(import_client):
 
     upload_dir = os.path.join(server.base_dir, "nbot", "web", "static", "uploads", "portraits")
     assert os.listdir(upload_dir) and os.listdir(upload_dir)[0].endswith(".png")
+
+
+# ============================================================
+# 第二轮 review 回归：字段顺序 / token 边界 / ZIP 读失败 / 立绘预算
+# ============================================================
+
+
+def test_pseudo_json_with_payload_before_salt():
+    """CodeRabbit minor：payload 写在 salt 之前也要能解析。"""
+    salt, token = _salt_and_token(salt=BINARY_SALT)
+    raw = (
+        b'{"payload": "' + token + b'", "salt": "' + salt + b'",'
+        b'"type":"nbot_config_bundle","encrypted":true}'
+    )
+    assert ct.load_bundle_bytes(raw, PASSWORD)["configs"]["settings"]["theme"] == "dark"
+
+
+def test_pseudo_json_ignores_payload_marker_inside_raw_salt():
+    """salt 的原始字节里含有 "payload" 字样时，不能被当成字段起点。"""
+    marker_in_salt = b'"payload":'
+    salt = marker_in_salt + bytes(6)  # 恰好 16 字节，前 10 字节就是字段名本身
+    _salt, token = _salt_and_token(salt=salt)
+    raw = (
+        b'{"salt": "' + salt + b'", "payload": "' + token + b'",'
+        b'"type":"nbot_config_bundle","encrypted":true}'
+    )
+    assert ct.load_bundle_bytes(raw, PASSWORD)["configs"]["settings"]["theme"] == "dark"
+
+
+def test_pseudo_json_token_with_embedded_quote_byte():
+    """CodeRabbit minor：原始 token 内含 0x22 时，不能按「下一个引号」截断。"""
+    salt = b"token-with-quote"  # 恰好 16 字节
+    assert len(salt) == ct.KDF_SALT_BYTES
+    for attempt in range(200):
+        plain = json.dumps(_plain_bundle({"settings": {"attempt": attempt}})).encode("utf-8")
+        token = ct._fernet_from_password(PASSWORD, salt).encrypt(plain)
+        raw_token = base64.urlsafe_b64decode(token)
+        if b'"' in raw_token:
+            break
+    else:  # pragma: no cover - 200 次都没撞上 0x22 的概率极低
+        pytest.skip("未能构造包含 0x22 的 Fernet token")
+
+    raw = (
+        b'{"salt": "' + salt + b'", "payload": "' + raw_token + b'",'
+        b'"type":"nbot_config_bundle","encrypted":true}'
+    )
+    bundle = ct.load_bundle_bytes(raw, PASSWORD)
+    assert "attempt" in bundle["configs"]["settings"]
+
+
+def test_zip_member_encrypted_flag_reports_readable_error():
+    """CodeRabbit minor：ZIP 级加密抛 RuntimeError，应转成可读错误而不是 500。"""
+    raw = bytearray(_zip_bytes(_json_bytes()))
+    marker = b"PK\x01\x02"
+    index = raw.find(marker)
+    assert index >= 0
+    while index >= 0:
+        raw[index + 8] |= 0x01  # 中央目录「加密」标志位
+        index = raw.find(marker, index + 4)
+
+    with pytest.raises(ct.ConfigTransferError) as excinfo:
+        ct.load_bundle_bytes(bytes(raw), PASSWORD)
+    assert "读取失败" in str(excinfo.value)
+    assert "UnicodeDecodeError" not in str(excinfo.value)
+
+
+def test_import_portraits_respect_cumulative_budget(monkeypatch):
+    """CodeRabbit major：多个大立绘成员不能叠加占用内存。"""
+    monkeypatch.setattr(ct, "_PORTRAITS_MAX_BYTES", 10)
+
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_STORED) as archive:
+        archive.writestr("config.nbotcfg", _json_bytes())
+        archive.writestr("portraits/a.png", b"x" * 8)
+        archive.writestr("portraits/b.png", b"y" * 8)
+
+    _bundle, portraits = ct.load_bundle_bytes_with_portraits(buffer.getvalue(), PASSWORD)
+    assert list(portraits) == ["portraits/a.png"]
+
+
+def test_text_decrypt_failure_preserves_original_error():
+    """CodeRabbit：解密成功但内容无效时，不能被回退改写成「密码错误」。"""
+    salt = BINARY_SALT
+    plaintext = json.dumps({"foo": 1}).encode("utf-8")
+    token = ct._fernet_from_password(PASSWORD, salt).encrypt(plaintext)
+    raw = json.dumps(
+        {
+            "type": "nbot_config_bundle",
+            "encrypted": True,
+            "salt": base64.urlsafe_b64encode(salt).decode("ascii"),
+            "payload": token.decode("ascii"),
+        }
+    ).encode("utf-8")
+
+    with pytest.raises(ct.ConfigTransferError) as excinfo:
+        ct.load_bundle_bytes(raw, PASSWORD)
+    assert "内容无效" in str(excinfo.value)
+    assert "密码" not in str(excinfo.value)
+
 
