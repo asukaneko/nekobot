@@ -9,6 +9,7 @@ import os
 import platform
 import re
 import zipfile
+import zlib
 from copy import deepcopy
 from datetime import datetime
 from typing import Any, Dict, Iterable, Tuple
@@ -272,8 +273,11 @@ def _b64decode_any(value: Any) -> bytes:
     if isinstance(value, (bytes, bytearray)):
         data = bytes(value).strip()
     elif isinstance(value, (list, tuple)) and all(isinstance(item, int) for item in value):
-        # 少数实现把 salt 直接写成整数数组
-        return bytes(value)
+        # 少数实现把 salt 直接写成整数数组；越界值视为非法，不让 ValueError 逃逸
+        try:
+            return bytes(value)
+        except ValueError:
+            return b""
     else:
         data = str(value or "").strip().encode("ascii", "ignore")
     if not data:
@@ -468,7 +472,15 @@ def _bundle_from_text_json(raw: bytes, password: str) -> dict[str, Any]:
             # 例如二进制 salt 被强制按 GB18030 解码后的“JSON”，交给字节级解析器
             parse_error = "JSON 结构不像配置包"
             continue
-        return decrypt_bundle(bundle, password)
+        try:
+            return decrypt_bundle(bundle, password)
+        except ConfigTransferError:
+            # 伪 JSON 的 salt 若恰好是合法文本（如全可打印 ASCII），JSON 层能解析成功，
+            # 但用它当 salt 解密必然失败；此处再用字节级 salt 重试一次
+            repaired = _bundle_from_pseudo_json(raw, password)
+            if repaired is not None:
+                return repaired
+            raise
     repaired = _bundle_from_pseudo_json(raw, password)
     if repaired is not None:
         return repaired
@@ -499,7 +511,8 @@ def _gunzip(raw: bytes) -> bytes:
     try:
         with gzip.GzipFile(fileobj=io.BytesIO(raw)) as handle:
             data = handle.read(_BUNDLE_MAX_BYTES + 1)
-    except OSError as exc:
+    # 截断的流抛 EOFError，损坏的 deflate/CRC 抛 zlib.error 或 BadGzipFile(OSError)
+    except (OSError, EOFError, zlib.error) as exc:
         raise _BundleFormatError(f"GZIP 解压失败: {exc}") from exc
     if len(data) > _BUNDLE_MAX_BYTES:
         raise ConfigTransferError("配置包解压后体积过大（>512MB），已中止")
@@ -531,7 +544,38 @@ def _read_zip_member(archive: zipfile.ZipFile, name: str) -> bytes:
     return archive.read(name)
 
 
-def load_bundle_bytes(raw: bytes, password: str, *, _depth: int = 0) -> dict[str, Any]:
+def _collect_zip_portraits(archive: zipfile.ZipFile, portraits: dict[str, bytes]) -> None:
+    """把 ZIP 内的立绘成员收集起来（供嵌套容器的导入路径恢复立绘）。"""
+    for name in archive.namelist():
+        if not name.startswith(_ZIP_PORTRAIT_DIR) or name.endswith("/"):
+            continue
+        if name in portraits:
+            continue
+        try:
+            size = archive.getinfo(name).file_size
+        except KeyError:
+            continue
+        if size > _BUNDLE_MAX_BYTES:
+            _log.warning("[ConfigTransfer] 跳过超大立绘成员 %s (%d bytes)", name, size)
+            continue
+        portraits[name] = archive.read(name)
+
+
+def _binary_fallback(raw: bytes, password: str) -> dict[str, Any] | None:
+    """容器魔数命中但解包失败时的回退：salt 恰好以魔数开头的情况。"""
+    try:
+        return _bundle_from_binary(raw, password)
+    except _BundleFormatError:
+        return None
+
+
+def load_bundle_bytes(
+    raw: bytes,
+    password: str,
+    *,
+    _depth: int = 0,
+    _portraits: dict[str, bytes] | None = None,
+) -> dict[str, Any]:
     """把任意来源的 ``.nbotcfg`` 原始字节解析成已解密的配置字典。
 
     全程使用二进制读取，按文件头嗅探容器后再解码，绝不把二进制密文当文本读：
@@ -540,6 +584,9 @@ def load_bundle_bytes(raw: bytes, password: str, *, _depth: int = 0) -> dict[str
     2. ``\\x1f\\x8b`` → GZIP，解压后递归；
     3. 文本 JSON（UTF-8/BOM/UTF-16/GB18030）→ ``decrypt_bundle``；
     4. 回退：salt 以原始字节内嵌的伪 JSON，或裸二进制「16 字节 salt + token」。
+
+    传入 ``_portraits`` 时，途经的 ZIP 容器会把 ``portraits/`` 成员收集进去，
+    便于调用方恢复立绘（见 ``load_bundle_bytes_with_portraits``）。
 
     解密成功但内容不合法、密码错误、体积超限等一律抛 ``ConfigTransferError``。
     """
@@ -553,7 +600,17 @@ def load_bundle_bytes(raw: bytes, password: str, *, _depth: int = 0) -> dict[str
     if fmt == "gzip":
         if _depth >= _BUNDLE_MAX_DEPTH:
             raise ConfigTransferError("配置包嵌套层数过多，已中止")
-        return load_bundle_bytes(_gunzip(raw), password, _depth=_depth + 1)
+        try:
+            inner = _gunzip(raw)
+        except _BundleFormatError as exc:
+            # salt 前两字节恰好是 \x1f\x8b 时会被误判成 GZIP，回退按二进制布局解析
+            fallback = _binary_fallback(raw, password)
+            if fallback is not None:
+                return fallback
+            raise ConfigTransferError(
+                f"配置包 GZIP 解压失败（文件可能被截断或损坏）: {exc}"
+            ) from exc
+        return load_bundle_bytes(inner, password, _depth=_depth + 1, _portraits=_portraits)
 
     if fmt == "zip":
         if _depth >= _BUNDLE_MAX_DEPTH:
@@ -564,9 +621,15 @@ def load_bundle_bytes(raw: bytes, password: str, *, _depth: int = 0) -> dict[str
                 if not member:
                     raise ConfigTransferError("ZIP 中未找到配置文件 (config.nbotcfg)")
                 inner = _read_zip_member(archive, member)
+                if _portraits is not None:
+                    _collect_zip_portraits(archive, _portraits)
         except zipfile.BadZipFile as exc:
+            # salt 恰好以 PK\x03\x04 开头时同理回退
+            fallback = _binary_fallback(raw, password)
+            if fallback is not None:
+                return fallback
             raise ConfigTransferError(f"ZIP 文件损坏: {exc}") from exc
-        return load_bundle_bytes(inner, password, _depth=_depth + 1)
+        return load_bundle_bytes(inner, password, _depth=_depth + 1, _portraits=_portraits)
 
     failures: list[str] = []
     for parser in (_bundle_from_text_json, _bundle_from_binary):
@@ -580,6 +643,19 @@ def load_bundle_bytes(raw: bytes, password: str, *, _depth: int = 0) -> dict[str
         message = f"{message}：{detail}"
     message = f"{message}；若这确实是加密配置包，请确认加密密码是否正确"
     raise ConfigTransferError(message)
+
+
+def load_bundle_bytes_with_portraits(
+    raw: bytes, password: str
+) -> tuple[dict[str, Any], dict[str, bytes]]:
+    """解析配置包字节，并返回其中 ZIP 容器携带的立绘文件。
+
+    GZIP 包裹的 ZIP、ZIP 套 ZIP 等嵌套形态同样会收集立绘，避免
+    「配置导入成功但立绘引用指向不存在的文件」。
+    """
+    portraits: dict[str, bytes] = {}
+    bundle = load_bundle_bytes(raw, password, _portraits=portraits)
+    return bundle, portraits
 
 
 def _save_imported_configs(server, touched: Iterable[str]) -> None:
@@ -796,24 +872,7 @@ def extract_zip_bundle(zip_bytes: bytes, password: str) -> Tuple[Dict[str, Any],
     Returns:
         (解密后的配置字典, {zip内路径: 文件二进制数据})
     """
-    with zipfile.ZipFile(io.BytesIO(zip_bytes), 'r') as zf:
-        namelist = zf.namelist()
-
-        # 查找配置文件（兼容旧版 .nbotcfg 直接打 ZIP 的情况）
-        config_filename = _pick_zip_config_member(namelist)
-        if not config_filename:
-            raise ConfigTransferError("ZIP 中未找到配置文件 (config.nbotcfg)")
-
-        # 二进制读取成员，再按文件头嗅探容器/编码（不再假定成员一定是 UTF-8 JSON）
-        bundle = load_bundle_bytes(_read_zip_member(zf, config_filename), password)
-
-        # 收集所有立绘文件
-        portraits = {}
-        for name in namelist:
-            if name.startswith(_ZIP_PORTRAIT_DIR):
-                portraits[name] = zf.read(name)
-
-        return bundle, portraits
+    return load_bundle_bytes_with_portraits(zip_bytes, password)
 
 
 def restore_portraits_from_zip(server, portraits: Dict[str, bytes], bundle: Dict[str, Any]) -> int:

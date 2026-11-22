@@ -42,6 +42,13 @@
 
 此外还兼容「salt 以原始字节内嵌在 JSON 字符串里」的伪 JSON：这类文件从 `{"salt": "` 之后就是随机二进制，只能按字节定位 `salt` / `payload` 字段再解密。
 
+几个边界处理：
+
+- 容器魔数命中但解包失败（如 salt 恰好以 `\x1f\x8b` 开头）时，会回退按「salt + token」布局再试一次；
+- 截断 / 损坏的 GZIP（`EOFError`、`zlib.error`、`BadGzipFile`）统一转成 `ConfigTransferError`，返回可读错误而不是 500；
+- `salt` 写成整数数组时，越界值按非法处理，不会抛 `ValueError`；
+- 嵌套容器（ZIP 套 ZIP、GZIP 包裹 ZIP）里的 `portraits/` 立绘会被一并收集并恢复，导入路由用 `load_bundle_bytes_with_portraits()` 取回 `(bundle, portraits)`。
+
 无法识别时的报错会带上容器类型、文件大小和头 16 字节十六进制，便于排查；密码错误仍返回 `密码错误或配置包已损坏`。
 
 ### 兼容性策略

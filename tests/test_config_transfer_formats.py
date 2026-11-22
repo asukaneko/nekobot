@@ -440,3 +440,118 @@ def test_pull_backup_unaffected_for_standard_json_payload(tmp_path, monkeypatch)
     assert result["ok"] is True
     assert result["imported"] == ["settings"]
     assert server.settings["theme"] == "dark"
+
+
+# ============================================================
+# Review 回归：容器/编码边界条件
+# ============================================================
+
+
+def _portrait_zip_bytes(member_bytes, member_name="config.nbotcfg", portrait=b"png"):
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr(member_name, member_bytes)
+        archive.writestr("portraits/alice.png", portrait)
+        archive.writestr(
+            "manifest.json",
+            json.dumps({"version": 2, "portraits": ["portraits/alice.png"]}),
+        )
+    return buffer.getvalue()
+
+
+def test_truncated_gzip_raises_config_transfer_error():
+    """Codex/CodeRabbit P2：截断的 GZIP 抛 EOFError，不能逃逸成 500。"""
+    raw = gzip.compress(_json_bytes())[:20]
+    with pytest.raises(ct.ConfigTransferError) as excinfo:
+        ct.load_bundle_bytes(raw, PASSWORD)
+    assert "GZIP" in str(excinfo.value)
+    assert "截断" in str(excinfo.value)
+
+
+def test_corrupt_gzip_payload_raises_config_transfer_error():
+    blob = bytearray(gzip.compress(_json_bytes()))
+    blob[-5] ^= 0xFF  # 破坏 CRC
+    with pytest.raises(ct.ConfigTransferError) as excinfo:
+        ct.load_bundle_bytes(bytes(blob), PASSWORD)
+    assert "GZIP" in str(excinfo.value)
+
+
+def test_out_of_range_integer_salt_is_rejected_not_raised():
+    """Codex/CodeRabbit P2：salt 写成越界整数数组时不能抛 ValueError。"""
+    raw = json.dumps(
+        {
+            "type": "nbot_config_bundle",
+            "encrypted": True,
+            "salt": [256, 300],
+            "payload": "A" * 64,
+        }
+    ).encode("utf-8")
+    with pytest.raises(ct.ConfigTransferError) as excinfo:
+        ct.load_bundle_bytes(raw, PASSWORD)
+    assert excinfo.type is ct.ConfigTransferError
+    assert "无法识别" in str(excinfo.value)
+
+
+def test_valid_integer_salt_array_still_works():
+    salt, token = _salt_and_token(salt=BINARY_SALT)
+    raw = json.dumps(
+        {
+            "type": "nbot_config_bundle",
+            "encrypted": True,
+            "salt": list(salt),
+            "payload": token.decode("ascii"),
+        }
+    ).encode("utf-8")
+    assert ct.load_bundle_bytes(raw, PASSWORD)["configs"]["settings"]["theme"] == "dark"
+
+
+def test_pseudo_json_with_printable_ascii_salt_is_recovered():
+    """CodeRabbit minor：salt 恰好全是可打印 ASCII 时，文本层解析成功后仍要回退。"""
+    salt, token = _salt_and_token(salt=b"abcdefghijklmnop")
+    raw = (
+        b'{"salt": "' + salt + b'", "payload": "' + token + b'",'
+        b'"type":"nbot_config_bundle","encrypted":true}'
+    )
+    # 文本层可以完整解析，但用手里的 salt 解密必然失败
+    assert json.loads(raw.decode("utf-8"))["salt"] == "abcdefghijklmnop"
+    bundle = ct.load_bundle_bytes(raw, PASSWORD)
+    assert bundle["configs"]["settings"]["theme"] == "dark"
+
+
+def test_binary_bundle_with_gzip_magic_salt_falls_back():
+    """CodeRabbit minor：salt 以 \\x1f\\x8b 开头时不能被 GZIP 分支吞掉。"""
+    salt = b"\x1f\x8b" + bytes(range(14))
+    _salt, token = _salt_and_token(salt=salt)
+    raw = salt + token
+    assert ct.sniff_bundle_format(raw) == "gzip"
+
+    bundle = ct.load_bundle_bytes(raw, PASSWORD)
+    assert bundle["configs"]["settings"]["theme"] == "dark"
+
+
+@pytest.mark.parametrize("wrapper", ["zip", "gzip+zip"])
+def test_portraits_survive_nested_containers(wrapper):
+    """CodeRabbit minor：GZIP 包裹 ZIP 时立绘不能被丢掉。"""
+    raw = _portrait_zip_bytes(_json_bytes())
+    if wrapper == "gzip+zip":
+        raw = gzip.compress(raw)
+
+    bundle, portraits = ct.load_bundle_bytes_with_portraits(raw, PASSWORD)
+    assert bundle["configs"]["settings"]["theme"] == "dark"
+    assert portraits == {"portraits/alice.png": b"png"}
+
+
+def test_route_restores_portraits_from_gzip_wrapped_zip(import_client):
+    http, server = import_client
+    configs = {"settings": {"theme": "dark"}, "custom_personality_presets": []}
+    payload = _portrait_zip_bytes(_json_bytes(configs=configs))
+    response = _upload(http, gzip.compress(payload), "backup.nbotcfg")
+
+    body = response.get_json()
+    assert response.status_code == 200
+    assert body["success"] is True
+    assert body["portraits_restored"] == 1
+
+    upload_dir = os.path.join(server.base_dir, "nbot", "web", "static", "uploads", "portraits")
+    assert os.listdir(upload_dir) and os.listdir(upload_dir)[0].endswith(".png")
+
